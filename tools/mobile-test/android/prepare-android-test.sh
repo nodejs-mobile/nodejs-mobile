@@ -26,7 +26,7 @@ adb $TARGET shell 'am force-stop nodejsmobile.test.testnode'
 # Clean the Android log
 adb logcat -c
 
-adb $TARGET install -r "$TEST_APP_BASE_DIR/app/build/outputs/apk/app-debug.apk"
+adb $TARGET install -r "$TEST_APP_BASE_DIR/app/build/outputs/apk/debug/app-debug.apk"
 
 # Start the test app without parameter in order to copy the assets to a writable location
 adb $TARGET shell 'am start -n nodejsmobile.test.testnode/nodejsmobile.test.testnode.MainActivity' > /dev/null
