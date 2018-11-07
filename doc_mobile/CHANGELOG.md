@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.1.8">0.1.8</a><br/>
 <a href="#0.1.7">0.1.7</a><br/>
 <a href="#0.1.6">0.1.6</a><br/>
 <a href="#0.1.5">0.1.5</a><br/>
@@ -18,8 +19,29 @@
 </tr>
 </table>
 
+<a id="0.1.8"></a>
+## 2018-11-07, Version 0.1.8 (Current)
+
+### Notable Changes
+
+* Fixes catching exceptions on iOS devices with an Apple A12 Bionic CPU.
+* Released binaries are now built with ndk r18b.
+
+### Commits
+
+* [[`d137dbf5ed`](https://github.com/janeasystems/nodejs-mobile/commit/d137dbf5ed5f8b998e0603de067b07b4e3c42165)] - Node.js on Mobile v0.1.8 (Jaime Bernardo)
+* [[`175e0c8c84`](https://github.com/janeasystems/nodejs-mobile/commit/175e0c8c847082655002dab9fbbb57d99c294deb)] - android,test: use NDK r18b for building (Jaime Bernardo)
+* [[`6e361e5bf6`](https://github.com/janeasystems/nodejs-mobile/commit/6e361e5bf676ed7470f192dfffa652a2c5419c36)] - ios,test: increase test app stack size (Jaime Bernardo)
+* [[`bb4b8548fc`](https://github.com/janeasystems/nodejs-mobile/commit/bb4b8548fc5f9b2ef5c4c2b450a61c68ea27a500)] - ios,chakra: unrolled arm64 function invocation (Diego Negri)
+* [[`7d74e5eafd`](https://github.com/janeasystems/nodejs-mobile/commit/7d74e5eafd08d939dc99c027bf9a4e74e36b8ca8)] - ChakraCore: Fix build script for LLVM >9 (Rajiv Shah)
+* [[`a9208805aa`](https://github.com/janeasystems/nodejs-mobile/commit/a9208805aa3bdc6dace6f7db88a3db6e398d11fd)] - doc: adapt the issue template for nodejs-mobile (Jaime Bernardo)
+* [[`2aaa8226a7`](https://github.com/janeasystems/nodejs-mobile/commit/2aaa8226a7d0f00acf656b98f07ce967bf57b768)] - test,android: run tests that needed small changes (Jaime Bernardo)
+* [[`160083eec0`](https://github.com/janeasystems/nodejs-mobile/commit/160083eec0c6e2eaee67195fb566118f6b8e239e)] - doc: add a FAQ to the project (Jaime Bernardo)
+* [[`ab46d30148`](https://github.com/janeasystems/nodejs-mobile/commit/ab46d301482bcb29b8135d25feb6ff98db3775f6)] - android,uv: relax number of cpus assumption (Jaime Bernardo)
+* [[`9e90dd8c14`](https://github.com/janeasystems/nodejs-mobile/commit/9e90dd8c14fce5b047aa16d00e22a8ef44222a99)] - Working on Node.js for Mobile Apps v0.1.8 (Jaime Bernardo)
+
 <a id="0.1.7"></a>
-## 2018-07-30, Version 0.1.7 (Current)
+## 2018-07-30, Version 0.1.7
 
 ### Notable Changes
 
