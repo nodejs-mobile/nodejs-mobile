@@ -19,6 +19,7 @@ C_FUNC(\Name):
 .endm
 
 .macro LEAF_ENTRY Name, Section
+        .align 4
         .global C_FUNC(\Name)
 #if defined(__APPLE__)
         .text

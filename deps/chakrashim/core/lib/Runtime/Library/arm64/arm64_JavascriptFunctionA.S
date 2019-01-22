@@ -59,7 +59,12 @@ NESTED_END _ZN2Js18JavascriptFunction20DeferredParsingThunkEPNS_16RecyclableObje
 
 NESTED_ENTRY arm64_CallFunction, _TEXT, NoHandler
 
-    PROLOG_SAVE_REG_PAIR_INDEXED fp, lr, -16    // save fp/lr (implicitly saves SP in FP)
+    stp    fp, lr, [sp, -16]!                   // save fp/lr
+    mov    fp, sp                               // explicitly save sp in fp
+    // CFI directives that work well in both Apple's armv8-a and armv8.3-a runtimes
+    .cfi_def_cfa x29, 16
+    .cfi_offset x30, -8
+    .cfi_offset x29, -16
 
     mov     x15, x3                             // copy entry point to x15
 
@@ -94,7 +99,7 @@ LOCAL_LABEL(CopyZero):
     blr     x15                                 // call saved entry point
 
     mov     sp, fp                              // explicitly restore sp
-    EPILOG_RESTORE_REG_PAIR_INDEXED fp, lr, 16  // restore FP/LR
+    ldp     fp, lr, [sp], 16                    // restore fp/lr
     EPILOG_RETURN                               // return
 
 LOCAL_LABEL(StackAlloc):
