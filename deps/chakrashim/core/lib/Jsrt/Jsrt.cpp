@@ -26,6 +26,11 @@
 #include "TestHooksRt.h"
 #endif
 
+#ifdef __IOS__
+#include <mach/mach.h>
+#include <sys/resource.h>
+#endif
+
 struct CodexHeapAllocatorInterface
 {
 public:
@@ -282,6 +287,21 @@ JsErrorCode CreateRuntimeCore(_In_ JsRuntimeAttributes attributes,
         }
         CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 0, nullptr);
         AllocationPolicyManager * policyManager = HeapNew(AllocationPolicyManager, (attributes & JsRuntimeAttributeDisableBackgroundWork) == 0);
+
+#if defined(__IOS__) && defined(_M_ARM64)
+        // iOS sets a memory usage limit per application.
+        // Set a limit that keeps usage from the engine at below threshold values.
+        size_t memoryLimit = AutoSystemInfo::GetIOSAppMemoryLimit();
+        if (memoryLimit != 0)
+        {
+            // After 75% of the expected maximum memory, start controlling
+            //for total application memory limit and don't let it go over 95%.
+            policyManager->SetIOSAppMemoryLimit(
+                (size_t)(memoryLimit * 0.75f),
+                (size_t)(memoryLimit * 0.95f)
+                );
+        }
+#endif
         bool enableExperimentalFeatures = (attributes & JsRuntimeAttributeEnableExperimentalFeatures) != 0;
         ThreadContext * threadContext = HeapNew(ThreadContext, policyManager, threadService, enableExperimentalFeatures);
 

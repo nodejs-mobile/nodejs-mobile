@@ -135,6 +135,9 @@ public:
     static bool ShouldQCMoreFrequently();
     static bool SupportsOnlyMultiThreadedCOM();
     static bool IsLowMemoryDevice();
+#if defined(__IOS__) && defined(_M_ARM64)
+    static size_t GetIOSAppMemoryLimit();
+#endif
 };
 
 #if defined(__IOS__)&&defined(_M_ARM64)

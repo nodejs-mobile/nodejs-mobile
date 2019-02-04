@@ -10,6 +10,10 @@
 // NOTE: For now, we are only tracking reserved page count.
 // Consider whether we should also (or maybe only) track committed page count.
 
+#if defined(__IOS__) && defined(_M_ARM64)
+#include <mach/mach.h>
+#endif
+
 class AllocationPolicyManager
 {
 public:
@@ -26,6 +30,16 @@ typedef bool (__stdcall * PageAllocatorMemoryAllocationCallback)(__in LPVOID con
 
 
 private:
+#if defined(__IOS__) && defined(_M_ARM64)
+    // On iOS, applications have a memory threshold after which they are killed
+    //by the OS. If this flag is true, the allocation policy manager will have
+    //a threshold after which it will check if the additional allocation request
+    //is likely to make the application memory exceed memoryLimit.
+    bool useIOSAppMemoryPolicyStrategy = false;
+    // A threshold from which to check if current application memory usage
+    //is below memory limit.
+    size_t thresholdCheckApplicationMemory;
+#endif
     size_t memoryLimit;
     size_t currentMemory;
     bool supportConcurrency;
@@ -35,6 +49,10 @@ private:
 
 public:
     AllocationPolicyManager(bool needConcurrencySupport) :
+#if defined(__IOS__) && defined(_M_ARM64)
+        useIOSAppMemoryPolicyStrategy(false),
+        thresholdCheckApplicationMemory((size_t)-1),
+#endif
         memoryLimit((size_t)-1),
         currentMemory(0),
         supportConcurrency(needConcurrencySupport),
@@ -60,8 +78,20 @@ public:
 
     void SetLimit(size_t newLimit)
     {
+#if defined(__IOS__) && defined(_M_ARM64)
+        useIOSAppMemoryPolicyStrategy = false;
+#endif
         memoryLimit = newLimit;
     }
+
+#if defined(__IOS__) && defined(_M_ARM64)
+    void SetIOSAppMemoryLimit(size_t newCheckAppMemoryThreshold, size_t newApplicationLimit)
+    {
+        useIOSAppMemoryPolicyStrategy = true;
+        memoryLimit = newApplicationLimit;
+        thresholdCheckApplicationMemory=newCheckAppMemoryThreshold;
+    }
+#endif
 
     bool RequestAlloc(DECLSPEC_GUARD_OVERFLOW size_t byteCount, bool externalAlloc = false)
     {
@@ -124,8 +154,29 @@ private:
     {
         size_t newCurrentMemory = currentMemory + byteCount;
 
+#if defined(__IOS__) && defined(_M_ARM64)
+        // iOS new allocation policy strategy implementation.
+        size_t newTotalApplicationMemory = 0;
+        if(useIOSAppMemoryPolicyStrategy) {
+            if(newCurrentMemory > thresholdCheckApplicationMemory) {
+                // Check current application memory.
+                struct mach_task_basic_info info;
+                mach_msg_type_number_t info_size = MACH_TASK_BASIC_INFO_COUNT;
+                kern_return_t kerr = task_info(mach_task_self(),
+                                            MACH_TASK_BASIC_INFO,
+                                            (task_info_t)&info,
+                                            &info_size);
+                if( kerr == KERN_SUCCESS ) {
+                    newTotalApplicationMemory = (size_t)(info.resident_size) + byteCount;
+                }
+            }
+        }
+#endif
         if (newCurrentMemory < currentMemory ||
             newCurrentMemory > memoryLimit ||
+#if defined(__IOS__) && defined(_M_ARM64)
+            newTotalApplicationMemory > memoryLimit ||
+#endif
             (memoryAllocationCallback != NULL && !memoryAllocationCallback(context, MemoryAllocateEvent::MemoryAllocate, byteCount)))
         {
             if (memoryAllocationCallback != NULL)

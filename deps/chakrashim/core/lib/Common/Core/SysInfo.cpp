@@ -10,6 +10,9 @@
 #include <VersionHelpers.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h> // sysctl*
+#if defined(__IOS__) && defined(_M_ARM64)
+#include <sys/utsname.h>
+#endif
 #elif defined(__linux__)
 #include <unistd.h> // sysconf
 #endif
@@ -429,6 +432,139 @@ bool AutoSystemInfo::IsLowMemoryProcess()
     this->GetAvailableCommit(&commit);
     return commit <= CONFIG_FLAG(LowMemoryCap);
 }
+
+#if defined(__IOS__) && defined(_M_ARM64)
+#define EQ_MODEL_NAME(a,b) (strncmp((a),(b),(_SYS_NAMELEN)) == 0)
+#define MEGABYTES * 1024 * 1024
+// Get an expected safe memory limit per application depending on the device model.
+size_t AutoSystemInfo::GetIOSAppMemoryLimit()
+{
+    size_t result = 0;
+    struct utsname uts;
+    if(uname(&uts) == 0) {
+        // Unfortunately there is no public API to get these values.
+        // These model names and values were posted on the internet and
+        //are the result of trying to exceed the memory limit per Application.
+        char* modelName = uts.machine;
+        if (EQ_MODEL_NAME(modelName,"iPad4,1") ||
+            EQ_MODEL_NAME(modelName,"iPad4,2") ||
+            EQ_MODEL_NAME(modelName,"iPad4,3") )
+        { // iPad Air
+            result = 697 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad4,4") ||
+            EQ_MODEL_NAME(modelName,"iPad4,5") ||
+            EQ_MODEL_NAME(modelName,"iPad4,6") )
+        { // iPad Mini 2
+            result = 696 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad5,3") ||
+            EQ_MODEL_NAME(modelName,"iPad5,4") )
+        { // iPad Air 2
+            result = 1383 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad6,3") ||
+            EQ_MODEL_NAME(modelName,"iPad6,4") )
+        { // iPad Pro (9.7-inch)
+            result = 1395 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad6,7") ||
+            EQ_MODEL_NAME(modelName,"iPad6,8") )
+        { // iPad Pro (12.9-inch) (2015)
+            result = 3058 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad7,1") ||
+            EQ_MODEL_NAME(modelName,"iPad7,2") )
+        { // iPad Pro (12.9-inch) (2017)
+            result = 3057 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad7,3") ||
+            EQ_MODEL_NAME(modelName,"iPad7,4") )
+        { // iPad Pro (10.5-inch)
+            result = 3057 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad8,1") ||
+            EQ_MODEL_NAME(modelName,"iPad8,3") )
+        { // iPad Pro (11-inch, 4GB RAM)
+            result = 2858 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPad8,6") ||
+            EQ_MODEL_NAME(modelName,"iPad8,8") )
+        { // iPad Pro (12.9-inch, 6GB RAM) (2018)
+            result = 4598 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone6,1") ||
+            EQ_MODEL_NAME(modelName,"iPhone6,2") )
+        { // iPhone 5s
+            result = 646 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone7,2"))
+        { // iPhone 6
+            result = 645 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone7,1"))
+        { // iPhone 6+
+            result = 645 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone8,1"))
+        { // iPhone 6s
+            result = 1396 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone8,2"))
+        { // iPhone 6s Plus
+            result = 1392 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone8,3") ||
+            EQ_MODEL_NAME(modelName,"iPhone8,4"))
+        { // iPhone SE
+            result = 1395 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone9,1") ||
+            EQ_MODEL_NAME(modelName,"iPhone9,3") )
+        { // iPhone 7
+            result = 1395 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone9,2") ||
+            EQ_MODEL_NAME(modelName,"iPhone9,4") )
+        { // iPhone 7+
+            result = 2040 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone10,1") ||
+            EQ_MODEL_NAME(modelName,"iPhone10,4") )
+        { // iPhone 8
+            result = 1364 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone10,3") ||
+            EQ_MODEL_NAME(modelName,"iPhone10,6") )
+        { // iPhone X
+            result = 1392 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone11,2"))
+        { // iPhone XS
+            result = 2040 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone11,4") ||
+            EQ_MODEL_NAME(modelName,"iPhone11,6") )
+        { // iPhone XS Max
+            result = 2039 MEGABYTES;
+        }
+        else if (EQ_MODEL_NAME(modelName,"iPhone11,8"))
+        { // iPhone XR
+            result = 1792 MEGABYTES;
+        }
+    }
+    if (result==0) {
+    // Couldn't use the model to get the maximumm possible application memory.
+    // Consider half of the total RAM.
+        size_t memoryLimit;
+        if (PlatformAgnostic::SystemInfo::GetTotalRam(&memoryLimit))
+        {
+            result = memoryLimit >> 1;
+        }
+    }
+    return result;
+}
+#endif
 
 BOOL AutoSystemInfo::GetAvailableCommit(ULONG64 *pCommit)
 {
