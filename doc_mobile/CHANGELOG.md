@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.1.9">0.1.9</a><br/>
 <a href="#0.1.8">0.1.8</a><br/>
 <a href="#0.1.7">0.1.7</a><br/>
 <a href="#0.1.6">0.1.6</a><br/>
@@ -19,8 +20,29 @@
 </tr>
 </table>
 
+<a id="0.1.9"></a>
+## 2019-02-07, Version 0.1.9 (Current)
+
+### Notable Changes
+
+* Adds mitigation strategy for iOS memory limit per Application.
+* Fixes assembly CallFunction for the Apple A12 Bionic CPU, optimizing stack space.
+* Adds podspec to enable use with CocoaPods.
+* Released binaries are now built with ndk r19.
+
+### Commits
+
+* [[`c5d39dc313`](https://github.com/janeasystems/nodejs-mobile/commit/c5d39dc31317d55fc50c38a8ebbb33cabcae103a)] - Node.js on Mobile v0.1.9 (Jaime Bernardo)
+* [[`67a9603822`](https://github.com/janeasystems/nodejs-mobile/commit/67a9603822390b670be6bf5ee3d6c8911c273fb0)] - ios,chakra: avoid device memory limits for apps (Jaime Bernardo)
+* [[`b57420f775`](https://github.com/janeasystems/nodejs-mobile/commit/b57420f7755ae72b8e44aeb5d25905dadf7b71fa)] - ios,chakra: revert arm64 function unrolling (Jaime Bernardo)
+* [[`9e0b148670`](https://github.com/janeasystems/nodejs-mobile/commit/9e0b148670c990acf17bc503b430a6d78a2eeaa9)] - ios: use different CFI directives in CallFunction (Jaime Bernardo)
+* [[`2a0a302aa6`](https://github.com/janeasystems/nodejs-mobile/commit/2a0a302aa614ff966176f412756836b68e020ce2)] - ios: add podspec to enable use with CocoaPods (Igor Makarov)
+* [[`f1e5e5ad5e`](https://github.com/janeasystems/nodejs-mobile/commit/f1e5e5ad5e90ac4b3f2e7782b3dd39ca139ff5b7)] - meta: issue template minor tweaks (Alexis Campailla)
+* [[`d5ee06fbff`](https://github.com/janeasystems/nodejs-mobile/commit/d5ee06fbff7d84ac003319f77c0bb3e7057b050d)] - meta: issue template fixes and tweaks (Alexis Campailla)
+* [[`66a52a3b6b`](https://github.com/janeasystems/nodejs-mobile/commit/66a52a3b6bddcac930d8b8685fc820d91f7f66d5)] - Working on Node.js for Mobile Apps v0.1.9 (Jaime Bernardo)
+
 <a id="0.1.8"></a>
-## 2018-11-07, Version 0.1.8 (Current)
+## 2018-11-07, Version 0.1.8
 
 ### Notable Changes
 
