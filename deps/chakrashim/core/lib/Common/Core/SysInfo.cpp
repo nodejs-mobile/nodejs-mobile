@@ -558,14 +558,17 @@ size_t AutoSystemInfo::GetIOSAppMemoryLimit()
         }
     }
     if (result==0) {
-    // Couldn't use the model to get the maximumm possible application memory.
+    // Couldn't use the model to get the maximum possible application memory.
     // Consider half of the total RAM.
         size_t memoryLimit;
-        if (PlatformAgnostic::SystemInfo::GetTotalRam(&memoryLimit))
+        int totalRamHW[] = { CTL_HW, HW_MEMSIZE };
+        size_t length = sizeof(memoryLimit);
+        if (sysctl(totalRamHW, 2, &memoryLimit, &length, NULL, 0) != -1)
         {
             result = memoryLimit >> 1;
         }
     }
+    // If no method for calculating the Application Memory Limit worked, result will be 0.
     return result;
 }
 #endif
