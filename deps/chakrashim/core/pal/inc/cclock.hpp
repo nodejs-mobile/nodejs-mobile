@@ -8,7 +8,13 @@
 
 class CCLock
 {
+#if defined(__IOS__) && defined(_ARM64_)
+    // NOTE: This will later on be cast and used as a pthread_mutex_t*,
+    // which needs to be 8 byte-aligned for ARM64 on iOS.
+    char           mutexPtr[64] __attribute__ ((aligned (8)));
+#else
     char           mutexPtr[64]; // keep mutex implementation opaque to consumer (PAL vs non-PAL)
+#endif
 
 public:
     void Reset(bool shouldTrackThreadId = false);
