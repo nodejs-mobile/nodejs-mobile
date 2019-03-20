@@ -90,13 +90,21 @@ test-vm-timeout-rethrow : SKIP
 #
 test-benchmark-buffer : SKIP
 test-benchmark-child-process: SKIP
+test-benchmark-dgram : SKIP
 test-benchmark-http : SKIP
 test-benchmark-net : SKIP
+test-benchmark-tls : SKIP
+test-benchmark-path : SKIP
+test-child-process-exit : SKIP
 test-child-process-fork-getconnections : SKIP
 test-child-process-pass-fd : SKIP
+test-cluster-send-handle-large-payload : SKIP
+test-fs-stat-sync-overflow : SKIP
 test-init : SKIP
+test-inspector-stops-no-file : SKIP
 test-net-GH-5504 : SKIP
 test-net-listen-shared-ports : SKIP
+test-net-response-size : SKIP
 test-next-tick-error-spin : SKIP
 test-process-warnings : SKIP
 test-regress-GH-1697 : SKIP
@@ -118,9 +126,35 @@ test-dgram-bind-shared-ports : SKIP
 #
 test-fs-watch : SKIP #signal SIGABRT
 #
+# FAILING test that tries to allocate 4294968296 bytes for ArrayBuffer
+#
+test-buffer-creation-regression : SKIP
+#
 # Tests that require the inspector, not included in the build
 #
 test-cluster-inspect-brk : SKIP
 test-debug-prompt : SKIP
 test-debugger-debug-brk : SKIP
 test-debugger-repeat-last : SKIP
+test-inspector : SKIP
+test-inspector-async-call-stack : SKIP
+test-inspector-async-hook-setup-at-signal : SKIP
+test-inspector-break-e : SKIP
+test-inspector-console : SKIP
+test-inspector-debug-brk-flag : SKIP
+test-inspector-debug-end : SKIP
+test-inspector-enabled : SKIP
+test-inspector-exception : SKIP
+test-inspector-invalid-args : SKIP
+test-inspector-ip-detection : SKIP
+test-inspector-module : SKIP
+test-inspector-not-blocked-on-idle : SKIP
+test-inspector-open : SKIP
+test-inspector-port-cluster : SKIP
+test-inspector-port-zero : SKIP
+test-inspector-runtime-evaluate-with-timeout : SKIP
+test-inspector-stress-http : SKIP
+#
+# Tests that run on Linux only
+#
+test-fs-watch-system-limit : SKIP

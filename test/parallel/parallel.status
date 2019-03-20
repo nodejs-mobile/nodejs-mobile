@@ -80,6 +80,7 @@ test-vm-preserves-property : SKIP
 test-vm-property-not-on-sandbox : SKIP
 test-vm-proxies : SKIP
 test-vm-strict-assign : SKIP
+test-vm-timeout : SKIP
 
 # This test requires promise swallowed rejection hook support missing in ChakraCore
 test-promise-swallowed-event : SKIP
@@ -526,12 +527,23 @@ test-benchmark-crypto : SKIP
 test-benchmark-dns : SKIP
 test-benchmark-domain : SKIP
 test-benchmark-events : SKIP
+test-benchmark-fs : SKIP
+test-benchmark-misc : SKIP
+test-benchmark-module : SKIP
 test-benchmark-os : SKIP
 test-benchmark-path : SKIP
 test-benchmark-process : SKIP
+test-benchmark-querystring : SKIP
+test-benchmark-streams : SKIP
+test-benchmark-string_decoder : SKIP
 test-benchmark-timers : SKIP
+test-benchmark-url : SKIP
+test-benchmark-util : SKIP
+test-benchmark-vm : SKIP
+test-benchmark-zlib : SKIP
 test-child-process-bad-stdio : SKIP
 test-child-process-buffering : SKIP
+test-child-process-can-write-to-stdout : SKIP
 test-child-process-constructor : SKIP
 test-child-process-cwd : SKIP
 test-child-process-default-options : SKIP
@@ -545,6 +557,7 @@ test-child-process-exec-env : SKIP
 test-child-process-exec-error : SKIP
 test-child-process-exec-kill-throws : SKIP
 test-child-process-exec-maxBuffer : SKIP
+test-child-process-exec-std-encoding : SKIP
 test-child-process-exec-stdout-stderr-data-string : SKIP
 test-child-process-exec-timeout : SKIP
 test-child-process-execfile : SKIP
@@ -553,10 +566,13 @@ test-child-process-flush-stdio : SKIP
 test-child-process-fork : SKIP
 test-child-process-fork-and-spawn : SKIP
 test-child-process-fork-close : SKIP
+test-child-process-fork-closed-channel-segfault : SKIP
 test-child-process-fork-dgram : SKIP
 test-child-process-fork-exec-argv : SKIP
 test-child-process-fork-exec-path : SKIP
 test-child-process-fork-net : SKIP
+test-child-process-fork-net-server : SKIP
+test-child-process-fork-net-socket : SKIP
 test-child-process-fork-net2 : SKIP
 test-child-process-fork-no-shell : SKIP
 test-child-process-fork-ref : SKIP
@@ -565,6 +581,7 @@ test-child-process-fork-regr-gh-2847 : SKIP
 test-child-process-fork-stdio : SKIP
 test-child-process-fork-stdio-string-variant : SKIP
 test-child-process-fork3 : SKIP
+test-child-process-http-socket-leak : SKIP
 test-child-process-internal : SKIP
 test-child-process-ipc : SKIP
 test-child-process-ipc-next-tick : SKIP
@@ -588,19 +605,23 @@ test-child-process-stdio-big-write-end : SKIP
 test-child-process-stdio-inherit : SKIP
 test-child-process-stdout-flush : SKIP
 test-child-process-stdout-flush-exit : SKIP
+test-child-process-stdout-ipc : SKIP
 test-cli-eval : SKIP
 test-cli-eval-event : SKIP
 test-cli-node-options : SKIP
 test-cli-node-options-disallowed : SKIP
+test-cli-node-print-help : SKIP
 test-cli-syntax : SKIP
 test-cluster-basic : SKIP
 test-cluster-bind-privileged-port : SKIP
 test-cluster-bind-twice : SKIP
+test-cluster-cwd : SKIP
 test-cluster-dgram-1 : SKIP
 test-cluster-dgram-2 : SKIP
 test-cluster-dgram-reuse : SKIP
 test-cluster-disconnect : SKIP
 test-cluster-disconnect-before-exit : SKIP
+test-cluster-disconnect-exitedAfterDisconnect-race : SKIP
 test-cluster-disconnect-idle-worker : SKIP
 test-cluster-disconnect-leak : SKIP
 test-cluster-disconnect-race : SKIP
@@ -611,9 +632,12 @@ test-cluster-eaccess : SKIP
 test-cluster-eaddrinuse : SKIP
 test-cluster-fork-env : SKIP
 test-cluster-fork-stdio : SKIP
+test-cluster-fork-windowsHide : SKIP
 test-cluster-http-pipe : SKIP
 test-cluster-invalid-message : SKIP
 test-cluster-ipc-throw : SKIP
+test-cluster-kill-disconnect : SKIP
+test-cluster-kill-infinite-loop : SKIP
 test-cluster-listening-port : SKIP
 test-cluster-master-error : SKIP
 test-cluster-master-kill : SKIP
@@ -648,6 +672,8 @@ test-cluster-worker-kill : SKIP
 test-cluster-worker-no-exit : SKIP
 test-cluster-worker-wait-server-close : SKIP
 test-common : SKIP
+test-common-countdown : SKIP
+test-crypto-tostring-segfault : SKIP
 test-cwd-enoent : SKIP
 test-cwd-enoent-preload : SKIP
 test-cwd-enoent-repl : SKIP
@@ -685,13 +711,17 @@ test-http-chunk-problem : SKIP
 test-http-full-response : SKIP
 test-http-pipeline-flood : SKIP
 test-http-server-stale-close : SKIP
+test-http2-tls-disconnect : SKIP
+test-kill-segfault-freebsd : SKIP
 test-listen-fd-cluster : SKIP
 test-listen-fd-detached : SKIP
 test-listen-fd-detached-inherit : SKIP
 test-listen-fd-server : SKIP
 test-net-listen-exclusive-random-ports : SKIP
 test-net-server-connections-child-null : SKIP
+test-net-socket-constructor : SKIP
 test-npm-install : SKIP
+test-os-userinfo-handles-getter-errors : SKIP
 test-pending-deprecation : SKIP
 test-pipe-file-to-http : SKIP
 test-pipe-head : SKIP
@@ -729,6 +759,7 @@ test-stdin-pipe-resume : SKIP
 test-stdin-script-child : SKIP
 test-stdin-script-child-option : SKIP
 test-stdio-closed : SKIP
+test-stdio-pipe-redirect : SKIP
 test-stdout-cannot-be-closed-child-process-pipe : SKIP
 test-stdout-close-catch : SKIP
 test-stdout-close-unref : SKIP
@@ -741,6 +772,7 @@ test-tls-env-extra-ca : SKIP
 test-tls-ticket-cluster : SKIP
 test-trace-event : SKIP
 test-util-callbackify : SKIP
+test-vm-api-handles-getter-errors : SKIP
 test-vm-sigint : SKIP
 test-vm-sigint-existing-handler : SKIP
 test-vm-syntax-error-message : SKIP
@@ -748,6 +780,8 @@ test-vm-syntax-error-stderr : SKIP
 #
 # Tests that also try to spawn processes, but don't fail right away
 #
+test-async-wrap-pop-id-during-load : SKIP
+test-buffer-constructor-node-modules-paths : SKIP
 test-child-process-spawn-argv0 : SKIP
 test-child-process-spawn-typeerror : SKIP
 test-child-process-spawnsync : SKIP
@@ -758,16 +792,22 @@ test-child-process-spawnsync-maxbuf : SKIP
 test-child-process-spawnsync-shell : SKIP
 test-child-process-spawnsync-timeout : SKIP
 test-child-process-spawnsync-validation-errors : SKIP
+test-child-process-windows-hide : SKIP
 test-cli-bad-options : SKIP
 test-crypto-fips : SKIP
 test-fs-realpath-pipe : SKIP
+test-http2-debug : SKIP
 test-internal-util-decorate-error-stack : SKIP
 test-module-loading-globalpaths : SKIP
+test-module-main-fail : SKIP
+test-module-main-preserve-symlinks-fail : SKIP
 test-openssl-ca-options : SKIP
 test-os-homedir-no-envvar : SKIP
 test-process-execpath : SKIP
+test-process-ppid : SKIP
 test-process-wrap : SKIP
 test-require-symlink : SKIP
+test-tls-handshake-exception : SKIP
 #
 # FAILING tests due to running out of stack space.
 #
@@ -805,11 +845,14 @@ test-fs-watch-encoding : SKIP
 #
 # FAILING test with listen EADDRINUSE.
 #
+test-http-client-abort-keep-alive-queued-unix-socket : SKIP
 test-http-client-abort-unix-socket : SKIP
 test-http-client-pipe-end : SKIP
 test-http-client-response-domain : SKIP
 test-http-unix-socket : SKIP
+test-http-unix-socket-keep-alive : SKIP
 test-https-unix-socket-self-signed : SKIP
+test-http2-pipe-named-pipe : SKIP
 test-net-connect-options-fd : SKIP
 test-net-connect-options-path : SKIP
 test-net-pingpong : SKIP
@@ -831,6 +874,15 @@ test-process-config : SKIP
 # FAILING test on unicode URL IDNA encoding. www.xn--ffchen-9ta.com is expected but www.xn--ffchen-vna.com
 #
 test-url-parse-format : SKIP
+#
+# FAILING test because calling setpriority on iOS fails with EPERM
+#
+test-os-process-priority : SKIP
+#
+# FAILING tests because ChakraCore doesn't support WebAssembly on arm.
+#
+test-util-types : SKIP
+test-wasm-simple : SKIP
 #
 # Tests that depend on FIPS OpenSSL that is not available on mobile
 #
@@ -858,8 +910,11 @@ test-tls-set-ciphers : SKIP
 # Tests that require the inspector, not included in the build
 #
 test-debugger-pid : SKIP
+test-inspect-support-for-node_options : SKIP
 test-inspector-invalid-args : SKIP
 test-inspector-open : SKIP
+test-inspector-port-zero-cluster : SKIP
+test-inspector-reported-host : SKIP
 test-warn-sigprof : SKIP
 #
 # Tests that require MultiLocalhost
@@ -869,13 +924,23 @@ test-https-localaddress : SKIP
 #
 # Tests that require Intl, not included in the build
 #
+test-assert-first-line : SKIP
 test-icu-data-dir : SKIP
 test-icu-punycode : SKIP
 test-icu-stringwidth : SKIP
 test-icu-transcode : SKIP
+test-intl : SKIP
 test-intl-v8BreakIterator : SKIP
+test-url-domain-ascii-unicode : SKIP
 test-url-format-whatwg : SKIP
+test-whatwg-encoding-fatal-streaming : SKIP
+test-whatwg-encoding-textdecoder-fatal : SKIP
+test-whatwg-encoding-textdecoder-utf16-surrogates : SKIP
 test-whatwg-url-constructor : SKIP
+test-whatwg-url-custom-domainto : SKIP
+test-whatwg-url-custom-inspect : SKIP
+test-whatwg-url-custom-parsing : SKIP
+test-whatwg-url-custom-setters : SKIP
 test-whatwg-url-domainto : SKIP
 test-whatwg-url-historical : SKIP
 test-whatwg-url-inspect : SKIP
@@ -884,11 +949,34 @@ test-whatwg-url-parsing : SKIP
 test-whatwg-url-setters : SKIP
 test-whatwg-url-toascii : SKIP
 #
+# Tests that require ESLINT, not included in the build
+#
+test-eslint-alphabetize-errors : SKIP
+test-eslint-buffer-constructor : SKIP
+test-eslint-crypto-check : SKIP
+test-eslint-documented-errors : SKIP
+test-eslint-duplicate-requires : SKIP
+test-eslint-eslint-check : SKIP
+test-eslint-inspector-check : SKIP
+test-eslint-lowercase-name-for-primitive : SKIP
+test-eslint-no-let-in-for-declaration : SKIP
+test-eslint-no-unescaped-regexp-dot : SKIP
+test-eslint-number-isnan : SKIP
+test-eslint-prefer-assert-iferror : SKIP
+test-eslint-prefer-assert-methods : SKIP
+test-eslint-prefer-common-expectserror : SKIP
+test-eslint-prefer-common-mustnotcall : SKIP
+test-eslint-prefer-util-format-errors : SKIP
+test-eslint-require-buffer : SKIP
+test-eslint-required-modules : SKIP
+#
 # Tests that run on Windows only
 #
 test-fs-long-path : SKIP
+test-fs-readfilesync-enoent : SKIP
 test-fs-realpath-on-substed-drive : SKIP
 test-fs-write-file-invalid-path : SKIP
+test-module-readonly : SKIP
 test-regress-GH-3542 : SKIP
 test-require-long-path : SKIP
 test-spawn-cmd-named-pipe : SKIP
@@ -898,7 +986,7 @@ test-windows-abort-exitcode : SKIP
 #
 test-fs-watch-recursive : SKIP
 #
-# These that run on Linux only
+# Tests that run on Linux only
 #
 test-fs-read-file-sync-hostname : SKIP
 test-fs-readdir-ucs2 : SKIP
