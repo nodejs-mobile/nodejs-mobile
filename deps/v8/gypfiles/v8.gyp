@@ -1974,7 +1974,8 @@
                   # These libraries do not exist on Mac hosted builds.
                   'libraries': [
                     '-ldl',
-                    '-lrt'
+                    '-lrt',
+                    '-lpthread'
                   ]
                 }]
               ]
