@@ -69,19 +69,22 @@ if [ -d "$TOOLCHAIN" ]; then
 else
     make_toolchain
 fi
-export PATH=$TOOLCHAIN/bin:$PATH
+
+export AR_host="$(which ar)"
 export AR=$TOOLCHAIN/bin/$SUFFIX-ar
-export CC=$TOOLCHAIN/bin/$SUFFIX-clang
-export CXX=$TOOLCHAIN/bin/$SUFFIX-clang++
-export LINK=$TOOLCHAIN/bin/$SUFFIX-clang++
+# Setting the AR host tool is needed for cross-building in macOS
+export AR_target=$TOOLCHAIN/bin/$SUFFIX-ar
+export CC_target=$TOOLCHAIN/bin/$SUFFIX-gcc
+export CXX_target=$TOOLCHAIN/bin/$SUFFIX-g++
+export LINK_target=$TOOLCHAIN/bin/$SUFFIX-g++
 
 GYP_DEFINES="target_arch=$ARCH"
 GYP_DEFINES+=" v8_target_arch=$V8_ARCH"
 GYP_DEFINES+=" android_target_arch=$ARCH"
 if [ "$(uname -s)" == "Darwin" ]; then
-    GYP_DEFINES+=" host_os=mac OS=android"
+    GYP_DEFINES+=" host_os=mac target_os=android"
 else
-    GYP_DEFINES+=" host_os=linux OS=android"
+    GYP_DEFINES+=" host_os=linux target_os=android"
 fi
 export GYP_DEFINES
 
@@ -93,5 +96,6 @@ if [ -f "configure" ]; then
         --openssl-no-asm \
         --with-intl=none \
         --engine=V8 \
+        --cross-compiling \
         --shared
 fi
