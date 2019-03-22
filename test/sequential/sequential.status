@@ -64,11 +64,14 @@ test-net-bytes-per-incoming-chunk-overhead : PASS, FLAKY
 test-benchmark-* : SKIP
 test-child-* : SKIP
 test-cluster-inspect-brk : SKIP
+test-cluster-send-handle-large-payload : SKIP
 test-debug-prompt : SKIP
 test-debugger-debug-brk : SKIP
 test-debugger-repeat-last : SKIP
 test-deprecation-flags : SKIP
 test-dgram-bind-shared-ports : SKIP
+test-fs-stat-sync-overflow : SKIP
+test-fs-watch-system-limit : SKIP
 test-init : SKIP
 test-module-loading : SKIP
 test-net-GH-5504 : SKIP
@@ -82,6 +85,42 @@ test-repl-timeout-throw : SKIP
 test-stream2-stderr-sync : SKIP
 test-util-debug : SKIP
 test-vm-timeout-rethrow : SKIP
+#
+# Test that tries to allocate 4294968296 bytes for ArrayBuffer
+#
+test-buffer-creation-regression : SKIP
+#
+# Tests that require the inspector, not included in the build
+#
+test-inspector : SKIP
+test-inspector-async-call-stack : SKIP
+test-inspector-async-call-stack-abort : SKIP
+test-inspector-async-hook-setup-at-inspect-brk : SKIP
+test-inspector-async-hook-setup-at-signal : SKIP
+test-inspector-async-stack-traces-promise-then : SKIP
+test-inspector-async-stack-traces-set-interval : SKIP
+test-inspector-bindings : SKIP
+test-inspector-break-e : SKIP
+test-inspector-break-when-eval : SKIP
+test-inspector-console : SKIP
+test-inspector-contexts : SKIP
+test-inspector-debug-brk-flag : SKIP
+test-inspector-debug-end : SKIP
+test-inspector-enabled : SKIP
+test-inspector-exception : SKIP
+test-inspector-invalid-args : SKIP
+test-inspector-ip-detection : SKIP
+test-inspector-module : SKIP
+test-inspector-not-blocked-on-idle : SKIP
+test-inspector-open : SKIP
+test-inspector-overwrite-config : SKIP
+test-inspector-port-cluster : SKIP
+test-inspector-port-zero : SKIP
+test-inspector-resource-name-to-url : SKIP
+test-inspector-runtime-evaluate-with-timeout : SKIP
+test-inspector-scriptparsed-context : SKIP
+test-inspector-stop-profile-after-done : SKIP
+test-inspector-stress-http : SKIP
 
 [$system==ios]
 #
