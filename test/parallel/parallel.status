@@ -730,6 +730,7 @@ test-cluster-master-error : SKIP
 test-cluster-master-kill : SKIP
 test-cluster-message : SKIP
 test-cluster-net-listen : SKIP
+test-cluster-net-listen-relative-path : SKIP
 test-cluster-net-send : SKIP
 test-cluster-process-disconnect : SKIP
 test-cluster-rr-domain-listen : SKIP
@@ -884,6 +885,7 @@ test-cli-bad-options : SKIP
 test-crypto-fips : SKIP
 test-fs-realpath-pipe : SKIP
 test-http2-debug : SKIP
+test-http2-respond-file-error-pipe-offset : SKIP
 test-internal-util-decorate-error-stack : SKIP
 test-module-loading-globalpaths : SKIP
 test-module-main-fail : SKIP
@@ -923,8 +925,6 @@ test-tls-pfx-gh-5100-regr : SKIP #bad decrypt
 #
 test-fs-options-immutable : SKIP #signal SIGABRT
 test-fs-watch-enoent : SKIP #signal SIGABRT
-test-signal-handler : SKIP #signal SIGHUP
-test-util-sigint-watchdog : SKIP #signal SIGINT
 #
 # FAILING tests due to timeout.
 #
@@ -970,6 +970,13 @@ test-os-process-priority : SKIP
 #
 test-util-types : SKIP
 test-wasm-simple : SKIP
+#
+# Tests that require the debugger to not stop on signals.
+# Tests pass if run individually with debugger configured to not stop.
+#
+test-signal-args : SKIP
+test-signal-handler : SKIP #signal SIGHUP
+test-util-sigint-watchdog : SKIP #signal SIGINT
 #
 # Tests that depend on FIPS OpenSSL that is not available on mobile
 #

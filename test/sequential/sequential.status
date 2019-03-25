@@ -189,6 +189,7 @@ test-inspector-ip-detection : SKIP
 test-inspector-module : SKIP
 test-inspector-not-blocked-on-idle : SKIP
 test-inspector-open : SKIP
+test-inspector-overwrite-config : SKIP
 test-inspector-port-cluster : SKIP
 test-inspector-port-zero : SKIP
 test-inspector-runtime-evaluate-with-timeout : SKIP

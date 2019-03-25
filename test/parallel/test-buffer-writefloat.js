@@ -54,9 +54,16 @@ buffer.writeFloatLE(NaN, 4);
 // JS only knows a single NaN but there exist two platform specific
 // implementations. Therefore, allow both quiet and signalling NaNs.
 if (common.isChakraEngine) {
-  assert.ok(
-    buffer.equals(new Uint8Array(
-      [ 0xFF, 0xC0, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xFF ])));
+  if(common.isIOS) {
+    // clang for iOS doesn't set the signal bit for NaN.
+    assert.ok(
+      buffer.equals(new Uint8Array(
+        [ 0x7F, 0xC0, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x7F ])));
+  } else {
+    assert.ok(
+      buffer.equals(new Uint8Array(
+        [ 0xFF, 0xC0, 0x00, 0x00, 0x00, 0x00, 0xC0, 0xFF ])));
+  }
 } else if (buffer[1] === 0xBF) {
   assert.ok(
     buffer.equals(new Uint8Array(

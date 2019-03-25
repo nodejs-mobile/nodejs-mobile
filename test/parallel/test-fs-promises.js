@@ -197,8 +197,8 @@ async function getHandle(dest) {
                          (await readlink(newLink)).toLowerCase());
 
       const newMode = 0o666;
-      if (common.isOSX) {
-        // lchmod is only available on macOS
+      if (common.isOSX || common.isIOS) {
+        // lchmod is only available on macOS and iOS
         await lchmod(newLink, newMode);
         stats = await lstat(newLink);
         assert.strictEqual(stats.mode & 0o777, newMode);
