@@ -711,7 +711,7 @@ common.expectsError(
     code: 'ERR_ASSERTION',
     type: assert.AssertionError,
     message: engineSpecificAssert(
-      '  a(\n' +
+      'a(\n' +
       '    (() => \'string\')()\n' +
       '    // eslint-disable-next-line operator-linebreak\n' +
       '    ===\n' +
@@ -736,7 +736,7 @@ common.expectsError(
     code: 'ERR_ASSERTION',
     type: assert.AssertionError,
     message: engineSpecificAssert(
-      '  a(\n' +
+      'a(\n' +
       '    (() => \'string\')()\n' +
       '    // eslint-disable-next-line operator-linebreak\n' +
       '    ===\n' +
@@ -758,7 +758,7 @@ Buffer
   code: 'ERR_ASSERTION',
   type: assert.AssertionError,
   message: engineSpecificAssert(
-    '  a((\n' +
+    'a((\n' +
     '    () => \'string\')() ===\n' +
     '  123 instanceof\n' +
     '  Buffer\n' +
@@ -791,7 +791,7 @@ common.expectsError(
     code: 'ERR_ASSERTION',
     type: assert.AssertionError,
     message: engineSpecificAssert(
-      'assert(null, undefined)\n',
+      'ok(null, undefined)\n',
       'null == true'
     )
   }

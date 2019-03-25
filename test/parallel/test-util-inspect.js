@@ -1682,8 +1682,8 @@ if (!common.isChakraEngine) {
     [new Map([[1, 2]]), 'Map { 1 => 2 }'],
     [new Set([1, 2]).entries(), '[Set Iterator] { 1, 2 }'],
     [new Map([[1, 2]]).keys(), '[Map Iterator] { 1 }'],
-    [new WeakSet(), 'WeakSet { <items unknown> }'],
-    [new WeakMap(), 'WeakMap { <items unknown> }'],
+    [new WeakSet(), 'WeakSet { [items unknown] }'],
+    [new WeakMap(), 'WeakMap { [items unknown] }'],
   ]
 ).forEach(([value, expected]) => {
   Object.defineProperty(value, 'valueOf', {
