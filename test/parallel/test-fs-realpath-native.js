@@ -6,7 +6,7 @@ const path = require('path');
 
 const filename = __filename.toLowerCase();
 
-if(common.isIOS) {
+if(common.isIOS || common.isAndroid) {
   // Change the working dir for what would be expected of the test framework
   //running in a Desktop environment.
   process.chdir(path.join(__dirname,'..','..'));

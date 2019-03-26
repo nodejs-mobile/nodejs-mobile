@@ -14,6 +14,11 @@ if (common.isWindows) {
 } else {
   mode = 0o644;
 }
+if (common.isAndroid) {
+  // On Android, writing in the Application files only sets permissions
+  // for the user associated with the App.
+  mode = mode & 0o700;
+}
 
 const maskToIgnore = 0o10000;
 

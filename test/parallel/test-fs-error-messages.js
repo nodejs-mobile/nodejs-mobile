@@ -25,6 +25,7 @@ const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 
 tmpdir.refresh();
 
@@ -36,6 +37,12 @@ const existingDir = tmpdir.path;
 const existingDir2 = fixtures.path('keys');
 const { COPYFILE_EXCL } = fs.constants;
 const uv = process.binding('uv');
+
+if (common.isAndroid) {
+  // Change the working dir for what would be expected of the test framework
+  //running in a Desktop environment.
+  process.chdir(path.join(__dirname, '..', '..'));
+}
 
 // Template tag function for escaping special characters in strings so that:
 // new RegExp(re`${str}`).test(str) === true
@@ -575,7 +582,7 @@ function re(literals, ...values) {
 }
 
 // chown
-if (!common.isWindows) {
+if (!common.isWindows && !common.isAndroid) {
   const validateError = (err) => {
     assert.strictEqual(nonexistentFile, err.path);
     assert.strictEqual(
@@ -759,7 +766,7 @@ if (!common.isAIX) {
 }
 
 // fchown
-if (!common.isWindows) {
+if (!common.isWindows && !common.isAndroid) {
   const validateError = (err) => {
     assert.strictEqual(err.message, 'EBADF: bad file descriptor, fchown');
     assert.strictEqual(err.errno, uv.UV_EBADF);

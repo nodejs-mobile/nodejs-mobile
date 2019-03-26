@@ -15,11 +15,17 @@ const tmpDir = tmpdir.path;
 tmpdir.refresh();
 
 async function validateFilePermission() {
+  let testmode = 0o444;
+  if (common.isAndroid) {
+    // On Android, writing in the Application files only sets permissions
+    // for the user associated with the App.
+    testmode = testmode & 0o700;
+  }
   const filePath = path.resolve(tmpDir, 'tmp-chmod.txt');
-  const fileHandle = await open(filePath, 'w+', 0o444);
+  const fileHandle = await open(filePath, 'w+', testmode);
   // file created with r--r--r-- 444
   const statsBeforeMod = fs.statSync(filePath);
-  assert.deepStrictEqual(statsBeforeMod.mode & 0o444, 0o444);
+  assert.deepStrictEqual(statsBeforeMod.mode & testmode, testmode);
 
   let expectedAccess;
   const newPermissions = 0o765;

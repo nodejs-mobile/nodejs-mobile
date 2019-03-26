@@ -5,7 +5,13 @@ const assert = require('assert');
 const util = require('util');
 const { Worker } = require('worker_threads');
 
-const numWorkers = +process.env.JOBS || require('os').cpus().length;
+let numWorkers;
+if (common.isAndroid) {
+  // Unable to get os.cpus() on Android.
+  numWorkers = 4;
+} else {
+  numWorkers = +process.env.JOBS || require('os').cpus().length;
+}
 
 // Verify that a Worker's memory isn't kept in memory after the thread finishes.
 
