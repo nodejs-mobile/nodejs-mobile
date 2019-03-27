@@ -136,13 +136,15 @@ void* thread_stdout_func(void*) {
 }
 
 int start_redirecting_stdout_stderr() {
-    // Set stdout as unbuffered.
-    setvbuf(stdout, 0, _IONBF, 0);
+    // Set stdout as line buffered.
+    // Avoids additional line breaks caused by adb logcat splitting the output.
+    setvbuf(stdout, 0, _IOLBF, 0);
     pipe(pipe_stdout);
     dup2(pipe_stdout[1], STDOUT_FILENO);
 
-    // Set stderr as unbuffered.
-    setvbuf(stderr, 0, _IONBF, 0);
+    // Set stderr as line buffered.
+    // Avoids additional line breaks caused by adb logcat splitting the output.
+    setvbuf(stderr, 0, _IOLBF, 0);
     pipe(pipe_stderr);
     dup2(pipe_stderr[1], STDERR_FILENO);
 
