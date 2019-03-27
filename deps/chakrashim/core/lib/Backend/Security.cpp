@@ -269,8 +269,12 @@ Security::InsertSmallNOP(IR::Instr * instr, DWORD nopSize)
     }
 
     instr->InsertBefore(nopInstr);
-#else
-    AssertMsg(false, "Unimplemented");
+#elif defined(_M_ARM64)
+
+    // All ARM64 instructions are 4 bytes.
+    IR::Instr *nopInstr = IR::Instr::New(Js::OpCode::NOP, instr->m_func);
+    instr->InsertBefore(nopInstr);
+
 #endif
 }
 
@@ -298,6 +302,14 @@ Security::DontEncode(IR::Opnd *opnd)
         IR::IndirOpnd *indirOpnd = opnd->AsIndirOpnd();
         return indirOpnd->m_dontEncode || indirOpnd->GetOffset() == 0;
     }
+    case IR::OpndKindInt64Const:
+        return false;
+    case IR::OpndKindList:
+    {
+        // We should only have RegOpnd in the ListOpnd therefore, we don't need to encode anything
+        Assert(opnd->AsListOpnd()->All([](IR::ListOpndType* opnd) { return DontEncode(opnd); }));
+        return true;
+    }
     default:
         return true;
     }
@@ -312,6 +324,13 @@ Security::CalculateConstSize(IR::Opnd *opnd)
     }
     switch (opnd->GetKind())
     {
+#if TARGET_64
+    case IR::OpndKindInt64Const:
+    {
+        IR::Int64ConstOpnd *intConstOpnd = opnd->AsInt64ConstOpnd();
+        return GetByteCount(intConstOpnd->GetValue());
+    }
+#endif
     case IR::OpndKindIntConst:
     {
         IR::IntConstOpnd *intConstOpnd = opnd->AsIntConstOpnd();
@@ -411,7 +430,7 @@ Security::EncodeOpnd(IR::Instr * instr, IR::Opnd *opnd)
             {
                 IR::RegOpnd * newBaseOpnd = IR::RegOpnd::New(TyMachReg, instr->m_func);
                 Lowerer::InsertAdd(false, newBaseOpnd, newOpnd, indirOpnd->GetBaseOpnd(), instr);
-                indirOpnd->SetBaseOpnd(newBaseOpnd);
+                indirOpnd->ReplaceBaseOpnd(newBaseOpnd);
             }
             else
             {
@@ -512,7 +531,7 @@ Security::EncodeValue(IR::Instr * instr, IR::Opnd *opnd, IntConstType constValue
         )
     {
         IR::RegOpnd *regOpnd = IR::RegOpnd::New(StackSym::New(opnd->GetType(), instr->m_func), opnd->GetType(), instr->m_func);
-        IR::Instr * instrNew = LowererMD::CreateAssign(regOpnd, opnd, instr);
+        IR::Instr * instrNew = Lowerer::InsertMove(regOpnd, opnd, instr);
         IR::IntConstOpnd * cookieOpnd = BuildCookieOpnd(opnd->GetType(), instr->m_func);
         instrNew = IR::Instr::New(LowererMD::MDXorOpcode, regOpnd, regOpnd, cookieOpnd, instr->m_func);
         instr->InsertBefore(instrNew);
@@ -533,7 +552,7 @@ Security::EncodeValue(IR::Instr * instr, IR::Opnd *opnd, IntConstType constValue
     else if (opnd->GetType() == TyUint32 || opnd->GetType() == TyUint16 || opnd->GetType() == TyUint8)
     {
         IR::RegOpnd *regOpnd = IR::RegOpnd::New(StackSym::New(opnd->GetType(), instr->m_func), opnd->GetType(), instr->m_func);
-        IR::Instr * instrNew = LowererMD::CreateAssign(regOpnd, opnd, instr);
+        IR::Instr * instrNew = Lowerer::InsertMove(regOpnd, opnd, instr);
 
         IR::IntConstOpnd * cookieOpnd = BuildCookieOpnd(opnd->GetType(), instr->m_func);
 
@@ -568,12 +587,12 @@ Security::EncodeValue(IR::Instr * instr, IR::Opnd *opnd, IntConstType constValue
 
 #if TARGET_64
 size_t
-Security::EncodeAddress(IR::Instr * instr, IR::Opnd *opnd, size_t value, _Out_ IR::RegOpnd **pNewOpnd)
+Security::EncodeAddress(IR::Instr * instr, IR::Opnd *opnd, size_t value,  _Out_ IR::RegOpnd **pNewOpnd)
 {
     IR::Instr   *instrNew = nullptr;
     IR::RegOpnd *regOpnd = IR::RegOpnd::New(TyMachReg, instr->m_func);
 
-    instrNew = LowererMD::CreateAssign(regOpnd, opnd, instr);
+    instrNew = Lowerer::InsertMove(regOpnd, opnd, instr);
 
     IR::IntConstOpnd *cookieOpnd = BuildCookieOpnd(TyMachReg, instr->m_func);
     instrNew = IR::Instr::New(LowererMD::MDXorOpcode, regOpnd, regOpnd, cookieOpnd, instr->m_func);

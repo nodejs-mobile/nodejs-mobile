@@ -9,15 +9,25 @@ namespace Js
     LPCUTF8 const ISourceHolder::emptyString = (LPCUTF8)"\0";
     SimpleSourceHolder const ISourceHolder::emptySourceHolder(NO_WRITE_BARRIER_TAG(emptyString), 0, true);
 
-    ISourceHolder* SimpleSourceHolder::Clone(ScriptContext* scriptContext)
+    void HeapSourceHolder::Dispose(bool fShutdown)
     {
-        if(this == ISourceHolder::GetEmptySourceHolder())
-        {
-            return this;
-        }
+        Unload();
+    }
 
-        utf8char_t * newUtf8String = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), utf8char_t, byteLength + 1);
-        js_memcpy_s(newUtf8String, byteLength + 1, this->source, byteLength + 1);
-        return RecyclerNew(scriptContext->GetRecycler(), SimpleSourceHolder, newUtf8String, byteLength);
+    void HeapSourceHolder::Unload()
+    {
+        if (this->shouldFreeSource)
+        {
+            // REVIEW: Where is the inc for this guy?
+            //PERF_COUNTER_DEC(Basic, ScriptCodeBufferCount);
+            HeapFree(GetProcessHeap(), 0, (void*)this->originalSourceBuffer);
+
+            this->source = nullptr;
+            this->originalSourceBuffer = nullptr;
+            this->isEmpty = true;
+            this->byteLength = 0;
+
+            this->shouldFreeSource = false;
+        }
     }
 }

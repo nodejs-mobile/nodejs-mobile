@@ -4,6 +4,7 @@ const BB = require('bluebird')
 
 const chain = require('slide').chain
 const detectIndent = require('detect-indent')
+const detectNewline = require('detect-newline')
 const readFile = BB.promisify(require('graceful-fs').readFile)
 const getRequested = require('./install/get-requested.js')
 const id = require('./install/deps.js')
@@ -18,9 +19,11 @@ const npm = require('./npm.js')
 const path = require('path')
 const readPackageTree = BB.promisify(require('read-package-tree'))
 const ssri = require('ssri')
+const stringifyPackage = require('stringify-package')
 const validate = require('aproba')
 const writeFileAtomic = require('write-file-atomic')
 const unixFormatPath = require('./utils/unix-format-path.js')
+const isRegistry = require('./utils/is-registry.js')
 
 const PKGLOCK = 'package-lock.json'
 const SHRINKWRAP = 'npm-shrinkwrap.json'
@@ -31,6 +34,8 @@ const PKGLOCK_VERSION = npm.lockfileVersion
 shrinkwrap.usage = 'npm shrinkwrap'
 
 module.exports = exports = shrinkwrap
+exports.treeToShrinkwrap = treeToShrinkwrap
+
 function shrinkwrap (args, silent, cb) {
   if (typeof cb !== 'function') {
     cb = silent
@@ -101,26 +106,25 @@ function shrinkwrapDeps (deps, top, tree, seen) {
   if (!seen) seen = new Set()
   if (seen.has(tree)) return
   seen.add(tree)
-  tree.children.sort(function (aa, bb) { return moduleName(aa).localeCompare(moduleName(bb)) }).forEach(function (child) {
-    if (child.fakeChild) {
-      deps[moduleName(child)] = child.fakeChild
-      return
-    }
+  sortModules(tree.children).forEach(function (child) {
     var childIsOnlyDev = isOnlyDev(child)
     var pkginfo = deps[moduleName(child)] = {}
-    var requested = child.package._requested || getRequested(child) || {}
+    var requested = getRequested(child) || child.package._requested || {}
     pkginfo.version = childVersion(top, child, requested)
+    if (requested.type === 'git' && child.package._from) {
+      pkginfo.from = child.package._from
+    }
     if (child.fromBundle || child.isInLink) {
       pkginfo.bundled = true
     } else {
-      if (requested.registry) {
+      if (isRegistry(requested)) {
         pkginfo.resolved = child.package._resolved
       }
       // no integrity for git deps as integirty hashes are based on the
       // tarball and we can't (yet) create consistent tarballs from a stable
       // source.
       if (requested.type !== 'git') {
-        pkginfo.integrity = child.package._integrity
+        pkginfo.integrity = child.package._integrity || undefined
         if (!pkginfo.integrity && child.package._shasum) {
           pkginfo.integrity = ssri.fromHex(child.package._shasum, 'sha1')
         }
@@ -130,9 +134,9 @@ function shrinkwrapDeps (deps, top, tree, seen) {
     if (isOnlyOptional(child)) pkginfo.optional = true
     if (child.requires.length) {
       pkginfo.requires = {}
-      child.requires.sort((a, b) => moduleName(a).localeCompare(moduleName(b))).forEach((required) => {
-        var requested = required.package._requested || getRequested(required) || {}
-        pkginfo.requires[moduleName(required)] = childVersion(top, required, requested)
+      sortModules(child.requires).forEach((required) => {
+        var requested = getRequested(required, child) || required.package._requested || {}
+        pkginfo.requires[moduleName(required)] = childRequested(top, required, requested)
       })
     }
     if (child.children.length) {
@@ -142,11 +146,37 @@ function shrinkwrapDeps (deps, top, tree, seen) {
   })
 }
 
+function sortModules (modules) {
+  // sort modules with the locale-agnostic Unicode sort
+  var sortedModuleNames = modules.map(moduleName).sort()
+  return modules.sort((a, b) => (
+    sortedModuleNames.indexOf(moduleName(a)) - sortedModuleNames.indexOf(moduleName(b))
+  ))
+}
+
 function childVersion (top, child, req) {
   if (req.type === 'directory' || req.type === 'file') {
     return 'file:' + unixFormatPath(path.relative(top.path, child.package._resolved || req.fetchSpec))
-  } else if (!req.registry && !child.fromBundle) {
+  } else if (!isRegistry(req) && !child.fromBundle) {
     return child.package._resolved || req.saveSpec || req.rawSpec
+  } else {
+    return child.package.version
+  }
+}
+
+function childRequested (top, child, requested) {
+  if (requested.type === 'directory' || requested.type === 'file') {
+    return 'file:' + unixFormatPath(path.relative(top.path, child.package._resolved || requested.fetchSpec))
+  } else if (!isRegistry(requested) && !child.fromBundle) {
+    return child.package._resolved || requested.saveSpec || requested.rawSpec
+  } else if (requested.type === 'tag') {
+    // tags are not ranges we can match against, so we invent a "reasonable"
+    // one based on what we actually installed.
+    return npm.config.get('save-prefix') + child.package.version
+  } else if (requested.saveSpec || requested.rawSpec) {
+    return requested.saveSpec || requested.rawSpec
+  } else if (child.package._from || (child.package._requested && child.package._requested.rawSpec)) {
+    return child.package._from.replace(/^@?[^@]+@/, '') || child.package._requested.rawSpec
   } else {
     return child.package.version
   }
@@ -170,11 +200,12 @@ function save (dir, pkginfo, opts, cb) {
         {
           path: path.resolve(dir, opts.defaultFile || PKGLOCK),
           data: '{}',
-          indent: (pkg && pkg.indent) || 2
+          indent: pkg && pkg.indent,
+          newline: pkg && pkg.newline
         }
       )
-      const updated = updateLockfileMetadata(pkginfo, pkg && pkg.data)
-      const swdata = JSON.stringify(updated, null, info.indent) + '\n'
+      const updated = updateLockfileMetadata(pkginfo, pkg && JSON.parse(pkg.raw))
+      const swdata = stringifyPackage(updated, info.indent, info.newline)
       if (swdata === info.raw) {
         // skip writing if file is identical
         log.verbose('shrinkwrap', `skipping write for ${path.basename(info.path)} because there were no changes.`)
@@ -235,9 +266,8 @@ function checkPackageFile (dir, name) {
     return {
       path: file,
       raw: data,
-      data: JSON.parse(data),
-      indent: detectIndent(data).indent || 2
+      indent: detectIndent(data).indent,
+      newline: detectNewline(data)
     }
   }).catch({code: 'ENOENT'}, () => {})
 }
-

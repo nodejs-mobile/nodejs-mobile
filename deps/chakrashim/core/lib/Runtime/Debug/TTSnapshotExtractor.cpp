@@ -19,7 +19,7 @@ namespace TTD
 
         if(this->m_marks.MarkAndTestAddr<MarkTableTag::TypeTag>(type))
         {
-            if(Js::DynamicType::Is(type->GetTypeId()))
+            if(Js::DynamicType::Is(type))
             {
                 Js::DynamicTypeHandler* handler = (static_cast<Js::DynamicType*>(type))->GetTypeHandler();
 
@@ -68,14 +68,12 @@ namespace TTD
     {
         if(this->m_marks.IsMarked(jstype))
         {
-            if(Js::DynamicType::Is(jstype->GetTypeId()))
+            NSSnapType::SnapHandler* sHandler = nullptr;
+
+            if(Js::DynamicType::Is(jstype))
             {
                 this->ExtractHandlerIfNeeded(static_cast<Js::DynamicType*>(jstype)->GetTypeHandler(), threadContext);
-            }
 
-            NSSnapType::SnapHandler* sHandler = nullptr;
-            if(Js::DynamicType::Is(jstype->GetTypeId()))
-            {
                 Js::DynamicTypeHandler* dhandler = static_cast<const Js::DynamicType*>(jstype)->GetTypeHandler();
 
                 TTD_PTR_ID handlerId = TTD_CONVERT_TYPEINFO_TO_PTR_ID(dhandler);
@@ -90,7 +88,7 @@ namespace TTD
         }
     }
 
-    void SnapshotExtractor::ExtractSlotArrayIfNeeded(Js::ScriptContext* ctx, Js::Var* scope)
+    void SnapshotExtractor::ExtractSlotArrayIfNeeded(Js::ScriptContext* ctx, Field(Js::Var)* scope)
     {
         if(this->m_marks.IsMarked(scope))
         {
@@ -100,7 +98,8 @@ namespace TTD
             slotInfo->SlotId = TTD_CONVERT_VAR_TO_PTR_ID(scope);
             slotInfo->ScriptContextLogId = ctx->ScriptContextLogTag;
 
-            slotInfo->SlotCount = slots.GetCount();
+            slotInfo->SlotCount = static_cast<uint>(slots.GetCount());
+
             slotInfo->Slots = this->m_pendingSnap->GetSnapshotSlabAllocator().SlabAllocateArray<TTDVar>(slotInfo->SlotCount);
 
             for(uint32 j = 0; j < slotInfo->SlotCount; ++j)
@@ -108,7 +107,7 @@ namespace TTD
                 slotInfo->Slots[j] = slots.Get(j);
             }
 
-            if(slots.IsFunctionScopeSlotArray())
+            if(!slots.IsDebuggerScopeSlotArray())
             {
                 Js::FunctionBody* fb = slots.GetFunctionInfo()->GetFunctionBody();
 
@@ -178,7 +177,7 @@ namespace TTD
                     break;
                 case Js::ScopeType::ScopeType_SlotArray:
                 {
-                    this->ExtractSlotArrayIfNeeded(ctx, (Js::Var*)scope);
+                    this->ExtractSlotArrayIfNeeded(ctx, (Field(Js::Var)*)scope);
 
                     entryInfo->IDValue = TTD_CONVERT_SLOTARRAY_TO_PTR_ID((Js::Var*)scope);
                     break;
@@ -248,7 +247,7 @@ namespace TTD
     void SnapshotExtractor::MarkVisitVar(Js::Var var)
     {
         TTDAssert(var != nullptr, "I don't think this should happen but not 100% sure.");
-        TTDAssert(Js::JavascriptOperators::GetTypeId(var) < Js::TypeIds_Limit || Js::RecyclableObject::FromVar(var)->CanHaveInterceptors(), "Not cool.");
+        TTDAssert(Js::JavascriptOperators::GetTypeId(var) < Js::TypeIds_Limit || Js::RecyclableObject::FromVar(var)->IsExternal(), "Not cool.");
 
         //We don't need to visit tagged things
         if(JsSupport::IsVarTaggedInline(var))
@@ -323,10 +322,9 @@ namespace TTD
                 {
                     if(this->m_marks.MarkAndTestAddr<MarkTableTag::SlotArrayTag>(scope))
                     {
-                        Js::ScopeSlots slotArray = (Js::Var*)scope;
-                        uint slotArrayCount = slotArray.GetCount();
-
-                        if(slotArray.IsFunctionScopeSlotArray())
+                        Js::ScopeSlots slotArray = (Field(Js::Var)*)scope;
+                        uint slotArrayCount = static_cast<uint>(slotArray.GetCount());
+                        if(!slotArray.IsDebuggerScopeSlotArray())
                         {
                             this->MarkFunctionBody(slotArray.GetFunctionInfo()->GetFunctionBody());
                         }
@@ -397,7 +395,7 @@ namespace TTD
         threadContext->TTDContext->LoadInvertedRootMap(objToLogIdMap);
 
         //We extract all the global code function bodies with the context so clear their marks now
-        for(int32 i = 0; i < threadContext->TTDContext->GetTTDContexts().Count(); ++i)
+        for (int32 i = 0; i < threadContext->TTDContext->GetTTDContexts().Count(); ++i)
         {
             JsUtil::List<TopLevelFunctionInContextRelation, HeapAllocator> topLevelScriptLoad(&HeapAllocator::Instance);
             JsUtil::List<TopLevelFunctionInContextRelation, HeapAllocator> topLevelNewFunction(&HeapAllocator::Instance);
@@ -406,30 +404,30 @@ namespace TTD
             Js::ScriptContext* ctx = threadContext->TTDContext->GetTTDContexts().Item(i);
             ctx->TTDContextInfo->GetLoadedSources(nullptr, topLevelScriptLoad, topLevelNewFunction, topLevelEval);
 
-            for(int32 j = 0; j < topLevelScriptLoad.Count(); ++j)
+            for (int32 j = 0; j < topLevelScriptLoad.Count(); ++j)
             {
                 Js::FunctionBody* body = TTD_COERCE_PTR_ID_TO_FUNCTIONBODY(topLevelScriptLoad.Item(j).ContextSpecificBodyPtrId);
-                if(this->m_marks.IsMarked(body))
+                if (this->m_marks.IsMarked(body))
                 {
                     liveTopLevelBodies.Add(body);
                     this->m_marks.ClearMark(body);
                 }
             }
 
-            for(int32 j = 0; j < topLevelNewFunction.Count(); ++j)
+            for (int32 j = 0; j < topLevelNewFunction.Count(); ++j)
             {
                 Js::FunctionBody* body = TTD_COERCE_PTR_ID_TO_FUNCTIONBODY(topLevelNewFunction.Item(j).ContextSpecificBodyPtrId);
-                if(this->m_marks.IsMarked(body))
+                if (this->m_marks.IsMarked(body))
                 {
                     liveTopLevelBodies.Add(body);
                     this->m_marks.ClearMark(body);
                 }
             }
 
-            for(int32 j = 0; j < topLevelEval.Count(); ++j)
+            for (int32 j = 0; j < topLevelEval.Count(); ++j)
             {
                 Js::FunctionBody* body = TTD_COERCE_PTR_ID_TO_FUNCTIONBODY(topLevelEval.Item(j).ContextSpecificBodyPtrId);
-                if(this->m_marks.IsMarked(body))
+                if (this->m_marks.IsMarked(body))
                 {
                     liveTopLevelBodies.Add(body);
                     this->m_marks.ClearMark(body);

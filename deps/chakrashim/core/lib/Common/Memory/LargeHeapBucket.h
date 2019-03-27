@@ -7,7 +7,6 @@
 namespace Memory
 {
 class HeapInfo;
-class RecyclerSweep;
 
 // CONSIDER: Templatizing this so that we can have separate leaf large allocations
 // and finalizable allocations
@@ -92,6 +91,10 @@ public:
     template <typename TBlockType>
     size_t Check(bool expectFull, bool expectPending, TBlockType * list, TBlockType * tail = nullptr);
 #endif
+#endif
+
+#if ENABLE_MEM_STATS
+    void AggregateBucketStats();
 #endif
 
 private:

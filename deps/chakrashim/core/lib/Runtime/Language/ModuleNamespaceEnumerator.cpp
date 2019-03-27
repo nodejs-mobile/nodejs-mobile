@@ -18,19 +18,19 @@ namespace Js
     {
     }
 
-    ModuleNamespaceEnumerator* ModuleNamespaceEnumerator::New(ModuleNamespace* nsObject, EnumeratorFlags flags, ScriptContext* scriptContext, ForInCache * forInCache)
+    ModuleNamespaceEnumerator* ModuleNamespaceEnumerator::New(ModuleNamespace* nsObject, EnumeratorFlags flags, ScriptContext* scriptContext, EnumeratorCache * enumeratorCache)
     {
         ModuleNamespaceEnumerator* enumerator = RecyclerNew(scriptContext->GetRecycler(), ModuleNamespaceEnumerator, nsObject, flags, scriptContext);
-        if (enumerator->Init(forInCache))
+        if (enumerator->Init(enumeratorCache))
         {
             return enumerator;
         }
         return nullptr;
     }
 
-    BOOL ModuleNamespaceEnumerator::Init(ForInCache * forInCache)
+    BOOL ModuleNamespaceEnumerator::Init(EnumeratorCache * enumeratorCache)
     {
-        if (!nsObject->DynamicObject::GetEnumerator(&symbolEnumerator, flags, GetScriptContext(), forInCache))
+        if (!nsObject->DynamicObject::GetEnumerator(&symbolEnumerator, flags, GetScriptContext(), enumeratorCache))
         {
             return FALSE;
         }
@@ -58,6 +58,7 @@ namespace Js
     // enumeration order: 9.4.6.10 (sorted) exports first, followed by symbols
     JavascriptString * ModuleNamespaceEnumerator::MoveAndGetNext(PropertyId& propertyId, PropertyAttributes* attributes)
     {
+        propertyId = Js::Constants::NoProperty;
         if (attributes != nullptr)
         {
             // all the attribute should have the same setting here in namespace object.

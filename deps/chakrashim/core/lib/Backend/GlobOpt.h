@@ -9,34 +9,65 @@ class GlobOpt;
 
 #if ENABLE_DEBUG_CONFIG_OPTIONS && DBG_DUMP
 
-#define GOPT_TRACE_OPND(opnd, ...) \
-    if (PHASE_TRACE(Js::GlobOptPhase, this->func) && !this->IsLoopPrePass()) \
+#define PRINT_GOPT_TRACE_HEADER \
+        Output::Print(_u("TRACE ")); \
+        if (this->IsLoopPrePass()) \
+        { \
+            Output::Print(_u("[%d, %d]"), this->rootLoopPrePass->loopNumber - 1, this->prePassLoop->loopNumber - 1); \
+        } \
+        Output::Print(_u(": ")); \
+
+#define PRINT_VALUENUMBER_TRACE_HEADER \
+        Output::Print(_u("VALUE NUMBERING TRACE ")); \
+        if (this->IsLoopPrePass()) \
+        { \
+            Output::Print(_u("[%d, %d]"), this->rootLoopPrePass->loopNumber - 1, this->prePassLoop->loopNumber - 1); \
+        } \
+        Output::Print(_u(": ")); \
+
+#define GOPT_TRACE_VALUENUMBER(opndHeader, opnd, ...) \
+    if (PHASE_TRACE(Js::ValueNumberingPhase, this->func)) \
     { \
-        Output::Print(_u("TRACE: ")); \
+        PRINT_VALUENUMBER_TRACE_HEADER; \
+        Output::Print(opndHeader); \
+        opnd->Dump(IRDumpFlags_None, this->func); \
+        Output::Print(_u(" : ")); \
+        Output::Print(__VA_ARGS__); \
+        Output::Print(_u("\n")); \
+        Output::Flush(); \
+    }
+#define GOPT_TRACE_OPND(opnd, ...) \
+    if (PHASE_TRACE(Js::GlobOptPhase, this->func)) \
+    { \
+        PRINT_GOPT_TRACE_HEADER; \
         opnd->Dump(); \
         Output::Print(_u(" : ")); \
         Output::Print(__VA_ARGS__); \
         Output::Flush(); \
     }
 #define GOPT_TRACE(...) \
-    if (PHASE_TRACE(Js::GlobOptPhase, this->func) && !this->IsLoopPrePass()) \
+    if (PHASE_TRACE(Js::GlobOptPhase, this->func)) \
     { \
-        Output::Print(_u("TRACE: ")); \
+        PRINT_GOPT_TRACE_HEADER; \
         Output::Print(__VA_ARGS__); \
         Output::Flush(); \
     }
 
 #define GOPT_TRACE_INSTRTRACE(instr) \
-    if (PHASE_TRACE(Js::GlobOptPhase, this->func) && !this->IsLoopPrePass()) \
+    if (PHASE_TRACE(Js::GlobOptPhase, this->func) || PHASE_TRACE(Js::ValueNumberingPhase, this->func)) \
     { \
+        if (this->IsLoopPrePass()) \
+        { \
+            Output::Print(_u("[%d, %d]: "), this->rootLoopPrePass->loopNumber - 1, this->prePassLoop->loopNumber - 1); \
+        } \
         instr->Dump(); \
         Output::Flush(); \
     }
 
 #define GOPT_TRACE_INSTR(instr, ...) \
-    if (PHASE_TRACE(Js::GlobOptPhase, this->func) && !this->IsLoopPrePass()) \
+    if (PHASE_TRACE(Js::GlobOptPhase, this->func)) \
     { \
-        Output::Print(_u("TRACE: ")); \
+        PRINT_GOPT_TRACE_HEADER; \
         Output::Print(__VA_ARGS__); \
         instr->Dump(); \
         Output::Flush(); \
@@ -79,20 +110,16 @@ class GlobOpt;
         TRACE_PHASE_INSTR(phase, instr, __VA_ARGS__); \
     }
 
-#define TRACE_TESTTRACE_PHASE_INSTR(phase, instr, ...) \
-    TRACE_PHASE_INSTR(phase, instr, __VA_ARGS__); \
-    TESTTRACE_PHASE_INSTR(phase, instr, __VA_ARGS__);
-
 #else   // ENABLE_DEBUG_CONFIG_OPTIONS && DBG_DUMP
 
 #define GOPT_TRACE(...)
+#define GOPT_TRACE_VALUENUMBER(opnd, ...)
 #define GOPT_TRACE_OPND(opnd, ...)
 #define GOPT_TRACE_INSTRTRACE(instr)
 #define GOPT_TRACE_INSTR(instr, ...)
 #define GOPT_TRACE_BLOCK(block, before)
 #define TRACE_PHASE_INSTR(phase, instr, ...)
 #define TRACE_PHASE_INSTR_VERBOSE(phase, instr, ...)
-#define TRACE_TESTTRACE_PHASE_INSTR(phase, instr, ...) TESTTRACE_PHASE_INSTR(phase, instr, __VA_ARGS__);
 
 #endif  // ENABLE_DEBUG_CONFIG_OPTIONS && DBG_DUMP
 
@@ -169,7 +196,7 @@ private:
 
 public:
     PathDependentInfo(const PathDependentRelationship relationship, Value *const leftValue, Value *const rightValue)
-        : relationship(relationship), leftValue(leftValue), rightValue(rightValue)
+        : leftValue(leftValue), rightValue(rightValue), rightConstantValue(0), relationship(relationship)
     {
         Assert(leftValue);
         Assert(rightValue);
@@ -180,7 +207,7 @@ public:
         Value *const leftValue,
         Value *const rightValue,
         const int32 rightConstantValue)
-        : relationship(relationship), leftValue(leftValue), rightValue(rightValue), rightConstantValue(rightConstantValue)
+        : leftValue(leftValue), rightValue(rightValue), rightConstantValue(rightConstantValue), relationship(relationship)
     {
         Assert(leftValue);
     }
@@ -332,12 +359,16 @@ public:
 public:
     bool KillsValueType(const ValueType valueType) const
     {
-        Assert(valueType.IsArrayOrObjectWithArray());
+        Assert(valueType.IsArrayOrObjectWithArray() || valueType.IsOptimizedVirtualTypedArray());
 
         return
             killsAllArrays ||
-            (killsArraysWithNoMissingValues && valueType.HasNoMissingValues()) ||
-            (killsNativeArrays && !valueType.HasVarElements());
+            (valueType.IsArrayOrObjectWithArray() &&
+             (
+              (killsArraysWithNoMissingValues && valueType.HasNoMissingValues()) ||
+              (killsNativeArrays && !valueType.HasVarElements())
+             )
+            );
     }
 
     bool AreSubsetOf(const JsArrayKills &other) const
@@ -360,13 +391,16 @@ private:
     const ValueNumber invariantSymValueNumber;
     BasicBlock *block;
     Value *invariantSymValue;
+    BVSparse<JitArenaAllocator> blockBV;
+    bool followFlow;
 
 #if DBG
     BasicBlock *const inclusiveEndBlock;
 #endif
 
+    bool UpdatePredBlockBV();
 public:
-    InvariantBlockBackwardIterator(GlobOpt *const globOpt, BasicBlock *const exclusiveBeginBlock, BasicBlock *const inclusiveEndBlock, StackSym *const invariantSym, const ValueNumber invariantSymValueNumber = InvalidValueNumber);
+    InvariantBlockBackwardIterator(GlobOpt *const globOpt, BasicBlock *const exclusiveBeginBlock, BasicBlock *const inclusiveEndBlock, StackSym *const invariantSym, const ValueNumber invariantSymValueNumber = InvalidValueNumber, bool followFlow = false);
 
 public:
     bool IsValid() const;
@@ -385,6 +419,8 @@ private:
     class AddSubConstantInfo;
     class ArrayLowerBoundCheckHoistInfo;
     class ArrayUpperBoundCheckHoistInfo;
+    class ArraySrcOpt;
+    class PRE;
 
     friend BackwardPass;
 #if DBG
@@ -397,7 +433,7 @@ private:
     SparseArray<Value>       *  byteCodeConstantValueArray;
     // Global bitvectors
     BVSparse<JitArenaAllocator> * byteCodeConstantValueNumbersBv;
-   
+
     // Global bitvectors
     IntConstantToStackSymMap *  intConstantToStackSymMap;
     IntConstantToValueMap*      intConstantToValueMap;
@@ -489,24 +525,22 @@ public:
 
     // GlobOptFields.cpp
     void                    ProcessFieldKills(IR::Instr *instr, BVSparse<JitArenaAllocator> * bv, bool inGlobOpt);
-    static bool             DoFieldHoisting(Loop * loop);
 
     IR::ByteCodeUsesInstr * ConvertToByteCodeUses(IR::Instr * isntr);
     bool GetIsAsmJSFunc()const{ return isAsmJSFunc; };
-private:
     bool                    IsLoopPrePass() const { return this->prePassLoop != nullptr; }
+private:
     void                    OptBlock(BasicBlock *block);
     void                    BackwardPass(Js::Phase tag);
     void                    ForwardPass();
     void                    OptLoops(Loop *loop);
     void                    TailDupPass();
     bool                    TryTailDup(IR::BranchInstr *tailBranch);
-    PRECandidatesList *     FindBackEdgePRECandidates(BasicBlock *block, JitArenaAllocator *alloc);
-    PRECandidatesList *     FindPossiblePRECandidates(Loop *loop, JitArenaAllocator *alloc);
-    void                    PreloadPRECandidates(Loop *loop, PRECandidatesList *candidates);
-    BOOL                    PreloadPRECandidate(Loop *loop, GlobHashBucket* candidate);
-    void                    SetLoopFieldInitialValue(Loop *loop, IR::Instr *instr, PropertySym *propertySym, PropertySym *originalPropertySym);
+
     void                    FieldPRE(Loop *loop);
+    void                    SetLoopFieldInitialValue(Loop *loop, IR::Instr *instr, PropertySym *propertySym, PropertySym *originalPropertySym);
+    PRECandidates *         FindBackEdgePRECandidates(BasicBlock *block, JitArenaAllocator *alloc);
+
     void                    CloneBlockData(BasicBlock *const toBlock, BasicBlock *const fromBlock);
     void                    CloneValues(BasicBlock *const toBlock, GlobOptBlockData *toData, GlobOptBlockData *fromData);
 
@@ -521,15 +555,17 @@ private:
     bool                    CheckIfPropOpEmitsTypeCheck(IR::Instr *instr, IR::PropertySymOpnd *opnd);
     IR::PropertySymOpnd *   CreateOpndForTypeCheckOnly(IR::PropertySymOpnd* opnd, Func* func);
     bool                    FinishOptPropOp(IR::Instr *instr, IR::PropertySymOpnd *opnd, BasicBlock* block = nullptr, bool updateExistingValue = false, bool* emitsTypeCheckOut = nullptr, bool* changesTypeValueOut = nullptr);
-    void                    FinishOptHoistedPropOps(Loop * loop);
     IR::Instr *             SetTypeCheckBailOut(IR::Opnd *opnd, IR::Instr *instr, BailOutInfo *bailOutInfo);
     void                    OptArguments(IR::Instr *Instr);
     void                    TrackInstrsForScopeObjectRemoval(IR::Instr * instr);
     bool                    AreFromSameBytecodeFunc(IR::RegOpnd const* src1, IR::RegOpnd const* dst) const;
     Value *                 ValueNumberDst(IR::Instr **pInstr, Value *src1Val, Value *src2Val);
     Value *                 ValueNumberLdElemDst(IR::Instr **pInstr, Value *srcVal);
-    ValueType               GetPrepassValueTypeForDst(const ValueType desiredValueType, IR::Instr *const instr, Value *const src1Value, Value *const src2Value, bool *const isValueInfoPreciseRef = nullptr) const;
-    bool                    IsPrepassSrcValueInfoPrecise(IR::Opnd *const src, Value *const srcValue) const;
+    ValueType               GetPrepassValueTypeForDst(const ValueType desiredValueType, IR::Instr *const instr, Value *const src1Value, Value *const src2Value, bool const isValueInfoPreciseRef = false) const;
+    bool                    IsPrepassSrcValueInfoPrecise(IR::Opnd *const src, Value *const srcValue, bool * canTransferValueNumberToDst = nullptr) const;
+    bool                    IsPrepassSrcValueInfoPrecise(IR::Instr *const instr, Value *const src1Value, Value *const src2Value, bool * canTransferValueNumberToDst = nullptr) const;
+    bool                    IsSafeToTransferInPrepass(StackSym * const sym, ValueInfo *const srcValueInfo) const;
+    bool                    SafeToCopyPropInPrepass(StackSym * const originalSym, StackSym * const copySym, Value *const value) const;
     Value *                 CreateDstUntransferredIntValue(const int32 min, const int32 max, IR::Instr *const instr, Value *const src1Value, Value *const src2Value);
     Value *                 CreateDstUntransferredValue(const ValueType desiredValueType, IR::Instr *const instr, Value *const src1Value, Value *const src2Value);
     Value *                 ValueNumberTransferDst(IR::Instr *const instr, Value *src1Val);
@@ -568,24 +604,9 @@ private:
     void                    SetSymStoreDirect(ValueInfo *valueInfo, Sym *sym);
     IR::Instr *             TypeSpecialization(IR::Instr *instr, Value **pSrc1Val, Value **pSrc2Val, Value **pDstVal, bool *redoTypeSpecRef, bool *const forceInvariantHoistingRef);
 
-#ifdef ENABLE_SIMDJS
-    // SIMD_JS
-    bool                    TypeSpecializeSimd128(IR::Instr *instr, Value **pSrc1Val, Value **pSrc2Val, Value **pDstVal);
-    bool                    Simd128DoTypeSpec(IR::Instr *instr, const Value *src1Val, const Value *src2Val, const Value *dstVal);
-    bool                    Simd128DoTypeSpecLoadStore(IR::Instr *instr, const Value *src1Val, const Value *src2Val, const Value *dstVal, const ThreadContext::SimdFuncSignature *simdFuncSignature);
-    bool                    Simd128CanTypeSpecOpnd(const ValueType opndType, const ValueType expectedType);
-    bool                    Simd128ValidateIfLaneIndex(const IR::Instr * instr, IR::Opnd * opnd, uint argPos);
-    void                    UpdateBoundCheckHoistInfoForSimd(ArrayUpperBoundCheckHoistInfo &upperHoistInfo, ValueType arrValueType, const IR::Instr *instr);    
-    void                    Simd128SetIndirOpndType(IR::IndirOpnd *indirOpnd, Js::OpCode opcode);
-#endif
-
-    IRType                  GetIRTypeFromValueType(const ValueType &valueType);
-    ValueType               GetValueTypeFromIRType(const IRType &type);
-    IR::BailOutKind         GetBailOutKindFromValueType(const ValueType &valueType);
     IR::Instr *             GetExtendedArg(IR::Instr *instr);
-    int                     GetBoundCheckOffsetForSimd(ValueType arrValueType, const IR::Instr *instr, const int oldOffset = -1);
 
-    IR::Instr *             OptNewScObject(IR::Instr** instrPtr, Value* srcVal);
+    void                    OptNewScObject(IR::Instr** instrPtr, Value* srcVal);
     template <typename T>
     bool                    OptConstFoldBinaryWasm(IR::Instr * *pInstr, const Value* src1, const Value* src2, Value **pDstVal);
     template <typename T>
@@ -593,6 +614,7 @@ private:
     bool                    OptConstFoldBinary(IR::Instr * *pInstr, const IntConstantBounds &src1IntConstantBounds, const IntConstantBounds &src2IntConstantBounds, Value **pDstVal);
     bool                    OptConstFoldUnary(IR::Instr * *pInstr, const int32 intConstantValue, const bool isUsingOriginalSrc1Value, Value **pDstVal);
     bool                    OptConstPeep(IR::Instr *instr, IR::Opnd *constSrc, Value **pDstVal, ValueInfo *vInfo);
+    bool                    CanProveConditionalBranch(IR::Instr *instr, Value *src1Val, Value *src2Val, Js::Var src1Var, Js::Var src2Var, bool *result);
     bool                    OptConstFoldBranch(IR::Instr *instr, Value *src1Val, Value*src2Val, Value **pDstVal);
     Js::Var                 GetConstantVar(IR::Opnd *opnd, Value *val);
     bool                    IsWorthSpecializingToInt32DueToSrc(IR::Opnd *const src, Value *const val);
@@ -669,7 +691,7 @@ private:
     IR::Instr*              CreateBoundsCheckInstr(IR::Opnd* lowerBound, IR::Opnd* upperBound, int offset, Func* func);
     IR::Instr*              CreateBoundsCheckInstr(IR::Opnd* lowerBound, IR::Opnd* upperBound, int offset, IR::BailOutKind bailoutkind, BailOutInfo* bailoutInfo, Func* func);
     IR::Instr*              AttachBoundsCheckData(IR::Instr* instr, IR::Opnd* lowerBound, IR::Opnd* upperBound, int offset);
-    void                    OptArraySrc(IR::Instr * *const instrRef);
+    void                    OptArraySrc(IR::Instr **const instrRef, Value ** src1Val, Value ** src2Val);
 
 private:
     void                    TrackIntSpecializedAddSubConstant(IR::Instr *const instr, const AddSubConstantInfo *const addSubConstantInfo, Value *const dstValue, const bool updateSourceBounds);
@@ -678,6 +700,7 @@ private:
     void                    DetectUnknownChangesToInductionVariables(GlobOptBlockData *const blockData);
     void                    SetInductionVariableValueNumbers(GlobOptBlockData *const blockData);
     void                    FinalizeInductionVariables(Loop *const loop, GlobOptBlockData *const headerData);
+    void                    InvalidateInductionVariables(IR::Instr * instr);
     enum class SymBoundType {OFFSET, VALUE, UNKNOWN};
     SymBoundType DetermineSymBoundOffsetOrValueRelativeToLandingPad(StackSym *const sym, const bool landingPadValueIsLowerBound, ValueInfo *const valueInfo, const IntBounds *const bounds, GlobOptBlockData *const landingPadGlobOptBlockData, int *const boundOffsetOrValueRef);
 
@@ -686,7 +709,7 @@ private:
     void                    DetermineLoopCount(Loop *const loop);
     void                    GenerateLoopCount(Loop *const loop, LoopCount *const loopCount);
     void                    GenerateLoopCountPlusOne(Loop *const loop, LoopCount *const loopCount);
-    void                    GenerateSecondaryInductionVariableBound(Loop *const loop, StackSym *const inductionVariableSym, const LoopCount *const loopCount, const int maxMagnitudeChange, StackSym *const boundSym);
+    void                    GenerateSecondaryInductionVariableBound(Loop *const loop, StackSym *const inductionVariableSym, LoopCount *const loopCount, const int maxMagnitudeChange, const bool needsMagnitudeAdjustment, StackSym *const boundSym);
 
 private:
     void                    DetermineArrayBoundCheckHoistability(bool needLowerBoundCheck, bool needUpperBoundCheck, ArrayLowerBoundCheckHoistInfo &lowerHoistInfo, ArrayUpperBoundCheckHoistInfo &upperHoistInfo, const bool isJsArray, StackSym *const indexSym, Value *const indexValue, const IntConstantBounds &indexConstantBounds, StackSym *const headSegmentLengthSym, Value *const headSegmentLengthValue, const IntConstantBounds &headSegmentLengthConstantBounds, Loop *const headSegmentLengthInvariantLoop, bool &failedToUpdateCompatibleLowerBoundCheck, bool &failedToUpdateCompatibleUpperBoundCheck);
@@ -701,6 +724,7 @@ public:
 
     GlobOptBlockData const * CurrentBlockData() const;
     GlobOptBlockData * CurrentBlockData();
+    void                    CommitCapturedValuesCandidate();
 
 private:
     bool                    IsOperationThatLikelyKillsJsArraysWithNoMissingValues(IR::Instr *const instr);
@@ -724,17 +748,12 @@ private:
     IR::Instr *             ToFloat64(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Value *val, IR::IndirOpnd *indir, IR::BailOutKind bailOutKind);
     IR::Instr *             ToTypeSpecUse(IR::Instr *instr, IR::Opnd *opnd, BasicBlock *block, Value *val, IR::IndirOpnd *indir,
         IRType toType, IR::BailOutKind bailOutKind, bool lossy = false, IR::Instr *insertBeforeInstr = nullptr);
+    IR::Instr *             ToTypeSpecIndex(IR::Instr * instr, IR::RegOpnd * opnd, IR::IndirOpnd * indir);
     void                    ToVarRegOpnd(IR::RegOpnd *dst, BasicBlock *block);
     void                    ToVarStackSym(StackSym *varSym, BasicBlock *block);
     void                    ToInt32Dst(IR::Instr *instr, IR::RegOpnd *dst, BasicBlock *block);
     void                    ToUInt32Dst(IR::Instr *instr, IR::RegOpnd *dst, BasicBlock *block);
     void                    ToFloat64Dst(IR::Instr *instr, IR::RegOpnd *dst, BasicBlock *block);
-
-#ifdef ENABLE_SIMDJS
-    // SIMD_JS
-    void                    TypeSpecializeSimd128Dst(IRType type, IR::Instr *instr, Value *valToTransfer, Value *const src1Value, Value **pDstVal);
-    void                    ToSimd128Dst(IRType toType, IR::Instr *instr, IR::RegOpnd *dst, BasicBlock *block);
-#endif
 
     void                    OptConstFoldBr(bool test, IR::Instr *instr, Value * intTypeSpecSrc1Val = nullptr, Value * intTypeSpecSrc2Val = nullptr);
     void                    PropagateIntRangeForNot(int32 minimum, int32 maximum, int32 *pNewMin, int32 * pNewMax);
@@ -749,7 +768,7 @@ private:
     bool                    TryHoistInvariant(IR::Instr *instr, BasicBlock *block, Value *dstVal, Value *src1Val, Value *src2Val, bool isNotTypeSpecConv,
                                                 const bool lossy = false, const bool forceInvariantHoisting = false, IR::BailOutKind bailoutKind = IR::BailOutInvalid);
     void                    HoistInvariantValueInfo(ValueInfo *const invariantValueInfoToHoist, Value *const valueToUpdate, BasicBlock *const targetBlock);
-    void                    OptHoistUpdateValueType(Loop* loop, IR::Instr* instr, IR::Opnd* srcOpnd, Value *const srcVal);
+    void                    OptHoistUpdateValueType(Loop* loop, IR::Instr* instr, IR::Opnd** srcOpndPtr, Value *const srcVal);
 public:
     static bool             IsTypeSpecPhaseOff(Func const * func);
     static bool             DoAggressiveIntTypeSpec(Func const * func);
@@ -764,8 +783,10 @@ public:
     static bool             DoTypedArrayTypeSpec(Func const * func);
     static bool             DoNativeArrayTypeSpec(Func const * func);
     static bool             IsSwitchOptEnabled(Func const * func);
+    static bool             IsSwitchOptEnabledForIntTypeSpec(Func const * func);
     static bool             DoInlineArgsOpt(Func const * func);
     static bool             IsPREInstrCandidateLoad(Js::OpCode opcode);
+    static bool             IsPREInstrSequenceCandidateLoad(Js::OpCode opcode);
     static bool             IsPREInstrCandidateStore(Js::OpCode opcode);
     static bool             ImplicitCallFlagsAllowOpts(Loop * loop);
     static bool             ImplicitCallFlagsAllowOpts(Func const * func);
@@ -790,6 +811,7 @@ private:
     bool                    DoNativeArrayTypeSpec() const { return GlobOpt::DoNativeArrayTypeSpec(this->func); }
     bool                    DoLdLenIntSpec(IR::Instr * const instr, const ValueType baseValueType);
     bool                    IsSwitchOptEnabled() const { return GlobOpt::IsSwitchOptEnabled(this->func); }
+    bool                    IsSwitchOptEnabledForIntTypeSpec() const { return GlobOpt::IsSwitchOptEnabledForIntTypeSpec(this->func); }
     bool                    DoPathDependentValues() const;
     bool                    DoTrackRelativeIntBounds() const;
     bool                    DoBoundCheckElimination() const;
@@ -798,30 +820,55 @@ private:
     bool                    DoPowIntIntTypeSpec() const;
     bool                    DoTagChecks() const;
 
+    template <class Fn>
+    void TrackByteCodeUsesForInstrAddedInOptInstr(IR::Instr * trackByteCodeUseOnInstr, Fn fn)
+    {
+        BVSparse<JitArenaAllocator> *currentBytecodeUses = this->byteCodeUses;
+        PropertySym * currentPropertySymUse = this->propertySymUse;
+        PropertySym * tempPropertySymUse = NULL;
+        this->byteCodeUses = NULL;
+        BVSparse<JitArenaAllocator> *tempByteCodeUse = JitAnew(this->tempAlloc, BVSparse<JitArenaAllocator>, this->tempAlloc);
+#if DBG
+        BVSparse<JitArenaAllocator> *currentBytecodeUsesBeforeOpt = this->byteCodeUsesBeforeOpt;
+        this->byteCodeUsesBeforeOpt = tempByteCodeUse;
+#endif
+        this->propertySymUse = NULL;
+        GlobOpt::TrackByteCodeSymUsed(trackByteCodeUseOnInstr, tempByteCodeUse, &tempPropertySymUse);
+
+        fn();
+
+        this->byteCodeUses = currentBytecodeUses;
+        this->propertySymUse = currentPropertySymUse;
+#if DBG
+        this->byteCodeUsesBeforeOpt = currentBytecodeUsesBeforeOpt;
+#endif
+    }
 private:
     // GlobOptBailout.cpp
     bool                    MayNeedBailOut(Loop * loop) const;
     static void             TrackByteCodeSymUsed(IR::Opnd * opnd, BVSparse<JitArenaAllocator> * instrByteCodeStackSymUsed, PropertySym **pPropertySymUse);
     static void             TrackByteCodeSymUsed(IR::RegOpnd * opnd, BVSparse<JitArenaAllocator> * instrByteCodeStackSymUsed);
     static void             TrackByteCodeSymUsed(StackSym * sym, BVSparse<JitArenaAllocator> * instrByteCodeStackSymUsed);
-    void                    CaptureValues(BasicBlock *block, BailOutInfo * bailOutInfo);
+    void                    CaptureValues(BasicBlock *block, BailOutInfo * bailOutInfo, BVSparse<JitArenaAllocator>* argsToCapture);
     void                    CaptureValuesFromScratch(
                                 BasicBlock * block,
-                                SListBase<ConstantStackSymValue>::EditingIterator & bailOutConstValuesIter,
-                                SListBase<CopyPropSyms>::EditingIterator & bailOutCopyPropIter);
+                                SListBase<ConstantStackSymValue>::EditingIterator & bailOutConstValuesIter, SListBase<CopyPropSyms>::EditingIterator & bailOutCopyPropIter,
+                                BVSparse<JitArenaAllocator>* argsToCapture);
     void                    CaptureValuesIncremental(
                                 BasicBlock * block,
                                 SListBase<ConstantStackSymValue>::EditingIterator & bailOutConstValuesIter,
-                                SListBase<CopyPropSyms>::EditingIterator & bailOutCopyPropIter);
+                                SListBase<CopyPropSyms>::EditingIterator & bailOutCopyPropIter, BVSparse<JitArenaAllocator>* argsToCapture);
     void                    CaptureCopyPropValue(BasicBlock * block, Sym * sym, Value * val, SListBase<CopyPropSyms>::EditingIterator & bailOutCopySymsIter);
     void                    CaptureArguments(BasicBlock *block, BailOutInfo * bailOutInfo, JitArenaAllocator *allocator);
     void                    CaptureByteCodeSymUses(IR::Instr * instr);
     IR::ByteCodeUsesInstr * InsertByteCodeUses(IR::Instr * instr, bool includeDef = false);
+    void                    ProcessInlineeEnd(IR::Instr * instr);
     void                    TrackCalls(IR::Instr * instr);
     void                    RecordInlineeFrameInfo(IR::Instr* instr);
     void                    EndTrackCall(IR::Instr * instr);
     void                    EndTrackingOfArgObjSymsForInlinee();
     void                    FillBailOutInfo(BasicBlock *block, BailOutInfo *bailOutInfo);
+    void                    FillBailOutInfo(BasicBlock *block, _In_ IR::Instr * instr);
 
     static void             MarkNonByteCodeUsed(IR::Instr * instr);
     static void             MarkNonByteCodeUsed(IR::Opnd * opnd);
@@ -853,7 +900,6 @@ private:
     bool                    DoFieldCopyProp(Loop * loop) const;
     bool                    DoFunctionFieldCopyProp() const;
 
-    bool                    DoFieldHoisting() const;
     bool                    DoObjTypeSpec() const;
     bool                    DoObjTypeSpec(Loop * loop) const;
     bool                    DoFieldRefOpts() const { return DoObjTypeSpec(); }
@@ -862,26 +908,8 @@ private:
     bool                    DoFieldPRE() const;
     bool                    DoFieldPRE(Loop *loop) const;
 
-    bool                    FieldHoistOptSrc(IR::Opnd *opnd, IR::Instr *instr, PropertySym * propertySym);
-    void                    FieldHoistOptDst(IR::Instr * instr, PropertySym * propertySym, Value * src1Val);
-
-    bool                    TrackHoistableFields() const;
-    void                    PreparePrepassFieldHoisting(Loop * loop);
-    void                    PrepareFieldHoisting(Loop * loop);
-    void                    CheckFieldHoistCandidate(IR::Instr * instr, PropertySym * sym);
-    Loop *                  FindFieldHoistStackSym(Loop * startLoop, SymID propertySymId, StackSym ** copySym, IR::Instr * instrToHoist = nullptr) const;
-    bool                    CopyPropHoistedFields(PropertySym * sym, IR::Opnd ** ppOpnd, IR::Instr * instr);
-    void                    HoistFieldLoad(PropertySym * sym, Loop * loop, IR::Instr * instr, Value * oldValue, Value * newValue);
-    void                    HoistNewFieldLoad(PropertySym * sym, Loop * loop, IR::Instr * instr, Value * oldValue, Value * newValue);
-    void                    GenerateHoistFieldLoad(PropertySym * sym, Loop * loop, IR::Instr * instr, StackSym * newStackSym, Value * oldValue, Value * newValue);
-    void                    HoistFieldLoadValue(Loop * loop, Value * newValue, SymID symId, Js::OpCode opcode, IR::Opnd * srcOpnd);
-    void                    ReloadFieldHoistStackSym(IR::Instr * instr, PropertySym * propertySym);
-    void                    CopyStoreFieldHoistStackSym(IR::Instr * storeFldInstr, PropertySym * sym, Value * src1Val);
     Value *                 CreateFieldSrcValue(PropertySym * sym, PropertySym * originalSym, IR::Opnd **ppOpnd, IR::Instr * instr);
 
-    static bool             HasHoistableFields(BasicBlock const * block);
-    static bool             HasHoistableFields(GlobOptBlockData const * globOptData);
-    bool                    IsHoistablePropertySym(SymID symId) const;
     bool                    NeedBailOnImplicitCallWithFieldOpts(Loop *loop, bool hasLiveFields) const;
     IR::Instr *             EnsureDisableImplicitCallRegion(Loop * loop);
     void                    UpdateObjPtrValueType(IR::Opnd * opnd, IR::Instr * instr);
@@ -891,10 +919,10 @@ private:
 
 #if DBG
     bool                    IsPropertySymId(SymID symId) const;
-    bool                    IsHoistedPropertySym(PropertySym * sym) const;
-    bool                    IsHoistedPropertySym(SymID symId, Loop * loop) const;
 
     static void             AssertCanCopyPropOrCSEFieldLoad(IR::Instr * instr);
+    void                    EmitIntRangeChecks(IR::Instr* instr);
+    void                    EmitIntRangeChecks(IR::Instr* instr, IR::Opnd* opnd);
 #endif
 
     StackSym *              EnsureObjectTypeSym(StackSym * objectSym);
@@ -909,7 +937,10 @@ private:
     bool                    CheckIfInstrInTypeCheckSeqEmitsTypeCheck(IR::Instr* instr, IR::PropertySymOpnd *opnd);
     template<bool makeChanges>
     bool                    ProcessPropOpInTypeCheckSeq(IR::Instr* instr, IR::PropertySymOpnd *opnd, BasicBlock* block, bool updateExistingValue, bool* emitsTypeCheckOut = nullptr, bool* changesTypeValueOut = nullptr, bool *isObjTypeChecked = nullptr);
-    void                    KillObjectHeaderInlinedTypeSyms(BasicBlock *block, bool isObjTypeSpecialized, SymID symId = (SymID)-1);
+    template<class Fn>
+    bool                    MapObjectHeaderInlinedTypeSymsUntil(BasicBlock *block, bool isObjTypeSpecialized, SymID opndId, Fn fn);
+    void                    KillObjectHeaderInlinedTypeSyms(BasicBlock *block, bool isObjTypeSpecialized, SymID symId = SymID_Invalid);
+    bool                    HasLiveObjectHeaderInlinedTypeSym(BasicBlock *block, bool isObjTypeSpecialized, SymID symId = SymID_Invalid);
     void                    ValueNumberObjectType(IR::Opnd *dstOpnd, IR::Instr *instr);
     void                    SetSingleTypeOnObjectTypeValue(Value* value, const JITTypeHolder type);
     void                    SetTypeSetOnObjectTypeValue(Value* value, Js::EquivalentTypeSet* typeSet);
@@ -986,4 +1017,28 @@ private:
     IR::Instr *             GenerateBailOutMarkTempObjectIfNeeded(IR::Instr * instr, IR::Opnd * opnd, bool isDst);
 
     friend class InvariantBlockBackwardIterator;
+};
+
+class GlobOpt::PRE
+{
+public:
+    PRE(GlobOpt * globOpt) : globOpt(globOpt) {}
+    void                    FieldPRE(Loop *loop);
+
+private:
+    void                    FindPossiblePRECandidates(Loop *loop, JitArenaAllocator *alloc);
+    void                    PreloadPRECandidates(Loop *loop);
+    BOOL                    PreloadPRECandidate(Loop *loop, GlobHashBucket* candidate);
+    IR::Instr *             InsertPropertySymPreloadInLandingPad(IR::Instr * origLdInstr, Loop * loop, PropertySym * propertySym);
+    void                    InsertInstrInLandingPad(IR::Instr * instr, Loop * loop);
+    bool                    InsertSymDefinitionInLandingPad(StackSym * sym, Loop * loop, Sym ** objPtrCopyPropSym);
+    void                    MakePropertySymLiveOnBackEdges(PropertySym * propertySym, Loop * loop, Value * valueToAdd);
+    void                    RemoveOverlyOptimisticInitialValues(Loop * loop);
+#if DBG_DUMP
+    void                    TraceFailedPreloadInLandingPad(const Loop *const loop, PropertySym * propSym, const char16* reason) const;
+#endif
+
+private:
+    GlobOpt * globOpt;
+    PRECandidates * candidates;
 };

@@ -51,7 +51,7 @@ const server = http.createServer(function(req, res) {
     const data = JSON.stringify(objects[req.url.replace(/[^a-z]/g, '')]);
 
     // this line will throw if you pick an unknown key
-    assert.notStrictEqual(data, undefined, 'Data should not be undefined');
+    assert.notStrictEqual(data, undefined);
 
     res.writeHead(200);
     res.end(data);
@@ -62,7 +62,7 @@ server.listen(0, next);
 
 function next() {
   const port = this.address().port;
-  console.log('listening on localhost:%d', port);
+  console.log(`listening on localhost:${port}`);
 
   let requests = 0;
   let responses = 0;
@@ -87,7 +87,7 @@ function next() {
     dom.add(req);
     req.on('response', function(res) {
       responses++;
-      console.error('requests=%d responses=%d', requests, responses);
+      console.error(`requests=${requests} responses=${responses}`);
       if (responses === requests) {
         console.error('done, closing server');
         // no more coming.

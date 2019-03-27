@@ -1,3 +1,4 @@
+/* eslint-disable camelcase */
 var child_process = require('child_process')
 var readdir = require('graceful-fs').readdirSync
 var path = require('path')
@@ -50,8 +51,7 @@ var modules = resolve(testdir, 'node_modules')
 var installed = resolve(modules, 'gitch')
 var expected = [
   'a.js',
-  'package.json',
-  '.npmignore'
+  'package.json'
 ].sort()
 
 var NPM_OPTS = {

@@ -10,8 +10,14 @@
 
 VirtualAllocWrapper VirtualAllocWrapper::Instance;  // single instance
 
-LPVOID VirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
+LPVOID VirtualAllocWrapper::AllocPages(LPVOID lpAddress, size_t pageCount, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
 {
+    if (pageCount > AutoSystemInfo::MaxPageCount)
+    {
+        return nullptr;
+    }
+    size_t dwSize = pageCount * AutoSystemInfo::PageSize;
+
     LPVOID address = nullptr;
 
 #if defined(ENABLE_JIT_CLAMP)
@@ -57,7 +63,7 @@ LPVOID VirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DWORD allocat
             BOOL result = VirtualProtect(address, dwSize, protectFlags, &oldProtectFlags);
             if (result == FALSE)
             {
-                CustomHeap_BadPageState_fatal_error((ULONG_PTR)this);
+                CustomHeap_BadPageState_unrecoverable_error((ULONG_PTR)this);
             }
         }
     }
@@ -84,10 +90,11 @@ BOOL VirtualAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFreeType
     return ret;
 }
 
+#if ENABLE_NATIVE_CODEGEN
 /*
 * class PreReservedVirtualAllocWrapper
 */
-#if !_M_X64_OR_ARM64 && _CONTROL_FLOW_GUARD
+#if !TARGET_64 && _CONTROL_FLOW_GUARD
 uint PreReservedVirtualAllocWrapper::numPreReservedSegment = 0;
 #endif
 
@@ -110,7 +117,7 @@ PreReservedVirtualAllocWrapper::~PreReservedVirtualAllocWrapper()
             // OOP JIT TODO: check if we need to cleanup the context related to this content process
         }
 
-#if !_M_X64_OR_ARM64 && _CONTROL_FLOW_GUARD
+#if !TARGET_64 && _CONTROL_FLOW_GUARD
         Assert(numPreReservedSegment > 0);
         InterlockedDecrement(&PreReservedVirtualAllocWrapper::numPreReservedSegment);
 #endif
@@ -220,7 +227,7 @@ LPVOID PreReservedVirtualAllocWrapper::EnsurePreReservedRegionInternal()
 
 #if defined(_CONTROL_FLOW_GUARD)
     bool supportPreReservedRegion = true;
-#if !_M_X64_OR_ARM64
+#if !TARGET_64
 #if _M_IX86
     // We want to restrict the number of prereserved segment for 32-bit process so that we don't use up the address space
 
@@ -244,7 +251,7 @@ LPVOID PreReservedVirtualAllocWrapper::EnsurePreReservedRegionInternal()
         PreReservedHeapTrace(_u("Reserving PreReservedSegment For the first time(CFG Enabled). Address: 0x%p\n"), preReservedStartAddress);
         preReservedStartAddress = startAddress;
 
-#if !_M_X64_OR_ARM64
+#if !TARGET_64
         if (startAddress)
         {
             InterlockedIncrement(&PreReservedVirtualAllocWrapper::numPreReservedSegment);
@@ -263,11 +270,16 @@ LPVOID PreReservedVirtualAllocWrapper::EnsurePreReservedRegionInternal()
 *   -   Returns an Allocated memory region within this preReserved region with the specified protectFlags.
 *   -   Tracks the committed pages
 */
-
-LPVOID PreReservedVirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
+LPVOID PreReservedVirtualAllocWrapper::AllocPages(LPVOID lpAddress, size_t pageCount,  DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
 {
+    if (pageCount > AutoSystemInfo::MaxPageCount)
+    {
+        return nullptr;
+    }
+    size_t dwSize = pageCount * AutoSystemInfo::PageSize;
+
     AssertMsg(isCustomHeapAllocation, "PreReservation used for allocations other than CustomHeap?");
-    AssertMsg(AutoSystemInfo::Data.IsCFGEnabled() || PHASE_FORCE1(Js::PreReservedHeapAllocPhase), "PreReservation without CFG ?");
+
     Assert(dwSize != 0);
 
     {
@@ -308,7 +320,7 @@ LPVOID PreReservedVirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DW
             //Check if the region is not already in MEM_COMMIT state.
             MEMORY_BASIC_INFORMATION memBasicInfo;
             size_t bytes = VirtualQuery(addressToReserve, &memBasicInfo, sizeof(memBasicInfo));
-            if (bytes == 0) 
+            if (bytes == 0)
             {
                 MemoryOperationLastError::RecordLastError();
             }
@@ -316,7 +328,7 @@ LPVOID PreReservedVirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DW
                 || memBasicInfo.RegionSize < requestedNumOfSegments * AutoSystemInfo::Data.GetAllocationGranularityPageSize()
                 || memBasicInfo.State == MEM_COMMIT)
             {
-                CustomHeap_BadPageState_fatal_error((ULONG_PTR)this);
+                CustomHeap_BadPageState_unrecoverable_error((ULONG_PTR)this);
             }
         }
         else
@@ -367,7 +379,7 @@ LPVOID PreReservedVirtualAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DW
                     BOOL result = VirtualProtect(allocatedAddress, dwSize, protectFlags, &oldProtect);
                     if (result == FALSE)
                     {
-                        CustomHeap_BadPageState_fatal_error((ULONG_PTR)this);
+                        CustomHeap_BadPageState_unrecoverable_error((ULONG_PTR)this);
                     }
                     AssertMsg(oldProtect == (PAGE_EXECUTE_READWRITE), "CFG Bitmap gets allocated and bits will be set to invalid only upon passing these flags.");
                 }
@@ -462,6 +474,8 @@ PreReservedVirtualAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFr
         return success;
     }
 }
+
+#endif // ENABLE_NATIVE_CODEGEN
 
 #if defined(ENABLE_JIT_CLAMP)
 /*

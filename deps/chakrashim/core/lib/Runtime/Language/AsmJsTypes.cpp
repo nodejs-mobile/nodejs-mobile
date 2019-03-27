@@ -48,6 +48,7 @@ namespace Js
         case Intish:      return _u("intish");
         case Void:        return _u("void");
         case Int32x4:     return _u("SIMD.Int32x4");
+        case Int64x2:     return _u("SIMD.Int64x2");
         case Bool32x4:    return _u("SIMD.Bool32x4");
         case Bool16x8:    return _u("SIMD.Bool16x8");
         case Bool8x16:    return _u("SIMD.Bool8x16");
@@ -102,6 +103,10 @@ namespace Js
     bool AsmJsType::isSIMDFloat64x2() const
     {
         return which_ == Float64x2;
+    }
+    bool AsmJsType::isSIMDInt64x2() const
+    {
+        return which_ == Int64x2;
     }
 
     bool AsmJsType::isSIMDUint32x4() const
@@ -241,39 +246,6 @@ namespace Js
         case Js::AsmJsType::Void:
             return isVoid();
             break;
-        case AsmJsType::Int32x4:
-            return isSIMDInt32x4();
-            break;
-        case AsmJsType::Bool32x4:
-            return isSIMDBool32x4();
-            break;
-        case AsmJsType::Bool16x8:
-            return isSIMDBool16x8();
-            break;
-        case AsmJsType::Bool8x16:
-            return isSIMDBool8x16();
-            break;
-        case AsmJsType::Float32x4:
-            return isSIMDFloat32x4();
-            break;
-        case AsmJsType::Float64x2:
-            return isSIMDFloat64x2();
-            break;
-        case AsmJsType::Int16x8:
-            return isSIMDInt16x8();
-            break;
-        case AsmJsType::Int8x16:
-            return isSIMDInt8x16();
-            break;
-        case AsmJsType::Uint32x4:
-            return isSIMDUint32x4();
-            break;
-        case AsmJsType::Uint16x8:
-            return isSIMDUint16x8();
-            break;
-        case AsmJsType::Uint8x16:
-            return isSIMDUint8x16();
-            break;
         default:
             break;
         }
@@ -330,7 +302,8 @@ namespace Js
         case AsmJS_ToInt32: which_   = Signed; break;
         case AsmJS_ToNumber: which_  = Double; break;
         case AsmJS_FRound: which_    = Float; break;
-        case AsmJS_Int32x4: which_   = Int32x4; break;
+#ifdef ENABLE_WASM_SIMD
+        case AsmJS_Int32x4: which_ = Int32x4; break;
         case AsmJS_Bool32x4: which_ = Bool32x4; break;
         case AsmJS_Bool16x8: which_ = Bool16x8; break;
         case AsmJS_Bool8x16: which_ = Bool8x16; break;
@@ -341,6 +314,7 @@ namespace Js
         case AsmJS_Uint32x4: which_ = Uint32x4; break;
         case AsmJS_Uint16x8: which_ = Uint16x8; break;
         case AsmJS_Uint8x16: which_ = Uint8x16; break;
+#endif
         }
     }
 
@@ -448,106 +422,24 @@ namespace Js
 
     }
 
-    template<>
-    AsmJsMathConst* Js::AsmJsSymbol::Cast()
+    AsmJsVarBase::AsmJsVarBase(PropertyName name, AsmJsSymbol::SymbolType type, bool isMutable /*= true*/) :
+        AsmJsSymbol(name, type)
+        , mType(AsmJsVarType::Double)
+        , mLocation(Js::Constants::NoRegister)
+        , mIsMutable(isMutable)
     {
-        Assert(mType == MathConstant);
-        return (AsmJsMathConst*)this;
+        Assert(AsmJsVarBase::Is(this));
     }
 
-    template<>
-    AsmJsVar* Js::AsmJsSymbol::Cast()
+    bool AsmJsVarBase::Is(AsmJsSymbol* sym)
     {
-        Assert(mType == Variable);
-        return (AsmJsVar*)this;
+        return AsmJsArgument::Is(sym) || AsmJsConstantImport::Is(sym) || AsmJsVar::Is(sym);
     }
 
-    template<>
-    AsmJsVarBase* Js::AsmJsSymbol::Cast()
-    {
-        Assert( mType == Argument || mType == Variable || mType == ConstantImport);
-        return ( AsmJsVarBase* )this;
-    }
-
-    template<>
-    AsmJsFunctionDeclaration* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ModuleFunction || mType == ImportFunction || mType == MathBuiltinFunction || mType == SIMDBuiltinFunction || mType == FuncPtrTable);
-        return (AsmJsFunctionDeclaration*)this;
-    }
-
-    template<>
-    AsmJsFunc* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ModuleFunction);
-        return (AsmJsFunc*)this;
-    }
-
-    template<>
-    AsmJsImportFunction* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ImportFunction);
-        return (AsmJsImportFunction*)this;
-    }
-
-    template<>
-    AsmJsMathFunction* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == MathBuiltinFunction);
-        return (AsmJsMathFunction*)this;
-    }
-
-    template<>
-    AsmJsSIMDFunction* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == SIMDBuiltinFunction);
-        return  (AsmJsSIMDFunction*) this;
-    }
-    template<>
-    AsmJsArrayView* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ArrayView);
-        return (AsmJsArrayView*)this;
-    }
-
-    template<>
-    AsmJsConstantImport* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ConstantImport);
-        return (AsmJsConstantImport*)this;
-    }
-
-    template<>
-    AsmJsFunctionTable* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == FuncPtrTable);
-        return (AsmJsFunctionTable*)this;
-    }
-
-    template<>
-    AsmJsTypedArrayFunction* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == TypedArrayBuiltinFunction);
-        return (AsmJsTypedArrayFunction*)this;
-    }
-
-    template<>
-    AsmJsModuleArg* Js::AsmJsSymbol::Cast()
-    {
-        Assert(mType == ModuleArgument);
-        return (AsmJsModuleArg*)this;
-    }
 
     Js::AsmJsType AsmJsModuleArg::GetType() const
     {
-        Assert(UNREACHED);
         return AsmJsType::Void;
-    }
-
-    bool AsmJsModuleArg::isMutable() const
-    {
-        Assert(UNREACHED);
-        return true;
     }
 
     Js::AsmJsType AsmJsMathConst::GetType() const
@@ -555,9 +447,28 @@ namespace Js
         return AsmJsType::Double;
     }
 
-    bool AsmJsMathConst::isMutable() const
+    AsmJsFunctionDeclaration::AsmJsFunctionDeclaration(PropertyName name, AsmJsSymbol::SymbolType type, ArenaAllocator* allocator) :
+        AsmJsSymbol(name, type)
+        , mAllocator(allocator)
+        , mReturnType(AsmJsRetType::Void)
+        , mArgCount(Constants::InvalidArgSlot)
+        , mLocation(0)
+        , mReturnTypeKnown(false)
+        , mArgumentsType(nullptr)
     {
-        return false;
+        Assert(AsmJsFunctionDeclaration::Is(this));
+    }
+
+    bool AsmJsFunctionDeclaration::Is(AsmJsSymbol* sym)
+    {
+        return (
+            AsmJsFunc::Is(sym) ||
+            AsmJsFunctionTable::Is(sym) ||
+            AsmJsImportFunction::Is(sym) ||
+            AsmJsMathFunction::Is(sym) ||
+            AsmJsTypedArrayFunction::Is(sym) ||
+            AsmJsClosureFunction::Is(sym)
+        );
     }
 
     bool AsmJsFunctionDeclaration::EnsureArgCount(ArgSlot count)
@@ -592,14 +503,15 @@ namespace Js
 
     bool AsmJsFunctionDeclaration::CheckAndSetReturnType(Js::AsmJsRetType val)
     {
-        Assert((val != AsmJsRetType::Fixnum && val != AsmJsRetType::Unsigned && val != AsmJsRetType::Floatish) ||
-               GetSymbolType() == AsmJsSymbol::MathBuiltinFunction ||
-               GetSymbolType() == AsmJsSymbol::SIMDBuiltinFunction);
+        const auto IsValid = [this](Js::AsmJsRetType val) {
+            return AsmJsMathFunction::Is(this) || (
+                val != AsmJsRetType::Fixnum && val != AsmJsRetType::Unsigned && val != AsmJsRetType::Floatish
+            );
+        };
+        Assert(IsValid(val));
         if (mReturnTypeKnown)
         {
-            Assert((mReturnType != AsmJsRetType::Fixnum && mReturnType != AsmJsRetType::Unsigned && mReturnType != AsmJsRetType::Floatish) ||
-                   GetSymbolType() == AsmJsSymbol::MathBuiltinFunction ||
-                   GetSymbolType() == AsmJsSymbol::SIMDBuiltinFunction);
+            Assert(IsValid(mReturnType));
             return mReturnType.toType().isSubType(val.toType());
         }
         mReturnType = val;
@@ -612,10 +524,6 @@ namespace Js
         return mReturnType.toType();
     }
 
-    bool AsmJsFunctionDeclaration::isMutable() const
-    {
-        return false;
-    }
     bool AsmJsFunctionDeclaration::EnsureArgType(AsmJsVarBase* arg, ArgSlot index)
     {
         if (mArgumentsType[index].GetWhich() == -1)
@@ -650,10 +558,6 @@ namespace Js
                 {
                     mArgumentsType[i] = AsmJsType::Int;
                 }
-                else if (args[i].isSIMDType())
-                {
-                    mArgumentsType[i] = args[i];
-                }
                 else
                 {
                     // call did not have valid argument type
@@ -680,11 +584,11 @@ namespace Js
 
     ArgSlot AsmJsFunctionDeclaration::GetArgByteSize(ArgSlot inArgCount) const
     {
-        uint argSize = 0;
-        if (GetSymbolType() == AsmJsSymbol::ImportFunction)
+        ArgSlot argSize = 0;
+        if (AsmJsImportFunction::Is(this))
         {
             Assert(inArgCount != Constants::InvalidArgSlot);
-            argSize = inArgCount * MachPtr;
+            argSize = ArgSlotMath::Mul(inArgCount, (uint16)MachPtr);
         }
 #if _M_IX86
         else
@@ -693,54 +597,35 @@ namespace Js
             {
                 if( GetArgType(i).isMaybeDouble() )
                 {
-                    argSize += sizeof(double);
+                    argSize = ArgSlotMath::Add(argSize, sizeof(double));
                 }
                 else if (GetArgType(i).isIntish())
                 {
-                    argSize += sizeof(int);
+                    argSize = ArgSlotMath::Add(argSize, sizeof(int));
                 }
                 else if (GetArgType(i).isFloatish())
                 {
-                    argSize += sizeof(float);
-                }
-                else if (GetArgType(i).isSIMDType())
-                {
-                    argSize += sizeof(AsmJsSIMDValue);
+                    argSize = ArgSlotMath::Add(argSize, sizeof(float));
                 }
                 else
                 {
-                    Assume(UNREACHED);
+                    AssertOrFailFast(UNREACHED);
                 }
             }
         }
 #elif _M_X64
         else
         {
-            for (ArgSlot i = 0; i < GetArgCount(); i++)
-            {
-                if (GetArgType(i).isSIMDType())
-                {
-                    argSize += sizeof(AsmJsSIMDValue);
-                }
-                else
-                {
-                    argSize += MachPtr;
-                }
-            }
+            argSize = ArgSlotMath::Mul(GetArgCount(), (uint16)MachPtr);
         }
 #else
-        Assert(UNREACHED);
+        AssertOrFailFast(UNREACHED);
 #endif
-        if (argSize >= (1 << 16))
-        {
-            // throw OOM on overflow
-            Throw::OutOfMemory();
-        }
-        return static_cast<ArgSlot>(argSize);
+        return argSize;
     }
 
     AsmJsMathFunction::AsmJsMathFunction( PropertyName name, ArenaAllocator* allocator, ArgSlot argCount, AsmJSMathBuiltinFunction builtIn, OpCodeAsmJs op, AsmJsRetType retType, ... ) :
-        AsmJsFunctionDeclaration( name, AsmJsSymbol::MathBuiltinFunction, allocator )
+        AsmJsFunctionDeclaration( name, symbolType, allocator )
         , mBuiltIn( builtIn )
         , mOverload( nullptr )
         , mOpCode(op)
@@ -805,7 +690,7 @@ namespace Js
 
     bool AsmJsMathFunction::IsFround(AsmJsFunctionDeclaration* sym)
     {
-        return sym && sym->GetSymbolType() == AsmJsSymbol::MathBuiltinFunction && sym->Cast<AsmJsMathFunction>()->GetMathBuiltInFunction() == AsmJSMathBuiltin_fround;
+        return AsmJsMathFunction::Is(sym) && AsmJsMathFunction::FromSymbol(sym)->GetMathBuiltInFunction() == AsmJSMathBuiltin_fround;
     }
 
     WAsmJs::RegisterSpace*
@@ -816,33 +701,32 @@ namespace Js
         case WAsmJs::INT32: return Anew(alloc, AsmJsRegisterSpace<int>, alloc);
         case WAsmJs::FLOAT32: return Anew(alloc, AsmJsRegisterSpace<float>, alloc);
         case WAsmJs::FLOAT64: return Anew(alloc, AsmJsRegisterSpace<double>, alloc);
-        case WAsmJs::SIMD: return Anew(alloc, AsmJsRegisterSpace<AsmJsSIMDValue>, alloc);
+#if TARGET_64
+        case WAsmJs::INT64: return Anew(alloc, AsmJsRegisterSpace<int64>, alloc);
+#endif
         default:
             AssertMsg(false, "Invalid native asm.js type");
             Js::Throw::InternalError();
         }
     }
 
-    AsmJsFunc::AsmJsFunc(PropertyName name, ParseNode* pnodeFnc, ArenaAllocator* allocator, ScriptContext* scriptContext) :
+    AsmJsFunc::AsmJsFunc(PropertyName name, ParseNodeFnc* pnodeFnc, ArenaAllocator* allocator, ScriptContext* scriptContext) :
         AsmJsFunctionDeclaration(name, AsmJsSymbol::ModuleFunction, allocator)
         , mCompileTime(0)
         , mVarMap(allocator)
         , mBodyNode(nullptr)
         , mFncNode(pnodeFnc)
+        , mCurrentProfileId(0)
         , mTypedRegisterAllocator(
             allocator,
             AllocateRegisterSpace,
-            // Exclude int64 and simd if not enabled
-            1 << WAsmJs::INT64 | (
-#ifdef ENABLE_SIMDJS
-                scriptContext->GetConfig()->IsSimdjsEnabled() ? 0 :
+            1 << WAsmJs::SIMD
+#if TARGET_32
+            | 1 << WAsmJs::INT64
 #endif
-                1 << WAsmJs::SIMD)
         )
-        , mFuncInfo(pnodeFnc->sxFnc.funcInfo)
+        , mFuncInfo(pnodeFnc->funcInfo)
         , mFuncBody(nullptr)
-        , mSimdVarsList(allocator)
-        , mArgOutDepth(0)
         , mMaxArgOutDepth(0)
         , mDefined( false )
     {
@@ -880,6 +764,12 @@ namespace Js
         return var;
     }
 
+    ProfileId AsmJsFunc::GetNextProfileId()
+    {
+        ProfileId nextProfileId = mCurrentProfileId;
+        UInt16Math::Inc(mCurrentProfileId);
+        return nextProfileId;
+    }
 
     AsmJsVarBase* AsmJsFunc::FindVar(const PropertyName name) const
     {
@@ -902,10 +792,6 @@ namespace Js
             {
                 ReleaseLocation<float>(pnode);
             }
-            else if (pnode->type.isSIMDType())
-            {
-                ReleaseLocation<AsmJsSIMDValue>(pnode);
-            }
         }
     }
 
@@ -917,11 +803,6 @@ namespace Js
             *lookupSource = AsmJsLookupSource::AsmJsFunction;
         }
         return var;
-    }
-
-    void AsmJsFunc::SetArgOutDepth( int outParamsCount )
-    {
-        mArgOutDepth = outParamsCount;
     }
 
     void AsmJsFunc::UpdateMaxArgOutDepth(int outParamsCount)
@@ -962,7 +843,7 @@ namespace Js
 
     WAsmJs::TypedSlotInfo* AsmJsFunctionInfo::GetTypedSlotInfo(WAsmJs::Types type)
     {
-        if ((uint32)type >= WAsmJs::LIMIT)
+        if ((uint32)type > WAsmJs::LIMIT)
         {
             Assert(false);
             Js::Throw::InternalError();
@@ -970,17 +851,17 @@ namespace Js
         return &mTypedSlotInfos[type];
     }
 
-    int AsmJsFunctionInfo::GetTotalSizeinBytes() const
+    void AsmJsFunctionInfo::SetTotalSizeinBytes(uint32 totalSize)
     {
-        int size;
-
-        // SIMD values are aligned
-        Assert(GetSimdByteOffset() % sizeof(AsmJsSIMDValue) == 0);
-        size = GetSimdByteOffset() + GetSimdAllCount()* sizeof(AsmJsSIMDValue);
-
-        return size;
+        AssertOrFailFast(mTotalSizeBytes == 0 && totalSize <= INT_MAX);
+        mTotalSizeBytes = totalSize;
     }
 
+    int AsmJsFunctionInfo::GetTotalSizeinBytes() const
+    {
+        AssertOrFailFast(mTotalSizeBytes <= INT_MAX);
+        return (int)mTotalSizeBytes;
+    }
 
     void AsmJsFunctionInfo::SetArgType(AsmJsVarType type, ArgSlot index)
     {
@@ -1041,12 +922,6 @@ namespace Js
         return AsmJsType::Intish;
     }
 
-    bool AsmJsArrayView::isMutable() const
-    {
-        return false;
-    }
-
-
     bool AsmJsImportFunction::SupportsArgCall(ArgSlot argCount, AsmJsType* args, AsmJsRetType& retType )
     {
         for (ArgSlot i = 0; i < argCount ; i++)
@@ -1060,7 +935,7 @@ namespace Js
     }
 
     AsmJsImportFunction::AsmJsImportFunction(PropertyName name, PropertyName field, ArenaAllocator* allocator) :
-        AsmJsFunctionDeclaration(name, AsmJsSymbol::ImportFunction, allocator)
+        AsmJsFunctionDeclaration(name, symbolType, allocator)
         , mField(field)
     {
         CheckAndSetReturnType(AsmJsRetType::Void);
@@ -1101,148 +976,6 @@ namespace Js
         }
         mAreArgumentsKnown = true;
         return true;
-    }
-
-    AsmJsSIMDFunction::AsmJsSIMDFunction(PropertyName name, ArenaAllocator* allocator, ArgSlot argCount, AsmJsSIMDBuiltinFunction builtIn, OpCodeAsmJs op, AsmJsRetType retType, ...) :
-        AsmJsFunctionDeclaration(name, AsmJsSymbol::SIMDBuiltinFunction, allocator)
-        , mBuiltIn(builtIn)
-        , mOverload(nullptr)
-        , mOpCode(op)
-    {
-        bool ret = CheckAndSetReturnType(retType);
-        Assert(ret);
-        va_list arguments;
-
-        SetArgCount(argCount);
-        va_start(arguments, retType);
-        for (ArgSlot iArg = 0; iArg < argCount; iArg++)
-        {
-            SetArgType(static_cast<AsmJsType::Which>(va_arg(arguments, int)), iArg);
-        }
-        va_end(arguments);
-    }
-
-    bool AsmJsSIMDFunction::SupportsSIMDCall(ArgSlot argCount, AsmJsType* args, OpCodeAsmJs& op, AsmJsRetType& retType)
-    {
-        if (AsmJsFunctionDeclaration::SupportsArgCall(argCount, args, retType))
-        {
-            op = mOpCode;
-            return true;
-        }
-        return mOverload && mOverload->SupportsSIMDCall(argCount, args, op, retType);
-    }
-
-    bool AsmJsSIMDFunction::SupportsArgCall(ArgSlot argCount, AsmJsType* args, AsmJsRetType& retType)
-    {
-        return AsmJsFunctionDeclaration::SupportsArgCall(argCount, args, retType) || (mOverload && mOverload->SupportsArgCall(argCount, args, retType));
-    }
-
-    bool AsmJsSIMDFunction::CheckAndSetReturnType(Js::AsmJsRetType val)
-    {
-        return AsmJsFunctionDeclaration::CheckAndSetReturnType(val) || (mOverload && mOverload->CheckAndSetReturnType(val));
-    }
-
-
-    void AsmJsSIMDFunction::SetOverload(AsmJsSIMDFunction* val)
-    {
-#if DBG
-        AsmJsSIMDFunction* over = val->mOverload;
-        while (over)
-        {
-            if (over == this)
-            {
-                Assert(false);
-                break;
-            }
-            over = over->mOverload;
-        }
-#endif
-        Assert(val->GetSymbolType() == GetSymbolType());
-        if (this->mOverload)
-        {
-            this->mOverload->SetOverload(val);
-        }
-        else
-        {
-            mOverload = val;
-        }
-    }
-
-    bool AsmJsSIMDFunction::IsTypeCheck()
-    {
-        return mBuiltIn == AsmJsSIMDBuiltin_int32x4_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_float32x4_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_float64x2_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_int16x8_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_int8x16_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_uint32x4_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_uint16x8_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_uint8x16_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_bool32x4_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_bool16x8_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_bool8x16_check;
-    }
-
-    bool AsmJsSIMDFunction::IsUnsignedTypeCheck()
-    {
-        return mBuiltIn == AsmJsSIMDBuiltin_uint32x4_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_uint16x8_check ||
-               mBuiltIn == AsmJsSIMDBuiltin_uint8x16_check;
-    }
-
-    AsmJsVarType AsmJsSIMDFunction::GetTypeCheckVarType()
-    {
-        Assert(this->IsTypeCheck());
-        return GetReturnType().toVarType();
-    }
-    bool AsmJsSIMDFunction::IsConstructor()
-    {
-        return mBuiltIn == AsmJsSIMDBuiltin_Int32x4 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Float32x4 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Float64x2 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Int16x8 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Int8x16 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Uint32x4 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Uint16x8 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Uint8x16 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Bool32x4 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Bool16x8 ||
-            mBuiltIn == AsmJsSIMDBuiltin_Bool8x16 ;
-    }
-
-    // Is a constructor with the correct argCount ?
-    bool AsmJsSIMDFunction::IsConstructor(uint argCount)
-    {
-        if (!IsConstructor())
-        {
-            return false;
-        }
-
-        switch (mBuiltIn)
-        {
-        case AsmJsSIMDBuiltin_Float64x2:
-            return argCount == 2;
-        case AsmJsSIMDBuiltin_Float32x4:
-        case AsmJsSIMDBuiltin_Int32x4:
-        case AsmJsSIMDBuiltin_Uint32x4:
-        case AsmJsSIMDBuiltin_Bool32x4:
-            return argCount == 4;
-        case AsmJsSIMDBuiltin_Int16x8:
-        case AsmJsSIMDBuiltin_Uint16x8:
-        case AsmJsSIMDBuiltin_Bool16x8:
-            return argCount == 8;
-        case AsmJsSIMDBuiltin_Uint8x16:
-        case AsmJsSIMDBuiltin_Int8x16:
-        case AsmJsSIMDBuiltin_Bool8x16:
-            return argCount == 16;
-        };
-        return false;
-    }
-
-    AsmJsVarType AsmJsSIMDFunction::GetConstructorVarType()
-    {
-        Assert(this->IsConstructor());
-        return GetReturnType().toVarType();
     }
 }
 #endif

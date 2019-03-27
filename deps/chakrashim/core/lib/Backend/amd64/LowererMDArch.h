@@ -1,5 +1,5 @@
 //-------------------------------------------------------------------------------------------------------
-// Copyright (C) Microsoft. All rights reserved.
+// Copyright (C) Microsoft Corporation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
@@ -88,11 +88,12 @@ public:
     IR::Instr *         LowerCall(IR::Instr * callInstr, uint32 argCount);
     IR::Instr *         LowerCallI(IR::Instr * callInstr, ushort callFlags, bool isHelper = false, IR::Instr * insertBeforeInstrForCFG = nullptr);
     IR::Instr *         LowerCallIDynamic(IR::Instr * callInstr, IR::Instr* saveThis, IR::Opnd* argsLengthOpnd, ushort callFlags, IR::Instr * insertBeforeInstrForCFG = nullptr);
-    IR::Instr *         LowerCallPut(IR::Instr * callInstr);
     IR::Instr *         LowerStartCall(IR::Instr * instr);
     IR::Instr *         LowerAsmJsCallI(IR::Instr * callInstr);
     IR::Instr *         LowerAsmJsCallE(IR::Instr * callInstr);
-    IR::Instr *         LowerWasmMemOp(IR::Instr * instr, IR::Opnd *addrOpnd);
+    IR::Instr *         LowerWasmArrayBoundsCheck(IR::Instr * instr, IR::Opnd *addrOpnd);
+    void                LowerAtomicStore(IR::Opnd * dst, IR::Opnd * src1, IR::Instr * insertBeforeInstr);
+    void                LowerAtomicLoad(IR::Opnd* dst, IR::Opnd* src1, IR::Instr* insertBeforeInstr);
     IR::Instr *         LowerAsmJsLdElemHelper(IR::Instr * instr, bool isSimdLoad = false, bool checkEndOffset = false);
     IR::Instr *         LowerAsmJsStElemHelper(IR::Instr * instr, bool isSimdStore = false, bool checkEndOffset = false);
 
@@ -108,9 +109,7 @@ public:
     IR::Instr *         LowerEntryInstr(IR::EntryInstr * entryInstr);
     void                GeneratePrologueStackProbe(IR::Instr *entryInstr, IntConstType frameSize);
     IR::Instr *         LowerExitInstr(IR::ExitInstr * exitInstr);
-    IR::Instr *         LowerEntryInstrAsmJs(IR::EntryInstr * entryInstr);
     IR::Instr *         LowerExitInstrAsmJs(IR::ExitInstr * exitInstr);
-    IR::Instr *         LowerInt64Assign(IR::Instr * instr);
     static void         EmitInt4Instr(IR::Instr *instr, bool signExtend = false);
     void                EmitLoadVar(IR::Instr *instrLoad, bool isFromUint32 = false, bool isHelper = false);
     void                EmitIntToFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert);
@@ -142,6 +141,7 @@ public:
     bool                GenerateFastNot(IR::Instr * instrNot);
     bool                GenerateFastShiftLeft(IR::Instr * instrShift);
     bool                GenerateFastShiftRight(IR::Instr * instrShift);
+    bool                GenerateFastDivAndRem(IR::Instr * divInstr, IR::LabelInstr* bailoutLabel);
 
     IR::Opnd*           GenerateArgOutForStackArgs(IR::Instr* callInstr, IR::Instr* stackArgsInstr);
     void                GenerateFunctionObjectTest(IR::Instr * callInstr, IR::RegOpnd  *functionObjOpnd, bool isHelper, IR::LabelInstr* afterCallLabel = nullptr);
@@ -151,13 +151,16 @@ public:
 
     void                LowerInlineSpreadArgOutLoop(IR::Instr *callInstr, IR::RegOpnd *indexOpnd, IR::RegOpnd *arrayElementsStartOpnd);
     IR::Instr *         LowerEHRegionReturn(IR::Instr * insertBeforeInstr, IR::Opnd * targetOpnd);
-
+    IR::BranchInstr*    InsertMissingItemCompareBranch(IR::Opnd* compareSrc, IR::Opnd* missingItemOpnd, Js::OpCode opcode, IR::LabelInstr* target, IR::Instr* insertBeforeInstr);
 private:
     void                MovArgFromReg2Stack(IR::Instr * instr, RegNum reg, Js::ArgSlot slotNumber, IRType type = TyMachReg);
     void                GenerateStackAllocation(IR::Instr *instr, uint32 size);
     IR::LabelInstr *    GetBailOutStackRestoreLabel(BailOutInfo * bailOutInfo, IR::LabelInstr * exitTargetInstr);
     void                GeneratePreCall(IR::Instr * callInstr, IR::Opnd  *functionObjOpnd, IR::Instr* insertBeforeInstrForCFGCheck = nullptr);
     void                SetMaxArgSlots(Js::ArgSlot actualCount /*including this*/);
+    void                GenerateMemInit(IR::RegOpnd * opnd, int32 offset, size_t value, IR::Instr * insertBeforeInstr, bool isZeroed = false);
+    bool                GenerateFastDivAndRem_Signed(IR::Instr* instrDiv);
+    bool                GenerateFastDivAndRem_Unsigned(IR::Instr* instrDiv);
 };
 
 #define REG_EH_TARGET      RegArg0

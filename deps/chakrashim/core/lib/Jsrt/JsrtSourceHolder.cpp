@@ -64,7 +64,7 @@ namespace Js
                 *utf8Script = HeapNewArray(utf8char_t, cbUtf8Buffer);
             }
 
-            *utf8Length = utf8::EncodeTrueUtf8IntoAndNullTerminate(*utf8Script, script, static_cast<charcount_t>(length));
+            *utf8Length = utf8::EncodeIntoAndNullTerminate<utf8::Utf8EncodingKind::TrueUtf8>(*utf8Script, cbUtf8Buffer, script, static_cast<charcount_t>(length));
             *scriptLength = length;
 
             if (utf8AllocLength != nullptr)
@@ -113,12 +113,18 @@ namespace Js
 
 #if ENABLE_DEBUG_CONFIG_OPTIONS
         AssertMsg(reasonString != nullptr, "Reason string for why we are mapping the source was not provided.");
-        JS_ETW(EventWriteJSCRIPT_SOURCEMAPPING((uint32)wcslen(reasonString), reasonString, (ushort)requestedFor));
+        JS_ETW(EventWriteJSCRIPT_SOURCEMAPPING(reasonString, (ushort)requestedFor));
 #endif
     }
 
     template <typename TLoadCallback, typename TUnloadCallback>
     void JsrtSourceHolder<TLoadCallback, TUnloadCallback>::Finalize(bool isShutdown)
+    {
+        Unload();
+    }
+
+    template <typename TLoadCallback, typename TUnloadCallback>
+    void JsrtSourceHolder<TLoadCallback, TUnloadCallback>::Unload()
     {
         if (scriptUnloadCallback == nullptr)
         {
@@ -202,8 +208,7 @@ namespace Js
                     *utf8Script = HeapNewArray(utf8char_t, cbUtf8Buffer);
                 }
 
-                *utf8Length = utf8::EncodeTrueUtf8IntoAndNullTerminate(*utf8Script,
-                    script, static_cast<charcount_t>(script_length));
+                *utf8Length = utf8::EncodeIntoAndNullTerminate<utf8::Utf8EncodingKind::TrueUtf8>(*utf8Script, cbUtf8Buffer, script, static_cast<charcount_t>(script_length));
                 *scriptLength = script_length;
 
                 if (utf8AllocLength != nullptr)
@@ -285,7 +290,7 @@ namespace Js
 
 #if ENABLE_DEBUG_CONFIG_OPTIONS
         AssertMsg(reasonString != nullptr, "Reason string for why we are mapping the source was not provided.");
-        JS_ETW(EventWriteJSCRIPT_SOURCEMAPPING((uint32)wcslen(reasonString), reasonString, (ushort)requestedFor));
+        JS_ETW(EventWriteJSCRIPT_SOURCEMAPPING(reasonString, (ushort)requestedFor));
 #endif
     }
 
@@ -299,7 +304,6 @@ namespace Js
             this->mappedSource = nullptr;
         }
         this->mappedScriptValue = nullptr;
-        this->mappedSerializedScriptValue = nullptr;
 
         // Don't allow load or unload again after told to unload.
         scriptLoadCallback = nullptr;

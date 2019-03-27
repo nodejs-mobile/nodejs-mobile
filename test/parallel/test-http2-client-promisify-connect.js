@@ -1,7 +1,7 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
+
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
@@ -14,11 +14,9 @@ server.on('stream', common.mustCall((stream) => {
   stream.end('ok');
 }));
 server.listen(0, common.mustCall(() => {
-
   const connect = util.promisify(http2.connect);
 
   connect(`http://localhost:${server.address().port}`)
-    .catch(common.mustNotCall())
     .then(common.mustCall((client) => {
       assert(client);
       const req = client.request();
@@ -27,7 +25,7 @@ server.listen(0, common.mustCall(() => {
       req.on('data', (chunk) => data += chunk);
       req.on('end', common.mustCall(() => {
         assert.strictEqual(data, 'ok');
-        client.destroy();
+        client.close();
         server.close();
       }));
     }));

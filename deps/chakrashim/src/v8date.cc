@@ -47,9 +47,15 @@ Local<Value> Date::New(Isolate * isolate, double time) {
 }
 
 // Not Implemented
-Date *Date::Cast(v8::Value *obj) {
+Date* Date::Cast(v8::Value* obj) {
   CHAKRA_ASSERT(obj->IsDate());
   return static_cast<Date*>(obj);
+}
+
+double Date::ValueOf() const {
+  CHAKRA_ASSERT(this->IsDate());
+
+  return this->NumberValue();
 }
 
 }  // namespace v8

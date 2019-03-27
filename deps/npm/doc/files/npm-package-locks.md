@@ -92,7 +92,7 @@ which will look something like this:
     }
 
 This file describes an *exact*, and more importantly *reproducible*
-`node_modules` tree. Once it's present, and future installation will base its
+`node_modules` tree. Once it's present, any future installation will base its
 work off this file, instead of recalculating dependency versions off
 package.json(5).
 
@@ -135,6 +135,25 @@ package source to get the exact same dependency tree that you were developing
 on. Additionally, the diffs from these changes are human-readable and will
 inform you of any changes npm has made to your `node_modules`, so you can notice
 if any transitive dependencies were updated, hoisted, etc.
+
+### Resolving lockfile conflicts
+
+Occasionally, two separate npm install will create package locks that cause
+merge conflicts in source control systems. As of `npm@5.7.0`, these conflicts
+can be resolved by manually fixing any `package.json` conflicts, and then
+running `npm install [--package-lock-only]` again. npm will automatically
+resolve any conflicts for you and write a merged package lock that includes all
+the dependencies from both branches in a reasonable tree. If
+`--package-lock-only` is provided, it will do this without also modifying your
+local `node_modules/`.
+
+To make this process seamless on git, consider installing
+[`npm-merge-driver`](https://npm.im/npm-merge-driver), which will teach git how
+to do this itself without any user interaction. In short: `$ npx
+npm-merge-driver install -g` will let you do this, and even works with
+pre-`npm@5.7.0` versions of npm 5, albeit a bit more noisily. Note that if
+`package.json` itself conflicts, you will have to resolve that by hand and run
+`npm install` manually, even with the merge driver.
 
 ## SEE ALSO
 

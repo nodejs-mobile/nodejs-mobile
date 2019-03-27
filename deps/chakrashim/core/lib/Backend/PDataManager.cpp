@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
 
-// Conditionally-compiled on x64 and arm
+// Conditionally-compiled on x64 and arm/arm64
 #if PDATA_ENABLED
 
 #ifdef _WIN32
@@ -15,37 +15,44 @@
 void PDataManager::RegisterPdata(RUNTIME_FUNCTION* pdataStart, _In_ const ULONG_PTR functionStart, _In_ const ULONG_PTR functionEnd, _Out_ PVOID* pdataTable, ULONG entryCount, ULONG maxEntryCount)
 {
     BOOLEAN success = FALSE;
+    HRESULT hr = S_OK;
     if (AutoSystemInfo::Data.IsWin8OrLater())
     {
         Assert(pdataTable != NULL);
 
         // Since we do not expect many thunk functions to be created, we are using 1 table/function
         // for now. This can be optimized further if needed.
-        DWORD status = NtdllLibrary::Instance->AddGrowableFunctionTable(pdataTable,
+        NTSTATUS status = NtdllLibrary::Instance->AddGrowableFunctionTable(pdataTable,
             pdataStart,
             entryCount,
             maxEntryCount,
             /*RangeBase*/ functionStart,
             /*RangeEnd*/ functionEnd);
         success = NT_SUCCESS(status);
-        if (success)
-        {
-            Assert(pdataTable);
-        }
+        Assert(!success || pdataTable);
+        hr = status;
     }
     else
     {
         *pdataTable = pdataStart;
         success = RtlAddFunctionTable(pdataStart, entryCount, functionStart);
+        if (!success) 
+        {
+            hr = E_OUTOFMEMORY; // only OOM error can happen for RtlAddFunctionTable
+        }
     }
-    Js::Throw::CheckAndThrowOutOfMemory(success);
+    if (!success)
+    {
+        Js::Throw::XDataRegistrationError(hr, functionStart);
+    }
 }
 
 void PDataManager::UnregisterPdata(RUNTIME_FUNCTION* pdata)
 {
     if (AutoSystemInfo::Data.IsWin8OrLater())
     {
-        NtdllLibrary::Instance->DeleteGrowableFunctionTable(pdata);
+        // TODO: need to move to background?
+        DelayDeletingFunctionTable::DeleteFunctionTable(pdata);
     }
     else
     {

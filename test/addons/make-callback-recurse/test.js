@@ -9,7 +9,6 @@ const makeCallback = binding.makeCallback;
 // Make sure this is run in the future.
 const mustCallCheckDomains = common.mustCall(checkDomains);
 
-
 // Make sure that using MakeCallback allows the error to propagate.
 assert.throws(function() {
   makeCallback({}, function() {

@@ -120,6 +120,16 @@ Isolate* Context::GetIsolate() {
   return Isolate::GetCurrent();
 }
 
+void Context::Enter() {
+  // CHAKRA-TODO - Figure out what to do here.
+  CHAKRA_UNIMPLEMENTED();
+}
+
+void Context::Exit() {
+  // CHAKRA-TODO - Figure out what to do here.
+  CHAKRA_UNIMPLEMENTED();
+}
+
 void* Context::GetAlignedPointerFromEmbedderData(int index) {
   jsrt::ContextShim * contextShim =
     jsrt::IsolateShim::GetCurrent()->GetContextShim((JsContextRef)this);
@@ -136,6 +146,12 @@ void Context::SetEmbedderData(int index, Local<Value> value) {
     SetAlignedPointerInEmbedderData(index, *value);
 }
 
+uint32_t Context::GetNumberOfEmbedderDataFields() {
+  jsrt::ContextShim * contextShim =
+      jsrt::IsolateShim::GetCurrent()->GetContextShim((JsContextRef)this);
+  return contextShim->GetNumberOfEmbedderDataFields();
+}
+
 Local<Value> Context::GetEmbedderData(int index) {
   return Local<Value>(GetAlignedPointerFromEmbedderData(index));
 }
@@ -149,4 +165,18 @@ Handle<Value> Context::GetSecurityToken() {
   return Handle<Value>();
 }
 
+void Context::AllowCodeGenerationFromStrings(bool allow) {
+  // CHAKRA-TODO
+}
+
+void Context::CacheGlobalProperties() {
+  jsrt::IsolateShim::GetContextShim(
+      reinterpret_cast<JsContextRef *>(this))->CacheGlobalProperties();
+}
+
+void Context::ResolveGlobalChanges(Local<Object> sandbox) {
+  jsrt::IsolateShim::GetContextShim(
+      reinterpret_cast<JsContextRef *>(this))
+    ->ResolveGlobalChanges((JsValueRef)*sandbox);
+}
 }  // namespace v8

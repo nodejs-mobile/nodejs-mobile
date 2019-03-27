@@ -23,6 +23,8 @@
 
 #if defined(DBG)
 
+#define DebugOnly(x)          x
+
 #define AssertMsg(exp, comment)   \
 do { \
 if (!(exp)) \
@@ -42,3 +44,7 @@ if (!(exp)) \
 #include "Core/CommonTypedefs.h"
 
 #include <FileLoadHelpers.h>
+#include "TestHooks.h"
+
+extern TestHooks g_testHooks;
+extern bool g_testHooksLoaded;

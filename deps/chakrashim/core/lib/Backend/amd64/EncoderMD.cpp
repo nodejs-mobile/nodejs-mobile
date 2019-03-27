@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "Backend.h"
+#include "Core/CRC.h"
 
 #include "X64Encode.h"
 
@@ -685,6 +686,11 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
 
     instrRestart = instrStart = m_pc;
 
+    // Emit the lock byte first if needed
+    if (opdope & DLOCK)
+    {
+        *instrRestart++ = 0xf0;
+    }
 
     // put out 16bit override if any
     if (instrSize == 2 && (opdope & (DNO16 | DFLT)) == 0)
@@ -727,7 +733,7 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
     prexByte = instrRestart;
 
     // This is a heuristic to determine whether we really need to have the Rex bytes
-    // This heuristics is always correct for instrSize == 8
+    // This heuristics is almost always correct for instrSize == 8
     // For instrSize < 8, we might use extended registers and we will have to adjust in EmitRexByte
     bool reservedRexByte = (instrSize == 8);
     if (reservedRexByte)
@@ -980,7 +986,10 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
                 }
                 break;
             }
-
+            case Js::OpCode::PEXTRD:
+            case Js::OpCode::PEXTRQ:
+                this->EmitModRM(instr, opr1, this->GetRegEncode(opr2->AsRegOpnd()));
+                break;
             case Js::OpCode::BT:
             case Js::OpCode::BTR:
             case Js::OpCode::BTS:
@@ -1023,6 +1032,25 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
                     rexByte |= this->EmitModRM(instr, src1, this->GetRegEncode(src2->AsRegOpnd()));
                 }
                 break;
+
+            case Js::OpCode::CMPXCHG8B:
+            case Js::OpCode::LOCKCMPXCHG8B:
+            {
+                if (instrSize == 8)
+                {
+                    skipRexByte = true;
+                    Assert(!opr2);
+                    BYTE byte2 = (this->GetOpcodeByte2(instr) >> 3);
+                    this->EmitModRM(instr, opr1, byte2);
+                }
+                else
+                {
+                    Assert(instrSize == 16);
+                    continue;
+                }
+                break;
+            }
+
             case Js::OpCode::SHLD:
                 /*
                  *       0F A4   SHLD r/m32, r32, imm8
@@ -1163,6 +1191,7 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
             case Js::OpCode::MOVAPS:
             case Js::OpCode::MOVUPS:
             case Js::OpCode::MOVHPD:
+            case Js::OpCode::MOVLPD:
                 if (!opr1->IsRegOpnd())
                 {
                     Assert(opr1->IsIndirOpnd() || opr1->IsMemRefOpnd() || opr1->IsSymOpnd());
@@ -1489,11 +1518,11 @@ EncoderMD::FixRelocListEntry(uint32 index, int totalBytesSaved, BYTE *buffStart,
                 // ptr points to imm32 offset of the instruction that needs to be adjusted
                 // offset is in top 28-bits, arg count in bottom 4
                 size_t field = *((size_t*) relocRecord.m_origPtr);
-                size_t offset = field >> 4;
+                size_t offset = field >> Js::InlineeCallInfo::inlineeStartOffsetShiftCount;
                 uint32 count = field & 0xf;
 
                 AssertMsg(offset < (size_t)(buffEnd - buffStart), "Inlinee entry offset out of range");
-                relocRecord.SetInlineOffset(((offset - totalBytesSaved) << 4) | count);
+                relocRecord.SetInlineOffset(((offset - totalBytesSaved) << Js::InlineeCallInfo::inlineeStartOffsetShiftCount) | count);
             }
             // adjust the ptr to the buffer itself
             relocRecord.m_ptr = (BYTE*) relocRecord.m_ptr - totalBytesSaved;
@@ -1518,7 +1547,7 @@ EncoderMD::FixMaps(uint32 brOffset, uint32 bytesSaved, uint32 *inlineeFrameRecor
 
 {
     InlineeFrameRecords *recList = m_encoder->m_inlineeFrameRecords;
-    InlineeFrameMap *mapList = m_encoder->m_inlineeFrameMap;
+    ArenaInlineeFrameMap *mapList = m_encoder->m_inlineeFrameMap;
     PragmaInstrList *pInstrList = m_encoder->m_pragmaInstrToRecordOffset;
     int32 i;
     for (i = *inlineeFrameRecordsIndex; i < recList->Count() && recList->Item(i)->inlineeStartOffset <= brOffset; i++)
@@ -1609,7 +1638,7 @@ EncoderMD::ApplyRelocs(size_t codeBufferAddress_, size_t codeSize, uint * buffer
                     }
                 }
 
-                *bufferCRC = Encoder::CalculateCRC(*bufferCRC, pcrel);
+                *bufferCRC = CalculateCRC(*bufferCRC, pcrel);
 
                 break;
             }
@@ -1630,7 +1659,7 @@ EncoderMD::ApplyRelocs(size_t codeBufferAddress_, size_t codeSize, uint * buffer
                 {
                     Encoder::EnsureRelocEntryIntegrity(codeBufferAddress_, codeSize, (size_t)m_encoder->m_encodeBuffer, (size_t)relocAddress, sizeof(size_t), targetAddress, false);
                 }
-                *bufferCRC = Encoder::CalculateCRC(*bufferCRC, offset);
+                *bufferCRC = CalculateCRC(*bufferCRC, offset);
                 break;
             }
         case RelocTypeLabel:
@@ -1748,7 +1777,7 @@ EncoderMD::EncodeInlineeCallInfo(IR::Instr *instr, uint32 codeOffset)
     // than can fit in as many bits.
     const bool encodeResult = Js::InlineeCallInfo::Encode(inlineeCallInfo,
         instr->GetSrc1()->AsIntConstOpnd()->GetValue(), codeOffset);
-    Assert(encodeResult);
+    AssertOrFailFast(encodeResult);
 
     instr->GetSrc1()->AsIntConstOpnd()->SetValue(inlineeCallInfo);
 }

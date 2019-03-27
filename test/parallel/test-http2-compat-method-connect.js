@@ -1,4 +1,3 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
@@ -34,7 +33,7 @@ function testMethodConnect(testsToRun) {
   }));
   req.resume();
   req.on('end', common.mustCall(() => {
-    client.destroy();
+    client.close();
     testMethodConnect(testsToRun - 1);
   }));
   req.end();

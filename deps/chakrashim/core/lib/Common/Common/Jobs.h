@@ -7,9 +7,14 @@
 // Undefine name #define in OS headers
 #undef AddJob
 #undef GetJob
+#include "Memory/AutoPtr.h"
 
 class Parser;
 class CompileScriptException;
+namespace Js
+{
+    class ScriptContext;
+}
 
 namespace JsUtil
 {
@@ -98,7 +103,11 @@ namespace JsUtil
     public:
         JobProcessor *Processor() const;
 
-    protected:
+    protected:        
+        // Called by the job processor (inside the lock) right before the job starts being processed. Note that the job
+        // has been removed from the queue at this point.
+        virtual void JobProcessing(Job* job) {}
+
         // Called by the job processor (outside the lock) to process a job. A job manager may choose to return false to indicate
         // a failure. Throwing OutOfMemoryException or OperationAbortedException also indicate a processing failure.
         // 'pageAllocator' will be null if the job is being processed in the foreground.
@@ -336,6 +345,9 @@ namespace JsUtil
         // Must be called from inside the lock
         virtual bool RemoveJob(Job *const job);
 
+        // Must be called from inside the lock
+        template<class Fn> void ForEachJob(Fn fn);
+
         template<class TJobManager, class TJobHolder>
         void AddJobAndProcessProactively(TJobManager *const jobManager, const TJobHolder holder);
 
@@ -360,6 +372,11 @@ namespace JsUtil
     public:
         // Closes the job processor and closes the handle of background threads.
         virtual void Close();
+
+#if PDATA_ENABLED && defined(_WIN32)
+        virtual void StartExtraWork() { };
+        virtual void EndExtraWork() { };
+#endif
     };
 
     // -------------------------------------------------------------------------------------------------------------------------
@@ -421,23 +438,9 @@ namespace JsUtil
         BackgroundJobProcessor *processor;
         Parser *parser;
         CompileScriptException *pse;
+        Js::ScriptContext *scriptContextBG;
 
-        ParallelThreadData(AllocationPolicyManager* policyManager) :
-            threadHandle(0),
-            isWaitingForJobs(false),
-            canDecommit(true),
-            currentJob(nullptr),
-            threadStartedOrClosing(false),
-            backgroundPageAllocator(policyManager, Js::Configuration::Global.flags, PageAllocatorType_BGJIT,
-                                    (AutoSystemInfo::Data.IsLowMemoryProcess() ?
-                                     PageAllocator::DefaultLowMaxFreePageCount :
-                                     PageAllocator::DefaultMaxFreePageCount)),
-            threadArena(nullptr),
-            processor(nullptr),
-            parser(nullptr),
-            pse(nullptr)
-            {
-            }
+        ParallelThreadData(AllocationPolicyManager* policyManager);
 
         PageAllocator* const GetPageAllocator() { return &backgroundPageAllocator; }
         bool CanDecommit() const { return canDecommit; }
@@ -457,6 +460,10 @@ namespace JsUtil
         unsigned int maxThreadCount;
         ParallelThreadData **parallelThreadData;
 
+#if PDATA_ENABLED && defined(_WIN32)
+        LONG hasExtraWork;
+#endif
+
 #if DBG_DUMP
         static  char16 const * const  DebugThreadNames[16];
 #endif
@@ -465,6 +472,10 @@ namespace JsUtil
         BackgroundJobProcessor(AllocationPolicyManager* policyManager, ThreadService *threadService, bool disableParallelThreads);
         ~BackgroundJobProcessor();
 
+#if PDATA_ENABLED && defined(_WIN32)
+        virtual void StartExtraWork() override;
+        virtual void EndExtraWork() override;
+#endif
 
     private:
         bool WaitWithThread(ParallelThreadData *parallelThreadData, const Event &e, const unsigned int milliseconds = INFINITE);
@@ -481,6 +492,10 @@ namespace JsUtil
         void InitializeThreadCount();
         void InitializeParallelThreadData(AllocationPolicyManager* policyManager, bool disableParallelThreads);
         void InitializeParallelThreadDataForThreadServiceCallBack(AllocationPolicyManager* policyManager);
+
+#if PDATA_ENABLED && defined(_WIN32)
+        void DoExtraWork();
+#endif
 
     public:
         virtual void AddManager(JobManager *const manager) override;
@@ -543,4 +558,16 @@ namespace JsUtil
         static void CALLBACK ThreadServiceCallback(void * callbackData);
     };
 #endif
+
+    // Functions defined in header so that templates can be used in other classes
+    template<class Fn>
+    void JobProcessor::ForEachJob(Fn fn)
+    {
+        AutoOptionalCriticalSection lock(GetCriticalSection());
+        bool shouldContinue = true;
+        for (Job *curJob = jobs.Head(); curJob != nullptr && shouldContinue; curJob = curJob->Next())
+        {
+            shouldContinue = fn(curJob);
+        }
+    }
 }

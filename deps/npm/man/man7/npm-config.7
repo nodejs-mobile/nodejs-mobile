@@ -1,4 +1,4 @@
-.TH "NPM\-CONFIG" "7" "July 2017" "" ""
+.TH "NPM\-CONFIG" "7" "August 2018" "" ""
 .SH "NAME"
 \fBnpm-config\fR \- More than you probably want to know about npm configuration
 .SH DESCRIPTION
@@ -28,6 +28,9 @@ same\. However, please note that inside npm\-scripts \fI/misc/scripts\fR
 npm will set its own environment variables and Node will prefer
 those lowercase versions over any uppercase ones that you might set\.
 For details see this issue \fIhttps://github\.com/npm/npm/issues/14528\fR\|\.
+.P
+Notice that you need to use underscores instead of dashes, so \fB\-\-allow\-same\-version\fP
+would become \fBnpm_config_allow_same_version=true\fP\|\.
 .SS npmrc Files
 .P
 The four relevant files are:
@@ -208,6 +211,29 @@ Type: String
 .P
 When "dev" or "development" and running local \fBnpm shrinkwrap\fP,
 \fBnpm outdated\fP, or \fBnpm update\fP, is an alias for \fB\-\-dev\fP\|\.
+.SS audit
+.RS 0
+.IP \(bu 2
+Default: true
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+When "true" submit audit reports alongside \fBnpm install\fP runs to the default
+registry and all registries configured for scopes\.  See the documentation
+for npm help audit for details on what is submitted\.
+.SS audit\-level
+.RS 0
+.IP \(bu 2
+Default: \fB"low"\fP
+.IP \(bu 2
+Type: \fB\|'low'\fP, \fB\|'moderate'\fP, \fB\|'high'\fP, \fB\|'critical'\fP
+
+.RE
+.P
+The minimum level of vulnerability for \fBnpm audit\fP to exit with
+a non\-zero exit code\.
 .SS auth\-type
 .RS 0
 .IP \(bu 2
@@ -253,7 +279,7 @@ Type: String, Array or null
 .RE
 .P
 The Certificate Authority signing certificate that is trusted for SSL
-connections to the registry\. Values should be in PEM format with newlines
+connections to the registry\. Values should be in PEM format (Windows calls it "Base\-64 encoded X\.509 (\.CER)") with newlines
 replaced by the string "\\n"\. For example:
 .P
 .RS 2
@@ -361,7 +387,7 @@ Type: String
 .RE
 .P
 A client certificate to pass when accessing the registry\.  Values should be in
-PEM format with newlines replaced by the string "\\n"\. For example:
+PEM format (Windows calls it "Base\-64 encoded X\.509 (\.CER)") with newlines replaced by the string "\\n"\. For example:
 .P
 .RS 2
 .nf
@@ -370,6 +396,16 @@ cert="\-\-\-\-\-BEGIN CERTIFICATE\-\-\-\-\-\\nXXXX\\nXXXX\\n\-\-\-\-\-END CERTIF
 .RE
 .P
 It is \fInot\fR the path to a certificate file (and there is no "certfile" option)\.
+.SS cidr
+.RS 0
+.IP \(bu 2
+Default: \fBnull\fP
+.IP \(bu 2
+Type: String, Array, null
+
+.RE
+.P
+This is a list of CIDR address to be used when configuring limited access tokens with the \fBnpm token create\fP command\.
 .SS color
 .RS 0
 .IP \(bu 2
@@ -381,6 +417,9 @@ Type: Boolean or \fB"always"\fP
 .P
 If false, never shows colors\.  If \fB"always"\fP then always shows colors\.
 If true, then only prints color codes for tty file descriptors\.
+.P
+This option can also be changed using the environment: colors are
+disabled when the environment variable \fBNO_COLOR\fP is set to any value\.
 .SS depth
 .RS 0
 .IP \(bu 2
@@ -429,8 +468,8 @@ Type: Boolean
 Indicates that you don't want npm to make any changes and that it should
 only report what it would have done\.  This can be passed into any of the
 commands that modify your local installation, eg, \fBinstall\fP, \fBupdate\fP,
-\fBdedupe\fP, \fBuninstall\fP\|\.  This is NOT currently honored by network related
-commands, eg \fBdist\-tags\fP, \fBowner\fP, \fBpublish\fP, etc\.
+\fBdedupe\fP, \fBuninstall\fP\|\.  This is NOT currently honored by some network related
+commands, eg \fBdist\-tags\fP, \fBowner\fP, etc\.
 .SS editor
 .RS 0
 .IP \(bu 2
@@ -541,6 +580,16 @@ Type: Boolean
 .RE
 .P
 Tag the commit when using the \fBnpm version\fP command\.
+.SS commit\-hooks
+.RS 0
+.IP \(bu 2
+Default: \fBtrue\fP
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+Run git commit hooks when using the \fBnpm version\fP command\.
 .SS global
 .RS 0
 .IP \(bu 2
@@ -802,19 +851,19 @@ to the npm registry\.  Must be IPv4 in versions of Node prior to 0\.12\.
 .SS loglevel
 .RS 0
 .IP \(bu 2
-Default: "warn"
+Default: "notice"
 .IP \(bu 2
 Type: String
 .IP \(bu 2
-Values: "silent", "error", "warn", "http", "info", "verbose", "silly"
+Values: "silent", "error", "warn", "notice", "http", "timing", "info",
+"verbose", "silly"
 
 .RE
 .P
 What level of logs to report\.  On failure, \fIall\fR logs are written to
 \fBnpm\-debug\.log\fP in the current working directory\.
 .P
-Any logs of a higher level than the setting are shown\.
-The default is "warn", which shows warn and error output\.
+Any logs of a higher level than the setting are shown\. The default is "notice"\.
 .SS logstream
 .RS 0
 .IP \(bu 2
@@ -879,13 +928,25 @@ Any "%s" in the message will be replaced with the version number\.
 .SS metrics\-registry
 .RS 0
 .IP \(bu 2
-Default: The value of  \fBregistry\fP (which defaults to "https://registry\.npmjs\.org/")
+Default: The value of  \fBregistry\fP (which defaults to "https://
 .IP \(bu 2
 Type: String
 
 .RE
 .P
 The registry you want to send cli metrics to if \fBsend\-metrics\fP is true\.
+.SS node\-options
+.RS 0
+.IP \(bu 2
+Default: null
+.IP \(bu 2
+Type: String
+
+.RE
+.P
+Options to pass through to Node\.js via the \fBNODE_OPTIONS\fP environment
+variable\.  This does not impact how npm itself is executed but it does
+impact how lifecycle scripts are called\.
 .SS node\-version
 .RS 0
 .IP \(bu 2
@@ -896,6 +957,16 @@ Type: semver or false
 .RE
 .P
 The node version to use when checking a package's \fBengines\fP map\.
+.SS noproxy
+.RS 0
+.IP \(bu 2
+Default: null
+.IP \(bu 2
+Type: String or Array
+
+.RE
+.P
+A comma\-separated string or an array of domain extensions that a proxy should not be used for\.
 .SS offline
 .RS 0
 .IP \(bu 2
@@ -951,6 +1022,17 @@ Type: Boolean
 Attempt to install packages in the \fBoptionalDependencies\fP object\.  Note
 that if these packages fail to install, the overall installation
 process is not aborted\.
+.SS otp
+.RS 0
+.IP \(bu 2
+Default: null
+.IP \(bu 2
+Type: Number
+
+.RE
+.P
+This is a one\-time password from a two\-factor authenticator\.  It's needed
+when publishing or changing package permissions with \fBnpm access\fP\|\.
 .SS package\-lock
 .RS 0
 .IP \(bu 2
@@ -963,7 +1045,22 @@ Type: Boolean
 If set to false, then ignore \fBpackage\-lock\.json\fP files when installing\. This
 will also prevent \fIwriting\fR \fBpackage\-lock\.json\fP if \fBsave\fP is true\.
 .P
+When package package\-locks are disabled, automatic pruning of extraneous
+modules will also be disabled\.  To remove extraneous modules with
+package\-locks disabled use \fBnpm prune\fP\|\.
+.P
 This option is an alias for \fB\-\-shrinkwrap\fP\|\.
+.SS package\-lock\-only
+.RS 0
+.IP \(bu 2
+Default: false
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+If set to true, it will update only the \fBpackage\-lock\.json\fP,
+instead of checking \fBnode_modules\fP and downloading dependencies\.
 .SS parseable
 .RS 0
 .IP \(bu 2
@@ -1010,6 +1107,17 @@ Type: path
 .P
 The location to install global items\.  If set on the command line, then
 it forces non\-global commands to run in the specified folder\.
+.SS preid
+.RS 0
+.IP \(bu 2
+Default: ""
+.IP \(bu 2
+Type: String
+
+.RE
+.P
+The "prerelease identifier" to use as a prefix for the "prerelease" part of a
+semver\. Like the \fBrc\fP in \fB1\.2\.0\-rc\.8\fP\|\.
 .SS production
 .RS 0
 .IP \(bu 2
@@ -1041,21 +1149,6 @@ When set to \fBtrue\fP, npm will display a progress bar during time intensive
 operations, if \fBprocess\.stderr\fP is a TTY\.
 .P
 Set to \fBfalse\fP to suppress the progress bar\.
-.SS proprietary\-attribs
-.RS 0
-.IP \(bu 2
-Default: true
-.IP \(bu 2
-Type: Boolean
-
-.RE
-.P
-Whether or not to include proprietary extended attributes in the
-tarballs created by npm\.
-.P
-Unless you are expecting to unpack package tarballs with something other
-than npm \-\- particularly a very outdated tar implementation \-\- leave
-this as true\.
 .SS proxy
 .RS 0
 .IP \(bu 2
@@ -1068,6 +1161,16 @@ Type: url
 A proxy to use for outgoing http requests\. If the \fBHTTP_PROXY\fP or
 \fBhttp_proxy\fP environment variables are set, proxy settings will be
 honored by the underlying \fBrequest\fP library\.
+.SS read\-only
+.RS 0
+.IP \(bu 2
+Default: false
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+This is used to mark a token as unable to publish when configuring limited access tokens with the \fBnpm token create\fP command\.
 .SS rebuild\-bundle
 .RS 0
 .IP \(bu 2
@@ -1081,7 +1184,7 @@ Rebuild bundled dependencies after installation\.
 .SS registry
 .RS 0
 .IP \(bu 2
-Default: https://registry\.npmjs\.org/
+Default: https://
 .IP \(bu 2
 Type: url
 
@@ -1101,7 +1204,7 @@ Remove failed installs\.
 .SS save
 .RS 0
 .IP \(bu 2
-Default: false
+Default: true
 .IP \(bu 2
 Type: Boolean
 
@@ -1327,6 +1430,20 @@ If set to false, then ignore \fBnpm\-shrinkwrap\.json\fP files when installing\.
 will also prevent \fIwriting\fR \fBnpm\-shrinkwrap\.json\fP if \fBsave\fP is true\.
 .P
 This option is an alias for \fB\-\-package\-lock\fP\|\.
+.SS sign\-git\-commit
+.RS 0
+.IP \(bu 2
+Default: false
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+If set to true, then the \fBnpm version\fP command will commit the new package
+version using \fB\-S\fP to add a signature\.
+.P
+Note that git requires you to have set up GPG keys in your git configs
+for this to work properly\.
 .SS sign\-git\-tag
 .RS 0
 .IP \(bu 2
@@ -1453,6 +1570,17 @@ Type: Boolean
 Set to true to suppress the UID/GID switching when running package
 scripts\.  If set explicitly to false, then installing as a non\-root user
 will fail\.
+.SS update\-notifier
+.RS 0
+.IP \(bu 2
+Default: true
+.IP \(bu 2
+Type: Boolean
+
+.RE
+.P
+Set to false to suppress the update notification when using an older
+version of npm than the latest\.
 .SS usage
 .RS 0
 .IP \(bu 2

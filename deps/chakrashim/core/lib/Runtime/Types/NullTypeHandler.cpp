@@ -41,6 +41,7 @@ namespace Js
         return Constants::NoSlot;
     }
 
+#if ENABLE_NATIVE_CODEGEN
     bool NullTypeHandlerBase::GetPropertyEquivalenceInfo(PropertyRecord const* propertyRecord, PropertyEquivalenceInfo& info)
     {
         info.slotIndex = Constants::NoSlot;
@@ -69,8 +70,9 @@ namespace Js
     {
         return entry->slotIndex == Constants::NoSlot && !entry->mustBeWritable;
     }
+#endif
 
-    BOOL NullTypeHandlerBase::HasProperty(DynamicObject* instance, PropertyId propertyId, __out_opt bool *noRedecl)
+    BOOL NullTypeHandlerBase::HasProperty(DynamicObject* instance, PropertyId propertyId, __out_opt bool *noRedecl, _Inout_opt_ PropertyValueInfo* info)
     {
         // Check numeric propertyId only if objectArray is available
         uint32 indexVal;
@@ -93,7 +95,7 @@ namespace Js
     BOOL NullTypeHandlerBase::HasProperty(DynamicObject* instance, JavascriptString* propertyNameString)
     {
         PropertyRecord const* propertyRecord;
-        instance->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+        instance->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
         return NullTypeHandlerBase::HasProperty(instance, propertyRecord->GetPropertyId());
     }
 
@@ -116,7 +118,7 @@ namespace Js
     BOOL NullTypeHandlerBase::GetProperty(DynamicObject* instance, Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext)
     {
         PropertyRecord const* propertyRecord;
-        instance->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+        instance->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
         return NullTypeHandlerBase::GetProperty(instance, originalInstance, propertyRecord->GetPropertyId(), value, info, requestContext);
     }
 
@@ -235,7 +237,7 @@ namespace Js
         instance->EnsureSlots(0, newTypeHandler->GetSlotCapacity(), scriptContext, newTypeHandler);
         Assert(((this->GetFlags() & IsPrototypeFlag) != 0) == this->isPrototype);
         newTypeHandler->SetFlags(IsPrototypeFlag, this->GetFlags());
-        newTypeHandler->SetPropertyTypes(PropertyTypesWritableDataOnly | PropertyTypesWritableDataOnlyDetection | PropertyTypesInlineSlotCapacityLocked, this->GetPropertyTypes());
+        newTypeHandler->SetPropertyTypes(PropertyTypesWritableDataOnly | PropertyTypesWritableDataOnlyDetection | PropertyTypesInlineSlotCapacityLocked | PropertyTypesHasSpecialProperties, this->GetPropertyTypes());
         if (instance->HasReadOnlyPropertiesInvisibleToTypeHandler())
         {
             newTypeHandler->ClearHasOnlyWritableDataProperties();
@@ -330,7 +332,7 @@ namespace Js
             NullTypeHandler<true>* protoTypeHandler = NullTypeHandler<true>::GetDefaultInstance();
             AssertMsg(protoTypeHandler->GetFlags() == (GetFlags() | IsPrototypeFlag), "Why did we change the flags of a NullTypeHandler?");
             Assert(this->GetIsInlineSlotCapacityLocked() == protoTypeHandler->GetIsInlineSlotCapacityLocked());
-            protoTypeHandler->SetPropertyTypes(PropertyTypesWritableDataOnly | PropertyTypesWritableDataOnlyDetection, GetPropertyTypes());
+            protoTypeHandler->SetPropertyTypes(PropertyTypesWritableDataOnly | PropertyTypesWritableDataOnlyDetection | PropertyTypesHasSpecialProperties, GetPropertyTypes());
             SetInstanceTypeHandler(instance, protoTypeHandler);
         }
     }
@@ -340,6 +342,14 @@ namespace Js
 
     template<bool IsPrototypeTemplate>
     NullTypeHandler<IsPrototypeTemplate> * NullTypeHandler<IsPrototypeTemplate>::GetDefaultInstance() { return &defaultInstance; }
+
+#if DBG_DUMP
+    template<bool IsPrototypeTemplate>
+    void NullTypeHandler<IsPrototypeTemplate>::Dump(unsigned indent) const
+    {
+        Output::Print(_u("%*sNullTypeHandler<%d> (0x%p): Dump unimplemented\n"), indent, _u(""), static_cast<int>(IsPrototypeTemplate), this);
+    }
+#endif
 
     template class NullTypeHandler<false>;
     template class NullTypeHandler<true>;

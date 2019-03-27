@@ -1,7 +1,8 @@
+#include <limits.h>  // INT_MAX
 #include <node_api.h>
 #include "../common.h"
 
-napi_value TestLatin1(napi_env env, napi_callback_info info) {
+static napi_value TestLatin1(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -27,7 +28,7 @@ napi_value TestLatin1(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value TestUtf8(napi_env env, napi_callback_info info) {
+static napi_value TestUtf8(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -53,7 +54,7 @@ napi_value TestUtf8(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value TestUtf16(napi_env env, napi_callback_info info) {
+static napi_value TestUtf16(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -79,7 +80,8 @@ napi_value TestUtf16(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value TestLatin1Insufficient(napi_env env, napi_callback_info info) {
+static napi_value
+TestLatin1Insufficient(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -105,7 +107,7 @@ napi_value TestLatin1Insufficient(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value TestUtf8Insufficient(napi_env env, napi_callback_info info) {
+static napi_value TestUtf8Insufficient(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -131,7 +133,7 @@ napi_value TestUtf8Insufficient(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value TestUtf16Insufficient(napi_env env, napi_callback_info info) {
+static napi_value TestUtf16Insufficient(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -157,7 +159,7 @@ napi_value TestUtf16Insufficient(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value Utf16Length(napi_env env, napi_callback_info info) {
+static napi_value Utf16Length(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -179,7 +181,7 @@ napi_value Utf16Length(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value Utf8Length(napi_env env, napi_callback_info info) {
+static napi_value Utf8Length(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1];
   NAPI_CALL(env, napi_get_cb_info(env, info, &argc, args, NULL, NULL));
@@ -201,7 +203,20 @@ napi_value Utf8Length(napi_env env, napi_callback_info info) {
   return output;
 }
 
-napi_value Init(napi_env env, napi_value exports) {
+static napi_value TestLargeUtf8(napi_env env, napi_callback_info info) {
+  napi_value output;
+  if (SIZE_MAX > INT_MAX) {
+    NAPI_CALL(env, napi_create_string_utf8(env, "", ((size_t)INT_MAX) + 1, &output));
+  } else {
+    // just throw the expected error as there is nothing to test
+    // in this case since we can't overflow
+    NAPI_CALL(env, napi_throw_error(env, NULL, "Invalid argument"));
+  }
+
+  return output;
+}
+
+static napi_value Init(napi_env env, napi_value exports) {
   napi_property_descriptor properties[] = {
     DECLARE_NAPI_PROPERTY("TestLatin1", TestLatin1),
     DECLARE_NAPI_PROPERTY("TestLatin1Insufficient", TestLatin1Insufficient),
@@ -211,6 +226,7 @@ napi_value Init(napi_env env, napi_value exports) {
     DECLARE_NAPI_PROPERTY("TestUtf16Insufficient", TestUtf16Insufficient),
     DECLARE_NAPI_PROPERTY("Utf16Length", Utf16Length),
     DECLARE_NAPI_PROPERTY("Utf8Length", Utf8Length),
+    DECLARE_NAPI_PROPERTY("TestLargeUtf8", TestLargeUtf8),
   };
 
   NAPI_CALL(env, napi_define_properties(

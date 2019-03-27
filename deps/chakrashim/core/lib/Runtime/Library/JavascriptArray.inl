@@ -5,6 +5,8 @@
 
 #pragma once
 
+#define Assert_FailFast(x) if (!(x)) { Assert(x); Js::Throw::FatalInternalError(); }
+
 namespace Js
 {
     //
@@ -153,6 +155,7 @@ namespace Js
             DetermineInlineHeadSegmentPointer<T, InlinePropertySlots, false>(array);
         if(wasZeroAllocated)
         {
+            AssertOrFailFast(size <= SparseArraySegmentBase::INLINE_CHUNK_SIZE);
             if(length != 0)
             {
                 head->length = length;
@@ -236,6 +239,14 @@ namespace Js
                 DetermineAllocationSize<className, inlineSlots>(length, &allocationPlusSize, &alignedInlineElementSlots);
             }
 
+            // alignedInlineElementSlots is actually the 'size' of the segment. The size of the segment should not be greater than InlineHead segment limit, otherwise the inline
+            // segment may not be interpreted as inline segment if the length extends to the size.
+            // the size could increase because of allignment.
+            // Update the size so that it does not exceed SparseArraySegmentBase::INLINE_CHUNK_SIZE.
+
+            uint inlineChunkSize = SparseArraySegmentBase::INLINE_CHUNK_SIZE;
+            uint size = min(alignedInlineElementSlots, inlineChunkSize);
+
             array = RecyclerNewPlusZ(recycler, allocationPlusSize, className, length, arrayType);
 
             // An new array's head segment length is initialized to zero despite the array length being nonzero because the segment
@@ -248,9 +259,9 @@ namespace Js
             // a variable until it is fully initialized, there is no way for script code to use the array while it still has missing
             // values.
             SparseArraySegment<unitType> *head =
-                InitArrayAndHeadSegment<className, inlineSlots>(array, length, alignedInlineElementSlots, true);
+                InitArrayAndHeadSegment<className, inlineSlots>(array, length, size, true);
 
-            head->FillSegmentBuffer(length, alignedInlineElementSlots);
+            head->FillSegmentBuffer(length, size);
 
             Assert(array->HasNoMissingValues());
             return array;
@@ -401,12 +412,14 @@ namespace Js
         return NewLiteral<typename T::TElement, T, InlinePropertySlots>(length, arrayType, arrayType->GetRecycler());
     }
 
-    template<typename T>
-    inline void JavascriptArray::DirectSetItemAt(uint32 itemIndex, T newValue)
+    template <>
+    inline void JavascriptArray::DirectSetItemAt<int32>(uint32 itemIndex, int32 newValue)
     {
+        Assert_FailFast(this->GetTypeId() == TypeIds_NativeIntArray);
+
         Assert(itemIndex < InvalidIndex); // Otherwise the code below could overflow and set length = 0
 
-        SparseArraySegment<T> *seg = (SparseArraySegment<T>*)this->GetLastUsedSegment();
+        SparseArraySegment<int32> *seg = (SparseArraySegment<int32>*)this->GetLastUsedSegment();
         uint32 offset = itemIndex - seg->left;
         if(itemIndex >= seg->left && offset < seg->size)
         {
@@ -414,6 +427,60 @@ namespace Js
             return;
         }
         DirectSetItem_Full(itemIndex, newValue);
+    }
+
+    template <>
+    inline void JavascriptArray::DirectSetItemAt<double>(uint32 itemIndex, double newValue)
+    {
+        Assert_FailFast(this->GetTypeId() == TypeIds_NativeFloatArray);
+
+        Assert(itemIndex < InvalidIndex); // Otherwise the code below could overflow and set length = 0
+
+        SparseArraySegment<double> *seg = (SparseArraySegment<double>*)this->GetLastUsedSegment();
+        uint32 offset = itemIndex - seg->left;
+        if (itemIndex >= seg->left && offset < seg->size)
+        {
+            DirectSetItemInLastUsedSegmentAt(offset, newValue);
+            return;
+        }
+        DirectSetItem_Full(itemIndex, newValue);
+    }
+
+    template <>
+    inline void JavascriptArray::DirectSetItemAt<Var>(uint32 itemIndex, Var newValue)
+    {
+        Assert_FailFast(this->GetTypeId() == TypeIds_Array || this->GetTypeId() == TypeIds_ES5Array);
+
+        Assert(itemIndex < InvalidIndex); // Otherwise the code below could overflow and set length = 0
+
+        SparseArraySegment<Var> *seg = (SparseArraySegment<Var>*)this->GetLastUsedSegment();
+        uint32 offset = itemIndex - seg->left;
+        if (itemIndex >= seg->left && offset < seg->size)
+        {
+            DirectSetItemInLastUsedSegmentAt(offset, newValue);
+            return;
+        }
+        DirectSetItem_Full(itemIndex, newValue);
+    }
+
+    template <typename T>
+    inline void JavascriptArray::DirectSetItemAt(uint32 itemIndex, T newValue)
+    {
+        Assert(itemIndex < InvalidIndex); // Otherwise the code below could overflow and set length = 0
+
+        SparseArraySegment<T> *seg = (SparseArraySegment<T>*)this->GetLastUsedSegment();
+        uint32 offset = itemIndex - seg->left;
+        if (itemIndex >= seg->left && offset < seg->size)
+        {
+            DirectSetItemInLastUsedSegmentAt(offset, newValue);
+            return;
+        }
+        DirectSetItem_Full(itemIndex, newValue);
+    }
+
+    inline void JavascriptArray::GenericDirectSetItemAt(const uint32 index, Var newValue)
+    {
+        this->DirectSetItemAt(index, newValue);
     }
 
     template<typename T>
@@ -637,7 +704,7 @@ SECOND_PASS:
     SparseArraySegment<T>* JavascriptArray::PrepareSegmentForMemOp(uint32 startIndex, uint32 length)
     {
         uint32 endIndex;
-        if(UInt32Math::Add(startIndex, length - 1, &endIndex))
+        if (UInt32Math::Add(startIndex, length - 1, &endIndex))
         {
             return nullptr;
         }
@@ -653,29 +720,38 @@ SECOND_PASS:
             }
         }
 
+        // We are messing with the segments and the length of the array.
+        // We must be certain we reach the end of this function without
+        // any interruption to guaranty coherence of the array
+        AutoDisableInterrupt autoDisableInterrupt(this->GetScriptContext()->GetThreadContext());
+
         this->EnsureHead<T>();
 
         Recycler* recycler = GetRecycler();
 
         //Find the segment where itemIndex is present or is at the boundary
-        SparseArraySegment<T>* current = (SparseArraySegment<T>*)this->GetBeginLookupSegment(startIndex, false);
+        SparseArraySegment<T>* current = (SparseArraySegment<T>*)this->GetLastUsedSegment();
 
         SparseArraySegmentBase* prev = nullptr;
         SparseArraySegmentBase* startSeg = nullptr;
         SparseArraySegmentBase* endSeg = nullptr;
         SparseArraySegmentBase* startPrev = nullptr;
         uint32 growby, startOffset, endOffset;
+        bool isAllocationSolelyInLastUsedSegment = false;
 
-        const auto FindStartAndEndSegment = [&]()
+        // FindStartAndEndSegment
         {
-            if (endIndex >= current->left + current->size)
+            if (current->left > startIndex || endIndex >= current->left + current->size)
             {
+                // The allocation may touch other segments, just start looking from head
                 current = SparseArraySegment<T>::From(head);
             }
             else
             {
+                // We are allocating solely in the last used segment
                 startSeg = endSeg = current;
                 current = nullptr;
+                isAllocationSolelyInLastUsedSegment = true;
             }
 
             while (current != nullptr)
@@ -721,10 +797,12 @@ SECOND_PASS:
             {
                 startPrev = prev;
             }
-        };
+        }
 
-        const auto ResizeArrayIfStartIsOutsideArrayLength = [&]()
+        if (startSeg == nullptr)
         {
+            // if start index is greater than array length then we can add a new segment (or extend the last segment based on some heuristics)
+            // ResizeArrayIfStartIsOutsideArrayLength;
             Assert(endSeg == nullptr);
             Assert(startIndex >= head->size);
             // Reallocate head if it meets a heuristics
@@ -760,10 +838,14 @@ SECOND_PASS:
                     SetHasNoMissingValues();
                 }
             }
-        };
-
-        const auto ExtendStartSegmentForMemOp = [&]()
+        }
+        else
         {
+            // once we found the start segment we extend the start segment until startIndex+length . We don't care about what was there
+            // as they will be overwritten by the memset/ memcopy. Then we need to append items from the (startIndex+length) to array.length
+            // from the end segment to the new array
+
+            // ExtendStartSegmentForMemOp
             SparseArraySegmentBase *oldStartSeg = startSeg;
             bool isInlineSegment = false;
             startOffset = startIndex - startSeg->left;
@@ -810,13 +892,13 @@ SECOND_PASS:
                         else if (!HasNoMissingValues())
                         {
                             // Have we overwritten all the missing values?
-                            if (!ScanForMissingValues<T>(0, startOffset))
+                            if (!ScanForMissingValues<T>(0, startOffset) && !ScanForMissingValues<T>(startOffset + length, current->length))
                             {
                                 SetHasNoMissingValues();
                             }
                         }
                     }
-                    current->length = current->length >  (startOffset + length) ? current->length : (startOffset + length);
+                    current->length = current->length > (startOffset + length) ? current->length : (startOffset + length);
                     current->CheckLengthvsSize();
                     Assert(current == oldStartSeg);
                 }
@@ -824,24 +906,12 @@ SECOND_PASS:
             else if ((startIndex + 1) <= startSeg->left)
             {
                 isInlineSegment = JavascriptArray::IsInlineSegment(startSeg, this);
-                if (startIndex + 1 == startSeg->left && startPrev == head)
+                // startIndex is in between prev and startIndex
+                current = SparseArraySegment<T>::template AllocateSegmentImpl<false>(recycler, startIndex, length, nullptr);
+                LinkSegments((Js::SparseArraySegment<T>*)startPrev, current);
+                if (current == head)
                 {
-                    current = SparseArraySegment<T>::From(head)->GrowByMin(recycler, startIndex + length - head->size);
-                    current->length = endIndex + 1;
-                    current->CheckLengthvsSize();
-                    head = current;
-                }
-                else
-                {
-                    // startIndex is in between prev and startIndex
-                    current = SparseArraySegment<T>::AllocateSegment(recycler, startIndex, length, (SparseArraySegment<T> *)nullptr);
-                    LinkSegments((Js::SparseArraySegment<T>*)startPrev, current);
-                    if (current == head)
-                    {
-                        SetHasNoMissingValues();
-                    }
-                    current->length = length;
-                    current->CheckLengthvsSize();
+                    SetHasNoMissingValues();
                 }
             }
             else
@@ -871,12 +941,11 @@ SECOND_PASS:
             {
                 this->ClearElements(oldStartSeg, 0);
             }
-        };
 
-        const auto AppendLeftOverItemsFromEndSegment = [&]()
-        {
+            // AppendLeftOverItemsFromEndSegment
+
             SparseArraySegmentBase *oldCurrent = current;
-            bool isInlineSegment = false;
+            isInlineSegment = false;
             if (!endSeg)
             {
                 // end is beyond the length of the array
@@ -905,12 +974,12 @@ SECOND_PASS:
                             LinkSegments((Js::SparseArraySegment<T>*)startPrev, current);
                             current->length = startOffset + length + growby;
                             current->CheckLengthvsSize();
-                        }
-                        if (current == head && HasNoMissingValues())
-                        {
-                            if (ScanForMissingValues<T>(startOffset + length, current->length))
+                            if (current == head && HasNoMissingValues())
                             {
-                                SetHasNoMissingValues(false);
+                                if (ScanForMissingValues<T>(startOffset + length, current->length))
+                                {
+                                    SetHasNoMissingValues(false);
+                                }
                             }
                         }
                     }
@@ -929,7 +998,7 @@ SECOND_PASS:
                         CopyArray(current->elements + endIndex + 1, endSeg->length,
                             ((Js::SparseArraySegment<T>*)endSeg)->elements, endSeg->length);
                         LinkSegments((Js::SparseArraySegment<T>*)startPrev, current);
-                        if (HasNoMissingValues())
+                        if (current == head && HasNoMissingValues())
                         {
                             if (ScanForMissingValues<T>(endIndex + 1, endIndex + growby))
                             {
@@ -960,25 +1029,14 @@ SECOND_PASS:
             {
                 this->ClearElements(oldCurrent, 0);
             }
-        };
-        FindStartAndEndSegment();
-        if (startSeg == nullptr)
-        {
-            // if start index is greater than array length then we can add a new segment (or extend the last segment based on some heuristics)
-            ResizeArrayIfStartIsOutsideArrayLength();
-        }
-        else
-        {
-            // once we found the start segment we extend the start segment until startIndex+length . We don't care about what was there
-            // as they will be overwritten by the memset/ memcopy. Then we need to append items from the (startIndex+length) to array.length
-            // from the end segment to the new array
-            ExtendStartSegmentForMemOp();
-            AppendLeftOverItemsFromEndSegment();
         }
 
         Assert(current);
         Assert(current->left <= startIndex);
         Assert((startIndex - current->left) < current->size);
+        // If we are solely using the last used segment, make sure there were no allocation done
+        Assert(!isAllocationSolelyInLastUsedSegment || (current == startSeg && current == endSeg));
+        autoDisableInterrupt.Completed();
         return current;
     }
 
@@ -1017,7 +1075,7 @@ SECOND_PASS:
 
         const auto isSegmentValid = [length](Js::SparseArraySegment<T>* segment, uint32 startIndex) {
             uint32 end, segmentEnd;
-            // Check the segment is int32 enough
+            // Check the segment is big enough
             return (
                 segment &&
                 !UInt32Math::Add(startIndex, length, &end) &&
@@ -1027,8 +1085,8 @@ SECOND_PASS:
                 segmentEnd >= end
             );
         };
-        //Find the segment where itemIndex is present or is at the boundary
-        Js::SparseArraySegment<T>* fromSegment = (Js::SparseArraySegment<T>*)fromArray->GetBeginLookupSegment(fromStartIndex, false);
+        // Check if the head segment of the fromArray has everything we need to copy
+        Js::SparseArraySegment<T>* fromSegment = (Js::SparseArraySegment<T>*)fromArray->GetHead();
         if (!isSegmentValid(fromSegment, fromStartIndex))
         {
             return false;
@@ -1111,27 +1169,19 @@ SECOND_PASS:
         }
         else if (startIndex == 0 && length > this->length && (head == EmptySegment || length > head->size))
         {
-
             Recycler *recycler = GetRecycler();
-            this->length = length;
-            this->EnsureHead<T>();
-            SparseArraySegmentBase* current = nullptr;
-
-            Assert(head->size < length);
-
-            current = SparseArraySegment<T>::AllocateSegment(recycler, 0, length, (SparseArraySegment<T> *)nullptr);
+            SparseArraySegmentBase* current = SparseArraySegment<T>::AllocateSegment(recycler, 0, length, (SparseArraySegment<T> *)nullptr);
             this->SetHeadAndLastUsedSegment(current);
+            this->length = length;
 
             Assert(!HasSegmentMap());
 
             SetHasNoMissingValues(true);
-
             CopyValueToSegmentBuferNoCheck(((Js::SparseArraySegment<T>*)current)->elements, length, newValue);
-            this->SetLastUsedSegment(current);
         }
         else
         {
-            DirectSetItemAtRangeFull<T>(startIndex, length, newValue);
+            return DirectSetItemAtRangeFull<T>(startIndex, length, newValue);
         }
         return true;
     }
@@ -1737,7 +1787,7 @@ SECOND_PASS:
             sizeof(T) + sizeof(SparseArraySegment<typename T::TElement>) + InlinePropertySlots * sizeof(Var);
         size_t totalSize = UInt32Math::MulAdd<sizeof(typename T::TElement), objectSize>(inlineElementSlots);
 
-    #if defined(_M_X64_OR_ARM64)
+    #if defined(TARGET_64)
         // On x64, the total size won't be anywhere near AllocSizeMath::MaxMemory on x64, so no need to check
         totalSize = HeapInfo::GetAlignedSizeNoCheck(totalSize);
     #else

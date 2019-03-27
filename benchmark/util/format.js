@@ -16,12 +16,13 @@ const inputs = {
 };
 
 const bench = common.createBenchmark(main, {
-  n: [4e6],
+  n: [1e5],
   type: Object.keys(inputs)
 });
 
 function main({ n, type }) {
-  const [first, second] = inputs[type];
+  // For testing, if supplied with an empty type, default to string.
+  const [first, second] = inputs[type || 'string'];
 
   bench.start();
   for (var i = 0; i < n; i++) {

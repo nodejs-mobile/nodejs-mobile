@@ -194,6 +194,8 @@ InstructionType EncoderMD::CanonicalizeInstr(IR::Instr* instr)
         case Js::OpCode::VSQRT:
         case Js::OpCode::VMOV:
         case Js::OpCode::VMOVARMVFP:
+        case Js::OpCode::VMOVF64R32L:
+        case Js::OpCode::VMOVF64R32U:
         case Js::OpCode::VCVTF64F32:
         case Js::OpCode::VCVTF32F64:
         case Js::OpCode::VCVTF64S32:
@@ -2205,17 +2207,18 @@ EncoderMD::BaseAndOffsetFromSym(IR::SymOpnd *symOpnd, RegNum *pBaseReg, int32 *p
 
     RegNum baseReg = func->GetLocalsPointer();
     int32 offset = stackSym->m_offset + symOpnd->m_offset;
+
     if (baseReg == RegSP)
     {
         // SP points to the base of the argument area. Non-reg SP points directly to the locals.
         offset += (func->m_argSlotsForFunctionsCalled * MachRegInt);
-        if (func->GetMaxInlineeArgOutCount())
+    }
+
+    if (func->HasInlinee())
+    {
+        if ((!stackSym->IsArgSlotSym() || stackSym->m_isOrphanedArg) && !stackSym->IsParamSlotSym())
         {
-            Assert(func->HasInlinee());
-            if ((!stackSym->IsArgSlotSym() || stackSym->m_isOrphanedArg) && !stackSym->IsParamSlotSym())
-            {
-                offset += func->GetInlineeArgumentStackSize();
-            }
+            offset += func->GetInlineeArgumentStackSize();
         }
     }
 
@@ -2237,18 +2240,19 @@ EncoderMD::BaseAndOffsetFromSym(IR::SymOpnd *symOpnd, RegNum *pBaseReg, int32 *p
         Assert(offset >= 0);
         Assert(baseReg != RegSP || (uint)offset >= (func->m_argSlotsForFunctionsCalled * MachRegInt));
 
-        if (func->GetMaxInlineeArgOutCount())
+        if (func->GetMaxInlineeArgOutSize() != 0)
         {
-            Assert(baseReg == RegSP);
+            Assert(func->HasInlinee());
+            Assert(baseReg == (func->HasTry() ?  RegR7 : RegSP));
             if (stackSym->IsArgSlotSym() && !stackSym->m_isOrphanedArg)
             {
                 Assert(stackSym->m_isInlinedArgSlot);
-                Assert((uint)offset <= ((func->m_argSlotsForFunctionsCalled + func->GetMaxInlineeArgOutCount()) * MachRegInt));
+                Assert((uint)offset <= func->m_argSlotsForFunctionsCalled * MachRegInt + func->GetMaxInlineeArgOutSize());
             }
             else
             {
                 AssertMsg(stackSym->IsAllocated(), "StackSym offset should be set");
-                Assert((uint)offset > ((func->m_argSlotsForFunctionsCalled + func->GetMaxInlineeArgOutCount()) * MachRegInt));
+                Assert(offset > (func->HasTry() ? (int32)func->GetMaxInlineeArgOutSize() : (int32)(func->m_argSlotsForFunctionsCalled * MachRegInt + func->GetMaxInlineeArgOutSize())));
             }
         }
         // TODO: restore the following assert (very useful) once we have a way to tell whether prolog/epilog
@@ -2399,7 +2403,7 @@ bool EncoderMD::TryConstFold(IR::Instr *instr, IR::RegOpnd *regOpnd)
         }
 
         instr->ReplaceSrc(regOpnd, regOpnd->m_sym->GetConstOpnd());
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
 
         return true;
     }
@@ -2419,7 +2423,7 @@ bool EncoderMD::TryFold(IR::Instr *instr, IR::RegOpnd *regOpnd)
         }
         IR::SymOpnd *symOpnd = IR::SymOpnd::New(regOpnd->m_sym, regOpnd->GetType(), instr->m_func);
         instr->ReplaceSrc(regOpnd, symOpnd);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
 
         return true;
     }

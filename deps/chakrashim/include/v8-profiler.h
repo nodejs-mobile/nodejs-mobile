@@ -39,6 +39,8 @@ class V8_EXPORT CpuProfiler {
   // void StartProfiling(Handle<String> title, bool record_samples = false);
   // CpuProfile* StopProfiling(Handle<String> title);
   void SetIdle(bool is_idle) {}
+  static CpuProfiler* New(Isolate* isolate) { return nullptr; };
+  void Dispose() {}
 };
 
 class V8_EXPORT OutputStream {  // NOLINT
@@ -79,6 +81,32 @@ class V8_EXPORT ActivityControl {  // NOLINT
 };
 
 // NOT IMPLEMENTED
+class V8_EXPORT EmbedderGraph {
+ public:
+  class Node {
+   public:
+    Node() = default;
+    virtual ~Node() = default;
+    virtual const char* Name()  { return nullptr; };
+    virtual size_t SizeInBytes() { return 0; }
+    virtual Node* WrapperNode() { return nullptr; }
+    virtual bool IsRootNode() { return false; }
+    virtual bool IsEmbedderNode() { return true; }
+    virtual const char* NamePrefix() { return nullptr; }
+
+   private:
+    Node(const Node&) = delete;
+    Node& operator=(const Node&) = delete;
+  };
+
+  virtual Node* V8Node(const v8::Local<v8::Value>& value) { return nullptr; }
+  virtual Node* AddNode(std::unique_ptr<Node> node) { return nullptr; }
+  virtual void AddEdge(Node* from, Node* to) {};
+
+  virtual ~EmbedderGraph() = default;
+};
+
+// NOT IMPLEMENTED
 class V8_EXPORT HeapProfiler {
  public:
   typedef RetainedObjectInfo *(*WrapperInfoCallback)(
@@ -101,6 +129,12 @@ class V8_EXPORT HeapProfiler {
   void SetWrapperClassInfoProvider(
     uint16_t class_id, WrapperInfoCallback callback) {}
   void StartTrackingHeapObjects(bool track_allocations = false) {}
+
+  typedef void (*BuildEmbedderGraphCallback)(v8::Isolate* isolate,
+                                             v8::EmbedderGraph* graph,
+                                             void* data);
+  void AddBuildEmbedderGraphCallback(BuildEmbedderGraphCallback callback, void* data) {}
+  void RemoveBuildEmbedderGraphCallback(BuildEmbedderGraphCallback callback, void* data) {}
 };
 
 // NOT IMPLEMENTED
@@ -113,6 +147,10 @@ class V8_EXPORT RetainedObjectInfo {
   virtual const char *GetGroupLabel() { return nullptr; }
   virtual intptr_t GetElementCount() { return 0; }
   virtual intptr_t GetSizeInBytes() { return 0; }
+
+ protected:
+  RetainedObjectInfo() {}
+  virtual ~RetainedObjectInfo() {}
 };
 
 struct HeapStatsUpdate {

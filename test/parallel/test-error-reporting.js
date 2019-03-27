@@ -23,30 +23,23 @@
 const common = require('../common');
 const assert = require('assert');
 const exec = require('child_process').exec;
-const path = require('path');
+const fixtures = require('../common/fixtures');
 
 function errExec(script, callback) {
-  const cmd = `"${process.argv[0]}" "${path.join(common.fixturesDir, script)}"`;
+  const cmd = `"${process.argv[0]}" "${fixtures.path(script)}"`;
   return exec(cmd, function(err, stdout, stderr) {
     // There was some error
     assert.ok(err);
 
-    if (!common.isChakraEngine) {
-      // More than one line of error output. (not necessarily for chakra engine)
-      assert.ok(stderr.split('\n').length > 2);
-    }
-
-    if (!common.isChakraEngine) { // chakra does not output script
-      // Assert the script is mentioned in error output.
-      assert.ok(stderr.includes(script));
-    }
+    // More than one line of error output.
+    assert.ok(stderr.split('\n').length);
 
     // Proxy the args for more tests.
     callback(err, stdout, stderr);
   });
 }
 
-const syntaxErrorMessage = /SyntaxError/;
+const syntaxErrorMessage = /\bSyntaxError\b/;
 
 
 // Simple throw error
@@ -69,9 +62,6 @@ errExec('throws_error3.js', common.mustCall(function(err, stdout, stderr) {
 
 // throw ILLEGAL error
 errExec('throws_error4.js', common.mustCall(function(err, stdout, stderr) {
-  if (!common.isChakraEngine) { // chakra does not output source line
-    assert.ok(/\/\*\*/.test(stderr));
-  }
   assert.ok(syntaxErrorMessage.test(stderr));
 }));
 

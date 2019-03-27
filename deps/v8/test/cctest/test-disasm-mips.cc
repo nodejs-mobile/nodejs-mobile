@@ -33,10 +33,12 @@
 #include "src/debug/debug.h"
 #include "src/disasm.h"
 #include "src/disassembler.h"
+#include "src/frames-inl.h"
 #include "src/macro-assembler.h"
 #include "test/cctest/cctest.h"
 
-using namespace v8::internal;
+namespace v8 {
+namespace internal {
 
 bool prev_instr_compact_branch = false;
 
@@ -142,14 +144,14 @@ if (failure) { \
 #define COMPARE_PC_JUMP(asm_, compare_string, target)                          \
   {                                                                            \
     int pc_offset = assm.pc_offset();                                          \
-    byte *progcounter = &buffer[pc_offset];                                    \
+    byte* progcounter = &buffer[pc_offset];                                    \
     char str_with_address[100];                                                \
     int instr_index = (target >> 2) & kImm26Mask;                              \
     snprintf(                                                                  \
         str_with_address, sizeof(str_with_address), "%s %p -> %p",             \
-        compare_string, reinterpret_cast<void *>(target),                      \
-        reinterpret_cast<void *>(((uint32_t)(progcounter + 4) & ~0xfffffff) |  \
-                                 (instr_index << 2)));                         \
+        compare_string, reinterpret_cast<void*>(target),                       \
+        reinterpret_cast<void*>(((uint32_t)(progcounter + 4) & ~0xFFFFFFF) |   \
+                                (instr_index << 2)));                          \
     assm.asm_;                                                                 \
     if (!DisassembleAndCompare(progcounter, str_with_address)) failure = true; \
   }
@@ -157,10 +159,9 @@ if (failure) { \
 #define GET_PC_REGION(pc_region)                                         \
   {                                                                      \
     int pc_offset = assm.pc_offset();                                    \
-    byte *progcounter = &buffer[pc_offset];                              \
-    pc_region = reinterpret_cast<int32_t>(progcounter + 4) & ~0xfffffff; \
+    byte* progcounter = &buffer[pc_offset];                              \
+    pc_region = reinterpret_cast<int32_t>(progcounter + 4) & ~0xFFFFFFF; \
   }
-
 
 TEST(Type0) {
   SET_UP();
@@ -502,12 +503,12 @@ TEST(Type0) {
 
   int32_t target = pc_region | 0x4;
   COMPARE_PC_JUMP(j(target), "08000001       j      ", target);
-  target = pc_region | 0xffffffc;
+  target = pc_region | 0xFFFFFFC;
   COMPARE_PC_JUMP(j(target), "0bffffff       j      ", target);
 
   target = pc_region | 0x4;
   COMPARE_PC_JUMP(jal(target), "0c000001       jal    ", target);
-  target = pc_region | 0xffffffc;
+  target = pc_region | 0xFFFFFFC;
   COMPARE_PC_JUMP(jal(target), "0fffffff       jal    ", target);
 
   COMPARE(addiu(a0, a1, 0x0),
@@ -1120,6 +1121,18 @@ TEST(madd_msub_maddf_msubf) {
   VERIFY_RUN();
 }
 
+TEST(atomic_load_store) {
+  SET_UP();
+  if (IsMipsArchVariant(kMips32r6)) {
+    COMPARE(ll(v0, MemOperand(v1, -1)), "7c62ffb6       ll     v0, -1(v1)");
+    COMPARE(sc(v0, MemOperand(v1, 1)), "7c6200a6       sc     v0, 1(v1)");
+  } else {
+    COMPARE(ll(v0, MemOperand(v1, -1)), "c062ffff       ll     v0, -1(v1)");
+    COMPARE(sc(v0, MemOperand(v1, 1)), "e0620001       sc     v0, 1(v1)");
+  }
+  VERIFY_RUN();
+}
+
 TEST(MSA_BRANCH) {
   SET_UP();
   if (IsMipsArchVariant(kMips32r6) && CpuFeatures::IsSupported(MIPS_SIMD)) {
@@ -1131,14 +1144,16 @@ TEST(MSA_BRANCH) {
                        32767);
     COMPARE_MSA_BRANCH(bnz_d(w3, -32768), "47e38000       bnz.d  w3, -32768",
                        -32768);
-    COMPARE_MSA_BRANCH(bnz_v(w0, 0), "45e00000       bnz.v  w0, 0", 0);
+    COMPARE_MSA_BRANCH(bnz_v(w0, static_cast<int16_t>(0)),
+                       "45e00000       bnz.v  w0, 0", 0);
     COMPARE_MSA_BRANCH(bz_b(w0, 1), "47000001       bz.b  w0, 1", 1);
     COMPARE_MSA_BRANCH(bz_h(w1, -1), "4721ffff       bz.h  w1, -1", -1);
     COMPARE_MSA_BRANCH(bz_w(w2, 32767), "47427fff       bz.w  w2, 32767",
                        32767);
     COMPARE_MSA_BRANCH(bz_d(w3, -32768), "47638000       bz.d  w3, -32768",
                        -32768);
-    COMPARE_MSA_BRANCH(bz_v(w0, 0), "45600000       bz.v  w0, 0", 0);
+    COMPARE_MSA_BRANCH(bz_v(w0, static_cast<int16_t>(0)),
+                       "45600000       bz.v  w0, 0", 0);
   }
   VERIFY_RUN();
 }
@@ -1799,3 +1814,6 @@ TEST(MSA_BIT) {
   }
   VERIFY_RUN();
 }
+
+}  // namespace internal
+}  // namespace v8

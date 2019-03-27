@@ -249,7 +249,7 @@ TEST_IMPL(signal_multiple_loops) {
     uv_sem_wait(&sem);
 
   /* Block all signals to this thread, so we are sure that from here the signal
-   * handler runs in another thread. This is is more likely to catch thread and
+   * handler runs in another thread. This is more likely to catch thread and
    * signal safety issues if there are any.
    */
   sigfillset(&sigset);
@@ -275,6 +275,7 @@ TEST_IMPL(signal_multiple_loops) {
     ASSERT(r == 0);
   }
 
+  uv_sem_destroy(&sem);
   printf("signal1_cb calls: %d\n", signal1_cb_counter);
   printf("signal2_cb calls: %d\n", signal2_cb_counter);
   printf("loops created and destroyed: %d\n", loop_creation_counter);

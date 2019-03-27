@@ -51,7 +51,7 @@ HeapStatistics::HeapStatistics()
       peak_malloced_memory_(0),
       does_zap_garbage_(0) {}
 
-const char *V8::GetVersion() {
+const char* V8::GetVersion() {
   static char versionStr[kMaxVersionLength] = {};
 
   if (versionStr[0] == '\0') {
@@ -91,6 +91,16 @@ const char *V8::GetVersion() {
   return versionStr;
 }
 
+void Isolate::SetHostImportModuleDynamicallyCallback(
+    HostImportModuleDynamicallyCallback callback) {
+  // CHAKRA-TODO
+}
+
+void Isolate::SetHostInitializeImportMetaObjectCallback(
+    HostInitializeImportMetaObjectCallback callback) {
+  CHAKRA_UNIMPLEMENTED();
+}
+
 void Isolate::SetFatalErrorHandler(FatalErrorCallback that) {
   // CONSIDER: Ignoring for now, since we don't have an equivalent concept.
 }
@@ -108,14 +118,11 @@ static bool startsWith(const char* str, const char (&prefix)[N]) {
   return strncmp(str, prefix, N - 1) == 0;
 }
 
-
-
-
-void V8::SetFlagsFromCommandLine(int *argc, char **argv, bool remove_flags) {
+void V8::SetFlagsFromCommandLine(int* argc, char** argv, bool remove_flags) {
   for (int i = 1; i < *argc; i++) {
     // Note: Node now exits on invalid options. We may not recognize V8 flags
     // and fail here, causing Node to exit.
-    char *arg = argv[i];
+    char* arg = argv[i];
     if (equals("--expose-gc", arg) || equals("--expose_gc", arg)) {
       g_exposeGC = true;
       if (remove_flags) {
@@ -132,18 +139,24 @@ void V8::SetFlagsFromCommandLine(int *argc, char **argv, bool remove_flags) {
         argv[i] = nullptr;
       }
     } else if (equals("--trace-debug-json", arg) ||
-      equals("--trace_debug_json", arg)) {
+               equals("--trace_debug_json", arg)) {
       g_trace_debug_json = true;
       if (remove_flags) {
         argv[i] = nullptr;
       }
-    } else if (remove_flags &&
-               (startsWith(
-                 arg, "--debug")  // Ignore some flags to reduce unit test noise
-                || startsWith(arg, "--harmony")
-                || startsWith(arg, "--stack-size=")
-                || startsWith(arg, "--nolazy"))) {
-      argv[i] = nullptr;
+    } else if (startsWith(arg, "--debug") ||
+               startsWith(arg, "--harmony") ||
+               startsWith(arg, "--max-old-space-size=") ||
+               startsWith(arg, "--nolazy") ||
+               startsWith(arg, "--stack-size=")) {
+      // Ignore some flags to reduce compatibility issues. These flags don't
+      // have any functionality differences in ChakraCore and are generally
+      // invisible to the running code.
+      fprintf(stderr, "Warning: Ignored engine flag: %s\n", arg);
+
+      if (remove_flags) {
+        argv[i] = nullptr;
+      }
     } else if (equals("--help", arg)) {
         printf(
           "Options:\n"
@@ -162,7 +175,9 @@ void V8::SetFlagsFromCommandLine(int *argc, char **argv, bool remove_flags) {
   }
 
   if (remove_flags) {
-    char** end = std::remove(argv + 1, argv + *argc, nullptr);
+    char** end = std::remove(argv + 1,
+                             argv + *argc, // NOLINT (readability/null_usage)
+                             nullptr);
     *argc = static_cast<int>(end - argv);
   }
 }
@@ -213,33 +228,46 @@ namespace platform {
   void SetTracingController(
       v8::Platform* platform,
       v8::platform::tracing::TracingController* tracing_controller) {
-    jsrt::Unimplemented("TracingController");
   }
 }  // namespace platform
 
 namespace platform {
 namespace tracing {
   void TracingController::StopTracing() {
-    jsrt::Unimplemented("TracingController");
   }
 
   void TracingController::StartTracing(TraceConfig*) {
-    jsrt::Unimplemented("TracingController");
   }
 
   void TracingController::Initialize(TraceBuffer*) {
-    jsrt::Unimplemented("TracingController");
   }
 
   const uint8_t* TracingController::GetCategoryGroupEnabled(
       const char* category_group) {
-    jsrt::Unimplemented("TracingController");
-    return nullptr;
+    static uint8_t no = 0;
+    return &no;
+  }
+
+  uint64_t TracingController::AddTraceEvent(
+      char phase, const uint8_t* category_enabled_flag, const char* name,
+      const char* scope, uint64_t id, uint64_t bind_id, int32_t num_args,
+      const char** arg_names, const uint8_t* arg_types,
+      const uint64_t* arg_values,
+      std::unique_ptr<v8::ConvertableToTraceFormat>* arg_convertables,
+      unsigned int flags) {
+    return 0;
   }
 
   void TracingController::UpdateTraceEventDuration(
       const uint8_t* category_enabled_flag, const char* name, uint64_t handle) {
-    jsrt::Unimplemented("TracingController");
+  }
+
+  int64_t TracingController::CurrentTimestampMicroseconds() {
+    return 0;
+  }
+
+  int64_t TracingController::CurrentCpuTimestampMicroseconds() {
+    return 0;
   }
 
   void TraceConfig::AddIncludedCategory(char const*) {
@@ -263,7 +291,31 @@ namespace tracing {
     // Intentionally left empty to suppress warning C4722.
   }
 
+  void TraceObject::Initialize(
+    char phase,
+    const uint8_t* category_enabled_flag,
+    const char* name,
+    const char* scope,
+    uint64_t id,
+    uint64_t bind_id,
+    int num_args,
+    const char** arg_names,
+    const uint8_t* arg_types,
+    const uint64_t* arg_values,
+    std::unique_ptr<v8::ConvertableToTraceFormat>* arg_convertables,
+    unsigned int flags,
+    int64_t timestamp,
+    int64_t cpu_timestamp) {
+    // Unimplemented
+  }
+
   TraceWriter* TraceWriter::CreateJSONTraceWriter(std::ostream&) {
+    jsrt::Unimplemented("TraceWriter");
+    return 0;
+  }
+
+  TraceWriter* TraceWriter::CreateJSONTraceWriter(std::ostream&,
+                                                  const std::string&) {
     jsrt::Unimplemented("TraceWriter");
     return 0;
   }

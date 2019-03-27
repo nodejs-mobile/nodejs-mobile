@@ -11,80 +11,67 @@ namespace Js
 
     PropertyString::PropertyString(StaticType* type, const Js::PropertyRecord* propertyRecord) :
         JavascriptString(type, propertyRecord->GetLength(), propertyRecord->GetBuffer()),
-        propertyRecord(propertyRecord),
-        ldElemInlineCache(nullptr),
-        stElemInlineCache(nullptr),
-        hitRate(0)
+        propertyRecordUsageCache(type, propertyRecord)
     {
     }
 
     PropertyString* PropertyString::New(StaticType* type, const Js::PropertyRecord* propertyRecord, Recycler *recycler)
     {
-        PropertyString * propertyString = RecyclerNewZ(recycler, PropertyString, type, propertyRecord);
-        // TODO: in future, might be worth putting these inline to avoid extra allocations. PIC copy API needs to be updated to support this though
-        propertyString->ldElemInlineCache = ScriptContextPolymorphicInlineCache::New(MinPropertyStringInlineCacheSize, type->GetLibrary());
-        propertyString->stElemInlineCache = ScriptContextPolymorphicInlineCache::New(MinPropertyStringInlineCacheSize, type->GetLibrary());
-        return propertyString;
+        return RecyclerNewZ(recycler, PropertyString, type, propertyRecord);
     }
 
     PolymorphicInlineCache * PropertyString::GetLdElemInlineCache() const
     {
-        return this->ldElemInlineCache;
+        return this->propertyRecordUsageCache.GetLdElemInlineCache();
     }
 
     PolymorphicInlineCache * PropertyString::GetStElemInlineCache() const
     {
-        return this->stElemInlineCache;
+        return this->propertyRecordUsageCache.GetStElemInlineCache();
     }
 
-    void const * PropertyString::GetOriginalStringReference()
+    PropertyRecordUsageCache * PropertyString::GetPropertyRecordUsageCache()
+    {
+        return &this->propertyRecordUsageCache;
+    }
+
+    /* static */
+    bool PropertyString::Is(RecyclableObject * obj)
+    {
+        return VirtualTableInfo<Js::PropertyString>::HasVirtualTable(obj);
+    }
+
+    /* static */
+    bool PropertyString::Is(Var var)
+    {
+        return RecyclableObject::Is(var) && PropertyString::Is(RecyclableObject::UnsafeFromVar(var));
+    }
+
+    PropertyString* PropertyString::UnsafeFromVar(Js::Var aValue)
+    {
+        AssertMsg(Is(aValue), "Ensure var is actually a 'PropertyString'");
+
+        return static_cast<PropertyString *>(aValue);
+    }
+
+    const void * PropertyString::GetOriginalStringReference()
     {
         // Property record is the allocation containing the string buffer
-        return this->propertyRecord;
+        return this->propertyRecordUsageCache.GetPropertyRecord();
     }
 
-    bool PropertyString::ShouldUseCache() const
+    bool PropertyString::TrySetPropertyFromCache(
+        _In_ RecyclableObject *const object,
+        _In_ Var propertyValue,
+        _In_ ScriptContext *const requestContext,
+        const PropertyOperationFlags propertyOperationFlags,
+        _Inout_ PropertyValueInfo *const propertyValueInfo)
     {
-        return this->hitRate > (int)CONFIG_FLAG(StringCacheMissThreshold);
-    }
-
-    void PropertyString::LogCacheMiss()
-    {
-        this->hitRate -= (int)CONFIG_FLAG(StringCacheMissPenalty);
-        if (this->hitRate < (int)CONFIG_FLAG(StringCacheMissReset))
-        {
-            this->hitRate = 0;
-        }
+        return this->propertyRecordUsageCache.TrySetPropertyFromCache<false /* ReturnOperationInfo */>(object, propertyValue, requestContext, propertyOperationFlags, propertyValueInfo, this, nullptr);
     }
 
     RecyclableObject * PropertyString::CloneToScriptContext(ScriptContext* requestContext)
     {
-        return requestContext->GetLibrary()->CreatePropertyString(this->propertyRecord);
-    }
-
-    PolymorphicInlineCache * PropertyString::CreateBiggerPolymorphicInlineCache(bool isLdElem)
-    {
-        PolymorphicInlineCache * polymorphicInlineCache = isLdElem ? GetLdElemInlineCache() : GetStElemInlineCache();
-        Assert(polymorphicInlineCache && polymorphicInlineCache->CanAllocateBigger());
-        uint16 polymorphicInlineCacheSize = polymorphicInlineCache->GetSize();
-        uint16 newPolymorphicInlineCacheSize = PolymorphicInlineCache::GetNextSize(polymorphicInlineCacheSize);
-        Assert(newPolymorphicInlineCacheSize > polymorphicInlineCacheSize);
-        PolymorphicInlineCache * newPolymorphicInlineCache = ScriptContextPolymorphicInlineCache::New(newPolymorphicInlineCacheSize, GetLibrary());
-        polymorphicInlineCache->CopyTo(this->propertyRecord->GetPropertyId(), GetScriptContext(), newPolymorphicInlineCache);
-        if (isLdElem)
-        {
-            this->ldElemInlineCache = newPolymorphicInlineCache;
-        }
-        else
-        {
-            this->stElemInlineCache = newPolymorphicInlineCache;
-        }
-#ifdef ENABLE_DEBUG_CONFIG_OPTIONS
-        if (PHASE_VERBOSE_TRACE1(Js::PolymorphicInlineCachePhase) || PHASE_TRACE1(PropertyStringCachePhase))
-        {
-            Output::Print(_u("PropertyString '%s' : Bigger PIC, oldSize = %d, newSize = %d\n"), GetString(), polymorphicInlineCacheSize, newPolymorphicInlineCacheSize);
-        }
-#endif
-        return newPolymorphicInlineCache;
+        return requestContext->GetPropertyString(this->propertyRecordUsageCache.GetPropertyRecord());
     }
 }

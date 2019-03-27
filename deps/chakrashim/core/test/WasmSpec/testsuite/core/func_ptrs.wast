@@ -7,7 +7,7 @@
   (type $T (func (param i32) (result i32)))  ;; 5: i32 -> i32
   (type $U (func (param i32)))               ;; 6: i32 -> void
 
-  (func $print (import "spectest" "print") (type 6))
+  (func $print (import "spectest" "print_i32") (type 6))
 
   (func (type 0))
   (func (type $S))
@@ -46,7 +46,7 @@
 )
 
 (assert_invalid (module (func (type 42))) "unknown type")
-(assert_invalid (module (import "spectest" "print" (func (type 43)))) "unknown type")
+(assert_invalid (module (import "spectest" "print_i32" (func (type 43)))) "unknown type")
 
 (module
   (type $T (func (param) (result i32)))
@@ -60,11 +60,11 @@
   (func $u2 (type $U) (i32.const 5))
 
   (func (export "callt") (param $i i32) (result i32)
-    (call_indirect $T (get_local $i))
+    (call_indirect (type $T) (get_local $i))
   )
 
   (func (export "callu") (param $i i32) (result i32)
-    (call_indirect $U (get_local $i))
+    (call_indirect (type $U) (get_local $i))
   )
 )
 
@@ -98,7 +98,7 @@
   (func $t2 (type $T) (i32.const 2))
 
   (func (export "callt") (param $i i32) (result i32)
-    (call_indirect $T (get_local $i))
+    (call_indirect (type $T) (get_local $i))
   )
 )
 

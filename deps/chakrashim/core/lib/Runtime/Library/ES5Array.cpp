@@ -20,6 +20,12 @@ namespace Js
 
     ES5Array* ES5Array::FromVar(Var instance)
     {
+        AssertOrFailFast(Is(instance));
+        return static_cast<ES5Array*>(instance);
+    }
+
+    ES5Array* ES5Array::UnsafeFromVar(Var instance)
+    {
         Assert(Is(instance));
         return static_cast<ES5Array*>(instance);
     }
@@ -34,7 +40,7 @@ namespace Js
         return GetTypeHandler()->IsLengthWritable();
     }
 
-    PropertyQueryFlags ES5Array::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags ES5Array::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         if (propertyId == PropertyIds::length)
         {
@@ -42,7 +48,7 @@ namespace Js
         }
 
         // Skip JavascriptArray override
-        return DynamicObject::HasPropertyQuery(propertyId);
+        return DynamicObject::HasPropertyQuery(propertyId, info);
     }
 
     BOOL ES5Array::IsWritable(PropertyId propertyId)
@@ -308,9 +314,9 @@ namespace Js
         return DynamicObject::Freeze();
     }
 
-    BOOL ES5Array::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL ES5Array::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
-        return enumerator->Initialize(nullptr, this, this, flags, requestContext, forInCache);
+        return enumerator->Initialize(nullptr, this, this, flags, requestContext, enumeratorCache);
     }
 
     JavascriptEnumerator * ES5Array::GetIndexEnumerator(EnumeratorFlags flags, ScriptContext* requestContext)

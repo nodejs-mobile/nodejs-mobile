@@ -171,4 +171,3 @@ Please see the [TESTING.md](https://github.com/janeasystems/nodejs-mobile/blob/m
 
 ## Contributing
 Please see the [CONTRIBUTING](https://github.com/janeasystems/nodejs-mobile/blob/mobile-master/doc_mobile/CONTRIBUTING.md) file in the `doc_mobile` folder in this source distribution.
-

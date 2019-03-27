@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "Backend.h"
+#include "Core/CRC.h"
 
 #include "X86Encode.h"
 
@@ -630,8 +631,9 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
     IR::Opnd  *opr1;
     IR::Opnd  *opr2;
 
+    uint32 opdope = this->GetOpdope(instr);
     // Canonicalize operands.
-    if (this->GetOpdope(instr) & DDST)
+    if (opdope & DDST)
     {
         opr1 = dst;
         opr2 = src1;
@@ -649,31 +651,37 @@ EncoderMD::Encode(IR::Instr *instr, BYTE *pc, BYTE* beginCodeAddress)
     const uint32 leadIn = EncoderMD::GetLeadIn(instr);
     instrRestart = instrStart = m_pc;
 
-    if (instrSize == 2 && (this->GetOpdope(instr) & (DNO16|DFLT)) == 0)
+    // Emit the lock byte first if needed
+    if (opdope & DLOCK)
+    {
+        *instrRestart++ = 0xf0;
+    }
+
+    if (instrSize == 2 && (opdope & (DNO16|DFLT)) == 0)
     {
         *instrRestart++ = 0x66;
     }
-    if (this->GetOpdope(instr) & D66EX)
+    if (opdope & D66EX)
     {
         if (opr1->IsFloat64() || opr2->IsFloat64())
         {
             *instrRestart++ = 0x66;
         }
     }
-    if (this->GetOpdope(instr) & (DZEROF|DF2|DF3|D66))
+    if (opdope & (DZEROF|DF2|DF3|D66))
     {
-        if (this->GetOpdope(instr) & DZEROF)
+        if (opdope & DZEROF)
         {
         }
-        else if (this->GetOpdope(instr) & DF2)
+        else if (opdope & DF2)
         {
             *instrRestart++ = 0xf2;
         }
-        else if (this->GetOpdope(instr) & DF3)
+        else if (opdope & DF3)
         {
             *instrRestart++ = 0xf3;
         }
-        else if (this->GetOpdope(instr) & D66)
+        else if (opdope & D66)
         {
             *instrRestart++ = 0x66;
         }
@@ -1070,6 +1078,7 @@ modrm:
             case Js::OpCode::MOVAPS:
             case Js::OpCode::MOVUPS:
             case Js::OpCode::MOVHPD:
+            case Js::OpCode::MOVLPD:
                 if (!opr1->IsRegOpnd())
                 {
                     Assert(opr2->IsRegOpnd());
@@ -1136,6 +1145,9 @@ modrm:
                 {
                     continue;
                 }
+                break;
+            case Js::OpCode::PEXTRD:
+                this->EmitModRM(instr, opr1, this->GetRegEncode(opr2->AsRegOpnd()));
                 break;
             case Js::OpCode::BT:
             case Js::OpCode::BTR:
@@ -1229,13 +1241,13 @@ modrm:
         }
 
         // if instr has W bit, set it appropriately
-        if ((*form & WBIT) && !(this->GetOpdope(instr) & DFLT) && instrSize != 1)
+        if ((*form & WBIT) && !(opdope & DFLT) && instrSize != 1)
         {
             *opcodeByte |= 0x1; // set WBIT
         }
 
         AssertMsg(m_pc - instrStart <= MachMaxInstrSize, "MachMaxInstrSize not set correctly");
-        if (this->GetOpdope(instr) & DSSE)
+        if (opdope & DSSE)
         {
             // extra imm8 byte for SSE instructions.
             uint valueImm = 0;
@@ -1342,11 +1354,11 @@ EncoderMD::FixRelocListEntry(uint32 index, int32 totalBytesSaved, BYTE *buffStar
                 // ptr points to imm32 offset of the instruction that needs to be adjusted
                 // offset is in top 28-bits, arg count in bottom 4
                 uint32 field = *((uint32*) relocRecord.m_origPtr);
-                uint32 offset = field >> 4;
+                uint32 offset = field >> Js::InlineeCallInfo::inlineeStartOffsetShiftCount;
                 uint32 count = field & 0xf;
 
                 AssertMsg(offset < (uint32)(buffEnd - buffStart), "Inlinee entry offset out of range");
-                relocRecord.SetInlineOffset(((offset - totalBytesSaved) << 4) | count);
+                relocRecord.SetInlineOffset(((offset - totalBytesSaved) << Js::InlineeCallInfo::inlineeStartOffsetShiftCount) | count);
             }
             // adjust the ptr to the buffer itself
             relocRecord.m_ptr = (BYTE*) relocRecord.m_ptr - totalBytesSaved;
@@ -1366,7 +1378,7 @@ EncoderMD::FixMaps(uint32 brOffset, int32 bytesSaved, uint32 *inlineeFrameRecord
 
 {
     InlineeFrameRecords *recList = m_encoder->m_inlineeFrameRecords;
-    InlineeFrameMap *mapList = m_encoder->m_inlineeFrameMap;
+    ArenaInlineeFrameMap *mapList = m_encoder->m_inlineeFrameMap;
     PragmaInstrList *pInstrList = m_encoder->m_pragmaInstrToRecordOffset;
     int32 i;
     for (i = *inlineeFrameRecordsIndex; i < recList->Count() && recList->Item(i)->inlineeStartOffset <= brOffset; i++)
@@ -1420,7 +1432,7 @@ EncoderMD::ApplyRelocs(uint32 codeBufferAddress, size_t codeSize, uint * bufferC
                     Assert(*(uint32 *)relocAddress == 0);
                     *(uint32 *)relocAddress = offset;
                 }
-                *bufferCRC = Encoder::CalculateCRC(*bufferCRC, offset);
+                *bufferCRC = CalculateCRC(*bufferCRC, offset);
                 break;
             }
         case RelocTypeBranch:
@@ -1455,7 +1467,7 @@ EncoderMD::ApplyRelocs(uint32 codeBufferAddress, size_t codeSize, uint * bufferC
                         Encoder::EnsureRelocEntryIntegrity(codeBufferAddress, codeSize, (size_t)m_encoder->m_encodeBuffer, (size_t)relocAddress, sizeof(uint32), (ptrdiff_t)labelInstr->GetPC() - ((ptrdiff_t)reloc->m_ptr + 4));
                     }
                 }
-                *bufferCRC = Encoder::CalculateCRC(*bufferCRC, pcrel);
+                *bufferCRC = CalculateCRC(*bufferCRC, pcrel);
                 break;
             }
         case RelocTypeLabelUse:
@@ -1473,7 +1485,7 @@ EncoderMD::ApplyRelocs(uint32 codeBufferAddress, size_t codeSize, uint * bufferC
                 {
                     Encoder::EnsureRelocEntryIntegrity(codeBufferAddress, codeSize, (size_t)m_encoder->m_encodeBuffer, (size_t)relocAddress, sizeof(size_t), targetAddress, false);
                 }
-                *bufferCRC = Encoder::CalculateCRC(*bufferCRC, offset);
+                *bufferCRC = CalculateCRC(*bufferCRC, offset);
                 break;
             }
         case RelocTypeLabel:
@@ -1576,7 +1588,7 @@ EncoderMD::EncodeInlineeCallInfo(IR::Instr *instr, uint32 codeOffset)
     // offset of the start of the inlinee. We shouldn't have gotten here with more arguments
     // than can fit in as many bits.
     const bool encodeResult = Js::InlineeCallInfo::Encode(inlineeCallInfo, (uint32)instr->GetSrc1()->AsIntConstOpnd()->GetValue(), codeOffset);
-    Assert(encodeResult);
+    AssertOrFailFast(encodeResult);
 
     instr->GetSrc1()->AsIntConstOpnd()->SetValue(inlineeCallInfo);
 }

@@ -7,8 +7,6 @@
 load("test/mjsunit/wasm/wasm-constants.js");
 load("test/mjsunit/wasm/wasm-module-builder.js");
 
-var kPageSize = 0x10000;
-var kV8MaxPages = 16384;
 
 function genGrowMemoryBuilder() {
   var builder = new WasmModuleBuilder();
@@ -298,9 +296,8 @@ function testGrowMemoryTrapMaxPagesZeroInitialMemory() {
   var builder = genGrowMemoryBuilder();
   builder.addMemory(0, kV8MaxPages, false);
   var module = builder.instantiate();
-  var maxPages = 16385;
   function growMem(pages) { return module.exports.grow_memory(pages); }
-  assertEquals(-1, growMem(maxPages));
+  assertEquals(-1, growMem(kV8MaxPages + 1));
 }
 
 testGrowMemoryTrapMaxPagesZeroInitialMemory();
@@ -309,9 +306,8 @@ function testGrowMemoryTrapMaxPages() {
   var builder = genGrowMemoryBuilder();
   builder.addMemory(1, 1, false);
   var module = builder.instantiate();
-  var maxPages = 16384;
   function growMem(pages) { return module.exports.grow_memory(pages); }
-  assertEquals(-1, growMem(maxPages));
+  assertEquals(-1, growMem(kV8MaxPages));
 }
 
 testGrowMemoryTrapMaxPages();
@@ -481,9 +477,8 @@ testGrowMemoryDeclaredMaxTraps();
 function testGrowMemoryDeclaredSpecMaxTraps() {
   // The spec maximum is higher than the internal V8 maximum. This test only
   // checks that grow_memory does not grow past the internally defined maximum
-  // to reflect the currentl implementation.
+  // to reflect the current implementation.
   var builder = genGrowMemoryBuilder();
-  var kSpecMaxPages = 65535;
   builder.addMemory(1, kSpecMaxPages, false);
   var module = builder.instantiate();
   function poke(value) { return module.exports.store(offset, value); }
@@ -493,3 +488,54 @@ function testGrowMemoryDeclaredSpecMaxTraps() {
 }
 
 testGrowMemoryDeclaredSpecMaxTraps();
+
+function testGrowMemory2Gb() {
+  print("testGrowMemory2Gb");
+  var builder = genGrowMemoryBuilder();
+  builder.addMemory(1, kV8MaxPages, false);
+  var module = builder.instantiate();
+  var offset, val;
+  function peek() { return module.exports.load(offset); }
+  function poke(value) { return module.exports.store(offset, value); }
+  function growMem(pages) { return module.exports.grow_memory(pages); }
+
+  for(offset = 0; offset <= (kPageSize - 4); offset+=4) {
+    poke(100000 - offset);
+    assertEquals(100000 - offset, peek());
+  }
+
+  let result = growMem(kV8MaxPages - 1);
+  if (result == 1 ){
+    for(offset = 0; offset <= (kPageSize - 4); offset+=4) {
+      assertEquals(100000 - offset, peek());
+    }
+
+    // Bounds check for large mem size
+    for(offset = (kV8MaxPages - 1) * kPageSize;
+        offset <= (kV8MaxPages * kPageSize - 4); offset+=4) {
+      poke(0xaced);
+      assertEquals(0xaced, peek());
+    }
+
+    for (offset = kV8MaxPages * kPageSize - 3;
+        offset <= kV8MaxPages * kPageSize + 4; offset++) {
+      assertTraps(kTrapMemOutOfBounds, poke);
+    }
+
+    // Check traps around 3GB/4GB boundaries
+    let offset_3gb = 49152 * kPageSize;
+    let offset_4gb = 2 * kV8MaxPages * kPageSize;
+    for (offset = offset_3gb - 5; offset < offset_3gb + 4; offset++) {
+      assertTraps(kTrapMemOutOfBounds, poke);
+    }
+    for (offset = offset_4gb - 5; offset < offset_4gb; offset++) {
+      assertTraps(kTrapMemOutOfBounds, poke);
+    }
+  } else {
+    // Allocating big chunks of memory can fail on gc_stress, especially on 32
+    // bit platforms. When grow_memory fails, expected result is -1.
+    assertEquals(-1, result);
+  }
+}
+
+testGrowMemory2Gb();

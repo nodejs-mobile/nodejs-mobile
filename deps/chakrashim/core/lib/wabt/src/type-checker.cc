@@ -14,27 +14,19 @@
  * limitations under the License.
  */
 
-#include "type-checker.h"
+#include "src/type-checker.h"
 
-#define CHECK_RESULT(expr)  \
-  do {                      \
-    if (Failed(expr))       \
-      return Result::Error; \
-  } while (0)
-
-#define COMBINE_RESULT(result_var, result)                            \
-  do {                                                                \
-    (result_var) = static_cast<Result>(static_cast<int>(result_var) | \
-                                       static_cast<int>(result));     \
-  } while (0)
+#include <cinttypes>
 
 namespace wabt {
 
 TypeChecker::Label::Label(LabelType label_type,
-                          const TypeVector& sig,
+                          const TypeVector& param_types,
+                          const TypeVector& result_types,
                           size_t limit)
     : label_type(label_type),
-      sig(sig),
+      param_types(param_types),
+      result_types(result_types),
       type_stack_limit(limit),
       unreachable(false) {}
 
@@ -66,8 +58,9 @@ Result TypeChecker::TopLabel(Label** out_label) {
 
 bool TypeChecker::IsUnreachable() {
   Label* label;
-  if (Failed(TopLabel(&label)))
+  if (Failed(TopLabel(&label))) {
     return true;
+  }
   return label->unreachable;
 }
 
@@ -83,8 +76,11 @@ Result TypeChecker::SetUnreachable() {
   return Result::Ok;
 }
 
-void TypeChecker::PushLabel(LabelType label_type, const TypeVector& sig) {
-  label_stack_.emplace_back(label_type, sig, type_stack_.size());
+void TypeChecker::PushLabel(LabelType label_type,
+                            const TypeVector& param_types,
+                            const TypeVector& result_types) {
+  label_stack_.emplace_back(label_type, param_types, result_types,
+                            type_stack_.size());
 }
 
 Result TypeChecker::PopLabel() {
@@ -108,116 +104,81 @@ Result TypeChecker::PeekType(Index depth, Type* out_type) {
   return Result::Ok;
 }
 
-Result TypeChecker::TopType(Type* out_type) {
-  return PeekType(0, out_type);
-}
-
-Result TypeChecker::PopType(Type* out_type) {
-  Label* label;
-  CHECK_RESULT(TopLabel(&label));
-  Result result = TopType(out_type);
-  if (type_stack_.size() > label->type_stack_limit)
-    type_stack_.pop_back();
-  return result;
+Result TypeChecker::PeekAndCheckType(Index depth, Type expected) {
+  Type actual = Type::Any;
+  Result result = PeekType(depth, &actual);
+  return result | CheckType(actual, expected);
 }
 
 Result TypeChecker::DropTypes(size_t drop_count) {
   Label* label;
   CHECK_RESULT(TopLabel(&label));
   if (label->type_stack_limit + drop_count > type_stack_.size()) {
-    if (label->unreachable) {
-      ResetTypeStackToLabel(label);
-      return Result::Ok;
-    }
-    return Result::Error;
+    ResetTypeStackToLabel(label);
+    return label->unreachable ? Result::Ok : Result::Error;
   }
   type_stack_.erase(type_stack_.end() - drop_count, type_stack_.end());
   return Result::Ok;
 }
 
 void TypeChecker::PushType(Type type) {
-  if (type != Type::Void)
+  if (type != Type::Void) {
     type_stack_.push_back(type);
+  }
 }
 
 void TypeChecker::PushTypes(const TypeVector& types) {
-  for (Type type : types)
+  for (Type type : types) {
     PushType(type);
-}
-
-Result TypeChecker::CheckTypeStackLimit(size_t expected, const char* desc) {
-  Label* label;
-  CHECK_RESULT(TopLabel(&label));
-  size_t avail = type_stack_.size() - label->type_stack_limit;
-  if (!label->unreachable && expected > avail) {
-    PrintError("type stack size too small at %s. got %" PRIzd
-               ", expected at least %" PRIzd,
-               desc, avail, expected);
-    return Result::Error;
   }
-  return Result::Ok;
 }
 
 Result TypeChecker::CheckTypeStackEnd(const char* desc) {
   Label* label;
   CHECK_RESULT(TopLabel(&label));
-  if (type_stack_.size() != label->type_stack_limit) {
-    PrintError("type stack at end of %s is %" PRIzd ", expected %" PRIzd, desc,
-               type_stack_.size(), label->type_stack_limit);
-    return Result::Error;
-  }
-  return Result::Ok;
+  Result result = (type_stack_.size() == label->type_stack_limit)
+                      ? Result::Ok
+                      : Result::Error;
+  PrintStackIfFailed(result, desc);
+  return result;
 }
 
-Result TypeChecker::CheckType(Type actual, Type expected, const char* desc) {
-  if (expected != actual && expected != Type::Any && actual != Type::Any) {
-    PrintError("type mismatch in %s, expected %s but got %s.", desc,
-               GetTypeName(expected), GetTypeName(actual));
-    return Result::Error;
-  }
-  return Result::Ok;
+Result TypeChecker::CheckType(Type actual, Type expected) {
+  return (expected == actual || expected == Type::Any || actual == Type::Any)
+             ? Result::Ok
+             : Result::Error;
 }
 
 Result TypeChecker::CheckSignature(const TypeVector& sig, const char* desc) {
   Result result = Result::Ok;
-  COMBINE_RESULT(result, CheckTypeStackLimit(sig.size(), desc));
   for (size_t i = 0; i < sig.size(); ++i) {
-    Type actual = Type::Any;
-    COMBINE_RESULT(result, PeekType(sig.size() - i - 1, &actual));
-    COMBINE_RESULT(result, CheckType(actual, sig[i], desc));
+    result |= PeekAndCheckType(sig.size() - i - 1, sig[i]);
   }
+  PrintStackIfFailed(result, desc, sig);
   return result;
 }
 
 Result TypeChecker::PopAndCheckSignature(const TypeVector& sig,
                                          const char* desc) {
-  Result result = Result::Ok;
-  COMBINE_RESULT(result, CheckSignature(sig, desc));
-  COMBINE_RESULT(result, DropTypes(sig.size()));
+  Result result = CheckSignature(sig, desc);
+  result |= DropTypes(sig.size());
   return result;
 }
 
 Result TypeChecker::PopAndCheckCall(const TypeVector& param_types,
                                     const TypeVector& result_types,
                                     const char* desc) {
-  Result result = Result::Ok;
-  COMBINE_RESULT(result, CheckTypeStackLimit(param_types.size(), desc));
-  for (size_t i = 0; i < param_types.size(); ++i) {
-    Type actual = Type::Any;
-    COMBINE_RESULT(result, PeekType(param_types.size() - i - 1, &actual));
-    COMBINE_RESULT(result, CheckType(actual, param_types[i], desc));
-  }
-  COMBINE_RESULT(result, DropTypes(param_types.size()));
+  Result result = CheckSignature(param_types, desc);
+  result |= DropTypes(param_types.size());
   PushTypes(result_types);
   return result;
 }
 
 Result TypeChecker::PopAndCheck1Type(Type expected, const char* desc) {
   Result result = Result::Ok;
-  Type actual = Type::Any;
-  COMBINE_RESULT(result, CheckTypeStackLimit(1, desc));
-  COMBINE_RESULT(result, PopType(&actual));
-  COMBINE_RESULT(result, CheckType(actual, expected, desc));
+  result |= PeekAndCheckType(0, expected);
+  PrintStackIfFailed(result, desc, expected);
+  result |= DropTypes(1);
   return result;
 }
 
@@ -225,26 +186,23 @@ Result TypeChecker::PopAndCheck2Types(Type expected1,
                                       Type expected2,
                                       const char* desc) {
   Result result = Result::Ok;
-  Type actual1 = Type::Any;
-  Type actual2 = Type::Any;
-  COMBINE_RESULT(result, CheckTypeStackLimit(2, desc));
-  COMBINE_RESULT(result, PopType(&actual2));
-  COMBINE_RESULT(result, PopType(&actual1));
-  COMBINE_RESULT(result, CheckType(actual1, expected1, desc));
-  COMBINE_RESULT(result, CheckType(actual2, expected2, desc));
+  result |= PeekAndCheckType(0, expected2);
+  result |= PeekAndCheckType(1, expected1);
+  PrintStackIfFailed(result, desc, expected1, expected2);
+  result |= DropTypes(2);
   return result;
 }
 
-Result TypeChecker::PopAndCheck2TypesAreEqual(Type* out_type,
-                                              const char* desc) {
+Result TypeChecker::PopAndCheck3Types(Type expected1,
+                                      Type expected2,
+                                      Type expected3,
+                                      const char* desc) {
   Result result = Result::Ok;
-  Type right = Type::Any;
-  Type left = Type::Any;
-  COMBINE_RESULT(result, CheckTypeStackLimit(2, desc));
-  COMBINE_RESULT(result, PopType(&right));
-  COMBINE_RESULT(result, PopType(&left));
-  COMBINE_RESULT(result, CheckType(left, right, desc));
-  *out_type = right;
+  result |= PeekAndCheckType(0, expected3);
+  result |= PeekAndCheckType(1, expected2);
+  result |= PeekAndCheckType(2, expected1);
+  PrintStackIfFailed(result, desc, expected1, expected2, expected3);
+  result |= DropTypes(3);
   return result;
 }
 
@@ -261,46 +219,142 @@ Result TypeChecker::CheckOpcode2(Opcode opcode) {
   return result;
 }
 
-Result TypeChecker::BeginFunction(const TypeVector* sig) {
+Result TypeChecker::CheckOpcode3(Opcode opcode) {
+  Result result =
+      PopAndCheck3Types(opcode.GetParamType1(), opcode.GetParamType2(),
+                        opcode.GetParamType3(), opcode.GetName());
+  PushType(opcode.GetResultType());
+  return result;
+}
+
+static std::string TypesToString(const TypeVector& types,
+                                 const char* prefix = nullptr) {
+  std::string result = "[";
+  if (prefix) {
+    result += prefix;
+  }
+
+  for (size_t i = 0; i < types.size(); ++i) {
+    result += GetTypeName(types[i]);
+    if (i < types.size() - 1) {
+      result += ", ";
+    }
+  }
+  result += "]";
+  return result;
+}
+
+void TypeChecker::PrintStackIfFailed(Result result,
+                                     const char* desc,
+                                     const TypeVector& expected) {
+  if (Succeeded(result)) {
+    return;
+  }
+
+  size_t limit = 0;
+  Label* label;
+  if (Succeeded(TopLabel(&label))) {
+    limit = label->type_stack_limit;
+  }
+
+  TypeVector actual;
+  size_t max_depth = type_stack_.size() - limit;
+
+  // In general we want to print as many values of the actual stack as were
+  // expected. However, if the stack was expected to be empty, we should
+  // print some amount of the actual stack.
+  size_t actual_size;
+  if (expected.size() == 0) {
+    // Don't print too many elements if the stack is really deep.
+    const size_t kMaxActualStackToPrint = 4;
+    actual_size = std::min(kMaxActualStackToPrint, max_depth);
+  } else {
+    actual_size = std::min(expected.size(), max_depth);
+  }
+
+  bool incomplete_actual_stack = actual_size != max_depth;
+
+  for (size_t i = 0; i < actual_size; ++i) {
+    Type type;
+    Result result = PeekType(actual_size - i - 1, &type);
+    WABT_USE(result);
+    assert(Succeeded(result));
+    actual.push_back(type);
+  }
+
+  std::string message = "type mismatch in ";
+  message += desc;
+  message += ", expected ";
+  message += TypesToString(expected);
+  message += " but got ";
+  message += TypesToString(actual, incomplete_actual_stack ? "... " : nullptr);
+
+  PrintError("%s", message.c_str());
+}
+
+Result TypeChecker::BeginFunction(const TypeVector& sig) {
   type_stack_.clear();
   label_stack_.clear();
-  PushLabel(LabelType::Func, *sig);
+  PushLabel(LabelType::Func, TypeVector(), sig);
   return Result::Ok;
+}
+
+Result TypeChecker::OnAtomicLoad(Opcode opcode) {
+  return CheckOpcode1(opcode);
+}
+
+Result TypeChecker::OnAtomicStore(Opcode opcode) {
+  return CheckOpcode2(opcode);
+}
+
+Result TypeChecker::OnAtomicRmw(Opcode opcode) {
+  return CheckOpcode2(opcode);
+}
+
+Result TypeChecker::OnAtomicRmwCmpxchg(Opcode opcode) {
+  return CheckOpcode3(opcode);
+}
+
+Result TypeChecker::OnAtomicWait(Opcode opcode) {
+  return CheckOpcode3(opcode);
+}
+
+Result TypeChecker::OnAtomicWake(Opcode opcode) {
+  return CheckOpcode2(opcode);
 }
 
 Result TypeChecker::OnBinary(Opcode opcode) {
   return CheckOpcode2(opcode);
 }
 
-Result TypeChecker::OnBlock(const TypeVector* sig) {
-  PushLabel(LabelType::Block, *sig);
-  return Result::Ok;
+Result TypeChecker::OnBlock(const TypeVector& param_types,
+                            const TypeVector& result_types) {
+  Result result = PopAndCheckSignature(param_types, "block");
+  PushLabel(LabelType::Block, param_types, result_types);
+  PushTypes(param_types);
+  return result;
 }
 
 Result TypeChecker::OnBr(Index depth) {
   Result result = Result::Ok;
   Label* label;
   CHECK_RESULT(GetLabel(depth, &label));
-  if (label->label_type != LabelType::Loop)
-    COMBINE_RESULT(result, CheckSignature(label->sig, "br"));
+  result |= CheckSignature(label->br_types(), "br");
   CHECK_RESULT(SetUnreachable());
   return result;
 }
 
 Result TypeChecker::OnBrIf(Index depth) {
-  Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheck1Type(Type::I32, "br_if"));
+  Result result = PopAndCheck1Type(Type::I32, "br_if");
   Label* label;
   CHECK_RESULT(GetLabel(depth, &label));
-  if (label->label_type != LabelType::Loop) {
-    COMBINE_RESULT(result, PopAndCheckSignature(label->sig, "br_if"));
-    PushTypes(label->sig);
-  }
+  result |= PopAndCheckSignature(label->br_types(), "br_if");
+  PushTypes(label->br_types());
   return result;
 }
 
 Result TypeChecker::BeginBrTable() {
-  br_table_sig_ = Type::Any;
+  br_table_sig_ = nullptr;
   return PopAndCheck1Type(Type::I32, "br_table");
 }
 
@@ -308,19 +362,21 @@ Result TypeChecker::OnBrTableTarget(Index depth) {
   Result result = Result::Ok;
   Label* label;
   CHECK_RESULT(GetLabel(depth, &label));
-  Type label_sig;
-  if (label->label_type == LabelType::Loop) {
-    label_sig = Type::Void;
-  } else {
-    assert(label->sig.size() <= 1);
-    label_sig = label->sig.size() == 0 ? Type::Void : label->sig[0];
+  TypeVector& label_sig = label->br_types();
+  result |= CheckSignature(label_sig, "br_table");
+
+  // Make sure this label's signature is consistent with the previous labels'
+  // signatures.
+  if (br_table_sig_ == nullptr) {
+    br_table_sig_ = &label_sig;
+  }
+  if (*br_table_sig_ != label_sig) {
+    result |= Result::Error;
+    PrintError("br_table labels have inconsistent types: expected %s, got %s",
+               TypesToString(*br_table_sig_).c_str(),
+               TypesToString(label_sig).c_str());
   }
 
-  COMBINE_RESULT(result, CheckType(br_table_sig_, label_sig, "br_table"));
-  br_table_sig_ = label_sig;
-
-  if (label->label_type != LabelType::Loop)
-    COMBINE_RESULT(result, CheckSignature(label->sig, "br_table"));
   return result;
 }
 
@@ -328,17 +384,15 @@ Result TypeChecker::EndBrTable() {
   return SetUnreachable();
 }
 
-Result TypeChecker::OnCall(const TypeVector* param_types,
-                           const TypeVector* result_types) {
-  return PopAndCheckCall(*param_types, *result_types, "call");
+Result TypeChecker::OnCall(const TypeVector& param_types,
+                           const TypeVector& result_types) {
+  return PopAndCheckCall(param_types, result_types, "call");
 }
 
-Result TypeChecker::OnCallIndirect(const TypeVector* param_types,
-                                   const TypeVector* result_types) {
-  Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheck1Type(Type::I32, "call_indirect"));
-  COMBINE_RESULT(result,
-                 PopAndCheckCall(*param_types, *result_types, "call_indirect"));
+Result TypeChecker::OnCallIndirect(const TypeVector& param_types,
+                                   const TypeVector& result_types) {
+  Result result = PopAndCheck1Type(Type::I32, "call_indirect");
+  result |= PopAndCheckCall(param_types, result_types, "call_indirect");
   return result;
 }
 
@@ -346,21 +400,17 @@ Result TypeChecker::OnCompare(Opcode opcode) {
   return CheckOpcode2(opcode);
 }
 
-Result TypeChecker::OnCatch(const TypeVector* sig) {
-  PushTypes(*sig);
-  return Result::Ok;
-}
-
-Result TypeChecker::OnCatchBlock(const TypeVector* sig) {
+Result TypeChecker::OnCatch() {
   Result result = Result::Ok;
   Label* label;
   CHECK_RESULT(TopLabel(&label));
-  COMBINE_RESULT(result, CheckLabelType(label, LabelType::Try));
-  COMBINE_RESULT(result, PopAndCheckSignature(label->sig, "try block"));
-  COMBINE_RESULT(result, CheckTypeStackEnd("try block"));
+  result |= CheckLabelType(label, LabelType::Try);
+  result |= PopAndCheckSignature(label->result_types, "try block");
+  result |= CheckTypeStackEnd("try block");
   ResetTypeStackToLabel(label);
   label->label_type = LabelType::Catch;
   label->unreachable = false;
+  PushType(Type::ExceptRef);
   return result;
 }
 
@@ -373,16 +423,10 @@ Result TypeChecker::OnConvert(Opcode opcode) {
   return CheckOpcode1(opcode);
 }
 
-Result TypeChecker::OnCurrentMemory() {
-  PushType(Type::I32);
-  return Result::Ok;
-}
-
 Result TypeChecker::OnDrop() {
   Result result = Result::Ok;
-  Type type = Type::Any;
-  COMBINE_RESULT(result, CheckTypeStackLimit(1, "drop"));
-  COMBINE_RESULT(result, PopType(&type));
+  result |= DropTypes(1);
+  PrintStackIfFailed(result, "drop", Type::Any);
   return result;
 }
 
@@ -390,10 +434,11 @@ Result TypeChecker::OnElse() {
   Result result = Result::Ok;
   Label* label;
   CHECK_RESULT(TopLabel(&label));
-  COMBINE_RESULT(result, CheckLabelType(label, LabelType::If));
-  COMBINE_RESULT(result, PopAndCheckSignature(label->sig, "if true branch"));
-  COMBINE_RESULT(result, CheckTypeStackEnd("if true branch"));
+  result |= CheckLabelType(label, LabelType::If);
+  result |= PopAndCheckSignature(label->result_types, "if true branch");
+  result |= CheckTypeStackEnd("if true branch");
   ResetTypeStackToLabel(label);
+  PushTypes(label->param_types);
   label->label_type = LabelType::Else;
   label->unreachable = false;
   return result;
@@ -403,41 +448,60 @@ Result TypeChecker::OnEnd(Label* label,
                           const char* sig_desc,
                           const char* end_desc) {
   Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheckSignature(label->sig, sig_desc));
-  COMBINE_RESULT(result, CheckTypeStackEnd(end_desc));
+  result |= PopAndCheckSignature(label->result_types, sig_desc);
+  result |= CheckTypeStackEnd(end_desc);
   ResetTypeStackToLabel(label);
-  PushTypes(label->sig);
+  PushTypes(label->result_types);
   PopLabel();
   return result;
 }
 
 Result TypeChecker::OnEnd() {
   Result result = Result::Ok;
-  static const char* s_label_type_name[] = {"function", "block", "loop", "if",
-                                            "if false branch", "try",
+  static const char* s_label_type_name[] = {"function",
+                                            "block",
+                                            "loop",
+                                            "if",
+                                            "if false branch",
+                                            "if_except",
+                                            "if_except false branch",
+                                            "try",
                                             "try catch"};
   WABT_STATIC_ASSERT(WABT_ARRAY_SIZE(s_label_type_name) == kLabelTypeCount);
   Label* label;
   CHECK_RESULT(TopLabel(&label));
   assert(static_cast<int>(label->label_type) < kLabelTypeCount);
-  if (label->label_type == LabelType::If) {
-    if (label->sig.size() != 0) {
-      PrintError("if without else cannot have type signature.");
+  if (label->label_type == LabelType::If ||
+      label->label_type == LabelType::IfExcept) {
+    if (label->result_types.size() != 0) {
+      PrintError("if without else cannot have results.");
       result = Result::Error;
     }
   }
   const char* desc = s_label_type_name[static_cast<int>(label->label_type)];
-  COMBINE_RESULT(result, OnEnd(label, desc, desc));
+  result |= OnEnd(label, desc, desc);
   return result;
 }
 
-Result TypeChecker::OnGrowMemory() {
-  return CheckOpcode1(Opcode::GrowMemory);
+Result TypeChecker::OnIf(const TypeVector& param_types,
+                         const TypeVector& result_types) {
+  Result result = PopAndCheck1Type(Type::I32, "if");
+  result |= PopAndCheckSignature(param_types, "if");
+  PushLabel(LabelType::If, param_types, result_types);
+  PushTypes(param_types);
+  return result;
 }
 
-Result TypeChecker::OnIf(const TypeVector* sig) {
-  Result result = PopAndCheck1Type(Type::I32, "if");
-  PushLabel(LabelType::If, *sig);
+Result TypeChecker::OnIfExcept(const TypeVector& param_types,
+                               const TypeVector& result_types,
+                               const TypeVector& except_sig) {
+  Result result = PopAndCheck1Type(Type::ExceptRef, "if_except");
+  result |= PopAndCheckSignature(param_types, "if_except");
+  PushLabel(LabelType::IfExcept, param_types, result_types);
+  // TODO(binji): Not quite sure how multi-value and exception proposals are
+  // meant to interact here.
+  PushTypes(param_types);
+  PushTypes(except_sig);
   return result;
 }
 
@@ -455,40 +519,32 @@ Result TypeChecker::OnLoad(Opcode opcode) {
   return CheckOpcode1(opcode);
 }
 
-Result TypeChecker::OnLoop(const TypeVector* sig) {
-  PushLabel(LabelType::Loop, *sig);
+Result TypeChecker::OnLoop(const TypeVector& param_types,
+                           const TypeVector& result_types) {
+  Result result = PopAndCheckSignature(param_types, "loop");
+  PushLabel(LabelType::Loop, param_types, result_types);
+  PushTypes(param_types);
+  return result;
+}
+
+Result TypeChecker::OnMemoryGrow() {
+  return CheckOpcode1(Opcode::MemoryGrow);
+}
+
+Result TypeChecker::OnMemorySize() {
+  PushType(Type::I32);
   return Result::Ok;
 }
 
-Result TypeChecker::OnRethrow(Index depth) {
-  Result result = Result::Ok;
-  Label* label;
-  CHECK_RESULT(GetLabel(depth, &label));
-  if (label->label_type != LabelType::Catch) {
-    std::string candidates;
-    size_t last = label_stack_.size() - 1;
-    for (size_t i = 0; i < label_stack_.size(); ++i) {
-      if (label_stack_[last - i].label_type == LabelType::Catch) {
-        if (!candidates.empty())
-          candidates.append(", ");
-        candidates.append(std::to_string(i));
-      }
-    }
-    if (candidates.empty()) {
-      PrintError("Rethrow not in try catch block");
-    } else {
-      PrintError("invalid rethrow depth: %" PRIindex " (catches: %s)", depth,
-                 candidates.c_str());
-    }
-    result = Result::Error;
-  }
+Result TypeChecker::OnRethrow() {
+  Result result = PopAndCheck1Type(Type::ExceptRef, "rethrow");
   CHECK_RESULT(SetUnreachable());
   return result;
 }
 
-Result TypeChecker::OnThrow(const TypeVector* sig) {
+Result TypeChecker::OnThrow(const TypeVector& sig) {
   Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheckSignature(*sig, "throw"));
+  result |= PopAndCheckSignature(sig, "throw");
   CHECK_RESULT(SetUnreachable());
   return result;
 }
@@ -497,16 +553,19 @@ Result TypeChecker::OnReturn() {
   Result result = Result::Ok;
   Label* func_label;
   CHECK_RESULT(GetLabel(label_stack_.size() - 1, &func_label));
-  COMBINE_RESULT(result, PopAndCheckSignature(func_label->sig, "return"));
+  result |= PopAndCheckSignature(func_label->result_types, "return");
   CHECK_RESULT(SetUnreachable());
   return result;
 }
 
 Result TypeChecker::OnSelect() {
   Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheck1Type(Type::I32, "select"));
   Type type = Type::Any;
-  COMBINE_RESULT(result, PopAndCheck2TypesAreEqual(&type, "select"));
+  result |= PeekAndCheckType(0, Type::I32);
+  result |= PeekType(1, &type);
+  result |= PeekAndCheckType(2, type);
+  PrintStackIfFailed(result, "select", Type::I32, type, type);
+  result |= DropTypes(3);
   PushType(type);
   return result;
 }
@@ -523,20 +582,74 @@ Result TypeChecker::OnStore(Opcode opcode) {
   return CheckOpcode2(opcode);
 }
 
-Result TypeChecker::OnTryBlock(const TypeVector* sig) {
-  PushLabel(LabelType::Try, *sig);
-  return Result::Ok;
+Result TypeChecker::OnTry(const TypeVector& param_types,
+                          const TypeVector& result_types) {
+  Result result = PopAndCheckSignature(param_types, "try");
+  PushLabel(LabelType::Try, param_types, result_types);
+  PushTypes(param_types);
+  return result;
 }
 
 Result TypeChecker::OnTeeLocal(Type type) {
   Result result = Result::Ok;
-  COMBINE_RESULT(result, PopAndCheck1Type(type, "tee_local"));
+  result |= PopAndCheck1Type(type, "tee_local");
   PushType(type);
   return result;
 }
 
 Result TypeChecker::OnUnary(Opcode opcode) {
   return CheckOpcode1(opcode);
+}
+
+Result TypeChecker::OnTernary(Opcode opcode) {
+  return CheckOpcode3(opcode);
+}
+
+Result TypeChecker::OnSimdLaneOp(Opcode opcode, uint64_t lane_idx) {
+  Result result = Result::Error;
+  uint32_t lane_count = opcode.GetSimdLaneCount();
+  if (lane_idx >= lane_count) {
+    PrintError("lane index must be less than %d (got %" PRIu64 ")", lane_count,
+               lane_idx);
+  }
+
+  switch (opcode) {
+    case Opcode::I8X16ExtractLaneS:
+    case Opcode::I8X16ExtractLaneU:
+    case Opcode::I16X8ExtractLaneS:
+    case Opcode::I16X8ExtractLaneU:
+    case Opcode::I32X4ExtractLane:
+    case Opcode::F32X4ExtractLane:
+    case Opcode::I64X2ExtractLane:
+    case Opcode::F64X2ExtractLane:
+      result = CheckOpcode1(opcode);
+      break;
+    case Opcode::I8X16ReplaceLane:
+    case Opcode::I16X8ReplaceLane:
+    case Opcode::I32X4ReplaceLane:
+    case Opcode::F32X4ReplaceLane:
+    case Opcode::I64X2ReplaceLane:
+    case Opcode::F64X2ReplaceLane:
+      result = CheckOpcode2(opcode);
+      break;
+    default:
+      WABT_UNREACHABLE;
+  }
+  return result;
+}
+
+Result TypeChecker::OnSimdShuffleOp(Opcode opcode, v128 lane_idx) {
+  Result result = Result::Error;
+  uint8_t simd_data[16];
+  memcpy(simd_data, &lane_idx, 16);
+  for (int i = 0; i < 16; i++) {
+    if (simd_data[i] >= 32) {
+      PrintError("lane index must be less than 32 (got %d)", simd_data[i]);
+    }
+  }
+
+  result = CheckOpcode2(opcode);
+  return result;
 }
 
 Result TypeChecker::OnUnreachable() {
@@ -547,8 +660,8 @@ Result TypeChecker::EndFunction() {
   Result result = Result::Ok;
   Label* label;
   CHECK_RESULT(TopLabel(&label));
-  COMBINE_RESULT(result, CheckLabelType(label, LabelType::Func));
-  COMBINE_RESULT(result, OnEnd(label, "implicit return", "function"));
+  result |= CheckLabelType(label, LabelType::Func);
+  result |= OnEnd(label, "implicit return", "function");
   return result;
 }
 

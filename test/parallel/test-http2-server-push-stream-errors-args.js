@@ -1,4 +1,3 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
@@ -23,7 +22,7 @@ server.on('stream', common.mustCall((stream, headers) => {
     }, {}, 'callback'),
     {
       code: 'ERR_INVALID_CALLBACK',
-      message: 'callback must be a function'
+      message: 'Callback must be a function'
     }
   );
 
@@ -32,7 +31,8 @@ server.on('stream', common.mustCall((stream, headers) => {
     () => stream.pushStream({ 'connection': 'test' }, {}, () => {}),
     {
       code: 'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-      message: 'HTTP/1 Connection specific headers are forbidden'
+      name: 'TypeError [ERR_HTTP2_INVALID_CONNECTION_HEADERS]',
+      message: 'HTTP/1 Connection specific headers are forbidden: "connection"'
     }
   );
 
@@ -51,7 +51,7 @@ server.listen(0, common.mustCall(() => {
   req.on('end', common.mustCall(() => {
     assert.strictEqual(data, 'test');
     server.close();
-    client.destroy();
+    client.close();
   }));
   req.end();
 }));

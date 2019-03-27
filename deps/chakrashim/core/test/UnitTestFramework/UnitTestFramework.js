@@ -26,6 +26,7 @@
 //     example: testRunner.LoadModule(source, 'samethread', false);
 //
 //   How to use assert:
+//     assert.strictEqual(expected, actual, "those two should be strictly equal (i.e. === comparison)");
 //     assert.areEqual(expected, actual, "those two should be equal (i.e. deep equality of objects using ===)");
 //     assert.areNotEqual(expected, actual, "those two should NOT be equal");
 //     assert.areAlmostEqual(expected, actual, "those two should be almost equal, numerically (allows difference by epsilon)");
@@ -36,6 +37,7 @@
 //     assert.throws(function, SyntaxError, "function should throw (in this case, specifically a SyntaxError with fooMessage", "fooMessage");
 //     assert.doesNotThrow(function, "this function should not throw anything");
 //     assert.fail("error");
+//     assert.matches(/regex/, actual, "actual should match regex")
 //
 //   Some useful helpers:
 //     helpers.writeln("works in both", "console", "and", "browser);
@@ -110,6 +112,11 @@ var helpers = function helpers() {
         {
             return Object.prototype.toString.call(object);
         },
+        
+        getFileAndLineInfo: function getFileAndLineInfo() 
+        {   
+            return new Error().stack.toString().replace(/[\w\W]*at body\s*/, "").replace(/\n[\w\W]*/, "")
+        }
     }
 }(); // helpers module.
 
@@ -166,9 +173,15 @@ var testRunner = function testRunner() {
                 _verbose = options.verbose;
             }
 
+            const onlyFlag = WScript.Arguments != undefined && WScript.Arguments.filter((arg) => arg.substring(0, 6) === "-only:")
+            let only = undefined;
+            if (onlyFlag.length === 1) {
+                only = onlyFlag[0].substring(6).split(",");
+            }
+
             for (var i in testsToRun) {
                 var isRunnable = typeof testsToRun[i] === objectType;
-                if (isRunnable) {
+                if (isRunnable && (only === undefined || only.includes(i) || only.includes(testsToRun[i].name))) {
                     this.runTest(i, testsToRun[i].name, testsToRun[i].body);
                 }
             }
@@ -249,6 +262,7 @@ var testRunner = function testRunner() {
             } catch (ex) {
                 var message = ex.stack || ex.message || ex;
                 logTestNameIf(!_verbose);
+                var fileAndLineInfo = helpers.getFileAndLineInfo();
                 helpers.writeln("Test threw exception: ", message);
                 isSuccess = false;
             }
@@ -353,7 +367,7 @@ var assert = function assert() {
         } else {
             if (isObject(actual)) return "actual is an object";
             if (isNaN(expected) && isNaN(actual)) return true;
-            return "expected: " + expected + " actual: " + actual;
+            return "  expected: " + expected + "\n    actual: " + actual;
         }
     };
 
@@ -386,7 +400,8 @@ var assert = function assert() {
 
     var validate = function validate(result, assertType, message) {
         if (result !== true) {
-            var exMessage = addMessage("assert." + assertType + " failed: " + result);
+            var fileAndLineInfo = helpers.getFileAndLineInfo();
+            var exMessage = addMessage("assert." + assertType + " failed at " + fileAndLineInfo + ":\n" + result + "\n   ");
             exMessage = addMessage(exMessage, message);
             throwMessage(exMessage);
         }
@@ -394,12 +409,16 @@ var assert = function assert() {
 
     var addMessage = function addMessage(baseMessage, message) {
         if (message !== undefined) {
-            baseMessage += ": " + message;
+            baseMessage += "Message: " + message;
         }
         return baseMessage;
     }
 
     return {
+        strictEqual: function strictEqual(expected, actual, message) {
+            validate(expected === actual, "strictEqual", message);
+        },
+
         areEqual: function areEqual(expected, actual, message) {
             /// <summary>
             /// IMPORTANT: NaN compares equal.<br/>
@@ -481,10 +500,11 @@ var assert = function assert() {
                   expectedException.toString().replace(/\n/g, "").replace(/.*function (.*)\(.*/g, "$1") :
                   "<any exception>";
                 if (expectedErrorMessage) {
-                    expectedString += " " + expectedErrorMessage;
+                    expectedString += ": " + expectedErrorMessage;
                 }
                 var actual = exception !== noException ? exception : "<no exception>";
-                throwMessage(addMessage("assert.throws failed: expected: " + expectedString + ", actual: " + actual, message));
+                var fileAndLineInfo = helpers.getFileAndLineInfo();
+                throwMessage(addMessage("assert.throws failed at " + fileAndLineInfo + ":\n  expected: " + expectedString + "\n    actual: " + actual + "\n   ", message));
             }
         },
 
@@ -501,12 +521,24 @@ var assert = function assert() {
                 return;
             }
 
-            throwMessage(addMessage("assert.doesNotThrow failed: expected: <no exception>, actual: " + exception, message));
+            var fileAndLineInfo = helpers.getFileAndLineInfo();
+            throwMessage(addMessage("assert.doesNotThrow failed at " + fileAndLineInfo + ":\n  expected: <no exception>,\n    actual: " + exception + "\n   ", message));
         },
 
         fail: function fail(message) {
             ///<summary>Can be used to fail the test.</summary>
-            throwMessage(message);
+            var fileAndLineInfo = helpers.getFileAndLineInfo();
+            throwMessage(addMessage("assert.fail failed at " + fileAndLineInfo + "\n   ", message));
+        },
+
+        matches: function matches(expected, actual, message) {
+            if (!(expected instanceof RegExp)) {
+                throwMessage(addMessage("assert.matches failed: did not provide a valid regex", message));
+            }
+
+            if (!expected.test(actual)) {
+                throwMessage(addMessage("assert.matches failed", message));
+            }
         }
     }
 }(); // assert.

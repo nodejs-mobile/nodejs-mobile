@@ -1,12 +1,9 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
-
-assert.doesNotThrow(() => process.binding('http2'));
 
 const binding = process.binding('http2');
 const http2 = require('http2');
@@ -32,6 +29,7 @@ const expectedStatusCodes = {
   HTTP_STATUS_CONTINUE: 100,
   HTTP_STATUS_SWITCHING_PROTOCOLS: 101,
   HTTP_STATUS_PROCESSING: 102,
+  HTTP_STATUS_EARLY_HINTS: 103,
   HTTP_STATUS_OK: 200,
   HTTP_STATUS_CREATED: 201,
   HTTP_STATUS_ACCEPTED: 202,
@@ -99,6 +97,7 @@ const expectedHeaderNames = {
   HTTP2_HEADER_AUTHORITY: ':authority',
   HTTP2_HEADER_SCHEME: ':scheme',
   HTTP2_HEADER_PATH: ':path',
+  HTTP2_HEADER_PROTOCOL: ':protocol',
   HTTP2_HEADER_DATE: 'date',
   HTTP2_HEADER_ACCEPT_CHARSET: 'accept-charset',
   HTTP2_HEADER_ACCEPT_ENCODING: 'accept-encoding',
@@ -219,7 +218,8 @@ const expectedNGConstants = {
   NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS: 3,
   NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE: 4,
   NGHTTP2_SETTINGS_MAX_FRAME_SIZE: 5,
-  NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE: 6
+  NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE: 6,
+  NGHTTP2_SETTINGS_ENABLE_CONNECT_PROTOCOL: 8
 };
 
 const defaultSettings = {

@@ -94,6 +94,8 @@ typedef unsigned short WCHAR;
 
 #if (defined(_MSC_VER) && _MSC_VER <= 1900) || (!defined(_MSC_VER) && __cplusplus <= 199711L) // !C++11
 typedef unsigned short uint16_t;
+#else
+#include <stdint.h>
 #endif
 
     /// <summary>
@@ -211,17 +213,30 @@ typedef unsigned short uint16_t;
         /// </summary>
         JsErrorPropertyNotString,
         /// <summary>
-        ///     Module evaulation is called in wrong context.
+        ///     Module evaluation is called in wrong context.
         /// </summary>
         JsErrorInvalidContext,
         /// <summary>
-        ///     Module evaulation is called in wrong context.
+        ///     Module evaluation is called in wrong context.
         /// </summary>
         JsInvalidModuleHostInfoKind,
         /// <summary>
         ///     Module was parsed already when JsParseModuleSource is called.
         /// </summary>
         JsErrorModuleParsed,
+        /// <summary>
+        ///     Argument passed to JsCreateWeakReference is a primitive that is not managed by the GC.
+        ///     No weak reference is required, the value will never be collected.
+        /// </summary>
+        JsNoWeakRefRequired,
+        /// <summary>
+        ///     The <c>Promise</c> object is still in the pending state.
+        /// </summary>
+        JsErrorPromisePending,
+        /// <summary>
+        ///     Module was not yet evaluated when JsGetModuleNamespace was called.
+        /// </summary>
+        JsErrorModuleNotEvaluated,
         /// <summary>
         ///     Category of errors that relates to errors occurring within the engine itself.
         /// </summary>
@@ -295,7 +310,7 @@ typedef unsigned short uint16_t;
         /// </summary>
         JsErrorDiagObjectNotFound,
         /// <summary>
-        ///     VM was unable to perfom the request action
+        ///     VM was unable to perform the request action
         /// </summary>
         JsErrorDiagUnableToPerformAction,
     } JsErrorCode;
@@ -438,7 +453,21 @@ typedef unsigned short uint16_t;
         ///     Calling <c>JsSetException</c> will also dispatch the exception to the script debugger
         ///     (if any) giving the debugger a chance to break on the exception.
         /// </summary>
-        JsRuntimeAttributeDispatchSetExceptionsToDebugger = 0x00000040
+        JsRuntimeAttributeDispatchSetExceptionsToDebugger = 0x00000040,
+        /// <summary>
+        ///     Disable Failfast fatal error on OOM
+        /// </summary>
+        JsRuntimeAttributeDisableFatalOnOOM = 0x00000080,
+        /// <summary>
+        ///     Runtime will not allocate executable code pages
+        ///     This also implies that Native Code generation will be turned off
+        ///     Note that this will break JavaScript stack decoding in tools
+        //      like WPA since they rely on allocation of unique thunks to
+        //      interpret each function and allocation of those thunks will be
+        //      disabled as well
+        /// </summary>
+        JsRuntimeAttributeDisableExecutablePageAllocation = 0x00000100,
+
     } JsRuntimeAttributes;
 
     /// <summary>

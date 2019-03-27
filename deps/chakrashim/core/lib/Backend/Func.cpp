@@ -62,23 +62,24 @@ Func::Func(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
     m_fg(nullptr),
     m_labelCount(0),
     m_argSlotsForFunctionsCalled(0),
-    m_isLeaf(false),
     m_hasCalls(false),
     m_hasInlineArgsOpt(false),
     m_canDoInlineArgsOpt(true),
     m_doFastPaths(false),
     hasBailout(false),
+    firstIRTemp(0),
     hasBailoutInEHRegion(false),
     hasInstrNumber(false),
     maintainByteCodeOffset(true),
     frameSize(0),
+    topFunc(parentFunc ? parentFunc->topFunc : this),
     parentFunc(parentFunc),
     argObjSyms(nullptr),
     m_nonTempLocalVars(nullptr),
     hasAnyStackNestedFunc(false),
     hasMarkTempObjects(false),
     postCallByteCodeOffset(postCallByteCodeOffset),
-    maxInlineeArgOutCount(0),
+    maxInlineeArgOutSize(0),
     returnValueRegSlot(returnValueRegSlot),
     firstActualStackOffset(-1),
     m_localVarSlotsOffset(Js::Constants::InvalidOffset),
@@ -109,6 +110,7 @@ Func::Func(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
     isTJLoopBody(false),
     m_nativeCodeDataSym(nullptr),
     isFlowGraphValid(false),
+    legalizePostRegAlloc(false),
 #if DBG
     m_callSiteCount(0),
 #endif
@@ -185,7 +187,7 @@ Func::Func(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
 
     if (m_workItem->Type() == JsFunctionType &&
         GetJITFunctionBody()->DoBackendArgumentsOptimization() &&
-        !GetJITFunctionBody()->HasTry())
+        (!GetJITFunctionBody()->HasTry() || this->DoOptimizeTry()))
     {
         // doBackendArgumentsOptimization bit is set when there is no eval inside a function
         // as determined by the bytecode generator.
@@ -262,7 +264,7 @@ Func::Func(JitArenaAllocator *alloc, JITTimeWorkItem * workItem,
         ObjTypeSpecFldInfo * info = GetWorkItem()->GetJITTimeInfo()->GetObjTypeSpecFldInfo(i);
         if (info != nullptr)
         {
-            Assert(info->GetObjTypeSpecFldId() < GetTopFunc()->GetWorkItem()->GetJITTimeInfo()->GetGlobalObjTypeSpecFldInfoCount());
+            AssertOrFailFast(info->GetObjTypeSpecFldId() < GetTopFunc()->GetWorkItem()->GetJITTimeInfo()->GetGlobalObjTypeSpecFldInfoCount());
             GetTopFunc()->m_globalObjTypeSpecFldInfoArray[info->GetObjTypeSpecFldId()] = info;
         }
     }
@@ -276,6 +278,12 @@ bool
 Func::IsLoopBodyInTry() const
 {
     return IsLoopBody() && m_workItem->GetLoopHeader()->isInTry;
+}
+
+bool
+Func::IsLoopBodyInTryFinally() const
+{
+    return IsLoopBody() && m_workItem->GetLoopHeader()->isInTryFinally;
 }
 
 /* static */
@@ -744,19 +752,27 @@ void Func::SetFirstArgOffset(IR::Instr* inlineeStart)
     int32 lastOffset;
 
     IR::Instr* arg = inlineeStart->GetNextArg();
-    const auto lastArgOutStackSym = arg->GetDst()->AsSymOpnd()->m_sym->AsStackSym();
-    lastOffset = lastArgOutStackSym->m_offset;
-    Assert(lastArgOutStackSym->m_isSingleDef);
-    const auto secondLastArgOutOpnd = lastArgOutStackSym->m_instrDef->GetSrc2();
-    if (secondLastArgOutOpnd->IsSymOpnd())
+    if (arg)
     {
-        const auto secondLastOffset = secondLastArgOutOpnd->AsSymOpnd()->m_sym->AsStackSym()->m_offset;
-        if (secondLastOffset > lastOffset)
+        const auto lastArgOutStackSym = arg->GetDst()->AsSymOpnd()->m_sym->AsStackSym();
+        lastOffset = lastArgOutStackSym->m_offset;
+        Assert(lastArgOutStackSym->m_isSingleDef);
+        const auto secondLastArgOutOpnd = lastArgOutStackSym->m_instrDef->GetSrc2();
+        if (secondLastArgOutOpnd->IsSymOpnd())
         {
-            lastOffset = secondLastOffset;
+            const auto secondLastOffset = secondLastArgOutOpnd->AsSymOpnd()->m_sym->AsStackSym()->m_offset;
+            if (secondLastOffset > lastOffset)
+            {
+                lastOffset = secondLastOffset;
+            }
         }
+        lastOffset += MachPtr;
     }
-    lastOffset += MachPtr;
+    else
+    {
+        Assert(this->GetTopFunc()->GetJITFunctionBody()->IsAsmJsMode());
+        lastOffset = MachPtr;
+    }
     int32 firstActualStackOffset = lastOffset - ((this->actualCount + Js::Constants::InlineeMetaArgCount) * MachPtr);
     Assert((this->firstActualStackOffset == -1) || (this->firstActualStackOffset == firstActualStackOffset));
     this->firstActualStackOffset = firstActualStackOffset;
@@ -871,7 +887,11 @@ Func::SetDoFastPaths()
 #if LOWER_SPLIT_INT64
 Int64RegPair Func::FindOrCreateInt64Pair(IR::Opnd* opnd)
 {
-    AssertMsg(this->GetTopFunc()->currentPhases.Top() == Js::LowererPhase, "New Int64 sym map is only allowed during lower");
+    if (!this->IsTopFunc())
+    {
+        return GetTopFunc()->FindOrCreateInt64Pair(opnd);
+    }
+    AssertMsg(currentPhases.Top() == Js::LowererPhase, "New Int64 sym map is only allowed during lower");
     Int64RegPair pair;
     IRType pairType = opnd->GetType();
     if (opnd->IsInt64())
@@ -918,7 +938,7 @@ Int64RegPair Func::FindOrCreateInt64Pair(IR::Opnd* opnd)
             {
                 Js::ArgSlot slotNumber = stackSym->GetArgSlotNum();
                 symPair.low = StackSym::NewArgSlotSym(slotNumber, this, pairType);
-                symPair.high = StackSym::NewArgSlotSym(slotNumber + 1, this, pairType);
+                symPair.high = StackSym::NewArgSlotSym(slotNumber, this, pairType);
             }
             else
             {
@@ -954,6 +974,11 @@ Int64RegPair Func::FindOrCreateInt64Pair(IR::Opnd* opnd)
 
 void Func::Int64SplitExtendLoopLifetime(Loop* loop)
 {
+    if (!this->IsTopFunc())
+    {
+        GetTopFunc()->Int64SplitExtendLoopLifetime(loop);
+        return;
+    }
     if (m_int64SymPairMap)
     {
         BVSparse<JitArenaAllocator> *liveOnBackEdgeSyms = loop->regAlloc.liveOnBackEdgeSyms;
@@ -972,7 +997,7 @@ void Func::Int64SplitExtendLoopLifetime(Loop* loop)
 }
 #endif
 
-#ifdef _M_ARM
+#if defined(_M_ARM32_OR_ARM64)
 
 RegNum
 Func::GetLocalsPointer() const
@@ -1127,8 +1152,7 @@ bool Func::CanAllocInPreReservedHeapPageSegment ()
 {
 #ifdef _CONTROL_FLOW_GUARD
     return PHASE_FORCE1(Js::PreReservedHeapAllocPhase) || (!PHASE_OFF1(Js::PreReservedHeapAllocPhase) &&
-        !IsJitInDebugMode() && GetThreadContextInfo()->IsCFGEnabled()
-        //&& !GetScriptContext()->IsScriptContextInDebugMode()
+        !IsJitInDebugMode()
 #if _M_IX86
         && m_workItem->GetJitMode() == ExecutionMode::FullJit
 
@@ -1140,7 +1164,7 @@ bool Func::CanAllocInPreReservedHeapPageSegment ()
         && GetInProcCodeGenAllocators()->canCreatePreReservedSegment
 #endif
         );
-#elif _M_X64
+#elif TARGET_64
         && true);
 #else
         && false); //Not yet implemented for architectures other than x86 and amd64.
@@ -1195,6 +1219,17 @@ Func::NumberInstrs()
     NEXT_INSTR_IN_FUNC;
 }
 
+#if DBG
+BVSparse<JitArenaAllocator>* Func::GetByteCodeOffsetUses(uint offset) const
+{
+    InstrByteCodeRegisterUses uses;
+    if (byteCodeRegisterUses->TryGetValue(offset, &uses))
+    {
+        return uses.bv;
+    }
+    return nullptr;
+}
+
 ///----------------------------------------------------------------------------
 ///
 /// Func::IsInPhase
@@ -1202,7 +1237,6 @@ Func::NumberInstrs()
 /// Determines whether the function is currently in the provided phase
 ///
 ///----------------------------------------------------------------------------
-#if DBG
 bool
 Func::IsInPhase(Js::Phase tag)
 {
@@ -1292,6 +1326,11 @@ Func::EndPhase(Js::Phase tag, bool dump)
     }
 #endif
 
+    if (tag == Js::RegAllocPhase)
+    {
+        this->legalizePostRegAlloc = true;
+    }
+
 #if DBG
     if (tag == Js::LowererPhase)
     {
@@ -1330,28 +1369,6 @@ Func::EndPhase(Js::Phase tag, bool dump)
 #endif
 }
 
-Func const *
-Func::GetTopFunc() const
-{
-    Func const * func = this;
-    while (!func->IsTopFunc())
-    {
-        func = func->parentFunc;
-    }
-    return func;
-}
-
-Func *
-Func::GetTopFunc()
-{
-    Func * func = this;
-    while (!func->IsTopFunc())
-    {
-        func = func->parentFunc;
-    }
-    return func;
-}
-
 StackSym *
 Func::EnsureLoopParamSym()
 {
@@ -1363,11 +1380,11 @@ Func::EnsureLoopParamSym()
 }
 
 void
-Func::UpdateMaxInlineeArgOutCount(uint inlineeArgOutCount)
+Func::UpdateMaxInlineeArgOutSize(uint inlineeArgOutSize)
 {
-    if (maxInlineeArgOutCount < inlineeArgOutCount)
+    if (this->maxInlineeArgOutSize < inlineeArgOutSize)
     {
-        maxInlineeArgOutCount = inlineeArgOutCount;
+        this->maxInlineeArgOutSize = inlineeArgOutSize;
     }
 }
 
@@ -1550,6 +1567,7 @@ Func::GetOrCreateSingleTypeGuard(intptr_t typeAddr)
 void
 Func::EnsureEquivalentTypeGuards()
 {
+    AssertMsg(!PHASE_OFF(Js::EquivObjTypeSpecPhase, this), "Why do we have equivalent type guards if we don't do equivalent object type spec?");
     if (this->equivalentTypeGuards == nullptr)
     {
         this->equivalentTypeGuards = JitAnew(this->m_alloc, EquivalentTypeGuardList, this->m_alloc);
@@ -1563,6 +1581,26 @@ Func::CreateEquivalentTypeGuard(JITTypeHolder type, uint32 objTypeSpecFldId)
 
     Js::JitEquivalentTypeGuard* guard = NativeCodeDataNewNoFixup(GetNativeCodeDataAllocator(), Js::JitEquivalentTypeGuard, type->GetAddr(), this->indexedPropertyGuardCount++, objTypeSpecFldId);
 
+    this->InitializeEquivalentTypeGuard(guard);
+
+    return guard;
+}
+
+Js::JitPolyEquivalentTypeGuard*
+Func::CreatePolyEquivalentTypeGuard(uint32 objTypeSpecFldId)
+{
+    EnsureEquivalentTypeGuards();
+
+    Js::JitPolyEquivalentTypeGuard* guard = NativeCodeDataNewNoFixup(GetNativeCodeDataAllocator(), Js::JitPolyEquivalentTypeGuard, this->indexedPropertyGuardCount++, objTypeSpecFldId);
+
+    this->InitializeEquivalentTypeGuard(guard);
+
+    return guard;
+}
+
+void
+Func::InitializeEquivalentTypeGuard(Js::JitEquivalentTypeGuard * guard)
+{
     // If we want to hard code the address of the cache, we will need to go back to allocating it from the native code data allocator.
     // We would then need to maintain consistency (double write) to both the recycler allocated cache and the one on the heap.
     Js::EquivalentTypeCache* cache = nullptr;
@@ -1579,8 +1617,6 @@ Func::CreateEquivalentTypeGuard(JITTypeHolder type, uint32 objTypeSpecFldId)
     // Give the cache a back-pointer to the guard so that the guard can be cleared at runtime if necessary.
     cache->SetGuard(guard);
     this->equivalentTypeGuards->Prepend(guard);
-
-    return guard;
 }
 
 void
@@ -1680,6 +1716,7 @@ Func::EnsureFuncStartLabel()
     if(m_funcStartLabel == nullptr)
     {
         m_funcStartLabel = IR::LabelInstr::New( Js::OpCode::Label, this );
+        m_funcStartLabel->m_isDataLabel = true;
     }
     return m_funcStartLabel;
 }
@@ -1696,6 +1733,7 @@ Func::EnsureFuncEndLabel()
     if(m_funcEndLabel == nullptr)
     {
         m_funcEndLabel = IR::LabelInstr::New( Js::OpCode::Label, this );
+        m_funcEndLabel->m_isDataLabel = true;
     }
     return m_funcEndLabel;
 }

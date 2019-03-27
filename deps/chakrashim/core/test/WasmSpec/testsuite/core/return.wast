@@ -124,16 +124,24 @@
   (type $sig (func (param i32 i32 i32) (result i32)))
   (table anyfunc (elem $f))
   (func (export "as-call_indirect-func") (result i32)
-    (call_indirect $sig (return (i32.const 20)) (i32.const 1) (i32.const 2) (i32.const 3))
+    (call_indirect (type $sig)
+      (return (i32.const 20)) (i32.const 1) (i32.const 2) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-first") (result i32)
-    (call_indirect $sig (i32.const 0) (return (i32.const 21)) (i32.const 2) (i32.const 3))
+    (call_indirect (type $sig)
+      (i32.const 0) (return (i32.const 21)) (i32.const 2) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-mid") (result i32)
-    (call_indirect $sig (i32.const 0) (i32.const 1) (return (i32.const 22)) (i32.const 3))
+    (call_indirect (type $sig)
+      (i32.const 0) (i32.const 1) (return (i32.const 22)) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-last") (result i32)
-    (call_indirect $sig (i32.const 0) (i32.const 1) (i32.const 2) (return (i32.const 23)))
+    (call_indirect (type $sig)
+      (i32.const 0) (i32.const 1) (i32.const 2) (return (i32.const 23))
+    )
   )
 
   (func (export "as-set_local-value") (result i32) (local f32)
@@ -188,8 +196,8 @@
     (i32.wrap/i64 (return (i32.const 41)))
   )
 
-  (func (export "as-grow_memory-size") (result i32)
-    (grow_memory (return (i32.const 40)))
+  (func (export "as-memory.grow-size") (result i32)
+    (memory.grow (return (i32.const 40)))
   )
 )
 
@@ -270,7 +278,7 @@
 
 (assert_return (invoke "as-convert-operand") (i32.const 41))
 
-(assert_return (invoke "as-grow_memory-size") (i32.const 40))
+(assert_return (invoke "as-memory.grow-size") (i32.const 40))
 
 (assert_invalid
   (module (func $type-value-empty-vs-num (result f64) (return)))

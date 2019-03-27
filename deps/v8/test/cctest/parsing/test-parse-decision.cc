@@ -18,7 +18,8 @@
 
 #include "test/cctest/cctest.h"
 
-using namespace v8::internal;
+namespace v8 {
+namespace internal {
 
 namespace {
 
@@ -34,7 +35,7 @@ void GetTopLevelFunctionInfo(
   SharedFunctionInfo::ScriptIterator iterator(i_script);
 
   while (SharedFunctionInfo* shared = iterator.Next()) {
-    std::unique_ptr<char[]> name = String::cast(shared->name())->ToCString();
+    std::unique_ptr<char[]> name = String::cast(shared->Name())->ToCString();
     is_compiled->insert(std::make_pair(name.get(), shared->is_compiled()));
   }
 }
@@ -105,3 +106,6 @@ TEST(CommaFunctionSequence) {
   DCHECK(is_compiled["b"]);
   DCHECK(is_compiled["c"]);
 }
+
+}  // namespace internal
+}  // namespace v8

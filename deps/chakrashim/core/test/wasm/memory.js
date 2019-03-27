@@ -21,22 +21,16 @@ while (true) {
   ++verbose;
 }
 
-function testTransfer(buffer) {
-  if (ArrayBuffer.transfer) {
-    try {
-      ArrayBuffer.transfer(buffer);
-      print("Failed. Expected an error when trying to transfer ");
-    } catch (e) {
-      if (verbose > 1) {
-        print(`Passed. Expected error: ${e.message}`);
-      }
+function testDetach(buffer) {
+  try {
+    ArrayBuffer.detach(buffer);
+    print("Failed. Expected an error when trying to transfer ");
+  } catch (e) {
+    if (verbose > 1) {
+      print(`Passed. Expected error: ${e.message}`);
     }
-  } else {
-    print("ArrayBuffer.tranfer is missing");
   }
 }
-
-
 
 function test({init, max, checkOOM} = {}) {
   if (verbose) {
@@ -45,8 +39,8 @@ function test({init, max, checkOOM} = {}) {
   const moduleTxt = `
   (module
     (memory (export "mem") ${init|0} ${max !== undefined ? max|0 : ""})
-    (func (export "grow") (param i32) (result i32) (grow_memory (get_local 0)))
-    (func (export "current") (result i32) (current_memory))
+    (func (export "grow") (param i32) (result i32) (memory.grow (get_local 0)))
+    (func (export "current") (result i32) (memory.size))
     (func (export "load") (param i32) (result i32) (i32.load (get_local 0)))
     (func (export "store") (param i32 i32) (i32.store (get_local 0) (get_local 1)))
   )`;
@@ -105,7 +99,7 @@ function test({init, max, checkOOM} = {}) {
     }
   }
   function run(delta) {
-    testTransfer(mem.buffer);
+    testDetach(mem.buffer);
     const beforePages = current();
     const growRes = grow(delta);
     if (growRes !== -1 && growRes !== beforePages) {
@@ -124,16 +118,16 @@ function test({init, max, checkOOM} = {}) {
     testReadWrite(-2, -2, currentSize);
     testReadWrite(-1, -1, currentSize);
     testReadWrite(0, 6, currentSize);
-    testTransfer(mem.buffer);
+    testDetach(mem.buffer);
     testReadWrite(1, 7, currentSize);
-    testTransfer(mem.buffer);
+    testDetach(mem.buffer);
     testReadWrite(1, 7, currentSize);
     testReadWrite(currentSize - 4, 457, currentSize);
     testReadWrite(currentSize - 3, -98745, currentSize);
     testReadWrite(currentSize - 2, 786452, currentSize);
     testReadWrite(currentSize - 1, -1324, currentSize);
     testReadWrite(currentSize, 123, currentSize);
-    testTransfer(mem.buffer);
+    testDetach(mem.buffer);
   }
   run(0);
   run(3);

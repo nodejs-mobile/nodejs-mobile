@@ -25,7 +25,10 @@ const assert = require('assert');
 const child = require('child_process');
 const fixtures = require('../common/fixtures');
 
-if (process.env['TEST_INIT']) {
+if (!common.isMainThread)
+  common.skip('process.chdir is not available in Workers');
+
+if (process.env.TEST_INIT) {
   return process.stdout.write('Loaded successfully!');
 }
 
@@ -49,7 +52,7 @@ function test(file, expected) {
 
 {
   // test-init-index is in fixtures dir as requested by ry, so go there
-  process.chdir(common.fixturesDir);
+  process.chdir(fixtures.path());
   test('test-init-index', 'Loaded successfully!');
 }
 

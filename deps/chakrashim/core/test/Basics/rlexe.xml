@@ -71,94 +71,8 @@
   </test>
   <test>
     <default>
-      <files>label1.js</files>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label1.js</files>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label2.js</files>
-      <baseline>label2.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label2.js</files>
-      <baseline>label2.baseline</baseline>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-      <tags>exclude_dynapogo</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label3.js</files>
-      <baseline>label3.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label3.js</files>
-      <baseline>label3.baseline</baseline>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-      <tags>exclude_dynapogo</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label4.js</files>
-      <baseline>label4.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label4.js</files>
-      <baseline>label4.baseline</baseline>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-      <tags>exclude_dynapogo</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label5.js</files>
-      <baseline>label5.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label5.js</files>
-      <baseline>label5.baseline</baseline>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-      <tags>exclude_dynapogo</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label6.js</files>
-      <baseline>label6.baseline</baseline>
-      <tags>exclude_dynapogo</tags>
-      <compile-flags>-Intl-</compile-flags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>label6.js</files>
-      <baseline>label6.baseline</baseline>
-      <compile-flags>-Force:Deferparse -Intl-</compile-flags>
-      <tags>exclude_dynapogo</tags>
+      <files>Labels.js</files>
+      <compile-flags>-MuteHostErrorMsg -args summary -endargs</compile-flags>
     </default>
   </test>
   <test>
@@ -234,7 +148,6 @@
   <test>
     <default>
       <files>typeof.js</files>
-      <baseline>typeof.baseline</baseline>
       <compile-flags>-Intl-</compile-flags>
     </default>
   </test>
@@ -386,6 +299,42 @@
     <default>
       <files>bug650104.js</files>
       <baseline>bug650104.baseline</baseline>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>SpecialSymbolCapture.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>VerifyParserState.js</files>
+      <baseline>VerifyParserState.baseline</baseline>
+      <compile-flags>-UseParserStateCache -ParserStateCache -Force:DeferParse -Trace:CreateParserState</compile-flags>
+      <tags>exclude_test,exclude_jshost</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>VerifySkipNestedDeferred.js</files>
+      <baseline>VerifySkipNestedDeferred.baseline</baseline>
+      <compile-flags>-UseParserStateCache -ParserStateCache -Force:DeferParse -Trace:SkipNestedDeferred</compile-flags>
+      <tags>exclude_test,exclude_jshost,exclude_dynapogo</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bug_os17542375.js</files>
+      <compile-flags>-UseParserStateCache -ParserStateCache -Force:DeferParse -pageheap:2</compile-flags>
+      <tags>exclude_test,exclude_jshost</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bug_os16855035.js</files>
+      <compile-flags>-UseParserStateCache -ParserStateCache -Force:DeferParse -Force:Redeferral -CollectGarbage</compile-flags>
+      <tags>exclude_test,exclude_jshost</tags>
     </default>
   </test>
 </regress-exe>

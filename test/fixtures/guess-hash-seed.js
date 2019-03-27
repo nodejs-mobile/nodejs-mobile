@@ -1,4 +1,3 @@
-/* eslint-disable required-modules */
 'use strict';
 function min(arr) {
   let res = arr[0];
@@ -134,7 +133,7 @@ const slow_str_gen = (function*() {
   let strgen_i = 0;
   outer:
   while (1) {
-    const str = '#' + (strgen_i++);
+    const str = `#${strgen_i++}`;
     for (let i = 0; i < 1000; i++) {
       if (time_set_lookup(tester_set, str) < tester_set_treshold)
         continue outer;

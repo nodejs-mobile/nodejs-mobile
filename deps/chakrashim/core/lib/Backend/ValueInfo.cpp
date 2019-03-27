@@ -607,53 +607,6 @@ ValueInfo::SpecializeToFloat64(JitArenaAllocator *const allocator)
     return newValueInfo;
 }
 
-// SIMD_JS
-ValueInfo *
-ValueInfo::SpecializeToSimd128(IRType type, JitArenaAllocator *const allocator)
-{
-    switch (type)
-    {
-    case TySimd128F4:
-        return SpecializeToSimd128F4(allocator);
-    case TySimd128I4:
-        return SpecializeToSimd128I4(allocator);
-    default:
-        Assert(UNREACHED);
-        return nullptr;
-    }
-
-}
-
-ValueInfo *
-ValueInfo::SpecializeToSimd128F4(JitArenaAllocator *const allocator)
-{
-    if (IsSimd128Float32x4())
-    {
-        return this;
-    }
-
-    ValueInfo *const newValueInfo = CopyWithGenericStructureKind(allocator);
-
-    newValueInfo->Type() = ValueType::GetSimd128(ObjectType::Simd128Float32x4);
-
-    return newValueInfo;
-}
-
-ValueInfo *
-ValueInfo::SpecializeToSimd128I4(JitArenaAllocator *const allocator)
-{
-    if (IsSimd128Int32x4())
-    {
-        return this;
-    }
-
-    ValueInfo *const newValueInfo = CopyWithGenericStructureKind(allocator);
-
-    newValueInfo->Type() = ValueType::GetSimd128(ObjectType::Simd128Int32x4);
-
-    return newValueInfo;
-}
-
 bool
 ValueInfo::GetIsShared() const
 {
@@ -787,7 +740,10 @@ ValueInfo::MergeLikelyIntValueInfo(JitArenaAllocator* alloc, Value *toDataVal, V
 
     if(newValueType.IsInt())
     {
-        int32 min1, max1, min2, max2;
+        int32 min1 = INT32_MIN;
+        int32 max1 = INT32_MAX;
+        int32 min2 = INT32_MIN;
+        int32 max2 = INT32_MAX;
         toDataValueInfo->GetIntValMinMax(&min1, &max1, false);
         fromDataValueInfo->GetIntValMinMax(&min2, &max2, false);
         return ValueInfo::NewIntRangeValueInfo(alloc, min(min1, min2), max(max1, max2), wasNegativeZeroPreventedByBailout);

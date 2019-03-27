@@ -4,22 +4,29 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLanguagePch.h"
 
-namespace Js
-{
+using namespace Js;
+
 #if ENABLE_PROFILE_INFO
     Var ProfilingHelpers::ProfiledLdElem(
         const Var base,
         const Var varIndex,
         FunctionBody *const functionBody,
         const ProfileId profileId,
-        bool didArrayAccessHelperCall)
+        bool didArrayAccessHelperCall,
+        bool bailedOutOnArraySpecialization)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdElem);
         Assert(base);
         Assert(varIndex);
         Assert(functionBody);
         Assert(profileId != Constants::NoProfileId);
 
         LdElemInfo ldElemInfo;
+
+        if (bailedOutOnArraySpecialization)
+        {
+            ldElemInfo.disableAggressiveSpecialization = true;
+        }
 
         // Only enable fast path if the javascript array is not cross site
 #if ENABLE_COPYONACCESS_ARRAY
@@ -29,7 +36,7 @@ namespace Js
         const bool fastPath = isJsArray;
         if(fastPath)
         {
-            JavascriptArray *const array = JavascriptArray::FromVar(base);
+            JavascriptArray *const array = JavascriptArray::UnsafeFromVar(base);
             ldElemInfo.arrayType = ValueType::FromArray(ObjectType::Array, array, TypeIds_Array).ToLikely();
 
             const Var element = ProfiledLdElem_FastPath(array, varIndex, functionBody->GetScriptContext(), &ldElemInfo);
@@ -76,7 +83,7 @@ namespace Js
             }
             else if(Js::RecyclableObject::Is(base))
             {
-                ldElemInfo.arrayType = ValueType::FromObject(Js::RecyclableObject::FromVar(base)).ToLikely();
+                ldElemInfo.arrayType = ValueType::FromObject(Js::RecyclableObject::UnsafeFromVar(base)).ToLikely();
                 break;
             }
             else
@@ -99,10 +106,25 @@ namespace Js
             }
         } while(false);
 
-        const Var element = JavascriptOperators::OP_GetElementI(base, varIndex, functionBody->GetScriptContext());
+        ScriptContext* scriptContext = functionBody->GetScriptContext();
+        RecyclableObject* cacheOwner;
+        PropertyRecordUsageCache* propertyRecordUsageCache;
+        Var element = nullptr;
+        if (JavascriptOperators::GetPropertyRecordUsageCache(varIndex, scriptContext, &propertyRecordUsageCache, &cacheOwner))
+        {
+            PropertyCacheOperationInfo operationInfo;
+            element = JavascriptOperators::GetElementIWithCache<true /* ReturnOperationInfo */>(base, cacheOwner, propertyRecordUsageCache, scriptContext, &operationInfo);
+
+            ldElemInfo.flags = DynamicProfileInfo::FldInfoFlagsFromCacheType(operationInfo.cacheType);
+            ldElemInfo.flags = DynamicProfileInfo::MergeFldInfoFlags(ldElemInfo.flags, DynamicProfileInfo::FldInfoFlagsFromSlotType(operationInfo.slotType));
+        }
+        else
+        {
+            element = JavascriptOperators::OP_GetElementI(base, varIndex, scriptContext);
+        }
 
         const ValueType arrayType(ldElemInfo.GetArrayType());
-        if(!arrayType.IsUninitialized())
+        if(!arrayType.IsUninitialized() || ldElemInfo.flags != Js::FldInfo_NoInfo)
         {
             if(array && arrayType.IsLikelyObject() && arrayType.GetObjectType() == ObjectType::Array && !arrayType.HasIntElements())
             {
@@ -113,12 +135,14 @@ namespace Js
             }
 
             ldElemInfo.elemType = ValueType::Uninitialized.Merge(element);
+
             functionBody->GetDynamicProfileInfo()->RecordElementLoad(functionBody, profileId, ldElemInfo);
             return element;
         }
 
         functionBody->GetDynamicProfileInfo()->RecordElementLoadAsProfiled(functionBody, profileId);
         return element;
+        JIT_HELPER_END(ProfiledLdElem);
     }
 
     Var ProfilingHelpers::ProfiledLdElem_FastPath(
@@ -197,7 +221,10 @@ namespace Js
         FunctionBody *const functionBody,
         const ProfileId profileId)
     {
-        ProfiledStElem(base, varIndex, value, functionBody, profileId, PropertyOperation_None, false);
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStElem_DefaultFlags);
+        JIT_HELPER_SAME_ATTRIBUTES(ProfiledStElem_DefaultFlags, ProfiledStElem);
+        ProfiledStElem(base, varIndex, value, functionBody, profileId, PropertyOperation_None, false, false);
+        JIT_HELPER_END(ProfiledStElem_DefaultFlags);
     }
 
     void ProfilingHelpers::ProfiledStElem(
@@ -207,8 +234,10 @@ namespace Js
         FunctionBody *const functionBody,
         const ProfileId profileId,
         const PropertyOperationFlags flags,
-        bool didArrayAccessHelperCall)
+        bool didArrayAccessHelperCall,
+        bool bailedOutOnArraySpecialization)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStElem);
         Assert(base);
         Assert(varIndex);
         Assert(value);
@@ -217,13 +246,18 @@ namespace Js
 
         StElemInfo stElemInfo;
 
+        if (bailedOutOnArraySpecialization)
+        {
+            stElemInfo.disableAggressiveSpecialization = true;
+        }
+
         // Only enable fast path if the javascript array is not cross site
         const bool isJsArray = !TaggedNumber::Is(base) && VirtualTableInfo<JavascriptArray>::HasVirtualTable(base);
         ScriptContext *const scriptContext = functionBody->GetScriptContext();
         const bool fastPath = isJsArray && !JavascriptOperators::SetElementMayHaveImplicitCalls(scriptContext);
         if(fastPath)
         {
-            JavascriptArray *const array = JavascriptArray::FromVar(base);
+            JavascriptArray *const array = JavascriptArray::UnsafeFromVar(base);
             stElemInfo.arrayType = ValueType::FromArray(ObjectType::Array, array, TypeIds_Array).ToLikely();
             stElemInfo.createdMissingValue = array->HasNoMissingValues();
 
@@ -239,7 +273,7 @@ namespace Js
         TypeId arrayTypeId;
         if(isJsArray)
         {
-            array = JavascriptArray::FromVar(base);
+            array = JavascriptArray::UnsafeFromVar(base);
             isObjectWithArray = false;
             arrayTypeId = TypeIds_Array;
         }
@@ -325,19 +359,40 @@ namespace Js
             }
         } while(false);
 
-        JavascriptOperators::OP_SetElementI(base, varIndex, value, scriptContext, flags);
+        RecyclableObject* cacheOwner;
+        PropertyRecordUsageCache* propertyRecordUsageCache;
+        TypeId instanceType = JavascriptOperators::GetTypeId(base);
+        bool isTypedArray = (instanceType >= TypeIds_Int8Array && instanceType <= TypeIds_Float64Array);
+        if (!isTypedArray && JavascriptOperators::GetPropertyRecordUsageCache(varIndex, scriptContext, &propertyRecordUsageCache, &cacheOwner))
+        {
+            RecyclableObject* object = nullptr;
+            bool result = JavascriptOperators::GetPropertyObjectForSetElementI(base, cacheOwner, scriptContext, &object);
+            Assert(result);
 
-        if(!stElemInfo.GetArrayType().IsUninitialized())
+            PropertyCacheOperationInfo operationInfo;
+            JavascriptOperators::SetElementIWithCache<true /* ReturnOperationInfo */>(base, object, cacheOwner, value, propertyRecordUsageCache, scriptContext, flags, &operationInfo);
+
+            stElemInfo.flags = DynamicProfileInfo::FldInfoFlagsFromCacheType(operationInfo.cacheType);
+            stElemInfo.flags = DynamicProfileInfo::MergeFldInfoFlags(stElemInfo.flags, DynamicProfileInfo::FldInfoFlagsFromSlotType(operationInfo.slotType));
+        }
+        else
+        {
+            JavascriptOperators::OP_SetElementI(base, varIndex, value, scriptContext, flags);
+        }
+
+        if(!stElemInfo.GetArrayType().IsUninitialized() || stElemInfo.flags != Js::FldInfo_NoInfo)
         {
             if(array)
             {
                 stElemInfo.createdMissingValue &= !array->HasNoMissingValues();
             }
+
             functionBody->GetDynamicProfileInfo()->RecordElementStore(functionBody, profileId, stElemInfo);
             return;
         }
 
         functionBody->GetDynamicProfileInfo()->RecordElementStoreAsProfiled(functionBody, profileId);
+        JIT_HELPER_END(ProfiledStElem);
     }
 
     void ProfilingHelpers::ProfiledStElem_FastPath(
@@ -418,6 +473,7 @@ namespace Js
         FunctionBody *const functionBody,
         const ProfileId profileId)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledNewScArray);
         Assert(functionBody);
         Assert(profileId != Constants::NoProfileId);
 
@@ -458,6 +514,7 @@ namespace Js
 #endif
 
         return array;
+        JIT_HELPER_END(ProfiledNewScArray);
     }
 
     Var ProfilingHelpers::ProfiledNewScObjArray_Jit(
@@ -469,13 +526,16 @@ namespace Js
         ...)
     {
         ARGUMENTS(args, callee, framePointer, profileId, arrayProfileId, callInfo);
+        ScriptFunction* func = ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+        JIT_HELPER_REENTRANT_HEADER(ProfiledNewScObjArray);
         return
             ProfiledNewScObjArray(
                 callee,
                 args,
-                ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject),
+                func,
                 profileId,
                 arrayProfileId);
+        JIT_HELPER_END(ProfiledNewScObjArray);
     }
 
     Var ProfilingHelpers::ProfiledNewScObjArraySpread_Jit(
@@ -487,11 +547,12 @@ namespace Js
         CallInfo callInfo,
         ...)
     {
-        ARGUMENTS(args, callInfo);
+        ARGUMENTS(args, spreadIndices, callee, framePointer, profileId, arrayProfileId, callInfo);
 
-        Js::ScriptFunction *function = ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+        Js::ScriptFunction *function = ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ScriptContext* scriptContext = function->GetScriptContext();
 
+        JIT_HELPER_REENTRANT_HEADER(ProfiledNewScObjArraySpread);
         // GetSpreadSize ensures that spreadSize < 2^24
         uint32 spreadSize = 0;
         if (spreadIndices != nullptr)
@@ -536,6 +597,7 @@ namespace Js
                     profileId,
                     arrayProfileId);
         }
+        JIT_HELPER_END(ProfiledNewScObjArraySpread);
     }
 
     Var ProfilingHelpers::ProfiledNewScObjArray(
@@ -576,9 +638,10 @@ namespace Js
 
         args.Values[0] = nullptr;
         Var array;
+        Js::RecyclableObject* calleeObject = RecyclableObject::UnsafeFromVar(callee);
         if (arrayInfo->IsNativeIntArray())
         {
-            array = JavascriptNativeIntArray::NewInstance(RecyclableObject::FromVar(callee), args);
+            array = JavascriptNativeIntArray::NewInstance(calleeObject, args);
             if (VirtualTableInfo<JavascriptNativeIntArray>::HasVirtualTable(array))
             {
                 JavascriptNativeIntArray *const intArray = static_cast<JavascriptNativeIntArray *>(array);
@@ -600,7 +663,7 @@ namespace Js
         }
         else if (arrayInfo->IsNativeFloatArray())
         {
-            array = JavascriptNativeFloatArray::NewInstance(RecyclableObject::FromVar(callee), args);
+            array = JavascriptNativeFloatArray::NewInstance(calleeObject, args);
             if (VirtualTableInfo<JavascriptNativeFloatArray>::HasVirtualTable(array))
             {
                 JavascriptNativeFloatArray *const floatArray = static_cast<JavascriptNativeFloatArray *>(array);
@@ -613,10 +676,10 @@ namespace Js
         }
         else
         {
-            array = JavascriptArray::NewInstance(RecyclableObject::FromVar(callee), args);
+            array = JavascriptArray::NewInstance(calleeObject, args);
         }
 
-        return CrossSite::MarshalVar(scriptContext, array);
+        return CrossSite::MarshalVar(scriptContext, array, calleeObject->GetScriptContext());
     }
 
     Var ProfilingHelpers::ProfiledNewScObject(
@@ -638,7 +701,7 @@ namespace Js
             const auto calleeObject = JavascriptOperators::GetCallableObjectOrThrow(callee, scriptContext);
             const auto calleeFunctionInfo =
                 calleeObject->GetTypeId() == TypeIds_Function
-                    ? JavascriptFunction::FromVar(calleeObject)->GetFunctionInfo()
+                    ? JavascriptFunction::UnsafeFromVar(calleeObject)->GetFunctionInfo()
                     : nullptr;
             DynamicProfileInfo *profileInfo = callerFunctionBody->GetDynamicProfileInfo();
             profileInfo->RecordCallSiteInfo(
@@ -651,31 +714,51 @@ namespace Js
                 inlineCacheIndex);
             // We need to record information here, most importantly so that we handle array subclass
             // creation properly, since optimizing those cases is important
-            Var retVal = JavascriptOperators::NewScObject(callee, args, scriptContext, spreadIndices);
+            Var retVal = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                retVal = JavascriptOperators::NewScObject(callee, args, scriptContext, spreadIndices);
+            }
+            END_SAFE_REENTRANT_CALL
+            
             profileInfo->RecordReturnTypeOnCallSiteInfo(callerFunctionBody, profileId, retVal);
             return retVal;
         }
 
-        return JavascriptOperators::NewScObject(callee, args, scriptContext, spreadIndices);
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            return JavascriptOperators::NewScObject(callee, args, scriptContext, spreadIndices);
+        }
+        END_SAFE_REENTRANT_CALL
     }
 
     void ProfilingHelpers::ProfileLdSlot(const Var value, FunctionBody *const functionBody, const ProfileId profileId)
     {
+        JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(ProfileLdSlot);
         Assert(value);
         Assert(functionBody);
         Assert(profileId != Constants::NoProfileId);
 
         functionBody->GetDynamicProfileInfo()->RecordSlotLoad(functionBody, profileId, value);
+        JIT_HELPER_END(ProfileLdSlot);
     }
 
-    Var ProfilingHelpers::ProfiledLdFld_Jit(
+    Var ProfilingHelpers::ProfiledLdLen_Jit(
         const Var instance,
         const PropertyId propertyId,
         const InlineCacheIndex inlineCacheIndex,
+        const ProfileId profileId,
         void *const framePointer)
     {
-        ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdLen);
+        ScriptFunction * const scriptFunction = ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+        FunctionBody * functionBody = scriptFunction->GetFunctionBody();
+        DynamicProfileInfo * profileInfo = functionBody->GetDynamicProfileInfo();
+
+        LdLenInfo ldLenInfo;
+        ldLenInfo.arrayType = ValueType::Uninitialized.Merge(instance);
+        profileInfo->RecordLengthLoad(functionBody, profileId, ldLenInfo);
+
         return
             ProfiledLdFld<false, false, false>(
                 instance,
@@ -684,6 +767,27 @@ namespace Js
                 inlineCacheIndex,
                 scriptFunction->GetFunctionBody(),
                 instance);
+        JIT_HELPER_END(ProfiledLdLen);
+    }
+
+    Var ProfilingHelpers::ProfiledLdFld_Jit(
+        const Var instance,
+        const PropertyId propertyId,
+        const InlineCacheIndex inlineCacheIndex,
+        void *const framePointer)
+    {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdFld);
+        ScriptFunction *const scriptFunction =
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+        return
+            ProfiledLdFld<false, false, false>(
+                instance,
+                propertyId,
+                GetInlineCache(scriptFunction, inlineCacheIndex),
+                inlineCacheIndex,
+                scriptFunction->GetFunctionBody(),
+                instance);
+        JIT_HELPER_END(ProfiledLdFld);
     }
 
     Var ProfilingHelpers::ProfiledLdSuperFld_Jit(
@@ -692,9 +796,10 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer,
         const Var thisInstance)
-        {
+    {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdSuperFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         return
             ProfiledLdFld<false, false, false>(
             instance,
@@ -703,6 +808,7 @@ namespace Js
             inlineCacheIndex,
             scriptFunction->GetFunctionBody(),
             thisInstance);
+        JIT_HELPER_END(ProfiledLdSuperFld);
     }
 
     Var ProfilingHelpers::ProfiledLdFldForTypeOf_Jit(
@@ -711,8 +817,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdFldForTypeOf);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
 
         return ProfiledLdFldForTypeOf<false, false, false>(
             instance,
@@ -720,6 +827,7 @@ namespace Js
             GetInlineCache(scriptFunction, inlineCacheIndex),
             inlineCacheIndex,
             scriptFunction->GetFunctionBody());
+        JIT_HELPER_END(ProfiledLdFldForTypeOf);
     }
 
 
@@ -729,8 +837,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdFld_CallApplyTarget);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         return
             ProfiledLdFld<false, false, true>(
                 instance,
@@ -739,6 +848,7 @@ namespace Js
                 inlineCacheIndex,
                 scriptFunction->GetFunctionBody(),
                 instance);
+        JIT_HELPER_END(ProfiledLdFld_CallApplyTarget);
     }
 
     Var ProfilingHelpers::ProfiledLdMethodFld_Jit(
@@ -747,8 +857,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdMethodFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         return
             ProfiledLdFld<false, true, false>(
                 instance,
@@ -757,6 +868,7 @@ namespace Js
                 inlineCacheIndex,
                 scriptFunction->GetFunctionBody(),
                 instance);
+        JIT_HELPER_END(ProfiledLdMethodFld);
     }
 
     Var ProfilingHelpers::ProfiledLdRootFld_Jit(
@@ -765,8 +877,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdRootFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         return
             ProfiledLdFld<true, false, false>(
                 instance,
@@ -775,6 +888,7 @@ namespace Js
                 inlineCacheIndex,
                 scriptFunction->GetFunctionBody(),
                 instance);
+        JIT_HELPER_END(ProfiledLdRootFld);
     }
 
     Var ProfilingHelpers::ProfiledLdRootFldForTypeOf_Jit(
@@ -783,8 +897,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdRootFldForTypeOf);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
 
         return ProfiledLdFldForTypeOf<true, false, false>(
             instance,
@@ -792,6 +907,7 @@ namespace Js
             GetInlineCache(scriptFunction, inlineCacheIndex),
             inlineCacheIndex,
             scriptFunction->GetFunctionBody());
+        JIT_HELPER_END(ProfiledLdRootFldForTypeOf);
     }
 
     Var ProfilingHelpers::ProfiledLdRootMethodFld_Jit(
@@ -800,8 +916,9 @@ namespace Js
         const InlineCacheIndex inlineCacheIndex,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledLdRootMethodFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         return
             ProfiledLdFld<true, true, false>(
                 instance,
@@ -810,6 +927,7 @@ namespace Js
                 inlineCacheIndex,
                 scriptFunction->GetFunctionBody(),
                 instance);
+        JIT_HELPER_END(ProfiledLdRootMethodFld);
     }
 
     template<bool Root, bool Method, bool CallApplyTarget>
@@ -838,15 +956,15 @@ namespace Js
         FldInfoFlags fldInfoFlags = FldInfo_NoInfo;
         if (Root || (RecyclableObject::Is(instance) && RecyclableObject::Is(thisInstance)))
         {
-            RecyclableObject *const object = RecyclableObject::FromVar(instance);
-            RecyclableObject *const thisObject = RecyclableObject::FromVar(thisInstance);
+            RecyclableObject *const object = RecyclableObject::UnsafeFromVar(instance);
+            RecyclableObject *const thisObject = RecyclableObject::UnsafeFromVar(thisInstance);
 
             if (!Root && Method && (propertyId == PropertyIds::apply || propertyId == PropertyIds::call) && ScriptFunction::Is(object))
             {
                 // If the property being loaded is "apply"/"call", make an optimistic assumption that apply/call is not overridden and
                 // undefer the function right here if it was defer parsed before. This is required so that the load of "apply"/"call"
                 // happens from the same "type". Otherwise, we will have a polymorphic cache for load of "apply"/"call".
-                ScriptFunction *fn = ScriptFunction::FromVar(object);
+                ScriptFunction *fn = ScriptFunction::UnsafeFromVar(object);
                 if (fn->GetType()->GetEntryPoint() == JavascriptFunction::DeferredParsingThunk)
                 {
                     JavascriptFunction::DeferredParse(&fn);
@@ -856,7 +974,7 @@ namespace Js
             PropertyCacheOperationInfo operationInfo;
             PropertyValueInfo propertyValueInfo;
             PropertyValueInfo::SetCacheInfo(&propertyValueInfo, functionBody, inlineCache, inlineCacheIndex, true);
-            if (!CacheOperators::TryGetProperty<true, true, true, !Root && !Method, true, !Root, true, false, true>(
+            if (!CacheOperators::TryGetProperty<true, true, true, !Root && !Method, true, !Root, true, false, true, false>(
                     object,
                     Root,
                     object,
@@ -888,12 +1006,6 @@ namespace Js
                 {
                     fldInfoFlags = DynamicProfileInfo::MergeFldInfoFlags(fldInfoFlags, FldInfo_Polymorphic);
                 }
-            }
-
-            if (propertyId == Js::PropertyIds::arguments)
-            {
-                fldInfoFlags = DynamicProfileInfo::MergeFldInfoFlags(fldInfoFlags, FldInfo_FromAccessor);
-                scriptContext->GetThreadContext()->AddImplicitCallFlags(ImplicitCall_Accessor);
             }
 
             if (!Root && operationInfo.isPolymorphic)
@@ -972,8 +1084,9 @@ namespace Js
         const Var value,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledStFld<false>(
             instance,
             propertyId,
@@ -983,6 +1096,7 @@ namespace Js
             PropertyOperation_None,
             scriptFunction,
             instance);
+        JIT_HELPER_END(ProfiledStFld);
     }
 
     void ProfilingHelpers::ProfiledStSuperFld_Jit(
@@ -993,8 +1107,9 @@ namespace Js
         void *const framePointer,
         const Var thisInstance)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStSuperFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledStFld<false>(
             instance,
             propertyId,
@@ -1004,6 +1119,7 @@ namespace Js
             PropertyOperation_None,
             scriptFunction,
             thisInstance);
+        JIT_HELPER_END(ProfiledStSuperFld);
     }
 
     void ProfilingHelpers::ProfiledStFld_Strict_Jit(
@@ -1013,8 +1129,9 @@ namespace Js
         const Var value,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStFld_Strict);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledStFld<false>(
             instance,
             propertyId,
@@ -1024,6 +1141,7 @@ namespace Js
             PropertyOperation_StrictMode,
             scriptFunction,
             instance);
+        JIT_HELPER_END(ProfiledStFld_Strict);
     }
 
     void ProfilingHelpers::ProfiledStRootFld_Jit(
@@ -1033,8 +1151,9 @@ namespace Js
         const Var value,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStRootFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledStFld<true>(
             instance,
             propertyId,
@@ -1044,6 +1163,7 @@ namespace Js
             PropertyOperation_Root,
             scriptFunction,
             instance);
+        JIT_HELPER_END(ProfiledStRootFld);
     }
 
     void ProfilingHelpers::ProfiledStRootFld_Strict_Jit(
@@ -1053,8 +1173,9 @@ namespace Js
         const Var value,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledStRootFld_Strict);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledStFld<true>(
             instance,
             propertyId,
@@ -1064,6 +1185,7 @@ namespace Js
             PropertyOperation_StrictModeRoot,
             scriptFunction,
             instance);
+        JIT_HELPER_END(ProfiledStRootFld_Strict);
     }
 
     template<bool Root>
@@ -1096,8 +1218,8 @@ namespace Js
         FldInfoFlags fldInfoFlags = FldInfo_NoInfo;
         if(Root || (RecyclableObject::Is(instance) && RecyclableObject::Is(thisInstance)))
         {
-            RecyclableObject *const object = RecyclableObject::FromVar(instance);
-            RecyclableObject *const thisObject = RecyclableObject::FromVar(thisInstance);
+            RecyclableObject *const object = RecyclableObject::UnsafeFromVar(instance);
+            RecyclableObject *const thisObject = RecyclableObject::UnsafeFromVar(thisInstance);
             PropertyCacheOperationInfo operationInfo;
             PropertyValueInfo propertyValueInfo;
             PropertyValueInfo::SetCacheInfo(&propertyValueInfo, functionBody, inlineCache, inlineCacheIndex, true);
@@ -1181,13 +1303,14 @@ namespace Js
         }
         else
         {
-            JavascriptOperators::PatchPutValueNoLocalFastPath<false>(
+            JavascriptOperators::PatchPutValueWithThisPtrNoLocalFastPath<false>(
                 functionBody,
                 inlineCache,
                 inlineCacheIndex,
                 instance,
                 propertyId,
                 value,
+                thisInstance,
                 flags);
         }
 
@@ -1201,8 +1324,9 @@ namespace Js
         const Var value,
         void *const framePointer)
     {
+        JIT_HELPER_REENTRANT_HEADER(ProfiledInitFld);
         ScriptFunction *const scriptFunction =
-            ScriptFunction::FromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
+            ScriptFunction::UnsafeFromVar(JavascriptCallStackLayout::FromFramePointer(framePointer)->functionObject);
         ProfiledInitFld(
             RecyclableObject::FromVar(instance),
             propertyId,
@@ -1210,6 +1334,7 @@ namespace Js
             inlineCacheIndex,
             value,
             scriptFunction->GetFunctionBody());
+        JIT_HELPER_END(ProfiledInitFld);
     }
 
     void ProfilingHelpers::ProfiledInitFld(
@@ -1274,8 +1399,7 @@ namespace Js
         FunctionBody *const functionBody)
     {
         RecyclableObject *callee = nullptr;
-        if((cacheType & (CacheType_Getter | CacheType_Setter)) &&
-            inlineCache->GetGetterSetter(object->GetType(), &callee))
+        if((cacheType & (CacheType_Getter | CacheType_Setter)) && inlineCache->GetGetterSetter(object, &callee))
         {
             const bool canInline = functionBody->GetDynamicProfileInfo()->RecordLdFldCallSiteInfo(functionBody, callee, false /*callApplyTarget*/);
             if(canInline)
@@ -1312,8 +1436,7 @@ namespace Js
 
         return
             scriptFunction->GetHasInlineCaches()
-                ? ScriptFunctionWithInlineCache::FromVar(scriptFunction)->GetInlineCache(inlineCacheIndex)
+                ? ScriptFunctionWithInlineCache::UnsafeFromVar(scriptFunction)->GetInlineCache(inlineCacheIndex)
                 : scriptFunction->GetFunctionBody()->GetInlineCache(inlineCacheIndex);
     }
 #endif
-}

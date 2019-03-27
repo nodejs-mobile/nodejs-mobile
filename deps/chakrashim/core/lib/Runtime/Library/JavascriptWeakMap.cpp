@@ -19,9 +19,16 @@ namespace Js
 
     JavascriptWeakMap* JavascriptWeakMap::FromVar(Var aValue)
     {
+        AssertOrFailFastMsg(Is(aValue), "Ensure var is actually a 'JavascriptWeakMap'");
+
+        return static_cast<JavascriptWeakMap *>(aValue);
+    }
+
+    JavascriptWeakMap* JavascriptWeakMap::UnsafeFromVar(Var aValue)
+    {
         AssertMsg(Is(aValue), "Ensure var is actually a 'JavascriptWeakMap'");
 
-        return static_cast<JavascriptWeakMap *>(RecyclableObject::FromVar(aValue));
+        return static_cast<JavascriptWeakMap *>(RecyclableObject::UnsafeFromVar(aValue));
     }
 
     JavascriptWeakMap::WeakMapKeyMap* JavascriptWeakMap::GetWeakMapKeyMapFromKey(RecyclableObject* key) const
@@ -35,7 +42,7 @@ namespace Js
             return nullptr;
         }
 
-        if (key->GetScriptContext()->GetLibrary()->GetUndefined() == weakMapKeyData)
+        if (key->GetLibrary()->GetUndefined() == weakMapKeyData)
         {
             return nullptr;
         }
@@ -78,10 +85,9 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
         JavascriptLibrary* library = scriptContext->GetLibrary();
 
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && newTarget != nullptr && !JavascriptOperators::IsUndefined(newTarget);
-        Assert(isCtorSuperCall || !(callInfo.Flags & CallFlags_New) || args[0] == nullptr);
-        CHAKRATEL_LANGSTATS_INC_DATACOUNT(ES6_WeakMap);
+        Var newTarget = args.GetNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
+        CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, WeakMap, scriptContext);
 
         JavascriptWeakMap* weakMapObject = nullptr;
 
@@ -135,7 +141,11 @@ namespace Js
                     value = undefined;
                 }
 
-                CALL_FUNCTION(scriptContext->GetThreadContext(), adder, CallInfo(CallFlags_Value, 3), weakMapObject, key, value);
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    CALL_FUNCTION(scriptContext->GetThreadContext(), adder, CallInfo(CallFlags_Value, 3), weakMapObject, key, value);
+                }
+                END_SAFE_REENTRANT_CALL
             });
         }
 
@@ -228,7 +238,7 @@ namespace Js
         }
 #endif
 
-        return loaded ? value : scriptContext->GetLibrary()->GetUndefined();
+        return loaded ? CrossSite::MarshalVar(scriptContext, value) : scriptContext->GetLibrary()->GetUndefined();
     }
 
     Var JavascriptWeakMap::EntryHas(RecyclableObject* function, CallInfo callInfo, ...)
@@ -422,7 +432,7 @@ namespace Js
 
         this->Map([&](RecyclableObject* key, Js::Var value)
         {
-            AssertMsg(smi->MapSize + 1 < mapCountEst, "We are writting junk");
+            AssertMsg(smi->MapSize + 1 < mapCountEst, "We are writing junk");
 
             smi->MapKeyValueArray[smi->MapSize] = key;
             smi->MapKeyValueArray[smi->MapSize + 1] = value;

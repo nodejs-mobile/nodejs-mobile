@@ -17,11 +17,12 @@
 #ifndef WABT_BINARY_H_
 #define WABT_BINARY_H_
 
-#include "common.h"
+#include "src/common.h"
 
 #define WABT_BINARY_MAGIC 0x6d736100
 #define WABT_BINARY_VERSION 1
 #define WABT_BINARY_LIMITS_HAS_MAX_FLAG 0x1
+#define WABT_BINARY_LIMITS_IS_SHARED_FLAG 0x2
 
 #define WABT_BINARY_SECTION_NAME "name"
 #define WABT_BINARY_SECTION_RELOC "reloc"
@@ -56,6 +57,12 @@ enum class BinarySection {
 };
 /* clang-format on */
 static const int kBinarySectionCount = WABT_ENUM_COUNT(BinarySection);
+
+enum class NameSectionSubsection {
+  Module = 0,
+  Function = 1,
+  Local = 2,
+};
 
 extern const char* g_section_name[];
 

@@ -26,22 +26,6 @@ const HashTbl::ReservedWordInfo HashTbl::s_reservedWordInfo[tkID] =
 #include "keywords.h"
 };
 
-HashTbl * HashTbl::Create(uint cidHash)
-{
-    HashTbl * phtbl;
-
-    if (nullptr == (phtbl = HeapNewNoThrow(HashTbl)))
-        return nullptr;
-    if (!phtbl->Init(cidHash))
-    {
-        delete phtbl;  // invokes overrided operator delete
-        return nullptr;
-    }
-
-    return phtbl;
-}
-
-
 BOOL HashTbl::Init(uint cidHash)
 {
     // cidHash must be a power of two
@@ -145,8 +129,46 @@ uint HashTbl::CountAndVerifyItems(IdentPtr *buckets, uint bucketCount, uint mask
 }
 #endif
 
+
 #pragma warning(push)
-#pragma warning(disable:4740) // flow in or out of inline asm code suppresses global optimization
+#pragma warning(disable:4740)  // flow in or out of inline asm code suppresses global optimization
+
+// Decide if token is keyword by string matching -
+// This method is used during colorizing when scanner isn't interested in storing the actual id and does not care about conversion of escape sequences
+tokens Ident::TkFromNameLen(uint32 luHash, _In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode, ushort * pgrfid, ushort * ptk)
+{
+    // look for a keyword
+    #include "kwds_sw.h"
+
+    #define KEYWORD(tk,f,prec2,nop2,prec1,nop1,name) \
+    LEqual_##name: \
+        if (cch == g_ssym_##name.cch && \
+                0 == memcmp(g_ssym_##name.sz, prgch, cch * sizeof(OLECHAR))) \
+        { \
+            if (f) \
+                *pgrfid |= f; \
+            *ptk = tk; \
+            return ((f & fidKwdRsvd) || (isStrictMode && (f & fidKwdFutRsvd))) ? tk : tkID; \
+        } \
+        goto LDefault;
+    #include "keywords.h"
+
+LDefault:
+    return tkID;
+}
+
+#pragma warning(pop)
+
+#if DBG
+tokens Ident::TkFromNameLen(_In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode)
+{
+    uint32 luHash = CaseSensitiveComputeHash(prgch, prgch + cch);
+    ushort grfid;
+    ushort tk;
+    return TkFromNameLen(luHash, prgch, cch, isStrictMode, &grfid, &tk);
+}
+#endif
+
 tokens Ident::Tk(bool isStrictMode)
 {
     const tokens token = (tokens)m_tk;
@@ -156,22 +178,8 @@ tokens Ident::Tk(bool isStrictMode)
         const uint32 luHash = this->m_luHash;
         const LPCOLESTR prgch = Psz();
         const uint32 cch = Cch();
-        #include "kwds_sw.h"
 
-        #define KEYWORD(tk,f,prec2,nop2,prec1,nop1,name) \
-            LEqual_##name: \
-                if (cch == g_ssym_##name.cch && \
-                        0 == memcmp(g_ssym_##name.sz, prgch, cch * sizeof(OLECHAR))) \
-                { \
-                    if (f) \
-                        this->m_grfid |= f; \
-                    this->m_tk = tk; \
-                    return ((f & fidKwdRsvd) || (isStrictMode && (f & fidKwdFutRsvd))) ? tk : tkID; \
-                } \
-                goto LDefault;
-        #include "keywords.h"
-LDefault:
-        return tkID;
+        return TkFromNameLen(luHash, prgch, cch, isStrictMode, &this->m_grfid, &this->m_tk);
     }
     else if (token == tkNone || !(m_grfid & fidKwdRsvd))
     {
@@ -182,7 +190,6 @@ LDefault:
     }
     return token;
 }
-#pragma warning(pop)
 
 void Ident::SetTk(tokens token, ushort grfid)
 {
@@ -196,6 +203,14 @@ void Ident::SetTk(tokens token, ushort grfid)
     {
         Assert(m_tk == token);
         Assert((m_grfid & grfid) == grfid);
+    }
+}
+
+void Ident::TrySetIsUsedInLdElem(ParseNode * pnode)
+{
+    if (pnode && pnode->nop == knopStr)
+    {
+        pnode->AsParseNodeStr()->pid->SetIsUsedInLdElem(true);
     }
 }
 
@@ -243,7 +258,7 @@ template <typename CharType>
 IdentPtr HashTbl::PidHashNameLenWithHash(_In_reads_(cch) CharType const * prgch, CharType const * end, int32 cch, uint32 luHash)
 {
     Assert(cch >= 0);
-    AssertArrMemR(prgch, cch);
+    Assert(cch == 0 || prgch != nullptr);
     Assert(luHash == CaseSensitiveComputeHash(prgch, end));
 
     IdentPtr * ppid = nullptr;
@@ -345,11 +360,9 @@ IdentPtr HashTbl::FindExistingPid(
 {
     int32 bucketCount;
     IdentPtr pid;
-    IdentPtr *ppid = &m_prgpidName[luHash & m_luMask];
 
     /* Search the hash table for an existing match */
-    ppid = &m_prgpidName[luHash & m_luMask];
-
+    IdentPtr *ppid = &m_prgpidName[luHash & m_luMask];
     for (bucketCount = 0; nullptr != (pid = *ppid); ppid = &pid->m_pidNext, bucketCount++)
     {
         if (pid->m_luHash == luHash && (int)pid->m_cch == cch &&
@@ -411,33 +424,6 @@ bool HashTbl::Contains(_In_reads_(cch) LPCOLESTR prgch, int32 cch)
 
 #include "HashFunc.cpp"
 
-#pragma warning(push)
-#pragma warning(disable:4740)  // flow in or out of inline asm code suppresses global optimization
-
-// Decide if token is keyword by string matching -
-// This method is used during colorizing when scanner isn't interested in storing the actual id and does not care about conversion of escape sequences
-tokens HashTbl::TkFromNameLen(_In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode)
-{
-    uint32 luHash = CaseSensitiveComputeHash(prgch, prgch + cch);
-
-    // look for a keyword
-#include "kwds_sw.h"
-
-    #define KEYWORD(tk,f,prec2,nop2,prec1,nop1,name) \
-        LEqual_##name: \
-            if (cch == g_ssym_##name.cch && \
-                    0 == memcmp(g_ssym_##name.sz, prgch, cch * sizeof(OLECHAR))) \
-            { \
-                return ((f & fidKwdRsvd) || (isStrictMode && (f & fidKwdFutRsvd))) ? tk : tkID; \
-            } \
-            goto LDefault;
-#include "keywords.h"
-
-LDefault:
-    return tkID;
-}
-
-#pragma warning(pop)
 
 __declspec(noreturn) void HashTbl::OutOfMemory()
 {

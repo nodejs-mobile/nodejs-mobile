@@ -143,6 +143,13 @@
   </test>
   <test>
     <default>
+      <files>AssignmentToConst.js</files>
+      <baseline>AssignmentToConst.baseline</baseline>
+      <compile-flags>-force:deferparse</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>DeclOutofBlock.js</files>
       <baseline>DeclOutofBlock.baseline</baseline>
     </default>
@@ -382,6 +389,11 @@
   <test>
     <default>
       <files>shadowedsetter.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>funcDeclConflict.js</files>
     </default>
   </test>
 </regress-exe>

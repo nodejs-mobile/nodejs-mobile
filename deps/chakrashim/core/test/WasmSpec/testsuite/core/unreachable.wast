@@ -131,16 +131,24 @@
   (type $sig (func (param i32 i32 i32)))
   (table anyfunc (elem $dummy3))
   (func (export "as-call_indirect-func")
-    (call_indirect $sig (unreachable) (i32.const 1) (i32.const 2) (i32.const 3))
+    (call_indirect (type $sig)
+      (unreachable) (i32.const 1) (i32.const 2) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-first")
-    (call_indirect $sig (i32.const 0) (unreachable) (i32.const 2) (i32.const 3))
+    (call_indirect (type $sig)
+      (i32.const 0) (unreachable) (i32.const 2) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-mid")
-    (call_indirect $sig (i32.const 0) (i32.const 1) (unreachable) (i32.const 3))
+    (call_indirect (type $sig)
+      (i32.const 0) (i32.const 1) (unreachable) (i32.const 3)
+    )
   )
   (func (export "as-call_indirect-last")
-    (call_indirect $sig (i32.const 0) (i32.const 1) (i32.const 2) (unreachable))
+    (call_indirect (type $sig)
+      (i32.const 0) (i32.const 1) (i32.const 2) (unreachable)
+    )
   )
 
   (func (export "as-set_local-value") (local f32)
@@ -195,8 +203,8 @@
     (i32.wrap/i64 (unreachable))
   )
 
-  (func (export "as-grow_memory-size") (result i32)
-    (grow_memory (unreachable))
+  (func (export "as-memory.grow-size") (result i32)
+    (memory.grow (unreachable))
   )
 )
 
@@ -278,5 +286,5 @@
 
 (assert_trap (invoke "as-convert-operand") "unreachable")
 
-(assert_trap (invoke "as-grow_memory-size") "unreachable")
+(assert_trap (invoke "as-memory.grow-size") "unreachable")
 

@@ -3,6 +3,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #pragma once
+
+#if ENABLE_NATIVE_CODEGEN || DYNAMIC_INTERPRETER_THUNK
 namespace Memory
 {
 
@@ -55,7 +57,7 @@ struct Page
 
     bool CanAllocate(BucketId targetBucket)
     {
-        return freeBitVector.FirstStringOfOnes(targetBucket + 1) != BVInvalidIndex;
+        return freeBitVector.FirstStringOfOnes(1 << targetBucket) != BVInvalidIndex;
     }
 
     Page(__in char* address, void* segment, BucketId bucket):
@@ -70,8 +72,9 @@ struct Page
 
     // Each bit in the bit vector corresponds to 128 bytes of memory
     // This implies that 128 bytes is the smallest allocation possible
-    static const uint Alignment = 128;
     static const uint MaxAllocationSize = 4096;
+    static const uint sizePerBit = MaxAllocationSize / 32; // pagesize / freeBitVector bit count
+    static const uint Alignment = sizePerBit; // 128
 };
 
 struct Allocation
@@ -86,6 +89,7 @@ struct Allocation
         } largeObjectAllocation;
     };
 
+    uintptr_t thunkAddress;
     __field_bcount(size) char* address;
     size_t size;
 
@@ -422,7 +426,7 @@ public:
 
     BOOL ProtectAllocation(__in Allocation* allocation, DWORD dwVirtualProtectFlags, DWORD desiredOldProtectFlag, __in_opt char* addressInPage = nullptr);
     BOOL ProtectAllocationWithExecuteReadWrite(Allocation *allocation, __in_opt char* addressInPage = nullptr);
-    BOOL ProtectAllocationWithExecuteReadOnly(Allocation *allocation, __in_opt char* addressInPage = nullptr);
+    BOOL ProtectAllocationWithExecuteReadOnly(__in Allocation *allocation, __in_opt char* addressInPage = nullptr);
 
     ~Heap();
 
@@ -430,6 +434,10 @@ public:
     void DumpStats();
 #endif
 
+    bool IsPreReservedSegment(void * segment)
+    {
+        return this->codePageAllocators->IsPreReservedSegment(segment);
+    }
 private:
     /**
      * Inline methods
@@ -481,8 +489,8 @@ private:
     DWORD EnsurePageReadWrite(Page* page)
     {
         Assert(!page->isDecommitted);
-        this->codePageAllocators->ProtectPages(page->address, 1, page->segment, readWriteFlags, PAGE_EXECUTE);
-        return PAGE_EXECUTE;
+        this->codePageAllocators->ProtectPages(page->address, 1, page->segment, readWriteFlags, PAGE_EXECUTE_READ);
+        return PAGE_EXECUTE_READ;
     }
 
     template<DWORD readWriteFlags>
@@ -491,8 +499,8 @@ private:
     {
         if (allocation->IsLargeAllocation())
         {
-            this->ProtectAllocation(allocation, readWriteFlags, PAGE_EXECUTE);
-            return PAGE_EXECUTE;
+            this->ProtectAllocation(allocation, readWriteFlags, PAGE_EXECUTE_READ);
+            return PAGE_EXECUTE_READ;
         }
         else
         {
@@ -575,3 +583,4 @@ BucketId GetBucketForSize(DECLSPEC_GUARD_OVERFLOW size_t bytes);
 void FillDebugBreak(_Out_writes_bytes_all_(byteCount) BYTE* buffer, _In_ size_t byteCount);
 } // namespace CustomHeap
 } // namespace Memory
+#endif

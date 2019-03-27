@@ -29,7 +29,7 @@ namespace Js
         shadowData = nullptr;
     }
 
-    void ForInObjectEnumerator::Initialize(RecyclableObject* initObject, ScriptContext * requestContext, bool enumSymbols, ForInCache * forInCache)
+    void ForInObjectEnumerator::Initialize(RecyclableObject* initObject, ScriptContext * requestContext, bool enumSymbols, EnumeratorCache * forInCache)
     {
         this->enumeratingPrototype = false;
 
@@ -102,7 +102,7 @@ namespace Js
                 }
 
                 if (!DynamicType::Is(firstPrototypeWithEnumerableProperties->GetTypeId())
-                    || !DynamicObject::FromVar(firstPrototypeWithEnumerableProperties)->GetHasNoEnumerableProperties())
+                    || !DynamicObject::UnsafeFromVar(firstPrototypeWithEnumerableProperties)->GetHasNoEnumerableProperties())
                 {
                     break;
                 }
@@ -117,7 +117,7 @@ namespace Js
         return firstPrototypeWithEnumerableProperties;
     }
 
-    BOOL ForInObjectEnumerator::InitializeCurrentEnumerator(RecyclableObject * object, ForInCache * forInCache)
+    BOOL ForInObjectEnumerator::InitializeCurrentEnumerator(RecyclableObject * object, EnumeratorCache * forInCache)
     {
         EnumeratorFlags flags = enumerator.GetFlags();
         RecyclableObject * prototype = object->GetPrototype();
@@ -129,7 +129,7 @@ namespace Js
         return InitializeCurrentEnumerator(object, flags, GetScriptContext(), forInCache);
     }
 
-    BOOL ForInObjectEnumerator::InitializeCurrentEnumerator(RecyclableObject * object, EnumeratorFlags flags,  ScriptContext * scriptContext, ForInCache * forInCache)
+    BOOL ForInObjectEnumerator::InitializeCurrentEnumerator(RecyclableObject * object, EnumeratorFlags flags,  ScriptContext * scriptContext, EnumeratorCache * forInCache)
     {
         Assert(object);
         Assert(scriptContext);
@@ -152,7 +152,7 @@ namespace Js
     }
 
     JavascriptString * ForInObjectEnumerator::MoveAndGetNext(PropertyId& propertyId)
-    {        
+    {
         PropertyRecord const * propRecord;
         PropertyAttributes attributes = PropertyNone;
 
@@ -184,24 +184,16 @@ namespace Js
                 // Property Id does not exist.
                 if (propertyId == Constants::NoProperty)
                 {
-                    if (VirtualTableInfo<Js::PropertyString>::HasVirtualTable(currentIndex))
+                    currentIndex->GetPropertyRecord(&propRecord, true);
+                    if (propRecord == nullptr)
                     {
-                        // If we have a property string, it is assumed that the propertyId is being
-                        // kept alive with the object
-                        PropertyString * propertyString = (PropertyString *)currentIndex;
-                        propertyId = propertyString->GetPropertyRecord()->GetPropertyId();
-                    }
-                    else
-                    {
-                        ScriptContext* scriptContext = currentIndex->GetScriptContext();
-                        scriptContext->GetOrAddPropertyRecord(currentIndex->GetString(), currentIndex->GetLength(), &propRecord);
-                        propertyId = propRecord->GetPropertyId();
-
+                        currentIndex->GetPropertyRecord(&propRecord, false); // will create
                         // We keep the track of what is enumerated using a bit vector of propertyID.
                         // so the propertyId can't be collected until the end of the for in enumerator
                         // Keep a list of the property string.
                         this->shadowData->newPropertyStrings.Prepend(GetScriptContext()->GetRecycler(), propRecord);
                     }
+                    propertyId = propRecord->GetPropertyId();
                 }
 
                 if (TestAndSetEnumerated(propertyId) //checks if the property is already enumerated or not
@@ -218,9 +210,11 @@ namespace Js
                     return nullptr;
                 }
 
+                RecyclableObject* previousObject = this->shadowData->currentObject;
+
                 RecyclableObject * object;
                 if (!this->enumeratingPrototype)
-                {  
+                {
                     this->enumeratingPrototype = true;
                     object = this->shadowData->firstPrototype;
                     this->shadowData->currentObject = object;
@@ -257,6 +251,21 @@ namespace Js
                     }
                 }
                 while (true);
+
+                // Ignore special properties (ex: Array.length)
+                if (previousObject != nullptr)
+                {
+                    uint specialPropertyCount = previousObject->GetSpecialPropertyCount();
+                    if (specialPropertyCount > 0)
+                    {
+                        PropertyId const* specialPropertyIds = previousObject->GetSpecialPropertyIds();
+                        Assert(specialPropertyIds != nullptr);
+                        for (uint i = 0; i < specialPropertyCount; i++)
+                        {
+                            TestAndSetEnumerated(specialPropertyIds[i]);
+                        }
+                    }
+                }
             }
         }
     }

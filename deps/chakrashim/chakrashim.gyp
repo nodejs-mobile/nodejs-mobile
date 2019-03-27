@@ -148,13 +148,14 @@
         'src/v8objecttemplate.cc',
         'src/v8persistent.cc',
         'src/v8persistent.cc',
+        'src/v8primitivearray.cc',
         'src/v8private.cc',
         'src/v8promise.cc',
-        'src/v8resolver.cc',
         'src/v8propertydescriptor.cc',
         'src/v8proxy.cc',
         'src/v8regexp.cc',
         'src/v8script.cc',
+        'src/v8scriptormodule.cc',
         'src/v8sharedarraybuffer.cc',
         'src/v8set.cc',
         'src/v8signature.cc',
@@ -182,6 +183,7 @@
       'actions': [
         {
           'action_name': 'chakra_js2c',
+          'process_outputs_as_sources': 1,
           'inputs': [
             '<@(library_files)'
           ],

@@ -21,6 +21,9 @@
 #include "Library/DataView.h"
 
 #include "Library/JSONString.h"
+#include "Library/LazyJSONString.h"
+#include "Library/JSONStringBuilder.h"
+#include "Library/JSONStringifier.h"
 #include "Library/ProfileString.h"
 #include "Library/SingleCharString.h"
 #include "Library/SubString.h"
@@ -36,7 +39,6 @@
 
 #include "Library/JavascriptVariantDate.h"
 #include "Library/JavascriptPromise.h"
-#include "Library/JavascriptSymbol.h"
 #include "Library/JavascriptSymbolObject.h"
 #include "Library/JavascriptProxy.h"
 #include "Library/JavascriptReflect.h"
@@ -49,6 +51,7 @@
 #include "Library/JavascriptWeakMap.h"
 #include "Library/JavascriptWeakSet.h"
 
+#include "Types/UnscopablesWrapperObject.h"
 #include "Types/PropertyIndexRanges.h"
 #include "Types/DictionaryPropertyDescriptor.h"
 #include "Types/DictionaryTypeHandler.h"
@@ -80,8 +83,7 @@
 
 #include "Library/ModuleRoot.h"
 #include "Library/ArgumentsObject.h"
-// SIMD_JS
-#include "Library/SimdLib.h"
+// SIMD
 #include "Language/SimdOps.h"
 
 #include "Library/WebAssemblyInstance.h"
@@ -93,15 +95,6 @@
 #include "Library/JavascriptString.inl"
 #include "Library/ConcatString.inl"
 #include "Language/CacheOperators.inl"
-
-#ifdef INTL_ICU
-#define U_STATIC_IMPLEMENTATION
-#define U_SHOW_CPLUSPLUS_API 0
-#pragma warning(push)
-#pragma warning(disable:4995)
-#include <unicode/uloc.h>
-#pragma warning(pop)
-#endif
 
 #endif // !IsJsDiag
 

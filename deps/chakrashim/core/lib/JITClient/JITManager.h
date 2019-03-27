@@ -33,9 +33,6 @@ public:
 
     HRESULT InitializeThreadContext(
         __in ThreadContextDataIDL * data,
-#ifdef USE_RPC_HANDLE_MARSHALLING
-        __in HANDLE processHandle,
-#endif
         __out PPTHREADCONTEXT_HANDLE threadContextInfoAddress,
         __out intptr_t * prereservedRegionAddr,
         __out intptr_t * jitThunkAddr);
@@ -82,9 +79,8 @@ public:
         __in PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress);
 
     HRESULT FreeAllocation(
-        __in PTHREADCONTEXT_HANDLE threadContextInfoAddress,
-        __in intptr_t codeAddress,
-        __in intptr_t thunkAddress);
+        __in PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress,
+        __in intptr_t codeAddress);
 
     HRESULT SetIsPRNGSeeded(
         __in PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress,
@@ -108,6 +104,20 @@ public:
         __out boolean * result);
 #endif
 
+#ifdef ENABLE_DEBUG_CONFIG_OPTIONS
+    static HRESULT DeserializeRPCData(
+        _In_reads_(bufferSize) const byte* buffer,
+        _In_ uint bufferSize,
+        _Out_ CodeGenWorkItemIDL **workItemData
+    );
+
+    static HRESULT SerializeRPCData(
+        _In_ CodeGenWorkItemIDL *workItemData,
+        _Out_ size_t* bufferSize,
+        _Outptr_result_buffer_(*bufferSize) const byte** outBuffer
+    );
+#endif
+
     HRESULT Shutdown();
 
 
@@ -123,11 +133,14 @@ private:
         __in UUID* connectionUuid,
         __out RPC_BINDING_HANDLE* bindingHandle);
 
+    HRESULT ConnectProcess(RPC_BINDING_HANDLE rpcBindingHandle);
+
     RPC_BINDING_HANDLE m_rpcBindingHandle;
     UUID m_jitConnectionId;
     bool m_oopJitEnabled;
     bool m_isJITServer;
     HRESULT m_failingHRESULT;
+    CriticalSection m_cs;
 
     static JITManager s_jitManager;
 
@@ -149,9 +162,6 @@ public:
 
     HRESULT InitializeThreadContext(
         __in ThreadContextDataIDL * data,
-#ifdef USE_RPC_HANDLE_MARSHALLING
-        __in HANDLE processHandle,
-#endif
         __out PPTHREADCONTEXT_HANDLE threadContextInfoAddress,
         __out intptr_t *prereservedRegionAddr,
         __out intptr_t * jitThunkAddr)
@@ -203,9 +213,8 @@ public:
         { Assert(false); return E_FAIL; }
 
     HRESULT FreeAllocation(
-        __in PTHREADCONTEXT_HANDLE threadContextInfoAddress,
-        __in intptr_t codeAddress,
-        __in intptr_t thunkAddress)
+        __in PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress,
+        __in intptr_t codeAddress)
         { Assert(false); return E_FAIL; }
 
     HRESULT SetIsPRNGSeeded(
@@ -232,6 +241,20 @@ public:
         __in boolean asmjsThunk,
         __out boolean * result)
         { Assert(false); return E_FAIL; }
+#endif
+
+#ifdef ENABLE_DEBUG_CONFIG_OPTIONS
+    static HRESULT DeserializeRPCData(
+        _In_reads_(bufferSize) const byte* buffer,
+        _In_ uint bufferSize,
+        _Out_ CodeGenWorkItemIDL **workItemData
+    ) { *workItemData = nullptr; return E_NOTIMPL; }
+
+    static HRESULT SerializeRPCData(
+        _In_ CodeGenWorkItemIDL *workItemData,
+        _Out_ size_t* bufferSize,
+        _Outptr_result_buffer_(*bufferSize) const byte** outBuffer
+    ) { *bufferSize = 0; *outBuffer = nullptr; return E_NOTIMPL; }
 #endif
 
     HRESULT Shutdown()

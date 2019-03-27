@@ -19,7 +19,7 @@ Recycler::IntegrateBlock(char * blockAddress, PageSegment * segment, size_t allo
     // This should only happen during a pre-collection callback.
     Assert(this->collectionState == Collection_PreCollection);
 
-    bool success = autoHeap.IntegrateBlock<attributes>(blockAddress, segment, this, allocSize);
+    bool success = this->GetHeapInfoForAllocation<attributes>()->IntegrateBlock<attributes>(blockAddress, segment, this, allocSize);
 #ifdef PROFILE_RECYCLER_ALLOC
     if (success)
     {
@@ -36,9 +36,10 @@ namespace Memory
 class DummyVTableObject : public FinalizableObject
 {
 public:
-    virtual void Finalize(bool isShutdown) {}
-    virtual void Dispose(bool isShutdown) {}
-    virtual void Mark(Recycler * recycler) {}
+    virtual void Finalize(bool isShutdown) final {}
+    virtual void Dispose(bool isShutdown) final {}
+    virtual void Mark(Recycler * recycler) final {}
+    virtual void Trace(IRecyclerHeapMarkingContext* markingContext) final {}
 };
 }
 
@@ -46,8 +47,12 @@ template <ObjectInfoBits attributes, bool nothrow>
 inline char *
 Recycler::AllocWithAttributesInlined(DECLSPEC_GUARD_OVERFLOW size_t size)
 {
-    // All tracked objects are client tracked objects
+    // All tracked objects are client tracked or recycler host visited objects
+#ifndef RECYCLER_VISITED_HOST
     CompileAssert((attributes & TrackBit) == 0 || (attributes & ClientTrackedBit) != 0);
+#else
+    CompileAssert((attributes & TrackBit) == 0 || (attributes & ClientTrackedBit) != 0 || (attributes & RecyclerVisitedHostBit) != 0);
+#endif
     Assert(this->enableScanImplicitRoots || (attributes & ImplicitRootBit) == 0);
     AssertMsg(this->disableThreadAccessCheck || this->mainThreadId == GetCurrentThreadContextId(),
         "Allocating from the recycler can only be done on the main thread");
@@ -92,24 +97,25 @@ Recycler::AllocWithAttributesInlined(DECLSPEC_GUARD_OVERFLOW size_t size)
 #endif
 
     char* memBlock = nullptr;
+    HeapInfo * heapInfo = this->GetHeapInfoForAllocation<attributes>();
 #if GLOBAL_ENABLE_WRITE_BARRIER
     if (CONFIG_FLAG(ForceSoftwareWriteBarrier))
     {
         if ((attributes & InternalObjectInfoBitMask) != LeafBit)
         {
             // none leaf allocation or Finalizable Leaf allocation,  adding WithBarrierBit
-            memBlock = RealAlloc<(ObjectInfoBits)((attributes | WithBarrierBit) & InternalObjectInfoBitMask), nothrow>(&autoHeap, allocSize);
+            memBlock = RealAlloc<(ObjectInfoBits)((attributes | WithBarrierBit) & InternalObjectInfoBitMask), nothrow>(heapInfo, allocSize);
         }
         else
         {
             // pure Leaf allocation
-            memBlock = RealAlloc<(ObjectInfoBits)(attributes & InternalObjectInfoBitMask), nothrow>(&autoHeap, allocSize);
+            memBlock = RealAlloc<(ObjectInfoBits)(attributes & InternalObjectInfoBitMask), nothrow>(heapInfo, allocSize);
         }
     }
     else
 #endif
     {
-        memBlock = RealAlloc<(ObjectInfoBits)(attributes & InternalObjectInfoBitMask), nothrow>(&autoHeap, allocSize);
+        memBlock = RealAlloc<(ObjectInfoBits)(attributes & InternalObjectInfoBitMask), nothrow>(heapInfo, allocSize);
     }
 
     if (nothrow)
@@ -167,22 +173,18 @@ Recycler::AllocWithAttributesInlined(DECLSPEC_GUARD_OVERFLOW size_t size)
 #endif
 
 
-#pragma prefast(suppress:6313, "attributes is a template parameter and can be 0")
-    if (attributes & (FinalizeBit | TrackBit))
-    {
-        // Make sure a valid vtable is installed in case of OOM before the real vtable is set
-        memBlock = (char *)new (memBlock) DummyVTableObject();
-    }
-
 #ifdef RECYCLER_WRITE_BARRIER
     SwbVerboseTrace(this->GetRecyclerFlagsTable(), _u("Allocated SWB memory: 0x%p\n"), memBlock);
 
 #pragma prefast(suppress:6313, "attributes is a template parameter and can be 0")
-    if (attributes & NewTrackBit & WithBarrierBit)
+    if ((attributes & NewTrackBit) &&
+#if GLOBAL_ENABLE_WRITE_BARRIER && defined(RECYCLER_STATS)
+        true  // Trigger WB to force re-mark, to work around old mark false positive
+#else
+        (attributes & WithBarrierBit)
+#endif
+       )
     {
-        //REVIEW: is following comment correct? I added WithBarrierBit above
-        // why we need to set write barrier bit for none write barrier page address
-
         // For objects allocated with NewTrackBit, we need to trigger the write barrier since
         // there could be a GC triggered by an allocation in the constructor, and we'd miss
         // calling track on the partially constructed object. To deal with this, we set the write
@@ -281,30 +283,6 @@ Recycler::AllocZeroWithAttributesInlined(DECLSPEC_GUARD_OVERFLOW size_t size)
     return obj;
 }
 
-template<ObjectInfoBits attributes>
-bool Recycler::IsPageHeapEnabled(size_t size)
-{
-    if (IsPageHeapEnabled())
-    {
-        size_t sizeCat = HeapInfo::GetAlignedSizeNoCheck(size);
-        if (HeapInfo::IsSmallObject(size))
-        {
-            auto& bucket = this->autoHeap.GetBucket<(ObjectInfoBits)(attributes & GetBlockTypeBitMask)>(sizeCat);
-            return bucket.IsPageHeapEnabled(attributes);
-        }
-        else if (HeapInfo::IsMediumObject(size))
-        {
-            auto& bucket = this->autoHeap.GetMediumBucket<(ObjectInfoBits)(attributes & GetBlockTypeBitMask)>(sizeCat);
-            return bucket.IsPageHeapEnabled(attributes);
-        }
-        else
-        {
-            return this->autoHeap.largeObjectBucket.IsPageHeapEnabled(attributes);
-        }
-    }
-    return false;
-}
-
 template <ObjectInfoBits attributes, bool isSmallAlloc, bool nothrow>
 inline char*
 Recycler::RealAllocFromBucket(HeapInfo* heap, size_t size)
@@ -350,7 +328,7 @@ Recycler::RealAllocFromBucket(HeapInfo* heap, size_t size)
         )
     {
         // TODO: looks the check has been done already
-        if (this->IsPageHeapEnabled<attributes>(size))
+        if (heap->IsPageHeapEnabled<attributes>(size))
         {
             VerifyZeroFill(memBlock, size);
         }
@@ -451,6 +429,22 @@ inline bool Recycler::TryGetWeakReferenceHandle(T* pStrongReference, RecyclerWea
     return this->weakReferenceMap.TryGetValue((char*) pStrongReference, (RecyclerWeakReferenceBase**)weakReference);
 }
 
+#if ENABLE_WEAK_REFERENCE_REGIONS
+template<typename T>
+inline RecyclerWeakReferenceRegionItem<T>* Recycler::CreateWeakReferenceRegion(size_t count)
+{
+    RecyclerWeakReferenceRegionItem<T>* regionArray = RecyclerNewArrayLeafZ(this, RecyclerWeakReferenceRegionItem<T>, count);
+    RecyclerWeakReferenceRegion region;
+    region.ptr = reinterpret_cast<RecyclerWeakReferenceRegionItem<void*>*>(regionArray);
+    region.count = count;
+    region.arrayHeapBlock = this->FindHeapBlock(regionArray);
+    this->weakReferenceRegionList.Push(region);
+    return regionArray;
+}
+#endif
+
+
+
 inline HeapBlock*
 Recycler::FindHeapBlock(void* candidate)
 {
@@ -490,20 +484,29 @@ Recycler::ScanObjectInlineInterior(void ** obj, size_t byteCount)
     markContext.ScanObject<false, true>(obj, byteCount);
 }
 
-template <bool doSpecialMark>
+template <bool doSpecialMark, bool forceInterior>
 NO_SANITIZE_ADDRESS
 inline void
-Recycler::ScanMemoryInline(void ** obj, size_t byteCount)
+Recycler::ScanMemoryInline(void ** obj, size_t byteCount
+            ADDRESS_SANITIZER_APPEND(RecyclerScanMemoryType scanMemoryType))
 {
     // This is never called during parallel marking
     Assert(this->collectionState != CollectionStateParallelMark);
-    if (this->enableScanInteriorPointers)
+
+#if __has_feature(address_sanitizer)
+    void *asanFakeStack =
+        scanMemoryType == RecyclerScanMemoryType::Stack ? this->savedAsanFakeStack : nullptr;
+#endif
+
+    if (this->enableScanInteriorPointers || forceInterior)
     {
-        markContext.ScanMemory<false, true, doSpecialMark>(obj, byteCount);
+        markContext.ScanMemory<false, true, doSpecialMark>(
+                obj, byteCount ADDRESS_SANITIZER_APPEND(asanFakeStack));
     }
     else
     {
-        markContext.ScanMemory<false, false, doSpecialMark>(obj, byteCount);
+        markContext.ScanMemory<false, false, doSpecialMark>(
+                obj, byteCount ADDRESS_SANITIZER_APPEND(asanFakeStack));
     }
 }
 
@@ -515,6 +518,15 @@ Recycler::AddMark(void * candidate, size_t byteCount) throw()
     return markContext.AddMarkedObject(candidate, byteCount);
 }
 
+#ifdef RECYCLER_VISITED_HOST
+inline bool
+Recycler::AddPreciselyTracedMark(IRecyclerVisitedObject * candidate) throw()
+{
+    // This API cannot be used for parallel marking as we don't have enough information to determine which MarkingContext to use.
+    Assert((this->collectionState & Collection_Parallel) == 0);
+    return markContext.AddPreciselyTracedObject(candidate);
+}
+#endif
 
 template <typename T>
 void
@@ -527,6 +539,9 @@ Recycler::NotifyFree(T * heapBlock)
 #if DBG || defined(RECYCLER_STATS)
         this->isForceSweeping = true;
         heapBlock->isForceSweeping = true;
+#endif
+#ifdef RECYCLER_TRACE
+        this->PrintBlockStatus(nullptr, heapBlock, _u("[**34**] calling SweepObjects during NotifyFree."));
 #endif
         heapBlock->template SweepObjects<SweepMode_InThread>(this);
 #if DBG || defined(RECYCLER_STATS)

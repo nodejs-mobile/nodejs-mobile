@@ -41,6 +41,9 @@ String::Utf8Value::Utf8Value(Handle<v8::Value> obj)
   }
 }
 
+String::Utf8Value::Utf8Value(Isolate* isolate, Local<v8::Value> obj)
+    : Utf8Value(obj) {}
+
 String::Utf8Value::~Utf8Value() {
   if (_str != nullptr) {
     free(_str);
@@ -59,6 +62,9 @@ String::Value::Value(Handle<v8::Value> obj) : _str(nullptr), _length(0) {
   _str = new uint16_t[_length + 1];
   str->Write(_str);
 }
+
+String::Value::Value(Isolate* isolate, Local<v8::Value> obj)
+    : Value(obj) {}
 
 String::Value::~Value() {
   if (_str != nullptr) {
@@ -85,7 +91,16 @@ int String::Utf8Length() const {
   return str.length();
 }
 
-int String::Write(uint16_t *buffer, int start, int length, int options) const {
+int String::Utf8Length(Isolate* isolate) const {
+  return Utf8Length();
+}
+
+int String::Write(Isolate* isolate, uint16_t* buffer, int start, int length,
+                  int options) const {
+  return Write(buffer, start, length, options);
+}
+
+int String::Write(uint16_t* buffer, int start, int length, int options) const {
   size_t count = 0;
   if (JsCopyStringUtf16((JsValueRef)this, start, length,
                          buffer, &count) == JsNoError) {
@@ -95,6 +110,11 @@ int String::Write(uint16_t *buffer, int start, int length, int options) const {
     }
   }
   return count;
+}
+
+int String::WriteOneByte(Isolate* isolate, uint8_t* buffer, int start,
+                         int length, int options) const {
+  return WriteOneByte(buffer, start, length, options);
 }
 
 int String::WriteOneByte(
@@ -111,8 +131,13 @@ int String::WriteOneByte(
   return count;
 }
 
+int String::WriteUtf8(Isolate* isolate, char* buffer, int length,
+                      int* nchars_ref, int options) const {
+  return WriteUtf8(buffer, length, nchars_ref, options);
+}
+
 int String::WriteUtf8(
-    char *buffer, int length, int *nchars_ref, int options) const {
+    char* buffer, int length, int* nchars_ref, int options) const {
   size_t count = 0;
   if (length < 0) {
     // in case length was not provided we want to copy the whole string
@@ -195,12 +220,12 @@ Local<String> String::Empty(Isolate* isolate) {
   return FromMaybe(Utils::NewString("", 0));
 }
 
-String* String::Cast(v8::Value *obj) {
+String* String::Cast(v8::Value* obj) {
   CHAKRA_ASSERT(obj->IsString());
   return static_cast<String*>(obj);
 }
 
-MaybeLocal<String> Utils::NewString(const char *data, int length) {
+MaybeLocal<String> Utils::NewString(const char* data, int length) {
   if (length < 0) {
     length = static_cast<int>(strlen(data));
   }
@@ -282,7 +307,7 @@ Local<String> String::NewFromOneByte(Isolate* isolate,
                                   length));
 }
 
-static size_t WideStrLen(const uint16_t *p) {
+static size_t WideStrLen(const uint16_t* p) {
   size_t len = 0;
   while (*p++) {
     len++;
@@ -315,8 +340,13 @@ Local<String> String::NewFromTwoByte(Isolate* isolate,
                                   length));
 }
 
+Local<String> String::Concat(Isolate* isolate, Handle<String> left,
+                             Handle<String> right) {
+  return String::Concat(left, right);
+}
+
 Local<String> String::Concat(Handle<String> left, Handle<String> right) {
-  JsValueRef args[] = { *left, *right };
+  JsValueRef args[] = { *left, *right }; /* NOLINT (readability/null_usage) */
   JsValueRef result;
 
   JsValueRef stringConcatFunction =
@@ -369,7 +399,7 @@ MaybeLocal<String> String::NewExternalOneByte(
 }
 
 Local<String> String::NewExternal(Isolate* isolate,
-                                  ExternalOneByteStringResource *resource) {
+                                  ExternalOneByteStringResource* resource) {
   return FromMaybe(NewExternalOneByte(isolate, resource));
 }
 

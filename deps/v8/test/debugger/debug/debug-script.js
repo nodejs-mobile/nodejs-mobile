@@ -28,10 +28,11 @@
 // Flags: --expose-gc --send-idle-notification
 // Flags: --expose-natives-as natives
 // Flags: --noharmony-shipping
-// Flags: --nostress-opt
+// Flags: --nostress-opt --nostress-background-compile
 
-// --nostress-opt is specified because in stress mode the compilation cache
-// may hold on to old copies of scripts (see bug 1641).
+// --nostress-opt and --nostress-background-compilation is specified because in
+// stress mode the compilation cache may hold on to old copies of scripts (see
+// bug 1641).
 
 // Note: this test checks that that the number of scripts reported as native
 // by Debug.scripts() is the same as a number of core native scripts.
@@ -80,7 +81,7 @@ assertTrue(extension_count == 2 || extension_count == 3);
 // This script, test-api.js and mjsunit.js has been loaded.  If using d8, d8
 // loads a normal script during startup too.
 assertTrue(normal_count == 3 || normal_count == 4);
-assertTrue(inspector_count == 1);
+assertTrue(inspector_count == 0);
 
 // Test a builtins script.
 var array_script = Debug.findScript('native array.js');

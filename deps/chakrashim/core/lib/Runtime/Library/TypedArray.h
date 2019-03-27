@@ -21,7 +21,7 @@ namespace Js
         DEFINE_VTABLE_CTOR_ABSTRACT(TypedArrayBase, ArrayBufferParent);
 
     public:
-        static Var GetDefaultConstructor(Var object, ScriptContext* scriptContext);
+        static JavascriptFunction* GetDefaultConstructor(Var object, ScriptContext* scriptContext);
 
         class EntryInfo
         {
@@ -102,13 +102,13 @@ namespace Js
         virtual DescriptorFlags GetSetter(PropertyId propertyId, Var *setterValue, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual DescriptorFlags GetSetter(JavascriptString* propertyNameString, Var *setterValue, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual DescriptorFlags GetItemSetter(uint32 index, Var* setterValue, ScriptContext* requestContext) override;
-        virtual PropertyQueryFlags HasPropertyQuery(Js::PropertyId propertyId) override;
+        virtual PropertyQueryFlags HasPropertyQuery(Js::PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual BOOL HasOwnProperty(Js::PropertyId propertyId) override;
         virtual PropertyQueryFlags GetPropertyQuery(Js::Var originalInstance, Js::PropertyId propertyId, Js::Var* value, Js::PropertyValueInfo* info, Js::ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyQuery(Js::Var originalInstance, Js::JavascriptString* propertyNameString, Js::Var* value, Js::PropertyValueInfo* info, Js::ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyReferenceQuery(Js::Var originalInstance, Js::PropertyId propertyId, Js::Var* value, Js::PropertyValueInfo* info, Js::ScriptContext* requestContext) override;
         virtual PropertyQueryFlags HasItemQuery(uint32 index) override;
-        virtual BOOL DeleteItem(uint32 index, Js::PropertyOperationFlags flags) override { return false; }
+        virtual BOOL DeleteItem(uint32 index, Js::PropertyOperationFlags flags) override;
         virtual PropertyQueryFlags GetItemQuery(Js::Var originalInstance, uint32 index, Js::Var* value, Js::ScriptContext * requestContext) override;
         virtual BOOL SetItem(uint32 index, Js::Var value, Js::PropertyOperationFlags flags = PropertyOperation_None) override;
         virtual BOOL SetProperty(Js::PropertyId propertyId, Js::Var value, Js::PropertyOperationFlags flags, Js::PropertyValueInfo* info) override;
@@ -116,7 +116,7 @@ namespace Js
         virtual BOOL DeleteProperty(Js::PropertyId propertyId, Js::PropertyOperationFlags flags) override;
         virtual BOOL DeleteProperty(JavascriptString *propertyNameString, Js::PropertyOperationFlags flags) override;
         virtual PropertyQueryFlags GetItemReferenceQuery(Js::Var originalInstance, uint32 index, Js::Var* value, Js::ScriptContext * requestContext) override;
-        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache = nullptr) override;
+        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
         virtual JavascriptEnumerator * GetIndexEnumerator(EnumeratorFlags flags, ScriptContext * requestContext) override;
 
         virtual BOOL IsEnumerable(PropertyId propertyId)  override;
@@ -133,6 +133,7 @@ namespace Js
         static BOOL Is(Var aValue);
         static BOOL Is(TypeId typeId);
         static TypedArrayBase* FromVar(Var aValue);
+        static TypedArrayBase* UnsafeFromVar(Var aValue);
         // Returns false if this is not a TypedArray or it's not detached
         static BOOL IsDetachedTypedArray(Var aValue);
         static HRESULT GetBuffer(Var aValue, ArrayBuffer** outBuffer, uint32* outOffset, uint32* outLength);
@@ -146,15 +147,15 @@ namespace Js
         virtual BOOL DirectSetItemNoDetachCheck(__in uint32 index, __in Js::Var value) = 0;
         virtual Var  DirectGetItemNoDetachCheck(__in uint32 index) = 0;
 
-        virtual Var TypedAdd(__in uint32 index, Var second) = 0;
-        virtual Var TypedAnd(__in uint32 index, Var second) = 0;
+        virtual Var TypedAdd(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedAnd(__in uint32 index, __in Var second) = 0;
         virtual Var TypedLoad(__in uint32 index) = 0;
-        virtual Var TypedOr(__in uint32 index, Var second) = 0;
-        virtual Var TypedStore(__in uint32 index, Var second) = 0;
-        virtual Var TypedSub(__in uint32 index, Var second) = 0;
-        virtual Var TypedXor(__in uint32 index, Var second) = 0;
-        virtual Var TypedExchange(__in uint32 index, Var second) = 0;
-        virtual Var TypedCompareExchange(__in uint32 index, Var comparand, Var replacementValue) = 0;
+        virtual Var TypedOr(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedStore(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedSub(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedXor(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedExchange(__in uint32 index, __in Var second) = 0;
+        virtual Var TypedCompareExchange(__in uint32 index, __in Var comparand, __in Var replacementValue) = 0;
 
         uint32 GetByteLength() const { return length * BYTES_PER_ELEMENT; }
         uint32 GetByteOffset() const { return byteOffset; }
@@ -216,34 +217,44 @@ namespace Js
     };
 
     template <typename TypeName, bool clamped = false, bool virtualAllocated = false>
+    class TypedArray;
+
+    // These are referenced in the TypedArray implementation, so we need to forward-typedef these.
+
+    typedef TypedArray<int8>                Int8Array;
+    typedef TypedArray<uint8,false>         Uint8Array;
+    typedef TypedArray<uint8,true>          Uint8ClampedArray;
+    typedef TypedArray<int16>               Int16Array;
+    typedef TypedArray<uint16>              Uint16Array;
+    typedef TypedArray<int32>               Int32Array;
+    typedef TypedArray<uint32>              Uint32Array;
+    typedef TypedArray<float>               Float32Array;
+    typedef TypedArray<double>              Float64Array;
+    typedef TypedArray<int64>               Int64Array;
+    typedef TypedArray<uint64>              Uint64Array;
+    typedef TypedArray<bool>                BoolArray;
+    typedef TypedArray<int8, false, true>   Int8VirtualArray;
+    typedef TypedArray<uint8, false, true>  Uint8VirtualArray;
+    typedef TypedArray<uint8, true, true>   Uint8ClampedVirtualArray;
+    typedef TypedArray<int16, false, true>  Int16VirtualArray;
+    typedef TypedArray<uint16, false, true> Uint16VirtualArray;
+    typedef TypedArray<int32, false, true>  Int32VirtualArray;
+    typedef TypedArray<uint32, false, true> Uint32VirtualArray;
+    typedef TypedArray<float, false, true>  Float32VirtualArray;
+    typedef TypedArray<double, false, true> Float64VirtualArray;
+
+
+    template <typename TypeName, bool clamped /*= false*/, bool virtualAllocated /*= false*/>
     class TypedArray : public TypedArrayBase
     {
     protected:
         DEFINE_VTABLE_CTOR(TypedArray, TypedArrayBase);
-        virtual void MarshalToScriptContext(Js::ScriptContext * scriptContext)
-        {
-            Assert(this->GetScriptContext() != scriptContext);
-            AssertMsg(VirtualTableInfo<TypedArray>::HasVirtualTable(this), "Derived class need to define marshal to script context");
-
-            VirtualTableInfo<Js::CrossSiteObject<TypedArray<TypeName, clamped, virtualAllocated>>>::SetVirtualTable(this);
-            ArrayBufferBase* arrayBuffer = this->GetArrayBuffer();
-            if (arrayBuffer && !arrayBuffer->IsCrossSiteObject())
-            {
-                arrayBuffer->MarshalToScriptContext(scriptContext);
-            }
-        }
-
-#if ENABLE_TTD
-        virtual void MarshalCrossSite_TTDInflate()
-        {
-            AssertMsg(VirtualTableInfo<TypedArray>::HasVirtualTable(this), "Derived class need to define marshal");
-            VirtualTableInfo<Js::CrossSiteObject<TypedArray<TypeName, clamped, virtualAllocated>>>::SetVirtualTable(this);
-        }
-#endif
+        DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(TypedArray);
 
         TypedArray(DynamicType *type): TypedArrayBase(nullptr, 0, 0, sizeof(TypeName), type) { buffer = nullptr; }
 
     public:
+        typedef TypeName TypedArrayType;
         class EntryInfo
         {
         public:
@@ -262,6 +273,11 @@ namespace Js
 
         static BOOL Is(Var aValue);
         static TypedArray<TypeName, clamped, virtualAllocated>* FromVar(Var aValue);
+        static TypedArray<TypeName, clamped, virtualAllocated>* UnsafeFromVar(Var aValue);
+        static BOOL HasVirtualTableInfo(Var aValue)
+        {
+            return VirtualTableInfo<TypedArray<TypeName, clamped, virtualAllocated>>::HasVirtualTable(aValue) || VirtualTableInfo<CrossSiteObject<TypedArray<TypeName, clamped, virtualAllocated>>>::HasVirtualTable(aValue);
+        }
 
         inline Var BaseTypedDirectGetItem(__in uint32 index)
         {
@@ -363,13 +379,12 @@ namespace Js
             return true;
         }
 
-        inline BOOL DirectSetItemAtRange(__in int32 start, __in uint32 length, __in Js::Var value, TypeName(*convFunc)(Var value, ScriptContext* scriptContext))
+        inline BOOL DirectSetItemAtRange(__in int32 start, __in uint32 length, __in TypeName typedValue)
         {
             if (CrossSite::IsCrossSiteObjectTyped(this))
             {
                 return false;
             }
-            TypeName typedValue = convFunc(value, GetScriptContext());
 
             if (this->IsDetachedBuffer()) // 9.4.5.9 IntegerIndexedElementSet
             {
@@ -479,15 +494,15 @@ namespace Js
         virtual Var  DirectGetItem(__in uint32 index) override sealed;
         virtual BOOL DirectSetItemNoDetachCheck(__in uint32 index, __in Js::Var value) override sealed;
         virtual Var  DirectGetItemNoDetachCheck(__in uint32 index) override sealed;
-        virtual Var TypedAdd(__in uint32 index, Var second) override;
-        virtual Var TypedAnd(__in uint32 index, Var second) override;
+        virtual Var TypedAdd(__in uint32 index, __in Var second) override;
+        virtual Var TypedAnd(__in uint32 index, __in Var second) override;
         virtual Var TypedLoad(__in uint32 index) override;
-        virtual Var TypedOr(__in uint32 index, Var second) override;
-        virtual Var TypedStore(__in uint32 index, Var second) override;
-        virtual Var TypedSub(__in uint32 index, Var second) override;
-        virtual Var TypedXor(__in uint32 index, Var second) override;
-        virtual Var TypedExchange(__in uint32 index, Var second) override;
-        virtual Var TypedCompareExchange(__in uint32 index, Var comparand, Var replacementValue) override;
+        virtual Var TypedOr(__in uint32 index, __in Var second) override;
+        virtual Var TypedStore(__in uint32 index, __in Var second) override;
+        virtual Var TypedSub(__in uint32 index, __in Var second) override;
+        virtual Var TypedXor(__in uint32 index, __in Var second) override;
+        virtual Var TypedExchange(__in uint32 index, __in Var second) override;
+        virtual Var TypedCompareExchange(__in uint32 index, __in Var comparand, __in Var replacementValue) override;
 
         static BOOL DirectSetItem(__in TypedArray* arr, __in uint32 index, __in Js::Var value)
         {
@@ -540,6 +555,7 @@ namespace Js
 
         Var Subarray(uint32 begin, uint32 end);
         static CharArray* FromVar(Var aValue);
+        static CharArray* UnsafeFromVar(Var aValue);
 
         virtual BOOL DirectSetItem(__in uint32 index, __in Js::Var value) override;
         virtual BOOL DirectSetItemNoSet(__in uint32 index, __in Js::Var value) override;
@@ -547,15 +563,15 @@ namespace Js
         virtual BOOL DirectSetItemNoDetachCheck(__in uint32 index, __in Js::Var value) override;
         virtual Var  DirectGetItemNoDetachCheck(__in uint32 index) override;
 
-        virtual Var TypedAdd(__in uint32 index, Var second) override;
-        virtual Var TypedAnd(__in uint32 index, Var second) override;
+        virtual Var TypedAdd(__in uint32 index, __in Var second) override;
+        virtual Var TypedAnd(__in uint32 index, __in Var second) override;
         virtual Var TypedLoad(__in uint32 index) override;
-        virtual Var TypedOr(__in uint32 index, Var second) override;
-        virtual Var TypedStore(__in uint32 index, Var second) override;
-        virtual Var TypedSub(__in uint32 index, Var second) override;
-        virtual Var TypedXor(__in uint32 index, Var second) override;
-        virtual Var TypedExchange(__in uint32 index, Var second) override;
-        virtual Var TypedCompareExchange(__in uint32 index, Var comparand, Var replacementValue) override;
+        virtual Var TypedOr(__in uint32 index, __in Var second) override;
+        virtual Var TypedStore(__in uint32 index, __in Var second) override;
+        virtual Var TypedSub(__in uint32 index, __in Var second) override;
+        virtual Var TypedXor(__in uint32 index, __in Var second) override;
+        virtual Var TypedExchange(__in uint32 index, __in Var second) override;
+        virtual Var TypedCompareExchange(__in uint32 index, __in Var comparand, __in Var replacementValue) override;
 
     protected:
         CompareElementsFunction GetCompareElementsFunction()
@@ -637,34 +653,34 @@ namespace Js
 
 #if defined(__clang__)
 // hack for clang message: "...add an explicit instantiation declaration to .."
-#define __EXPLICIT_INSTANTINATE_TA(x) x;\
+#define __EXPLICIT_INSTANTINATE_TA(x) \
             template<> FunctionInfo Js::x::EntryInfo::NewInstance;\
             template<> FunctionInfo Js::x::EntryInfo::Set
 #else // MSVC
-#define __EXPLICIT_INSTANTINATE_TA(x) x
+#define __EXPLICIT_INSTANTINATE_TA(x)
 #endif
 
-    typedef TypedArray<int8>        __EXPLICIT_INSTANTINATE_TA(Int8Array);
-    typedef TypedArray<uint8,false> __EXPLICIT_INSTANTINATE_TA(Uint8Array);
-    typedef TypedArray<uint8,true>  __EXPLICIT_INSTANTINATE_TA(Uint8ClampedArray);
-    typedef TypedArray<int16>       __EXPLICIT_INSTANTINATE_TA(Int16Array);
-    typedef TypedArray<uint16>      __EXPLICIT_INSTANTINATE_TA(Uint16Array);
-    typedef TypedArray<int32>       __EXPLICIT_INSTANTINATE_TA(Int32Array);
-    typedef TypedArray<uint32>      __EXPLICIT_INSTANTINATE_TA(Uint32Array);
-    typedef TypedArray<float>       __EXPLICIT_INSTANTINATE_TA(Float32Array);
-    typedef TypedArray<double>      __EXPLICIT_INSTANTINATE_TA(Float64Array);
-    typedef TypedArray<int64>       __EXPLICIT_INSTANTINATE_TA(Int64Array);
-    typedef TypedArray<uint64>      __EXPLICIT_INSTANTINATE_TA(Uint64Array);
-    typedef TypedArray<bool>        __EXPLICIT_INSTANTINATE_TA(BoolArray);
-    typedef TypedArray<int8, false, true>   __EXPLICIT_INSTANTINATE_TA(Int8VirtualArray);
-    typedef TypedArray<uint8, false, true>  __EXPLICIT_INSTANTINATE_TA(Uint8VirtualArray);
-    typedef TypedArray<uint8, true, true>   __EXPLICIT_INSTANTINATE_TA(Uint8ClampedVirtualArray);
-    typedef TypedArray<int16, false, true>  __EXPLICIT_INSTANTINATE_TA(Int16VirtualArray);
-    typedef TypedArray<uint16, false, true> __EXPLICIT_INSTANTINATE_TA(Uint16VirtualArray);
-    typedef TypedArray<int32, false, true>  __EXPLICIT_INSTANTINATE_TA(Int32VirtualArray);
-    typedef TypedArray<uint32, false, true> __EXPLICIT_INSTANTINATE_TA(Uint32VirtualArray);
-    typedef TypedArray<float, false, true>  __EXPLICIT_INSTANTINATE_TA(Float32VirtualArray);
-    typedef TypedArray<double, false, true> __EXPLICIT_INSTANTINATE_TA(Float64VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Int8Array);
+    __EXPLICIT_INSTANTINATE_TA(Uint8Array);
+    __EXPLICIT_INSTANTINATE_TA(Uint8ClampedArray);
+    __EXPLICIT_INSTANTINATE_TA(Int16Array);
+    __EXPLICIT_INSTANTINATE_TA(Uint16Array);
+    __EXPLICIT_INSTANTINATE_TA(Int32Array);
+    __EXPLICIT_INSTANTINATE_TA(Uint32Array);
+    __EXPLICIT_INSTANTINATE_TA(Float32Array);
+    __EXPLICIT_INSTANTINATE_TA(Float64Array);
+    __EXPLICIT_INSTANTINATE_TA(Int64Array);
+    __EXPLICIT_INSTANTINATE_TA(Uint64Array);
+    __EXPLICIT_INSTANTINATE_TA(BoolArray);
+    __EXPLICIT_INSTANTINATE_TA(Int8VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Uint8VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Uint8ClampedVirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Int16VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Uint16VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Int32VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Uint32VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Float32VirtualArray);
+    __EXPLICIT_INSTANTINATE_TA(Float64VirtualArray);
 
 #undef __EXPLICIT_INSTANTINATE_TA
 }

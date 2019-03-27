@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "JsrtPch.h"
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "JsrtDebugUtils.h"
 #include "RuntimeDebugPch.h"
 #include "screrror.h"   // For CompileScriptException
@@ -144,6 +145,7 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
     bool addValue = false;
 
     Js::Var varValue = objectDisplayRef->GetVarValue(FALSE);
+    Js::IDiagObjectAddress* varAddress = objectDisplayRef->GetDiagAddress();
 
     if (varValue != nullptr)
     {
@@ -213,28 +215,9 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
             addDisplay = true;
             break;
 
-#ifdef ENABLE_SIMDJS
-        case Js::TypeIds_SIMDFloat32x4:
-            JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, scriptContext->GetLibrary()->GetSIMDFloat32x4DisplayString(), scriptContext);
-            addDisplay = true;
-            break;
-        case Js::TypeIds_SIMDFloat64x2:
-            JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, scriptContext->GetLibrary()->GetSIMDFloat64x2DisplayString(), scriptContext);
-            addDisplay = true;
-            break;
-        case Js::TypeIds_SIMDInt32x4:
-            JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, scriptContext->GetLibrary()->GetSIMDInt32x4DisplayString(), scriptContext);
-            addDisplay = true;
-            break;
-        case Js::TypeIds_SIMDInt8x16:
-            JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::type, scriptContext->GetLibrary()->GetSIMDInt8x16DisplayString(), scriptContext);
-            addDisplay = true;
-            break;
-#endif // #ifdef ENABLE_SIMDJS
-
         case Js::TypeIds_Enumerator:
         case Js::TypeIds_HostDispatch:
-        case Js::TypeIds_WithScopeObject:
+        case Js::TypeIds_UnscopablesWrapperObject:
         case Js::TypeIds_UndeclBlockVar:
         case Js::TypeIds_EngineInterfaceObject:
         case Js::TypeIds_WinRTDate:
@@ -363,6 +346,11 @@ void JsrtDebugUtils::AddPropertyType(Js::DynamicObject * object, Js::IDiagObject
     if (objectDisplayRef->HasChildren())
     {
         propertyAttributes |= JsrtDebugPropertyAttribute::HAVE_CHILDRENS;
+    }
+
+    if (varAddress != nullptr && varAddress->IsInDeadZone())
+    {
+        propertyAttributes |= JsrtDebugPropertyAttribute::IN_TDZ;
     }
 
     JsrtDebugUtils::AddPropertyToObject(object, JsrtDebugPropertyId::propertyAttributes, (UINT)propertyAttributes, scriptContext);
@@ -509,3 +497,4 @@ const char16 * JsrtDebugUtils::GetDebugPropertyName(JsrtDebugPropertyId property
     Assert(false);
     return _u("");
 }
+#endif

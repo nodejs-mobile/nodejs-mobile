@@ -62,6 +62,7 @@ namespace Js
 
         static bool Is(Var aValue);
         static JavascriptWeakMap* FromVar(Var aValue);
+        static JavascriptWeakMap* UnsafeFromVar(Var aValue);
 
         void Clear();
         bool Delete(RecyclableObject* key);
@@ -69,7 +70,14 @@ namespace Js
         bool Has(RecyclableObject* key) const;
         void Set(RecyclableObject* key, Var value);
 
-        virtual void Finalize(bool isShutdown) override { Clear(); }
+        virtual void Finalize(bool isShutdown) override
+        {
+            if (!isShutdown)
+            {
+                Clear();
+            }
+        }
+
         virtual void Dispose(bool isShutdown) override { }
 
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;

@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
 #include "Language/SourceDynamicProfileManager.h"
+#include "NativeEntryPointData.h"
 
 CodeGenWorkItem::CodeGenWorkItem(
     JsUtil::JobManager *const manager,
@@ -184,7 +185,7 @@ void CodeGenWorkItem::OnRemoveFromJitQueue(NativeCodeGenerator* generator)
         // Go ahead and delete it and let it re-queue if more interpreting of the loop happens
         auto loopBodyWorkItem = static_cast<JsLoopBodyCodeGen*>(this);
         loopBodyWorkItem->loopHeader->ResetInterpreterCount();
-        loopBodyWorkItem->GetEntryPoint()->Reset();
+        loopBodyWorkItem->GetEntryPoint()->Reset(true);
         HeapDelete(loopBodyWorkItem);
     }
     else
@@ -205,7 +206,26 @@ void CodeGenWorkItem::OnWorkItemProcessFail(NativeCodeGenerator* codeGen)
 #if DBG
         this->allocation->allocation->isNotExecutableBecauseOOM = true;
 #endif
-        codeGen->FreeNativeCodeGenAllocation(this->allocation->allocation->address, nullptr);
+
+#if PDATA_ENABLED & defined(_WIN32)
+        if (this->entryPointInfo)
+        {
+            XDataAllocation * xdataAllocation = this->entryPointInfo->GetNativeEntryPointData()->GetXDataInfo();
+            if (xdataAllocation)
+            {
+                void* functionTable = xdataAllocation->functionTable;
+                if (functionTable)
+                {
+                    if (!DelayDeletingFunctionTable::AddEntry(functionTable))
+                    {
+                        PHASE_PRINT_TESTTRACE1(Js::XDataPhase, _u("[%d]OnWorkItemProcessFail: Failed to add to slist, table: %llx\n"), GetCurrentThreadId(), functionTable);
+                        DelayDeletingFunctionTable::DeleteFunctionTable(functionTable);
+                    }
+                }
+            }
+        }
+#endif
+        codeGen->FreeNativeCodeGenAllocation(this->allocation->allocation->address);
     }
 }
 

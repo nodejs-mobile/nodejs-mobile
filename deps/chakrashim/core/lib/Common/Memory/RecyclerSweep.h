@@ -13,18 +13,14 @@ class RecyclerSweep
 #endif
 {
 public:
-#if ENABLE_PARTIAL_GC
-    void BeginSweep(Recycler * recycler, size_t rescanRootBytes, bool adjustPartialHeuristics);
-#else
-    void BeginSweep(Recycler * recycler);
-#endif
-    void FinishSweep();
-    void EndSweep();
+
+    void BeginSweep(Recycler * recycler, RecyclerSweepManager * recyclerSweepManager, HeapInfo * heapInfo);
     void ShutdownCleanup();
 
     Recycler * GetRecycler() const;
+    RecyclerSweepManager * GetManager() const;
+
     bool IsBackground() const;
-    bool HasSetupBackgroundSweep() const;
     void FlushPendingTransferDisposedObjects();
 
 #if ENABLE_CONCURRENT_GC
@@ -36,9 +32,6 @@ public:
     template <typename TBlockType> void QueueEmptyHeapBlock(HeapBucketT<TBlockType> const *heapBucket, TBlockType * heapBlock);
     template <typename TBlockType> void TransferPendingEmptyHeapBlocks(HeapBucketT<TBlockType> * heapBucket);
 
-    void BackgroundSweep();
-    void BeginBackground(bool forceForeground);
-    void EndBackground();
 
     template <typename TBlockType> void SetPendingMergeNewHeapBlockList(TBlockType * heapBlockList);
     template <typename TBlockType> void MergePendingNewHeapBlockList();
@@ -49,32 +42,14 @@ public:
     template <typename TBlockType> void SaveNextAllocableBlockHead(HeapBucketT<TBlockType> const * heapBucket);
 #endif
 #if DBG || defined(RECYCLER_SLOW_CHECK_ENABLED)
-    template < typename TBlockType> size_t GetHeapBlockCount(HeapBucketT<TBlockType> const * heapBucket);
-    size_t SetPendingMergeNewHeapBlockCount();
+    template <typename TBlockType> size_t GetHeapBlockCount(HeapBucketT<TBlockType> const * heapBucket);
+    size_t GetPendingMergeNewHeapBlockCount(HeapInfo const * heapInfo);
 #endif
 #endif
 
-    template <typename TBlockAttributes>
-    void AddUnaccountedNewObjectAllocBytes(SmallHeapBlockT<TBlockAttributes> * smallHeapBlock);
 #if ENABLE_PARTIAL_GC
     bool InPartialCollectMode() const;
     bool InPartialCollect() const;
-    void StartPartialCollectMode();
-    bool DoPartialCollectMode();
-    bool DoAdjustPartialHeuristics() const;
-    bool AdjustPartialHeuristics();
-    void SubtractSweepNewObjectAllocBytes(size_t newObjectExpectSweepByteCount);
-    size_t GetNewObjectAllocBytes() const;
-    size_t GetNewObjectFreeBytes() const;
-    size_t GetPartialUnusedFreeByteCount() const;
-    size_t GetPartialCollectSmallHeapBlockReuseMinFreeBytes() const;
-
-    template <typename TBlockAttributes>
-    void NotifyAllocableObjects(SmallHeapBlockT<TBlockAttributes> * smallHeapBlock);
-    void AddUnusedFreeByteCount(uint expectedFreeByteCount);
-
-    static const uint MinPartialUncollectedNewPageCount; // 4MB pages
-    static const uint MaxPartialCollectRescanRootBytes; // 5MB
 #endif
 
 private:
@@ -122,6 +97,9 @@ private:
     template <> Data<SmallLeafHeapBlock>& GetData<SmallLeafHeapBlock>() { return leafData; }
     template <> Data<SmallNormalHeapBlock>& GetData<SmallNormalHeapBlock>() { return normalData; }
     template <> Data<SmallFinalizableHeapBlock>& GetData<SmallFinalizableHeapBlock>() { return finalizableData; }
+#ifdef RECYCLER_VISITED_HOST
+    template <> Data<SmallRecyclerVisitedHostHeapBlock>& GetData<SmallRecyclerVisitedHostHeapBlock>() { return recyclerVisitedHostData; }
+#endif
 #ifdef RECYCLER_WRITE_BARRIER
     template <> Data<SmallNormalWithBarrierHeapBlock>& GetData<SmallNormalWithBarrierHeapBlock>() { return withBarrierData; }
     template <> Data<SmallFinalizableWithBarrierHeapBlock>& GetData<SmallFinalizableWithBarrierHeapBlock>() { return finalizableWithBarrierData; }
@@ -130,18 +108,25 @@ private:
     template <> Data<MediumLeafHeapBlock>& GetData<MediumLeafHeapBlock>() { return mediumLeafData; }
     template <> Data<MediumNormalHeapBlock>& GetData<MediumNormalHeapBlock>() { return mediumNormalData; }
     template <> Data<MediumFinalizableHeapBlock>& GetData<MediumFinalizableHeapBlock>() { return mediumFinalizableData; }
+#ifdef RECYCLER_VISITED_HOST
+    template <> Data<MediumRecyclerVisitedHostHeapBlock>& GetData<MediumRecyclerVisitedHostHeapBlock>() { return mediumRecyclerVisitedHostData; }
+#endif
 #ifdef RECYCLER_WRITE_BARRIER
     template <> Data<MediumNormalWithBarrierHeapBlock>& GetData<MediumNormalWithBarrierHeapBlock>() { return mediumWithBarrierData; }
     template <> Data<MediumFinalizableWithBarrierHeapBlock>& GetData<MediumFinalizableWithBarrierHeapBlock>() { return mediumFinalizableWithBarrierData; }
 #endif
 
 private:
-    bool IsMemProtectMode();
-
     Recycler * recycler;
+    RecyclerSweepManager * recyclerSweepManager;
+    HeapInfo * heapInfo;
+
     Data<SmallLeafHeapBlock> leafData;
     Data<SmallNormalHeapBlock> normalData;
     Data<SmallFinalizableHeapBlock> finalizableData;
+#ifdef RECYCLER_VISITED_HOST
+    Data<SmallRecyclerVisitedHostHeapBlock> recyclerVisitedHostData;
+#endif
 #ifdef RECYCLER_WRITE_BARRIER
     Data<SmallNormalWithBarrierHeapBlock> withBarrierData;
     Data<SmallFinalizableWithBarrierHeapBlock> finalizableWithBarrierData;
@@ -149,36 +134,17 @@ private:
     Data<MediumLeafHeapBlock> mediumLeafData;
     Data<MediumNormalHeapBlock> mediumNormalData;
     Data<MediumFinalizableHeapBlock> mediumFinalizableData;
+#ifdef RECYCLER_VISITED_HOST
+    Data<MediumRecyclerVisitedHostHeapBlock> mediumRecyclerVisitedHostData;
+#endif
 #ifdef RECYCLER_WRITE_BARRIER
     Data<MediumNormalWithBarrierHeapBlock> mediumWithBarrierData;
     Data<MediumFinalizableWithBarrierHeapBlock> mediumFinalizableWithBarrierData;
 #endif
 
-    bool background;
-    bool forceForeground;
     bool hasPendingSweepSmallHeapBlocks;
     bool hasPendingEmptyBlocks;
-    bool inPartialCollect;
-#if ENABLE_PARTIAL_GC
-    bool adjustPartialHeuristics;
-    size_t lastPartialUncollectedAllocBytes;
-    size_t nextPartialUncollectedAllocBytes;
 
-    // Sweep data for partial activation heuristic
-    size_t rescanRootBytes;
-    size_t reuseHeapBlockCount;
-    size_t reuseByteCount;
-
-    // Partial reuse Heuristic
-    size_t partialCollectSmallHeapBlockReuseMinFreeBytes;
-
-    // Data to update unusedPartialCollectFreeBytes
-    size_t partialUnusedFreeByteCount;
-
-#if DBG
-    bool partial;
-#endif
-#endif
 };
 
 #if ENABLE_CONCURRENT_GC
@@ -231,8 +197,8 @@ RecyclerSweep::TransferPendingEmptyHeapBlocks(HeapBucketT<TBlockType> * heapBuck
     if (list)
     {
         TBlockType * tail = bucketData.pendingEmptyBlockListTail;
-#if DBG || defined(RECYCLER_SLOW_CHECK_ENABLED)
-        size_t count = 0;
+#if DBG || defined(RECYCLER_SLOW_CHECK_ENABLED) || ENABLE_ALLOCATIONS_DURING_CONCURRENT_SWEEP
+        uint32 count = 0;
         HeapBlockList::ForEach(list, [tail, &count](TBlockType * heapBlock)
         {
             Assert(heapBlock->GetAddress() == nullptr);
@@ -240,8 +206,12 @@ RecyclerSweep::TransferPendingEmptyHeapBlocks(HeapBucketT<TBlockType> * heapBuck
             Assert(heapBlock->GetNextBlock() != nullptr || heapBlock == tail);
             count++;
         });
-        RECYCLER_SLOW_CHECK(heapBucket->emptyHeapBlockCount += count);
-        RECYCLER_SLOW_CHECK(heapBucket->heapBlockCount -= count);
+#if defined(RECYCLER_SLOW_CHECK_ENABLED)
+        heapBucket->emptyHeapBlockCount += count;
+#endif
+#if defined(RECYCLER_SLOW_CHECK_ENABLED) || ENABLE_ALLOCATIONS_DURING_CONCURRENT_SWEEP
+        heapBucket->heapBlockCount -= count;
+#endif
 #endif
 
 
@@ -279,10 +249,14 @@ RecyclerSweep::SaveNextAllocableBlockHead(HeapBucketT<TBlockType> const * heapBu
 }
 #endif
 #if DBG || defined(RECYCLER_SLOW_CHECK_ENABLED)
-template < typename TBlockType>
+template <typename TBlockType>
 size_t
 RecyclerSweep::GetHeapBlockCount(HeapBucketT<TBlockType> const * heapBucket)
 {
+    if (heapBucket->heapInfo != this->heapInfo)
+    {
+        return 0;
+    }
     auto& bucketData = this->GetBucketData(heapBucket);
     return HeapBlockList::Count(bucketData.pendingSweepList)
         + HeapBlockList::Count(bucketData.pendingEmptyBlockList);

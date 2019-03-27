@@ -12,7 +12,7 @@ namespace Js
 #include "Windows.Globalization.h"
 #endif
 
-int CountNewlines(LPCOLESTR psz, int cch = -1);
+int CountNewlines(LPCOLESTR psz);
 
 class Parser;
 struct ParseContext;
@@ -180,8 +180,9 @@ protected:
     }
 
 public:
-    void FromExternalSource() { }
-    bool IsFromExternalSource() { return false; }
+    void Clear() {}
+    void SetIsUtf8(bool isUtf8) { }
+    bool IsUtf8() const { return false; }
 };
 
 template <bool nullTerminated>
@@ -197,11 +198,11 @@ protected:
     size_t m_cMultiUnits;
     utf8::DecodeOptions m_decodeOptions;
 
-    UTF8EncodingPolicyBase(): m_cMultiUnits(0), m_decodeOptions(utf8::doAllowThreeByteSurrogates) { }
+    UTF8EncodingPolicyBase() { Clear(); }
 
     static BOOL IsMultiUnitChar(OLECHAR ch) { return ch > 0x7f; }
     // Note when nullTerminated is false we still need to increment the character pointer because the scanner "puts back" this virtual null character by decrementing the pointer
-    static OLECHAR ReadFirst(EncodedCharPtr &p, EncodedCharPtr last) { return (nullTerminated || p < last) ? static_cast< OLECHAR >(*p++) : (p++, 0); }
+    static OLECHAR ReadFirst(EncodedCharPtr &p, EncodedCharPtr last) { return (nullTerminated || p < last) ? static_cast<OLECHAR>(*p++) : (p++, 0); }
 
     // "bScan" indicates if this ReadFull is part of scanning. Pass true during scanning and ReadFull will update
     // related Scanner state. The caller is supposed to sync result "p" to Scanner's current position. Pass false
@@ -210,7 +211,7 @@ protected:
     OLECHAR ReadFull(EncodedCharPtr &p, EncodedCharPtr last)
     {
         EncodedChar ch = (nullTerminated || p < last) ? *p++ : (p++, 0);
-        return !IsMultiUnitChar(ch) ? static_cast< OLECHAR >(ch) : ReadRest<bScan>(ch, p, last);
+        return !IsMultiUnitChar(ch) ? static_cast<OLECHAR>(ch) : ReadRest<bScan>(ch, p, last);
     }
 
     OLECHAR ReadSurrogatePairUpper(EncodedCharPtr &p, EncodedCharPtr last)
@@ -221,7 +222,7 @@ protected:
         return ReadRest<true>(ch, p, last);
     }
 
-    static OLECHAR PeekFirst(EncodedCharPtr p, EncodedCharPtr last) { return (nullTerminated || p < last) ? static_cast< OLECHAR >(*p) : 0; }
+    static OLECHAR PeekFirst(EncodedCharPtr p, EncodedCharPtr last) { return (nullTerminated || p < last) ? static_cast<OLECHAR>(*p) : 0; }
 
     OLECHAR PeekFull(EncodedCharPtr p, EncodedCharPtr last)
     {
@@ -273,7 +274,7 @@ protected:
         if (m_cMultiUnits == 0 && offset <= currentCharacterOffset) return offset;
 
         // Use local decode options
-        utf8::DecodeOptions decodeOptions = IsFromExternalSource() ? utf8::doDefault : utf8::doAllowThreeByteSurrogates;
+        utf8::DecodeOptions decodeOptions = IsUtf8() ? utf8::doDefault : utf8::doAllowThreeByteSurrogates;
 
         if (offset > currentCharacterOffset)
         {
@@ -297,11 +298,26 @@ protected:
         utf8::DecodeUnitsInto(pch, start, end, m_decodeOptions);
     }
 
-
 public:
+    void Clear()
+    {
+        m_cMultiUnits = 0;
+        m_decodeOptions = utf8::doAllowThreeByteSurrogates;
+    }
+
     // If we get UTF8 source buffer, turn off doAllowThreeByteSurrogates but allow invalid WCHARs without replacing them with replacement 'g_chUnknown'.
-    void FromExternalSource() { m_decodeOptions = (utf8::DecodeOptions)(m_decodeOptions & ~utf8::doAllowThreeByteSurrogates | utf8::doAllowInvalidWCHARs); }
-    bool IsFromExternalSource() { return (m_decodeOptions & utf8::doAllowThreeByteSurrogates) == 0; }
+    void SetIsUtf8(bool isUtf8)
+    {
+        if (isUtf8)
+        {
+            m_decodeOptions = (utf8::DecodeOptions)(m_decodeOptions & ~utf8::doAllowThreeByteSurrogates | utf8::doAllowInvalidWCHARs);
+        }
+        else
+        {
+            m_decodeOptions = (utf8::DecodeOptions)(m_decodeOptions & ~utf8::doAllowInvalidWCHARs | utf8::doAllowThreeByteSurrogates);
+        }
+    }
+    bool IsUtf8() const { return (m_decodeOptions & utf8::doAllowThreeByteSurrogates) == 0; }
 };
 
 typedef UTF8EncodingPolicyBase<false> NotNullTerminatedUTF8EncodingPolicy;
@@ -318,7 +334,6 @@ enum ScanFlag
 {
     ScanFlagNone = 0,
     ScanFlagSuppressStrPid = 1,   // Force strings to always have pid
-    ScanFlagSuppressIdPid = 2     // Force identifiers to always have pid (currently unused)
 };
 
 typedef HRESULT (*CommentCallback)(void *data, OLECHAR firstChar, OLECHAR secondChar, bool containTypeDef, charcount_t min, charcount_t lim, bool adjacent, bool multiline, charcount_t startLine, charcount_t endLine);
@@ -363,21 +378,16 @@ class Scanner : public IScanner, public EncodingPolicy
     typedef typename EncodingPolicy::EncodedCharPtr EncodedCharPtr;
 
 public:
-    static Scanner * Create(Parser* parser, HashTbl *phtbl, Token *ptoken, Js::ScriptContext *scriptContext)
-    {
-        return HeapNewNoThrow(Scanner, parser, phtbl, ptoken, scriptContext);
-    }
-    void Release(void)
-    {
-        delete this;  // invokes overrided operator delete
-    }
+    Scanner(Parser* parser, Token *ptoken, Js::ScriptContext *scriptContext);
+    ~Scanner(void);
 
     tokens Scan();
     tokens ScanNoKeywords();
     tokens ScanForcingPid();
-    void SetText(EncodedCharPtr psz, size_t offset, size_t length, charcount_t characterOffset, ULONG grfscr, ULONG lineNumber = 0);
+    void SetText(EncodedCharPtr psz, size_t offset, size_t length, charcount_t characterOffset, bool isUtf8, ULONG grfscr, ULONG lineNumber = 0);
+#if ENABLE_BACKGROUND_PARSING
     void PrepareForBackgroundParse(Js::ScriptContext *scriptContext);
-
+#endif
     enum ScanState
     {
         ScanStateNormal = 0,       
@@ -482,16 +492,19 @@ public:
     {
         Assert(m_pchMinTok - m_pchBase >= 0);
         Assert(m_pchMinTok - m_pchBase <= LONG_MAX);
-        return static_cast< charcount_t >(m_pchMinTok - m_pchBase - m_cMinTokMultiUnits);
+        Assert(static_cast<charcount_t>(m_pchMinTok - m_pchBase) >= m_cMinTokMultiUnits);
+        return static_cast<charcount_t>(m_pchMinTok - m_pchBase - m_cMinTokMultiUnits);
     }
 
     // Returns the character offset of the character immediately following the token. The character offset is the offset the first
     // character of the token would have if the entire file was converted to Unicode (UTF16-LE).
     charcount_t IchLimTok(void) const
     {
+
         Assert(m_currentCharacter - m_pchBase >= 0);
         Assert(m_currentCharacter - m_pchBase <= LONG_MAX);
-        return static_cast< charcount_t >(m_currentCharacter - m_pchBase - this->m_cMultiUnits);
+        Assert(static_cast<charcount_t>(m_currentCharacter - m_pchBase) >= this->m_cMultiUnits);
+        return static_cast<charcount_t>(m_currentCharacter - m_pchBase - this->m_cMultiUnits);
     }
 
     void SetErrorPosition(charcount_t ichMinError, charcount_t ichLimError)
@@ -531,6 +544,12 @@ public:
         return m_iecpLimTokPrevious;
     }
 
+    charcount_t IchLimTokPrevious() const
+    {
+        AssertMsg(m_ichLimTokPrevious != (charcount_t)-1, "IchLimTokPrevious() cannot be called before scanning a token");
+        return m_ichLimTokPrevious;
+    }
+
     IdentPtr PidAt(size_t iecpMin, size_t iecpLim);
 
     // Returns the character offset within the stream of the first character on the current line.
@@ -538,17 +557,17 @@ public:
     {
         Assert(m_pchMinLine - m_pchBase >= 0);
         Assert(m_pchMinLine - m_pchBase <= LONG_MAX);
+        Assert(static_cast<charcount_t>(m_pchMinLine - m_pchBase) >= m_cMinLineMultiUnits);
         return static_cast<charcount_t>(m_pchMinLine - m_pchBase - m_cMinLineMultiUnits);
     }
 
     // Returns the current line number
-    charcount_t LineCur(void) { return m_line; }
-
-    tokens ErrorToken() { return m_errorToken; }
+    charcount_t LineCur(void) const { return m_line; }
 
     void SetCurrentCharacter(charcount_t offset, ULONG lineNumber = 0)
     {
         DebugOnly(m_iecpLimTokPrevious = (size_t)-1);
+        DebugOnly(m_ichLimTokPrevious = (charcount_t)-1);
         size_t length = m_pchLast - m_pchBase;
         if (offset > length) offset = static_cast< charcount_t >(length);
         size_t ibOffset = this->CharacterOffsetToUnitOffset(m_pchBase, m_currentCharacter, m_pchLast, offset);
@@ -573,7 +592,7 @@ public:
     }
 
     virtual HRESULT SysAllocErrorLine(int32 ichMinLine, __out BSTR* pbstrLine);
-    charcount_t UpdateLine(int32 &line, EncodedCharPtr start, EncodedCharPtr last, charcount_t ichStart, charcount_t ichEnd);
+
     class TemporaryBuffer
     {
         friend Scanner<EncodingPolicy>;
@@ -595,7 +614,7 @@ public:
             m_cchMax = _countof(m_rgbInit) / sizeof(OLECHAR);
             m_ichCur = 0;
         }
-
+        
         ~TemporaryBuffer()
         {
             if (m_prgch != (OLECHAR*)m_rgbInit)
@@ -604,9 +623,20 @@ public:
             }
         }
 
-        void Init()
+        void Reset()
         {
             m_ichCur = 0;
+        }
+
+        void Clear()
+        {
+            if (m_prgch != (OLECHAR*)m_rgbInit)
+            {
+                free(m_prgch);
+                m_prgch = (OLECHAR*)m_rgbInit;
+                m_cchMax = _countof(m_rgbInit) / sizeof(OLECHAR);
+            }
+            Reset();
         }
 
         void AppendCh(uint ch)
@@ -630,6 +660,7 @@ public:
             }
         }
 
+    private:
         void Grow()
         {
             Assert(m_pscanner != nullptr);
@@ -665,14 +696,12 @@ public:
     void Capture(_Out_ RestorePoint* restorePoint, uint functionIdIncrement, size_t lengthDecr);
     void SeekTo(const RestorePoint& restorePoint, uint *nextFunctionId);
 
-    void SetNextStringTemplateIsTagged(BOOL value)
-    {
-        this->m_fNextStringTemplateIsTagged = value;
-    }
+    void Clear();
 
+    HashTbl * GetHashTbl() { return &m_htbl; }
 private:
     Parser *m_parser;
-    HashTbl *m_phtbl;
+    HashTbl m_htbl;
     Token *m_ptoken;
     EncodedCharPtr m_pchBase;          // beginning of source
     EncodedCharPtr m_pchLast;          // The end of source
@@ -689,8 +718,7 @@ private:
     bool m_OctOrLeadingZeroOnLastTKNumber :1;
     bool m_EscapeOnLastTkStrCon:1;
     BOOL m_fNextStringTemplateIsTagged:1;   // the next string template scanned has a tag (must create raw strings)
-    BYTE m_DeferredParseFlags:2;            // suppressStrPid and suppressIdPid
-    charcount_t m_ichCheck;             // character at which completion is to be computed.
+    BYTE m_DeferredParseFlags:2;            // suppressStrPid and suppressIdPid    
     bool es6UnicodeMode;                // True if ES6Unicode Extensions are enabled.
     bool m_fYieldIsKeywordRegion;       // Whether to treat 'yield' as an identifier or keyword
     bool m_fAwaitIsKeywordRegion;       // Whether to treat 'await' as an identifier or keyword
@@ -701,7 +729,6 @@ private:
 
     charcount_t m_line;
     ScanState m_scanState;
-    tokens m_errorToken;
 
     charcount_t m_ichMinError;
     charcount_t m_ichLimError;
@@ -713,14 +740,9 @@ private:
 
     tokens m_tkPrevious;
     size_t m_iecpLimTokPrevious;
+    charcount_t m_ichLimTokPrevious;
 
-    Scanner(Parser* parser, HashTbl *phtbl, Token *ptoken, Js::ScriptContext *scriptContext);
-    ~Scanner(void);
-
-    void operator delete(void* p, size_t size)
-    {
-        HeapFree(p, size);
-    }
+    void ClearStates();
 
     template <bool forcePid>
     void SeekAndScan(const RestorePoint& restorePoint);
@@ -731,7 +753,6 @@ private:
     tokens ScanError(EncodedCharPtr pchCur, tokens errorToken)
     {
         m_currentCharacter = pchCur;
-        m_errorToken = errorToken;
         return m_ptoken->tk = tkScanError;
     }
 
@@ -742,7 +763,7 @@ private:
         throw ParseExceptionObject(hr);
     }
 
-    const EncodedCharPtr PchBase(void)
+    const EncodedCharPtr PchBase(void) const
     {
         return m_pchBase;
     }
@@ -767,7 +788,6 @@ private:
     tokens SkipComment(EncodedCharPtr *pp, /* out */ bool* containTypeDef);
     tokens ScanRegExpConstant(ArenaAllocator* alloc);
     tokens ScanRegExpConstantNoAST(ArenaAllocator* alloc);
-    BOOL oFScanNumber(double *pdbl, bool& likelyInt);
     EncodedCharPtr FScanNumber(EncodedCharPtr p, double *pdbl, bool& likelyInt);
     IdentPtr PidOfIdentiferAt(EncodedCharPtr p, EncodedCharPtr last, bool fHadEscape, bool fHasMultiChar);
     IdentPtr PidOfIdentiferAt(EncodedCharPtr p, EncodedCharPtr last);
@@ -824,4 +844,5 @@ private:
         return false;
     }
 
+    charcount_t UpdateLine(int32 &line, EncodedCharPtr start, EncodedCharPtr last, charcount_t ichStart, charcount_t ichEnd);
 };

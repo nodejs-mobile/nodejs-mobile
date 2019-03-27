@@ -31,6 +31,8 @@ namespace Js
         ScriptContext *scriptContext = this->GetScriptContext();
         targetFunction = RecyclableObject::FromVar(args[0]);
 
+        Assert(!CrossSite::NeedMarshalVar(targetFunction, scriptContext));
+
         // Let proto be targetFunction.[[GetPrototypeOf]]().
         RecyclableObject* proto = JavascriptOperators::GetPrototype(targetFunction);
         if (proto != type->GetPrototype())
@@ -46,7 +48,7 @@ namespace Js
         // Here although we won't use value of length, this is just to make sure that we call traps involved with HasOwnProperty(Target, "length") and Get(Target, "length")
         if (JavascriptProxy::Is(targetFunction))
         {
-            if (JavascriptOperators::HasOwnProperty(targetFunction, PropertyIds::length, scriptContext) == TRUE)
+            if (JavascriptOperators::HasOwnProperty(targetFunction, PropertyIds::length, scriptContext, nullptr) == TRUE)
             {
                 int len = 0;
                 Var varLength;
@@ -125,7 +127,7 @@ namespace Js
         }
 
         BoundFunction *boundFunction = (BoundFunction *) function;
-        Var targetFunction = boundFunction->targetFunction;
+        RecyclableObject *targetFunction = boundFunction->targetFunction;
 
         //
         // var o = new boundFunction()
@@ -134,33 +136,62 @@ namespace Js
         Var newVarInstance = nullptr;
         if (callInfo.Flags & CallFlags_New)
         {
-          if (JavascriptProxy::Is(targetFunction))
-          {
-            JavascriptProxy* proxy = JavascriptProxy::FromVar(targetFunction);
-            Arguments proxyArgs(CallInfo(CallFlags_New, 1), &targetFunction);
-            args.Values[0] = newVarInstance = proxy->ConstructorTrap(proxyArgs, scriptContext, 0);
-          }
-          else
-          {
-            args.Values[0] = newVarInstance = JavascriptOperators::NewScObjectNoCtor(targetFunction, scriptContext);
-          }
+            if (args.HasNewTarget())
+            {
+                // target has an overriden new target make a new object from the newTarget
+                Var newTargetVar = args.GetNewTarget();
+                AssertOrFailFastMsg(JavascriptOperators::IsConstructor(newTargetVar), "newTarget must be a constructor");
+                RecyclableObject* newTarget = RecyclableObject::UnsafeFromVar(newTargetVar);
+
+                // Class constructors expect newTarget to be in args slot 0 (usually "this"),
+                // because "this" is not constructed until we reach the most-super superclass.
+                FunctionInfo* functionInfo = JavascriptOperators::GetConstructorFunctionInfo(targetFunction, scriptContext);
+                if (functionInfo && functionInfo->IsClassConstructor())
+                {
+                    args.Values[0] = newVarInstance = newTarget;
+                }
+                else
+                {
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        args.Values[0] = newVarInstance = JavascriptOperators::CreateFromConstructor(newTarget, scriptContext);
+                    }
+                    END_SAFE_REENTRANT_CALL
+                }
+            }
+            else if (!JavascriptProxy::Is(targetFunction))
+            {
+                // No new target and target is not a proxy can make a new object in a "normal" way.
+                // NewScObjectNoCtor will either construct an object or return targetFunction depending
+                // on whether targetFunction is a class constructor.
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    args.Values[0] = newVarInstance = JavascriptOperators::NewScObjectNoCtor(targetFunction, scriptContext);
+                }
+                END_SAFE_REENTRANT_CALL
+            }
+            else
+            {
+                // target is a proxy without an overriden new target
+                // give nullptr - FunctionCallTrap will make a new object
+                args.Values[0] = newVarInstance;
+            }
         }
 
         Js::Arguments actualArgs = args;
 
         if (boundFunction->count > 0)
         {
-            BOOL isCrossSiteObject = boundFunction->IsCrossSiteObject();
             // OACR thinks that this can change between here and the check in the for loop below
             const unsigned int argCount = args.Info.Count;
 
-            if ((boundFunction->count + argCount) > CallInfo::kMaxCountArgs)
+            uint32 newArgCount = UInt32Math::Add(boundFunction->count, args.GetLargeArgCountWithExtraArgs());
+            if (newArgCount > CallInfo::kMaxCountArgs)
             {
                 JavascriptError::ThrowRangeError(scriptContext, JSERR_ArgListTooLarge);
             }
 
-            Field(Var) *newValues = RecyclerNewArray(scriptContext->GetRecycler(), Field(Var), boundFunction->count + argCount);
-
+            Field(Var) *newValues = RecyclerNewArray(scriptContext->GetRecycler(), Field(Var), newArgCount);
             uint index = 0;
 
             //
@@ -176,24 +207,9 @@ namespace Js
                 newValues[index++] = boundFunction->boundThis;
             }
 
-            // Copy the bound args
-            if (!isCrossSiteObject)
+            for (uint i = 0; i < boundFunction->count; i++)
             {
-                for (uint i = 0; i < boundFunction->count; i++)
-                {
-                    newValues[index++] = boundFunction->boundArgs[i];
-                }
-            }
-            else
-            {
-                // it is possible that the bound arguments are not marshalled yet.
-                for (uint i = 0; i < boundFunction->count; i++)
-                {
-                    //warning C6386: Buffer overrun while writing to 'newValues':  the writable size is 'boundFunction->count+argCount*8' bytes, but '40' bytes might be written.
-                    // there's throw with args.Info.Count == 0, so here won't hit buffer overrun, and __analyze_assume(argCount>0) does not work
-#pragma warning(suppress: 6386)
-                    newValues[index++] = CrossSite::MarshalVar(scriptContext, boundFunction->boundArgs[i]);
-                }
+                newValues[index++] = boundFunction->boundArgs[i];
             }
 
             // Copy the extra args
@@ -202,8 +218,15 @@ namespace Js
                 newValues[index++] = args[i];
             }
 
-            actualArgs = Arguments(args.Info, (Var*)newValues);
+            if (args.HasExtraArg())
+            {
+                newValues[index++] = args.Values[argCount];
+            }
+
+            actualArgs = Arguments(args.Info, unsafe_write_barrier_cast<Var*>(newValues));
             actualArgs.Info.Count = boundFunction->count + argCount;
+
+            Assert(index == actualArgs.GetLargeArgCountWithExtraArgs());
         }
         else
         {
@@ -213,8 +236,13 @@ namespace Js
             }
         }
 
-        RecyclableObject* actualFunction = RecyclableObject::FromVar(targetFunction);
-        Var aReturnValue = JavascriptFunction::CallFunction<true>(actualFunction, actualFunction->GetEntryPoint(), actualArgs);
+        Var aReturnValue = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            // Number of arguments are allowed to be more than Constants::MaxAllowedArgs in runtime. Need to use the larger argcount logic for this call.
+            aReturnValue = JavascriptFunction::CallFunction<true>(targetFunction, targetFunction->GetEntryPoint(), actualArgs, /* useLargeArgCount */ true);
+        }
+        END_SAFE_REENTRANT_CALL
 
         //
         // [[Construct]] and call returned a non-object
@@ -227,27 +255,6 @@ namespace Js
 
         return aReturnValue;
     }
-
-    void BoundFunction::MarshalToScriptContext(Js::ScriptContext * scriptContext)
-    {
-        Assert(this->GetScriptContext() != scriptContext);
-        AssertMsg(VirtualTableInfo<BoundFunction>::HasVirtualTable(this), "Derived class need to define marshal to script context");
-        VirtualTableInfo<Js::CrossSiteObject<BoundFunction>>::SetVirtualTable(this);
-        this->targetFunction = (RecyclableObject*)CrossSite::MarshalVar(scriptContext, this->targetFunction);
-        this->boundThis = (RecyclableObject*)CrossSite::MarshalVar(this->GetScriptContext(), this->boundThis);
-        for (uint i = 0; i < count; i++)
-        {
-            this->boundArgs[i] = CrossSite::MarshalVar(this->GetScriptContext(), this->boundArgs[i]);
-        }
-    }
-
-#if ENABLE_TTD
-    void BoundFunction::MarshalCrossSite_TTDInflate()
-    {
-        AssertMsg(VirtualTableInfo<BoundFunction>::HasVirtualTable(this), "Derived class need to define marshal");
-        VirtualTableInfo<Js::CrossSiteObject<BoundFunction>>::SetVirtualTable(this);
-    }
-#endif
 
     JavascriptFunction * BoundFunction::GetTargetFunction() const
     {
@@ -275,7 +282,7 @@ namespace Js
         JavascriptString* displayName = GetLibrary()->GetEmptyString();
         if (targetFunction != nullptr)
         {
-            Var value = JavascriptOperators::GetProperty(targetFunction, PropertyIds::name, targetFunction->GetScriptContext());
+            Var value = JavascriptOperators::GetPropertyNoCache(targetFunction, PropertyIds::name, targetFunction->GetScriptContext());
             if (JavascriptString::Is(value))
             {
                 displayName = JavascriptString::FromVar(value);
@@ -303,14 +310,14 @@ namespace Js
         return false;
     }
 
-    PropertyQueryFlags BoundFunction::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags BoundFunction::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         if (propertyId == PropertyIds::length)
         {
             return PropertyQueryFlags::Property_Found;
         }
 
-        return JavascriptFunction::HasPropertyQuery(propertyId);
+        return JavascriptFunction::HasPropertyQuery(propertyId, info);
     }
 
     PropertyQueryFlags BoundFunction::GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext)
@@ -405,7 +412,7 @@ namespace Js
         return false;
     }
 
-    BOOL BoundFunction::GetAccessors(PropertyId propertyId, Var *getter, Var *setter, ScriptContext * requestContext)
+    _Check_return_ _Success_(return) BOOL BoundFunction::GetAccessors(PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter, ScriptContext* requestContext)
     {
         return DynamicObject::GetAccessors(propertyId, getter, setter, requestContext);
     }
@@ -437,8 +444,7 @@ namespace Js
 
     BOOL BoundFunction::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags)
     {
-        JsUtil::CharacterBuffer<WCHAR> propertyName(propertyNameString->GetString(), propertyNameString->GetLength());
-        if (BuiltInPropertyRecords::length.Equals(propertyName))
+        if (BuiltInPropertyRecords::length.Equals(propertyNameString))
         {
             return false;
         }
@@ -556,13 +562,14 @@ namespace Js
         TTD::NSSnapObjects::StdExtractSetKindSpecificInfo<TTD::NSSnapObjects::SnapBoundFunctionInfo*, TTD::NSSnapObjects::SnapObjectType::SnapBoundFunctionObject>(objData, bfi, alloc, depCount, depArray);
     }
 
-    BoundFunction* BoundFunction::InflateBoundFunction(ScriptContext* ctx, RecyclableObject* function, Var bThis, uint32 ct, Var* args)
+    BoundFunction* BoundFunction::InflateBoundFunction(
+        ScriptContext* ctx, RecyclableObject* function, Var bThis, uint32 ct, Field(Var)* args)
     {
         BoundFunction* res = RecyclerNew(ctx->GetRecycler(), BoundFunction, ctx->GetLibrary()->GetBoundFunctionType());
 
         res->boundThis = bThis;
         res->count = ct;
-        res->boundArgs = (Field(Var)*)args;
+        res->boundArgs = args;
 
         res->targetFunction = function;
 

@@ -20,10 +20,10 @@ namespace Js
     public:
         WebAssemblyEnvironment(WebAssemblyModule* module);
 
-        Var* GetStartPtr() const { return (Var*)PointerValue(start); }
+        Field(Var)* GetStartPtr() const { return start; }
 
-        AsmJsScriptFunction* GetWasmFunction(uint32 index) const;
-        void SetWasmFunction(uint32 index, AsmJsScriptFunction* func);
+        WasmScriptFunction* GetWasmFunction(uint32 index) const;
+        void SetWasmFunction(uint32 index, WasmScriptFunction* func);
         void SetImportedFunction(uint32 index, Var importedFunc);
         WebAssemblyTable* GetTable(uint32 index) const;
         void SetTable(uint32 index, class WebAssemblyTable* table);

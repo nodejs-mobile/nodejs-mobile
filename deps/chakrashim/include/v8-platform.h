@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <string>
 #include <memory>
+#include <chrono>
 
 namespace v8 {
 
@@ -40,6 +41,28 @@ class Task {
  public:
   virtual ~Task() {}
   virtual void Run() = 0;
+};
+
+class IdleTask {
+ public:
+  virtual ~IdleTask() = default;
+  virtual void Run(double deadline_in_seconds) = 0;
+};
+
+class TaskRunner {
+ public:
+  virtual void PostTask(std::unique_ptr<Task> task) = 0;
+  virtual void PostDelayedTask(std::unique_ptr<Task> task,
+                               double delay_in_seconds) = 0;
+  virtual void PostIdleTask(std::unique_ptr<IdleTask> task) = 0;
+  virtual bool IdleTasksEnabled() = 0;
+
+  TaskRunner() = default;
+  virtual ~TaskRunner() = default;
+
+ private:
+  TaskRunner(const TaskRunner&) = delete;
+  TaskRunner& operator=(const TaskRunner&) = delete;
 };
 
 /**
@@ -77,6 +100,16 @@ class TracingController {
     return 0;
   }
 
+  virtual uint64_t AddTraceEventWithTimestamp(
+      char phase, const uint8_t* category_enabled_flag, const char* name,
+      const char* scope, uint64_t id, uint64_t bind_id, int32_t num_args,
+      const char** arg_names, const uint8_t* arg_types,
+      const uint64_t* arg_values,
+      std::unique_ptr<ConvertableToTraceFormat>* arg_convertables,
+      unsigned int flags, int64_t timestamp) {
+    return 0;
+  }
+
   virtual void UpdateTraceEventDuration(const uint8_t* category_enabled_flag,
                                         const char* name, uint64_t handle) {}
 
@@ -101,6 +134,17 @@ class Platform {
   virtual ~Platform() = default;
 
   virtual size_t NumberOfAvailableBackgroundThreads() { return 0; }
+  
+  virtual std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
+      Isolate* isolate) {
+    return {};
+  }
+
+  virtual std::shared_ptr<v8::TaskRunner> GetBackgroundTaskRunner(
+      Isolate* isolate) {
+    return {};
+  }
+
   virtual void CallOnBackgroundThread(Task* task,
                                       ExpectedRuntime expected_runtime) = 0;
   virtual void CallOnForegroundThread(Isolate* isolate, Task* task) = 0;
@@ -112,6 +156,7 @@ class Platform {
   }
 
   virtual double MonotonicallyIncreasingTime() = 0;
+  virtual double CurrentClockTimeMillis() = 0;
   typedef void(*StackTracePrinter)();
 
   virtual StackTracePrinter GetStackTracePrinter() { return nullptr; }
@@ -154,6 +199,13 @@ class Platform {
   typedef v8::TracingController::TraceStateObserver TraceStateObserver;
   virtual void AddTraceStateObserver(TraceStateObserver*) {}
   virtual void RemoveTraceStateObserver(TraceStateObserver*) {}
+
+ protected:
+  static double SystemClockTimeMillis() {
+    return std::chrono::duration_cast<
+        std::chrono::duration<double, std::milli>>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+  }
 };
 
 }  // namespace v8

@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-#include "resolve-names.h"
+#include "src/resolve-names.h"
 
 #include <cassert>
 #include <cstdio>
 
-#include "cast.h"
-#include "error-handler.h"
-#include "expr-visitor.h"
-#include "ir.h"
-#include "wast-lexer.h"
-#include "wast-parser-lexer-shared.h"
+#include "src/cast.h"
+#include "src/error-handler.h"
+#include "src/expr-visitor.h"
+#include "src/ir.h"
+#include "src/wast-lexer.h"
+#include "src/wast-parser-lexer-shared.h"
 
 namespace wabt {
 
@@ -45,11 +45,12 @@ class NameResolver : public ExprVisitor::DelegateNop {
   Result OnBrTableExpr(BrTableExpr*) override;
   Result OnCallExpr(CallExpr*) override;
   Result OnCallIndirectExpr(CallIndirectExpr*) override;
-  Result OnCatchExpr(TryExpr*, Catch*) override;
   Result OnGetGlobalExpr(GetGlobalExpr*) override;
   Result OnGetLocalExpr(GetLocalExpr*) override;
   Result BeginIfExpr(IfExpr*) override;
   Result EndIfExpr(IfExpr*) override;
+  Result BeginIfExceptExpr(IfExceptExpr*) override;
+  Result EndIfExceptExpr(IfExceptExpr*) override;
   Result BeginLoopExpr(LoopExpr*) override;
   Result EndLoopExpr(LoopExpr*) override;
   Result OnSetGlobalExpr(SetGlobalExpr*) override;
@@ -58,7 +59,6 @@ class NameResolver : public ExprVisitor::DelegateNop {
   Result BeginTryExpr(TryExpr*) override;
   Result EndTryExpr(TryExpr*) override;
   Result OnThrowExpr(ThrowExpr*) override;
-  Result OnRethrowExpr(RethrowExpr*) override;
 
  private:
   void PrintError(const Location* loc, const char* fmt, ...);
@@ -188,8 +188,9 @@ void NameResolver::ResolveExceptionVar(Var* var) {
 
 void NameResolver::ResolveLocalVar(Var* var) {
   if (var->is_name()) {
-    if (!current_func_)
+    if (!current_func_) {
       return;
+    }
 
     Index index = current_func_->GetLocalIndex(*var);
     if (index == kInvalidIndex) {
@@ -203,7 +204,7 @@ void NameResolver::ResolveLocalVar(Var* var) {
 }
 
 Result NameResolver::BeginBlockExpr(BlockExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -213,7 +214,7 @@ Result NameResolver::EndBlockExpr(BlockExpr* expr) {
 }
 
 Result NameResolver::BeginLoopExpr(LoopExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -233,7 +234,7 @@ Result NameResolver::OnBrIfExpr(BrIfExpr* expr) {
 }
 
 Result NameResolver::OnBrTableExpr(BrTableExpr* expr) {
-  for (Var& target : *expr->targets)
+  for (Var& target : expr->targets)
     ResolveLabelVar(&target);
   ResolveLabelVar(&expr->default_target);
   return Result::Ok;
@@ -245,7 +246,9 @@ Result NameResolver::OnCallExpr(CallExpr* expr) {
 }
 
 Result NameResolver::OnCallIndirectExpr(CallIndirectExpr* expr) {
-  ResolveFuncTypeVar(&expr->var);
+  if (expr->decl.has_func_type) {
+    ResolveFuncTypeVar(&expr->decl.type_var);
+  }
   return Result::Ok;
 }
 
@@ -260,11 +263,22 @@ Result NameResolver::OnGetLocalExpr(GetLocalExpr* expr) {
 }
 
 Result NameResolver::BeginIfExpr(IfExpr* expr) {
-  PushLabel(expr->true_->label);
+  PushLabel(expr->true_.label);
   return Result::Ok;
 }
 
 Result NameResolver::EndIfExpr(IfExpr* expr) {
+  PopLabel();
+  return Result::Ok;
+}
+
+Result NameResolver::BeginIfExceptExpr(IfExceptExpr* expr) {
+  PushLabel(expr->true_.label);
+  ResolveExceptionVar(&expr->except_var);
+  return Result::Ok;
+}
+
+Result NameResolver::EndIfExceptExpr(IfExceptExpr* expr) {
   PopLabel();
   return Result::Ok;
 }
@@ -285,7 +299,7 @@ Result NameResolver::OnTeeLocalExpr(TeeLocalExpr* expr) {
 }
 
 Result NameResolver::BeginTryExpr(TryExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -294,28 +308,16 @@ Result NameResolver::EndTryExpr(TryExpr*) {
   return Result::Ok;
 }
 
-Result NameResolver::OnCatchExpr(TryExpr* expr, Catch* catch_) {
-  if (!catch_->IsCatchAll())
-    ResolveExceptionVar(&catch_->var);
-  return Result::Ok;
-}
-
 Result NameResolver::OnThrowExpr(ThrowExpr* expr) {
   ResolveExceptionVar(&expr->var);
   return Result::Ok;
 }
 
-Result NameResolver::OnRethrowExpr(RethrowExpr* expr) {
-  // Note: the variable refers to corresponding (enclosing) catch, using the try
-  // block label for context.
-  ResolveLabelVar(&expr->var);
-  return Result::Ok;
-}
-
 void NameResolver::VisitFunc(Func* func) {
   current_func_ = func;
-  if (func->decl.has_func_type)
+  if (func->decl.has_func_type) {
     ResolveFuncTypeVar(&func->decl.type_var);
+  }
 
   CheckDuplicateBindings(&func->param_bindings, "parameter");
   CheckDuplicateBindings(&func->local_bindings, "local");
@@ -383,21 +385,22 @@ Result NameResolver::VisitModule(Module* module) {
     VisitElemSegment(elem_segment);
   for (DataSegment* data_segment : module->data_segments)
     VisitDataSegment(data_segment);
-  if (module->start)
-    ResolveFuncVar(module->start);
+  for (Var* start : module->starts)
+    ResolveFuncVar(start);
   current_module_ = nullptr;
   return result_;
 }
 
 void NameResolver::VisitScriptModule(ScriptModule* script_module) {
-  if (script_module->type == ScriptModule::Type::Text)
-    VisitModule(script_module->text);
+  if (auto* tsm = dyn_cast<TextScriptModule>(script_module)) {
+    VisitModule(&tsm->module);
+  }
 }
 
 void NameResolver::VisitCommand(Command* command) {
   switch (command->type) {
     case CommandType::Module:
-      VisitModule(cast<ModuleCommand>(command)->module);
+      VisitModule(&cast<ModuleCommand>(command)->module);
       break;
 
     case CommandType::Action:
@@ -423,16 +426,17 @@ void NameResolver::VisitCommand(Command* command) {
        * should try to resolve names when possible. */
       ErrorHandlerNop new_error_handler;
       NameResolver new_resolver(lexer_, script_, &new_error_handler);
-      new_resolver.VisitScriptModule(assert_invalid_command->module);
+      new_resolver.VisitScriptModule(assert_invalid_command->module.get());
       break;
     }
 
     case CommandType::AssertUnlinkable:
-      VisitScriptModule(cast<AssertUnlinkableCommand>(command)->module);
+      VisitScriptModule(cast<AssertUnlinkableCommand>(command)->module.get());
       break;
 
     case CommandType::AssertUninstantiable:
-      VisitScriptModule(cast<AssertUninstantiableCommand>(command)->module);
+      VisitScriptModule(
+          cast<AssertUninstantiableCommand>(command)->module.get());
       break;
   }
 }

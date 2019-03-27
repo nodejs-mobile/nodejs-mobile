@@ -2,20 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/factory.h"
 #include "src/heap/array-buffer-tracker.h"
+#include "src/heap/factory.h"
 #include "src/heap/spaces-inl.h"
 #include "src/isolate.h"
-// FIXME(mstarzinger, marja): This is weird, but required because of the missing
-// (disallowed) include: src/factory.h -> src/objects-inl.h
 #include "src/objects-inl.h"
-// FIXME(mstarzinger, marja): This is weird, but required because of the missing
-// (disallowed) include: src/feedback-vector.h ->
-// src/feedback-vector-inl.h
-#include "src/feedback-vector-inl.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/heap/heap-tester.h"
 #include "test/cctest/heap/heap-utils.h"
+
+namespace v8 {
+namespace internal {
+namespace heap {
 
 namespace {
 
@@ -24,30 +22,38 @@ v8::Isolate* NewIsolateForPagePromotion(int min_semi_space_size = 8,
   // Parallel evacuation messes with fragmentation in a way that objects that
   // should be copied in semi space are promoted to old space because of
   // fragmentation.
-  i::FLAG_parallel_compaction = false;
-  i::FLAG_page_promotion = true;
-  i::FLAG_page_promotion_threshold = 0;  // %
-  i::FLAG_min_semi_space_size = min_semi_space_size;
+  FLAG_parallel_compaction = false;
+  FLAG_page_promotion = true;
+  FLAG_page_promotion_threshold = 0;
+  // Parallel scavenge introduces too much fragmentation.
+  FLAG_parallel_scavenge = false;
+  FLAG_min_semi_space_size = min_semi_space_size;
   // We cannot optimize for size as we require a new space with more than one
   // page.
-  i::FLAG_optimize_for_size = false;
+  FLAG_optimize_for_size = false;
   // Set max_semi_space_size because it could've been initialized by an
   // implication of optimize_for_size.
-  i::FLAG_max_semi_space_size = max_semi_space_size;
+  FLAG_max_semi_space_size = max_semi_space_size;
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
   return isolate;
 }
 
-}  // namespace
+Page* FindLastPageInNewSpace(std::vector<Handle<FixedArray>>& handles) {
+  for (auto rit = handles.rbegin(); rit != handles.rend(); ++rit) {
+    Page* candidate = Page::FromAddress((*rit)->address());
+    if (candidate->InNewSpace()) return candidate;
+  }
+  return nullptr;
+}
 
-namespace v8 {
-namespace internal {
+}  // namespace
 
 UNINITIALIZED_TEST(PagePromotion_NewToOld) {
   if (!i::FLAG_incremental_marking) return;
   if (!i::FLAG_page_promotion) return;
+  ManualGCScope manual_gc_scope;
 
   v8::Isolate* isolate = NewIsolateForPagePromotion();
   i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate);
@@ -61,17 +67,16 @@ UNINITIALIZED_TEST(PagePromotion_NewToOld) {
     heap::SimulateFullSpace(heap->new_space(), &handles);
     heap->CollectGarbage(NEW_SPACE, i::GarbageCollectionReason::kTesting);
     CHECK_GT(handles.size(), 0u);
-    // Last object in handles should definitely be on a page that does not
-    // contain the age mark, thus qualifying for moving.
-    Handle<FixedArray> last_object = handles.back();
-    Page* to_be_promoted_page = Page::FromAddress(last_object->address());
+    Page* const to_be_promoted_page = FindLastPageInNewSpace(handles);
+    CHECK_NOT_NULL(to_be_promoted_page);
     CHECK(!to_be_promoted_page->Contains(heap->new_space()->age_mark()));
     // To perform a sanity check on live bytes we need to mark the heap.
     heap::SimulateIncrementalMarking(heap, true);
     // Sanity check that the page meets the requirements for promotion.
     const int threshold_bytes =
         FLAG_page_promotion_threshold * Page::kAllocatableMemory / 100;
-    CHECK_GE(MarkingState::Internal(to_be_promoted_page).live_bytes(),
+    CHECK_GE(heap->incremental_marking()->marking_state()->live_bytes(
+                 to_be_promoted_page),
              threshold_bytes);
 
     // Actual checks: The page is in new space first, but is moved to old space
@@ -82,6 +87,7 @@ UNINITIALIZED_TEST(PagePromotion_NewToOld) {
     CHECK(!heap->new_space()->ContainsSlow(to_be_promoted_page->address()));
     CHECK(heap->old_space()->ContainsSlow(to_be_promoted_page->address()));
   }
+  isolate->Dispose();
 }
 
 UNINITIALIZED_TEST(PagePromotion_NewToNew) {
@@ -109,6 +115,7 @@ UNINITIALIZED_TEST(PagePromotion_NewToNew) {
     CHECK(heap->new_space()->ToSpaceContainsSlow(last_object->address()));
     CHECK(to_be_promoted_page->Contains(last_object->address()));
   }
+  isolate->Dispose();
 }
 
 UNINITIALIZED_TEST(PagePromotion_NewToNewJSArrayBuffer) {
@@ -150,6 +157,7 @@ UNINITIALIZED_TEST(PagePromotion_NewToNewJSArrayBuffer) {
     CHECK(to_be_promoted_page->Contains(buffer->address()));
     CHECK(ArrayBufferTracker::IsTracked(*buffer));
   }
+  isolate->Dispose();
 }
 
 UNINITIALIZED_HEAP_TEST(Regress658718) {
@@ -182,11 +190,14 @@ UNINITIALIZED_HEAP_TEST(Regress658718) {
     }
     heap->CollectGarbage(NEW_SPACE, i::GarbageCollectionReason::kTesting);
     heap->new_space()->Shrink();
-    heap->memory_allocator()->unmapper()->WaitUntilCompleted();
-    heap->mark_compact_collector()->sweeper().StartSweeperTasks();
+    heap->memory_allocator()->unmapper()->EnsureUnmappingCompleted();
+    heap->delay_sweeper_tasks_for_testing_ = false;
+    heap->mark_compact_collector()->sweeper()->StartSweeperTasks();
     heap->mark_compact_collector()->EnsureSweepingCompleted();
   }
+  isolate->Dispose();
 }
 
+}  // namespace heap
 }  // namespace internal
 }  // namespace v8

@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const inspect = require('util').inspect;
 const StringDecoder = require('string_decoder').StringDecoder;
@@ -28,6 +28,11 @@ const StringDecoder = require('string_decoder').StringDecoder;
 // Test default encoding
 let decoder = new StringDecoder();
 assert.strictEqual(decoder.encoding, 'utf8');
+
+// Should work without 'new' keyword
+const decoder2 = {};
+StringDecoder.call(decoder2);
+assert.strictEqual(decoder2.encoding, 'utf8');
 
 // UTF-8
 test('utf-8', Buffer.from('$', 'utf-8'), '$');
@@ -61,15 +66,33 @@ test('utf-8', Buffer.from('C9B5A941', 'hex'), '\u0275\ufffdA');
 test('utf-8', Buffer.from('E2', 'hex'), '\ufffd');
 test('utf-8', Buffer.from('E241', 'hex'), '\ufffdA');
 test('utf-8', Buffer.from('CCCCB8', 'hex'), '\ufffd\u0338');
-test('utf-8', Buffer.from('F0B841', 'hex'), '\ufffdA');
+
+if (!common.isChakraEngine) {
+  // This test assumes that converting a utf8 string with invalid sequences
+  // generates replacement characters in a particular way which is true for v8
+  // but not true for charkacore
+  test('utf-8', Buffer.from('F0B841', 'hex'), '\ufffdA');
+}
+
 test('utf-8', Buffer.from('F1CCB8', 'hex'), '\ufffd\u0338');
 test('utf-8', Buffer.from('F0FB00', 'hex'), '\ufffd\ufffd\0');
 test('utf-8', Buffer.from('CCE2B8B8', 'hex'), '\ufffd\u2e38');
-test('utf-8', Buffer.from('E2B8CCB8', 'hex'), '\ufffd\u0338');
+
+if (!common.isChakraEngine) {
+  // This test assumes that converting a utf8 string with invalid sequences
+  // generates replacement characters in a particular way which is true for v8
+  // but not true for charkacore
+  test('utf-8', Buffer.from('E2B8CCB8', 'hex'), '\ufffd\u0338');
+}
+
 test('utf-8', Buffer.from('E2FBCC01', 'hex'), '\ufffd\ufffd\ufffd\u0001');
 test('utf-8', Buffer.from('CCB8CDB9', 'hex'), '\u0338\u0379');
 // CESU-8 of U+1D40D
-test('utf-8', Buffer.from('EDA0B5EDB08D', 'hex'), '\ufffd\ufffd');
+
+// V8 has changed their invalid UTF-8 handling, see
+// https://chromium-review.googlesource.com/c/v8/v8/+/671020 for more info.
+test('utf-8', Buffer.from('EDA0B5EDB08D', 'hex'),
+     '\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd');
 
 // UCS-2
 test('ucs2', Buffer.from('ababc', 'ucs2'), 'ababc');
@@ -80,11 +103,36 @@ test('utf16le', Buffer.from('3DD84DDC', 'hex'), '\ud83d\udc4d'); // thumbs up
 // Additional UTF-8 tests
 decoder = new StringDecoder('utf8');
 assert.strictEqual(decoder.write(Buffer.from('E1', 'hex')), '');
+
+// A quick test for lastChar, lastNeed & lastTotal which are undocumented.
+assert(decoder.lastChar.equals(new Uint8Array([0xe1, 0, 0, 0])));
+assert.strictEqual(decoder.lastNeed, 2);
+assert.strictEqual(decoder.lastTotal, 3);
+
 assert.strictEqual(decoder.end(), '\ufffd');
+
+// ArrayBufferView tests
+const arrayBufferViewStr = 'String for ArrayBufferView tests\n';
+const inputBuffer = Buffer.from(arrayBufferViewStr.repeat(8), 'utf8');
+for (const expectView of common.getArrayBufferViews(inputBuffer)) {
+  assert.strictEqual(
+    decoder.write(expectView),
+    inputBuffer.toString('utf8')
+  );
+  assert.strictEqual(decoder.end(), '');
+}
 
 decoder = new StringDecoder('utf8');
 assert.strictEqual(decoder.write(Buffer.from('E18B', 'hex')), '');
-assert.strictEqual(decoder.end(), '\ufffd');
+
+// This test assumes that converting a utf8 string with invalid sequences
+// generates replacement characters in a particular way which is true for v8
+// but not true for charkacore
+assert.strictEqual(decoder.end(),
+                   common.engineSpecificMessage({
+                     v8: '\ufffd',
+                     chakracore: '\ufffd\ufffd'
+                   }));
 
 decoder = new StringDecoder('utf8');
 assert.strictEqual(decoder.write(Buffer.from('\ufffd')), '\ufffd');
@@ -124,13 +172,45 @@ assert.strictEqual(decoder.write(Buffer.from('3DD8', 'hex')), '');
 assert.strictEqual(decoder.write(Buffer.from('4D', 'hex')), '');
 assert.strictEqual(decoder.end(), '\ud83d');
 
-assert.throws(() => {
-  new StringDecoder(1);
-}, /^Error: Unknown encoding: 1$/);
+decoder = new StringDecoder('utf16le');
+assert.strictEqual(decoder.write(Buffer.from('3DD84D', 'hex')), '\ud83d');
+assert.strictEqual(decoder.end(), '');
 
-assert.throws(() => {
-  new StringDecoder('test');
-}, /^Error: Unknown encoding: test$/);
+// Regression test for https://github.com/nodejs/node/issues/22358
+// (unaligned UTF-16 access).
+decoder = new StringDecoder('utf16le');
+assert.strictEqual(decoder.write(Buffer.alloc(1)), '');
+assert.strictEqual(decoder.write(Buffer.alloc(20)), '\0'.repeat(10));
+assert.strictEqual(decoder.write(Buffer.alloc(48)), '\0'.repeat(24));
+assert.strictEqual(decoder.end(), '');
+
+common.expectsError(
+  () => new StringDecoder(1),
+  {
+    code: 'ERR_UNKNOWN_ENCODING',
+    type: TypeError,
+    message: 'Unknown encoding: 1'
+  }
+);
+
+common.expectsError(
+  () => new StringDecoder('test'),
+  {
+    code: 'ERR_UNKNOWN_ENCODING',
+    type: TypeError,
+    message: 'Unknown encoding: test'
+  }
+);
+
+common.expectsError(
+  () => new StringDecoder('utf8').write(null),
+  {
+    code: 'ERR_INVALID_ARG_TYPE',
+    type: TypeError,
+    message: 'The "buf" argument must be one of type Buffer, TypedArray,' +
+      ' or DataView. Received type object'
+  }
+);
 
 // test verifies that StringDecoder will correctly decode the given input
 // buffer with the given encoding to the expected output. It will attempt all
@@ -154,11 +234,11 @@ function test(encoding, input, expected, singleSequence) {
     output += decoder.end();
     if (output !== expected) {
       const message =
-        'Expected "' + unicodeEscape(expected) + '", ' +
-        'but got "' + unicodeEscape(output) + '"\n' +
-        'input: ' + input.toString('hex').match(hexNumberRE) + '\n' +
-        'Write sequence: ' + JSON.stringify(sequence) + '\n' +
-        'Full Decoder State: ' + inspect(decoder);
+        `Expected "${unicodeEscape(expected)}", ` +
+        `but got "${unicodeEscape(output)}"\n` +
+        `input: ${input.toString('hex').match(hexNumberRE)}\n` +
+        `Write sequence: ${JSON.stringify(sequence)}\n` +
+        `Full Decoder State: ${inspect(decoder)}`;
       assert.fail(output, expected, message);
     }
   });

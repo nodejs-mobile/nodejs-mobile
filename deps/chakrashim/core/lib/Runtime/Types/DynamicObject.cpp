@@ -15,7 +15,7 @@ namespace Js
         objectArray(nullptr)
     {
         Assert(!UsesObjectArrayOrFlagsAsFlags());
-        if(initSlots)
+        if (initSlots)
         {
             InitSlots(this);
         }
@@ -46,7 +46,7 @@ namespace Js
 #endif
     }
 
-    DynamicObject::DynamicObject(DynamicObject * instance) :
+    DynamicObject::DynamicObject(DynamicObject * instance, bool deepCopy) :
         RecyclableObject(instance->type),
         auxSlots(instance->auxSlots),
         objectArray(instance->objectArray)  // copying the array should copy the array flags and array call site index as well
@@ -58,11 +58,13 @@ namespace Js
         int propertyCount = typeHandler->GetPropertyCount();
         int inlineSlotCapacity = GetTypeHandler()->GetInlineSlotCapacity();
         int inlineSlotCount = min(inlineSlotCapacity, propertyCount);
-        Var * srcSlots = reinterpret_cast<Var*>(reinterpret_cast<size_t>(instance) + typeHandler->GetOffsetOfInlineSlots());
-        Field(Var) * dstSlots = reinterpret_cast<Field(Var)*>(reinterpret_cast<size_t>(this) + typeHandler->GetOffsetOfInlineSlots());
+        Field(Var)* srcSlots = instance->GetInlineSlots();
+        Field(Var)* dstSlots = this->GetInlineSlots();
 #if !FLOATVAR
         ScriptContext * scriptContext = this->GetScriptContext();
 #endif
+        // Copy the inline slot data from the source instance. Deep copy is implicit because
+        // the inline slot allocation is already accounted for with the allocation of the object.
         for (int i = 0; i < inlineSlotCount; i++)
         {
 #if !FLOATVAR
@@ -71,11 +73,27 @@ namespace Js
 #else
             dstSlots[i] = srcSlots[i];
 #endif
-
+            Assert(!ThreadContext::IsOnStack(dstSlots[i]));
         }
 
         if (propertyCount > inlineSlotCapacity)
         {
+            // Properties that are not inlined are stored in the auxSlots, which must be copied
+            // from the source instance.
+
+            // Assert that this block of code will not overwrite inline slot data
+            Assert(!typeHandler->IsObjectHeaderInlinedTypeHandler());
+
+            if (deepCopy)
+            {
+                // When a deepCopy is needed, ensure that auxSlots is not shared with the source instance
+                // so that both objects can have their own, separate lifetimes.
+                InitSlots(this);
+
+                // This auxSlots should now be a separate allocation.
+                Assert(auxSlots != instance->auxSlots);
+            }
+
             uint auxSlotCount = propertyCount - inlineSlotCapacity;
 
             for (uint i = 0; i < auxSlotCount; i++)
@@ -84,9 +102,41 @@ namespace Js
                 // Currently we only support temp numbers assigned to stack objects
                 auxSlots[i] = JavascriptNumber::BoxStackNumber(instance->auxSlots[i], scriptContext);
 #else
+                // Copy the slot values from that instance to this
+                Assert(!ThreadContext::IsOnStack(instance->auxSlots[i]));
                 auxSlots[i] = instance->auxSlots[i];
 #endif
+                Assert(!ThreadContext::IsOnStack(auxSlots[i]));
             }
+        }
+
+        if (deepCopy && instance->HasObjectArray())
+        {
+            // Assert that this block of code will not overwrite inline slot data
+            Assert(!typeHandler->IsObjectHeaderInlinedTypeHandler());
+
+            // While the objectArray can be any array type, a DynamicObject that is created on the
+            // stack will only have one of these three types (as these are also the only array types
+            // that can be allocated on the stack).
+            Assert(Js::JavascriptArray::Is(instance->GetObjectArrayOrFlagsAsArray())
+                || Js::JavascriptNativeIntArray::Is(instance->GetObjectArrayOrFlagsAsArray())
+                || Js::JavascriptNativeFloatArray::Is(instance->GetObjectArrayOrFlagsAsArray())
+            );
+
+            // Since a deep copy was requested for this DynamicObject, deep copy the object array as well
+            SetObjectArray(JavascriptArray::DeepCopyInstance(instance->GetObjectArrayOrFlagsAsArray()));
+        }
+        else
+        {
+            // Otherwise, assert that there is either
+            // - no object array to deep copy
+            // - an object array, but no deep copy needed
+            // - data in the objectArray member, but it is inline slot data
+            // - data in the objectArray member, but it is array flags
+            Assert(
+                (instance->GetObjectArrayOrFlagsAsArray() == nullptr) ||
+                (!deepCopy || typeHandler->IsObjectHeaderInlinedTypeHandler() || instance->UsesObjectArrayOrFlagsAsFlags())
+            );
         }
 
 #if ENABLE_OBJECT_SOURCE_TRACKING
@@ -101,12 +151,20 @@ namespace Js
 
     bool DynamicObject::Is(Var aValue)
     {
-        return RecyclableObject::Is(aValue) && (RecyclableObject::FromVar(aValue)->GetTypeId() == TypeIds_Object);
+        return RecyclableObject::Is(aValue) && (RecyclableObject::UnsafeFromVar(aValue)->GetTypeId() == TypeIds_Object);
     }
 
     DynamicObject* DynamicObject::FromVar(Var aValue)
     {
         RecyclableObject* obj = RecyclableObject::FromVar(aValue);
+        AssertMsg(obj->DbgIsDynamicObject(), "Ensure instance is actually a DynamicObject");
+        AssertOrFailFast(DynamicType::Is(obj->GetTypeId()));
+        return static_cast<DynamicObject*>(obj);
+    }
+
+    DynamicObject* DynamicObject::UnsafeFromVar(Var aValue)
+    {
+        RecyclableObject* obj = RecyclableObject::UnsafeFromVar(aValue);
         AssertMsg(obj->DbgIsDynamicObject(), "Ensure instance is actually a DynamicObject");
         Assert(DynamicType::Is(obj->GetTypeId()));
         return static_cast<DynamicObject*>(obj);
@@ -264,7 +322,7 @@ namespace Js
 
             // If this object is used as a prototype, the has-only-writable-data-properties-in-prototype-chain cache needs to be
             // invalidated here since the type handler of 'objectArray' is not marked as being used as a prototype
-            GetType()->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+            GetType()->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
         }
     }
 
@@ -291,6 +349,9 @@ namespace Js
         // For now, i have added only Aux Slot -> so new inlineSlotCapacity should be 2.
         AssertMsg(DynamicObject::IsTypeHandlerCompatibleForObjectHeaderInlining(this->GetTypeHandler(), type->GetTypeHandler()),
             "Object is ObjectHeaderInlined and should have compatible TypeHandlers for proper transition");
+
+        AssertMsg(!JavascriptObject::IsPrototypeOfStopAtProxy(this, type->GetPrototype(), GetScriptContext()),
+            "Replacing the type should not create a cycle in the prototype chain");
 
         this->type = type;
     }
@@ -465,6 +526,11 @@ namespace Js
         return RecyclerNew(GetRecycler(), DynamicType, this->GetDynamicType());
     }
 
+    void DynamicObject::PrepareForConversionToNonPathType()
+    {
+        // Nothing to do in base class
+    }
+
     /*
     *   DynamicObject::IsTypeHandlerCompatibleForObjectHeaderInlining
     *   -   Checks if the TypeHandlers are compatible for transition from oldTypeHandler to newTypeHandler
@@ -507,7 +573,7 @@ namespace Js
         }
 
         PathTypeHandlerBase *const oldTypeHandler = PathTypeHandlerBase::FromTypeHandler(GetTypeHandler());
-        SimplePathTypeHandler *const newTypeHandler = oldTypeHandler->DeoptimizeObjectHeaderInlining(GetLibrary());
+        PathTypeHandlerBase *const newTypeHandler = oldTypeHandler->DeoptimizeObjectHeaderInlining(GetLibrary());
 
         const PropertyIndex newInlineSlotCapacity = newTypeHandler->GetInlineSlotCapacity();
         DynamicTypeHandler::AdjustSlots(
@@ -524,8 +590,12 @@ namespace Js
 
     void DynamicObject::ChangeType()
     {
+        // Allocation won't throw any more, otherwise we should use AutoDisableInterrupt to guard here
+        AutoDisableInterrupt autoDisableInterrupt(this->GetScriptContext()->GetThreadContext());
+
         Assert(!GetDynamicType()->GetIsShared() || GetTypeHandler()->GetIsShared());
         this->type = this->DuplicateType();
+        autoDisableInterrupt.Completed();
     }
 
     void DynamicObject::ChangeTypeIf(const Type* oldType)
@@ -649,6 +719,7 @@ namespace Js
         DynamicType * oldType = this->GetDynamicType();
         DynamicTypeHandler* oldTypeHandler = oldType->GetTypeHandler();
 
+#if ENABLE_FIXED_FIELDS
         // Consider: Because we've disabled fixed properties on DOM objects, we don't need to rely on a type change here to
         // invalidate fixed properties.  Under some circumstances (with F12 tools enabled) an object which
         // is already in the new context can be reset and newType == oldType. If we re-enable fixed properties on DOM objects
@@ -656,6 +727,7 @@ namespace Js
         // Assert(newType != oldType);
         // We only expect DOM objects to ever be reset and we explicitly disable fixed properties on DOM objects.
         Assert(!oldTypeHandler->HasAnyFixedProperties());
+#endif
 
         this->type = newType;
         if (!IsAnyArray(this))
@@ -741,6 +813,152 @@ namespace Js
         }
     }
 
+    Field(Var)* DynamicObject::GetInlineSlots() const
+    {
+        return reinterpret_cast<Field(Var)*>(reinterpret_cast<size_t>(this) + this->GetOffsetOfInlineSlots());
+    }
+
+    bool DynamicObject::IsCompatibleForCopy(DynamicObject* from) const
+    {
+        if (this->GetTypeHandler()->GetInlineSlotCapacity() != from->GetTypeHandler()->GetInlineSlotCapacity())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: inline slot capacity doesn't match, from: %u, to: %u\n"),
+                    from->GetTypeHandler()->GetInlineSlotCapacity(),
+                    this->GetTypeHandler()->GetInlineSlotCapacity());
+            }
+            return false;
+        }
+        if (!from->GetTypeHandler()->IsPathTypeHandler())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: Don't have PathTypeHandler\n"));
+            }
+            return false;
+        }
+        if (this->HasObjectArray())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: to obj has object array\n"));
+            }
+            return false;
+        }
+        if (from->GetOffsetOfInlineSlots() != this->GetOffsetOfInlineSlots())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: Don't have same inline slot offset\n"));
+            }
+            return false;
+        }
+        if (PathTypeHandlerBase::FromTypeHandler(from->GetTypeHandler())->HasAccessors())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: type handler has accessors\n"));
+            }
+            return false;
+        }
+        if (this->GetPrototype() != from->GetPrototype())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: Prototypes don't match\n"));
+            }
+            return false;
+        }
+        if (!from->GetTypeHandler()->AllPropertiesAreEnumerable())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: from obj has non-enumerable properties\n"));
+            }
+            return false;
+        }
+        if (from->IsExternal())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: from obj is External\n"));
+            }
+            return false;
+        }
+        if (this->GetScriptContext() != from->GetScriptContext())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: from obj is from different ScriptContext\n"));
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    bool DynamicObject::TryCopy(DynamicObject* from)
+    {
+#if ENABLE_TTD
+        if (from->GetScriptContext()->ShouldPerformRecordOrReplayAction())
+        {
+            return false;
+        }
+#endif
+
+        if (!PHASE_ON1(ObjectCopyPhase))
+        {
+            return false;
+        }
+        // Validate that objects are compatible
+        if (!this->IsCompatibleForCopy(from))
+        {
+            return false;
+        }
+        // Share the type
+        // Note: this will mark type as shared in case of success
+        if (!from->GetDynamicType()->ShareType())
+        {
+            if (PHASE_TRACE1(ObjectCopyPhase))
+            {
+                Output::Print(_u("ObjectCopy: Can't copy: failed to share type\n"));
+            }
+            return false;
+        }
+
+        // Update this object
+        this->ReplaceType(from->GetDynamicType());
+        this->InitSlots(this);
+        const int slotCapacity = this->GetTypeHandler()->GetSlotCapacity();
+        const uint16 inlineSlotCapacity = this->GetTypeHandler()->GetInlineSlotCapacity();
+        const int auxSlotCapacity = slotCapacity - inlineSlotCapacity;
+
+        if (auxSlotCapacity > 0)
+        {
+            CopyArray(this->auxSlots, auxSlotCapacity, from->auxSlots, auxSlotCapacity);
+        }
+        if (inlineSlotCapacity != 0)
+        {
+            Field(Var)* thisInlineSlots = this->GetInlineSlots();
+            Field(Var)* fromInlineSlots = from->GetInlineSlots();
+
+            CopyArray(thisInlineSlots, inlineSlotCapacity, fromInlineSlots, inlineSlotCapacity);
+        }
+        if (from->HasObjectArray())
+        {
+            Assert(!this->HasObjectArray());
+            Assert(!this->IsObjectHeaderInlinedTypeHandler());
+            this->SetObjectArray(JavascriptArray::DeepCopyInstance(from->GetObjectArrayOrFlagsAsArray()));
+        }
+        if (PHASE_TRACE1(ObjectCopyPhase))
+        {
+            Output::Print(_u("ObjectCopy succeeded\n"));
+        }
+
+        return true;
+    }
+
     bool
     DynamicObject::GetHasNoEnumerableProperties()
     {
@@ -791,7 +1009,7 @@ namespace Js
     }
 
     DynamicObject *
-    DynamicObject::BoxStackInstance(DynamicObject * instance)
+    DynamicObject::BoxStackInstance(DynamicObject * instance, bool deepCopy)
     {
         Assert(ThreadContext::IsOnStack(instance));
         // On the stack, the we reserved a pointer before the object as to store the boxed value
@@ -805,11 +1023,11 @@ namespace Js
         size_t inlineSlotsSize = instance->GetTypeHandler()->GetInlineSlotsSize();
         if (inlineSlotsSize)
         {
-            boxedInstance = RecyclerNewPlusZ(instance->GetRecycler(), inlineSlotsSize, DynamicObject, instance);
+            boxedInstance = RecyclerNewPlusZ(instance->GetRecycler(), inlineSlotsSize, DynamicObject, instance, deepCopy);
         }
         else
         {
-            boxedInstance = RecyclerNew(instance->GetRecycler(), DynamicObject, instance);
+            boxedInstance = RecyclerNew(instance->GetRecycler(), DynamicObject, instance, deepCopy);
         }
 
         *boxedInstanceRef = boxedInstance;
@@ -878,10 +1096,9 @@ namespace Js
         TTD::NSSnapObjects::StdExtractSetKindSpecificInfo<void*, TTD::NSSnapObjects::SnapObjectType::SnapDynamicObject>(objData, nullptr);
     }
 
-    Js::Var const* DynamicObject::GetInlineSlots_TTD() const
+    Field(Js::Var) const* DynamicObject::GetInlineSlots_TTD() const
     {
-        return reinterpret_cast<Var const*>(
-            reinterpret_cast<size_t>(this) + this->GetTypeHandler()->GetOffsetOfInlineSlots());
+        return this->GetInlineSlots();
     }
 
     Js::Var const* DynamicObject::GetAuxSlots_TTD() const

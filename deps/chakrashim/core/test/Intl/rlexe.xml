@@ -2,28 +2,20 @@
 <regress-exe>
   <test>
     <default>
-      <files>Basics.js</files>
-      <tags>Intl,exclude_winglob</tags>
-      <compile-flags>-args summary -endargs</compile-flags>
-    </default>
-  </test>
-
-  <test>
-    <default>
       <files>Collator.js</files>
-      <tags>Intl,exclude_winglob</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>CollatorOptions.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
       <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
-      <files>DateTimeFormatOptions.js</files>
+      <files>common.js</files>
+      <tags>Intl</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>DateTimeFormat.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
       <tags>Intl</tags>
     </default>
@@ -31,8 +23,7 @@
   <test>
     <default>
       <files>NumberFormat.js</files>
-      <baseline>NumberFormat.baseline</baseline>
-      <tags>Intl,exclude_winglob,exclude_drt</tags>
+      <tags>Intl,exclude_drt</tags>
     </default>
   </test>
   <test>
@@ -42,70 +33,67 @@
       <tags>Intl</tags>
     </default>
   </test>
-
   <test>
     <default>
       <files>GetCanonicalLocales.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <files>SupportedLocalesOf.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <files>IntlHiddenInternals.js</files>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <files>IntlTaintingTests.js</files>
       <baseline>IntlTaintingTests.baseline</baseline>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <files>IntlTaintingPreInitTests.js</files>
       <baseline>IntlTaintingPreInitTests.baseline</baseline>
-      <tags>Intl,exclude_winglob,exclude_drt</tags>
+      <tags>Intl,exclude_drt</tags>
     </default>
   </test>
-
   <test>
     <default>
       <files>IntlBuiltIns.js</files>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <files>IntlIdentities.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
     <default>
       <compile-flags> -Intl -debugLaunch -dbgbaseline:IntlReturnedValueTests.js.dbg.baseline</compile-flags>
       <files>IntlReturnedValueTests.js</files>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl,require_winglob</tags> <!-- require_winglob because the baseline contains embedded bi-di markers -->
     </default>
   </test>
-
   <test>
     <default>
       <!-- TODO investigate why -ExtendedErrorStackForTestHost inserts tabs at the beginning of some frames (Microsoft/ChakraCore#3130) -->
       <files>IntlInternalsHiddenFromExceptionStackTest.js</files>
       <baseline>IntlInternalsHiddenFromExceptionStackTest.baseline</baseline>
       <compile-flags>-ExtendedErrorStackForTestHost-</compile-flags>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
     </default>
   </test>
   <test>
@@ -114,7 +102,20 @@
       <files>IntlInternalsHiddenFromFirstChanceExceptionStackTest.js</files>
       <baseline>IntlInternalsHiddenFromFirstChanceExceptionStackTest.baseline</baseline>
       <compile-flags>-ExtendedErrorStackForTestHost-</compile-flags>
-      <tags>Intl,exclude_winglob</tags>
+      <tags>Intl</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>IntlPlatform.js</files>
+      <compile-flags>-IntlPlatform</compile-flags>
+      <tags>Intl,exclude_windows</tags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>PluralRules.js</files>
+      <tags>Intl,exclude_windows</tags>
     </default>
   </test>
 

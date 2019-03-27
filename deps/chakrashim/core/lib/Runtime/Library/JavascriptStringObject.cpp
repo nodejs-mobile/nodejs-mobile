@@ -18,7 +18,7 @@ namespace Js
             // No need to invalidate store field caches for non-writable properties here. Since this type is just being created, it cannot represent
             // an object that is already a prototype. If it becomes a prototype and then we attempt to add a property to an object derived from this
             // object, then we will check if this property is writable, and only if it is will we do the fast path for add property.
-            GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+            GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
         }
     }
 
@@ -33,7 +33,7 @@ namespace Js
             // No need to invalidate store field caches for non-writable properties here. Since this type is just being created, it cannot represent
             // an object that is already a prototype. If it becomes a prototype and then we attempt to add a property to an object derived from this
             // object, then we will check if this property is writable, and only if it is will we do the fast path for add property.
-            GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+            GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
         }
     }
 
@@ -44,9 +44,16 @@ namespace Js
 
     JavascriptStringObject* JavascriptStringObject::FromVar(Var aValue)
     {
+        AssertOrFailFastMsg(Is(aValue), "Ensure var is actually a 'JavascriptString'");
+
+        return static_cast<JavascriptStringObject *>(aValue);
+    }
+
+    JavascriptStringObject* JavascriptStringObject::UnsafeFromVar(Var aValue)
+    {
         AssertMsg(Is(aValue), "Ensure var is actually a 'JavascriptString'");
 
-        return static_cast<JavascriptStringObject *>(RecyclableObject::FromVar(aValue));
+        return static_cast<JavascriptStringObject *>(aValue);
     }
 
     void JavascriptStringObject::Initialize(JavascriptString* value)
@@ -87,14 +94,14 @@ namespace Js
         return !conditionMetBehavior;
     }
 
-    PropertyQueryFlags JavascriptStringObject::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags JavascriptStringObject::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         if (propertyId == PropertyIds::length)
         {
             return PropertyQueryFlags::Property_Found;
         }
 
-        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId)))
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId, info)))
         {
             return PropertyQueryFlags::Property_Found;
         }
@@ -164,7 +171,7 @@ namespace Js
 
         // From DynamicObject::IsConfigurable we can't tell if the result is from a property or just default
         // value. Call HasProperty to find out.
-        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId)))
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId, nullptr /*info*/)))
         {
             return DynamicObject::IsConfigurable(propertyId);
         }
@@ -192,7 +199,7 @@ namespace Js
 
         // From DynamicObject::IsWritable we can't tell if the result is from a property or just default
         // value. Call HasProperty to find out.
-        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId)))
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId, nullptr /*info*/)))
         {
             return DynamicObject::IsWritable(propertyId);
         }
@@ -246,7 +253,9 @@ namespace Js
         uint32 index;
         if (scriptContext->IsNumericPropertyId(propertyId, &index))
         {
-            JavascriptString* str = JavascriptString::FromVar(CrossSite::MarshalVar(requestContext, this->InternalUnwrap()));
+            JavascriptString* str = this->InternalUnwrap();
+            str = JavascriptString::FromVar(CrossSite::MarshalVar(requestContext, str, scriptContext));
+
             return JavascriptConversion::BooleanToPropertyQueryFlags(str->GetItemAt(index, value));
         }
 
@@ -333,8 +342,7 @@ namespace Js
 
     BOOL JavascriptStringObject::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags propertyOperationFlags)
     {
-        JsUtil::CharacterBuffer<WCHAR> propertyName(propertyNameString->GetString(), propertyNameString->GetLength());
-        if (BuiltInPropertyRecords::length.Equals(propertyName))
+        if (BuiltInPropertyRecords::length.Equals(propertyNameString))
         {
             JavascriptError::ThrowCantDeleteIfStrictMode(propertyOperationFlags, this->GetScriptContext(), propertyNameString->GetString());
 
@@ -354,7 +362,10 @@ namespace Js
 
     PropertyQueryFlags JavascriptStringObject::GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext* requestContext)
     {
-        JavascriptString* str = JavascriptString::FromVar(CrossSite::MarshalVar(requestContext, this->InternalUnwrap()));
+        Var strObject = CrossSite::MarshalVar(requestContext,
+          this->InternalUnwrap(), this->GetScriptContext());
+
+        JavascriptString* str = JavascriptString::FromVar(strObject);
         if (str->GetItemAt(index, value))
         {
             return PropertyQueryFlags::Property_Found;
@@ -385,11 +396,11 @@ namespace Js
         return DynamicObject::SetItem(index, value, flags);
     }
 
-    BOOL JavascriptStringObject::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL JavascriptStringObject::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
         return GetEnumeratorWithPrefix(
             RecyclerNew(GetScriptContext()->GetRecycler(), JavascriptStringEnumerator, this->Unwrap(), requestContext),
-            enumerator, flags, requestContext, forInCache);
+            enumerator, flags, requestContext, enumeratorCache);
     }
 
     BOOL JavascriptStringObject::GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext)

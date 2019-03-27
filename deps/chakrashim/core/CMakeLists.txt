@@ -56,6 +56,15 @@ unset(CC_TARGETS_ARM64_SH CACHE)
 unset(CC_TARGETS_X86_SH CACHE)
 unset(CC_TARGETS_AMD64_SH CACHE)
 
+if(CCACHE_PROGRAM_NAME_SH)
+  find_program(CCACHE_PROGRAM ${CCACHE_PROGRAM_NAME_SH})
+  if (CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+  endif()
+  unset(CCACHE_PROGRAM_NAME_SH CACHE)
+endif()
+
 if(ENABLE_VALGRIND_SH)
     unset(ENABLE_VALGRIND_SH CACHE)
     if(NOT CC_TARGETS_X86)
@@ -67,11 +76,10 @@ endif()
 
 if(ICU_SETTINGS_RESET)
     unset(ICU_SETTINGS_RESET CACHE)
-    unset(ICU_INCLUDE_PATH CACHE)
     unset(ICU_INCLUDE_PATH_SH CACHE)
-    unset(NO_ICU_PATH_GIVEN_SH CACHE)
-    unset(NO_ICU_PATH_GIVEN CACHE)
-    unset(CC_EMBED_ICU_SH CACHE)
+    unset(NO_ICU_SH CACHE)
+    unset(LOCAL_ICU_SH CACHE)
+    unset(SYSTEM_ICU_SH CACHE)
 endif()
 
 if(CC_TARGET_OS_ANDROID_SH)
@@ -110,63 +118,94 @@ if (ENABLE_CC_XPLAT_TRACE_SH)
     endif()
 endif()
 
-if(CC_EMBED_ICU_SH)
-    unset(CC_EMBED_ICU_SH CACHE)
-    set(CC_EMBED_ICU 1)
-    set(ICU_INCLUDE_PATH "deps/icu/source/output/include/")
-endif()
-
 if(ICU_INCLUDE_PATH_SH)
     set(ICU_INCLUDE_PATH ${ICU_INCLUDE_PATH_SH})
-    unset(NO_ICU_PATH_GIVEN_SH CACHE)
-    unset(NO_ICU_PATH_GIVEN CACHE)
     unset(ICU_INCLUDE_PATH_SH CACHE)
 endif()
 
-if(NO_ICU_PATH_GIVEN_SH)
-    set(NO_ICU_PATH_GIVEN ${NO_ICU_PATH_GIVEN_SH})
-    unset(NO_ICU_PATH_GIVEN_SH CACHE)
-    unset(ICU_INCLUDE_PATH_SH CACHE)
-    unset(ICU_INCLUDE_PATH CACHE)
+if(NO_ICU_SH)
+    set(NO_ICU 1)
+    unset(NO_ICU_SH CACHE)
 endif()
 
-function(clr_unknown_arch)
-    message(FATAL_ERROR "Only AMD64, ARM64, ARM and I386 are supported")
-endfunction()
+if(SYSTEM_ICU_SH)
+    set(SYSTEM_ICU 1)
+    unset(SYSTEM_ICU_SH CACHE)
+endif()
+
+if(INTL_ICU_SH)
+    unset(INTL_ICU_SH CACHE)
+    set(INTL_ICU 1)
+else()
+    unset(INTL_ICU_SH CACHE)
+    set(INTL_ICU 0)
+endif()
 
 if(ICU_INCLUDE_PATH)
     add_definitions(-DHAS_REAL_ICU=1)
-    set(ICU_CC_PATH "${ICU_INCLUDE_PATH}/../lib/")
-    find_library(ICUUC icuuc PATHS ${ICU_CC_PATH} NO_DEFAULT_PATH)
-    find_library(ICU18 icui18n PATHS ${ICU_CC_PATH} NO_DEFAULT_PATH)
-    if(ICUUC)
-      message("-- found ICU libs: ${ICU_CC_PATH}")
-      find_library(ICUDATA icudata PATHS ${ICU_CC_PATH} NO_DEFAULT_PATH)
-      if (NOT ICUDATA)
-          set(ICUDATA "")
-      endif()
-      find_library(ICUTOOLS icutools PATHS ${ICU_CC_PATH} NO_DEFAULT_PATH)
-      if (NOT ICUTOOLS)
-          set(ICUTOOLS "")
-      endif()
-      set(ICULIB
-        ${ICUUC}
-        ${ICU18}
-        ${ICUDATA}
-        ${ICUTOOLS}
+    add_definitions(-DHAS_ICU)
+    set(ICU_LIBRARY_PATH "${ICU_INCLUDE_PATH}/../lib/")
+    find_library(ICUUC icuuc PATHS ${ICU_LIBRARY_PATH} NO_DEFAULT_PATH)
+
+    if(INTL_ICU)
+        add_definitions(-DINTL_ICU=1)
+        find_library(ICUIN icui18n PATHS ${ICU_LIBRARY_PATH} NO_DEFAULT_PATH)
+        # In a default install, ICU header files are all in ICU_ROOT/include
+        # However, for Node, the include/ folder is never generated, so we have to look
+        # in NODE/deps/icu/source/{common|i18n} for headers
+        set(ICU_INCLUDE_PATH
+            "${ICU_INCLUDE_PATH}"
+            "${ICU_INCLUDE_PATH}/../i18n/"
         )
+    endif()
+
+    if(ICUUC)
+        message("-- found ICU libs: ${ICU_LIBRARY_PATH}")
+        find_library(ICUDATA icudata PATHS ${ICU_LIBRARY_PATH} NO_DEFAULT_PATH)
+        if (NOT ICUDATA)
+            set(ICUDATA "")
+        endif()
+        set(ICU_LIBRARIES
+            ${ICUUC}
+            ${ICUIN}
+            ${ICUDATA}
+        )
+    endif()
+endif()
+
+if(CC_TARGET_OS_LINUX OR CC_TARGET_OS_ANDROID)
+    if(SYSTEM_ICU OR (NOT ICU_INCLUDE_PATH AND NOT NO_ICU))
+        set(ICU_LIBRARIES "icuuc")
+        if(INTL_ICU)
+            add_definitions(-DINTL_ICU=1)
+            set(ICU_LIBRARIES
+                ${ICU_LIBRARIES}
+                icui18n
+            )
+        endif()
+        add_definitions(-DHAS_REAL_ICU=1)
+        add_definitions(-DHAS_ICU)
+    endif()
+elseif(CC_TARGET_OS_OSX)
+    # in case ICU path was given but it doesn't exist, build script will fail.
+    # so, fallback only if ICU path wasn't given
+    if(NOT ICU_INCLUDE_PATH)
+        set(NO_ICU 1)
+        message("-- Couldn't find ICU. Falling back to --no-icu build")
     endif()
 endif()
 
 set(CLR_CMAKE_PLATFORM_XPLAT 1)
 if(CC_TARGETS_AMD64)
-    add_definitions(-D_M_X64_OR_ARM64)
+    add_definitions(-DTARGET_64)
     add_compile_options(-msse4.2)
 
-    set(CAN_BUILD_WABT 1)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL Release)
+        set(CAN_BUILD_WABT 1)
+    endif()
 elseif(CC_TARGETS_X86)
     add_definitions(-D__i686__)
-    add_definitions(-D_M_IX86_OR_ARM32)
+    add_definitions(-DTARGET_32)
     add_compile_options(-arch i386)
     add_compile_options(-msse3)
 
@@ -175,7 +214,7 @@ elseif(CC_TARGETS_X86)
     )
 elseif(CC_TARGETS_ARM)
     add_definitions(-D__arm__)
-    add_definitions(-D_M_IX86_OR_ARM32)
+    add_definitions(-DTARGET_32)
     add_definitions(-D_M_ARM32_OR_ARM64)
     if(CC_TARGET_OS_OSX)
         add_compile_options(-arch arm)
@@ -191,7 +230,7 @@ elseif(CC_TARGETS_ARM64)
         add_compile_options(-arch arm64)
     endif()
 else()
-    clr_unknown_arch()
+    message(FATAL_ERROR "Only AMD64, ARM64, ARM and I386 are supported")
 endif()
 
 if(CAN_BUILD_WABT)
@@ -199,15 +238,6 @@ if(CAN_BUILD_WABT)
 endif()
 
 if(CC_TARGET_OS_LINUX OR CC_TARGET_OS_ANDROID)
-    if(NOT ICULIB)
-      if(NOT NO_ICU_PATH_GIVEN)
-        if(NOT CC_EMBED_ICU)
-          set(ICULIB "icuuc")
-        endif()
-        add_definitions(-DHAS_REAL_ICU=1)
-      endif()
-    endif()
-
     set(CLR_CMAKE_PLATFORM_LINUX 1)
     # OSX 10.12 Clang deprecates libstdc++ [See GH #1599]
     # So, -Werror is linux only for now
@@ -222,13 +252,6 @@ elseif(CC_TARGET_OS_OSX OR CC_TARGET_OS_IOS)
     add_definitions(
         -DPLATFORM_UNIX
     )
-
-    # in case ICU path was given but it doesn't exist, build script will fail.
-    # so, fallback only if ICU path wasn't given
-    if(NOT ICU_INCLUDE_PATH)
-      set(NO_ICU_PATH_GIVEN 1)
-      message("-- Couldn't find ICU. Falling back to --no-icu build")
-    endif()
 
     if(NOT CC_XCODE_PROJECT)
       if (CC_TARGET_OS_OSX)
@@ -355,13 +378,24 @@ if(CLR_CMAKE_PLATFORM_XPLAT)
         -Wno-return-type\
         -Wno-switch\
         -Wno-implicit-function-declaration\
-        -Wno-int-to-pointer-cast"
+        -Wno-int-to-pointer-cast\
+        -Wno-tautological-constant-compare\
+        -Wno-enum-compare-switch\
+        -Wno-unknown-warning-option"
     )
         # notes..
         # -Wno-address-of-temporary  # vtinfo.h, VirtualTableInfo<T>::RegisterVirtualTable
         # -Wno-null-conversion # Check shmemory.cpp and cs.cpp here...
         # -Wno-return-type # switch unreachable code
         # -Wno-switch # switch values not handled
+        # -W-enum-compare-switch # throws warning on enum1 == enum2 where both
+        # enums represent same value but do not share the type. ie. we use both AsmJsType
+        # and AsmJsRetType interchangably and filter things out by `default:` case.
+        # -W-tautological-constant-compare throws warning for checks known at compile time.
+        # Some of those checks are optimized out during compile / lto time, and others
+        # are platform / compiler dependent.
+        # -Wno-unknown-warning-option ... well, some of the new switches are not
+        # recognized by older compilers and they fail. So, put this one and not fail
 
     include(Build/CMakeFeatureDetect.cmake)
 
@@ -375,14 +409,16 @@ if(CLR_CMAKE_PLATFORM_XPLAT)
     add_compile_options(
         -fasm-blocks
         -fms-extensions
-        -fwrapv                 # Treat signed integer overflow as two's complement
+        -fwrapv # Treat signed integer overflow as two's complement
     )
 
-    # Clang -fsanitize.
-    if (CLANG_SANITIZE_SH)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${CLANG_SANITIZE_SH}")
-        set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -fsanitize=${CLANG_SANITIZE_SH}")
-        unset(CLANG_SANITIZE_SH CACHE)      # don't cache
+    # Only disable RTTI in release builds so that TrackAlloc works for debug and test builds
+    # Also disable RTTI when building a shared library
+    # TODO: why does the shared library break with rtti disabled?
+    if(CMAKE_BUILD_TYPE STREQUAL Release)
+        if(STATIC_LIBRARY)
+            add_compile_options(-fno-rtti)
+        endif()
     endif()
 endif(CLR_CMAKE_PLATFORM_XPLAT)
 
@@ -441,12 +477,6 @@ if(NO_JIT_SH)
     add_definitions(-DDISABLE_JIT=1)
 else()
     set(BuildJIT 1)
-endif()
-
-if(INTL_ICU_SH)
-    unset(INTL_ICU_SH CACHE)    # don't cache
-    add_definitions(-DINTL_ICU=1)
-    set(IntlICU 1)
 endif()
 
 if(WITHOUT_FEATURES_SH)
@@ -510,8 +540,20 @@ include_directories(
 
 if(ICU_INCLUDE_PATH)
     if(NOT HAVE_LIBICU_UCHAR_H)
-        set(HAVE_LIBICU_UCHAR_H "1")
+        set(HAVE_LIBICU_UCHAR_H 1)
     endif()
+endif()
+
+# detect features
+include_directories(SYSTEM /usr/local/include)
+include(pal/src/configure.cmake)
+
+# this should be after `detect feature` to not to affect feature detection
+# Clang -fsanitize.
+if (CLANG_SANITIZE_SH)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=${CLANG_SANITIZE_SH}")
+    set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -fsanitize=${CLANG_SANITIZE_SH}")
+    unset(CLANG_SANITIZE_SH CACHE)      # don't cache
 endif()
 
 add_subdirectory (pal)
@@ -521,5 +563,21 @@ add_definitions(
     -DNO_PAL_MINMAX
     -DPAL_STDCPP_COMPAT
     )
+
+if (ENABLE_JS_LTTNG_SH)
+    unset(ENABLE_JS_LTTNG_SH CACHE)
+    include_directories (
+      ${CMAKE_CURRENT_SOURCE_DIR}/out/lttng
+    )
+    add_subdirectory ($ENV{TARGET_PATH}/lttng ${CMAKE_CURRENT_BINARY_DIR}/lttng)
+
+    add_definitions(
+      -DENABLE_JS_ETW
+      -DENABLE_JS_LTTNG
+    )
+    set(USE_LTTNG "1")
+endif()
+
 add_subdirectory (lib)
+
 add_subdirectory (bin)

@@ -7,7 +7,7 @@
 namespace UnifiedRegex
 {
     RegexPattern::RegexPattern(Js::JavascriptLibrary *const library, Program* program, bool isLiteral)
-        : library(library), isLiteral(isLiteral), isShallowClone(false)
+        : library(library), isLiteral(isLiteral), isShallowClone(false), testCache(nullptr)
     {
         rep.unified.program = program;
         rep.unified.matcher = nullptr;
@@ -24,31 +24,42 @@ namespace UnifiedRegex
                 program,
                 isLiteral);
     }
+
     void RegexPattern::Finalize(bool isShutdown)
     {
-        if(isShutdown)
+        if (isShutdown)
+        {
             return;
+        }
 
         const auto scriptContext = GetScriptContext();
-        if(!scriptContext)
+        if (!scriptContext)
+        {
             return;
+        }
 
 #if DBG
-        // In JSRT, we might not have a chance to close at finalize time.
-        if(!isLiteral && !scriptContext->IsClosed() && !scriptContext->GetThreadContext()->IsJSRT())
+        // In JSRT or ChakraEngine, we might not have a chance to close at finalize time
+        if (!isLiteral && !scriptContext->IsClosed() &&
+            !scriptContext->GetThreadContext()->IsJSRT() &&
+            !scriptContext->GetLibrary()->IsChakraEngine())
         {
             const auto source = GetSource();
-            RegexPattern *p;
-            Assert(
-                !GetScriptContext()->GetDynamicRegexMap()->TryGetValue(
-                    RegexKey(source.GetBuffer(), source.GetLength(), GetFlags()),
-                    &p) || ( source.GetLength() == 0 ) ||
-                p != this);
+            RegexPattern *p = nullptr;
+
+            bool hasRegexPatternForSourceKey = GetScriptContext()->GetDynamicRegexMap()->TryGetValue(
+                RegexKey(source.GetBuffer(), source.GetLength(), GetFlags()), &p);
+            bool isSourceLengthZero = source.GetLength() == 0;
+            bool isUniquePattern = p != this;
+
+            Assert(!hasRegexPatternForSourceKey || isSourceLengthZero || isUniquePattern);
         }
 #endif
 
-        if(isShallowClone)
+        if (isShallowClone)
+        {
             return;
+        }
 
         rep.unified.program->FreeBody(scriptContext->RegexAllocator());
     }
@@ -72,7 +83,7 @@ namespace UnifiedRegex
         return rep.unified.program->flags;
     }
 
-    int RegexPattern::NumGroups() const
+    uint16 RegexPattern::NumGroups() const
     {
         return rep.unified.program->numGroups;
     }
@@ -128,6 +139,21 @@ namespace UnifiedRegex
         return result;
     }
 
+    Field(RegExpTestCache*) RegexPattern::EnsureTestCache()
+    {
+        if (this->testCache == nullptr)
+        {
+            this->testCache = RecyclerNewPlusZ(this->library->GetRecycler(), TestCacheSize * sizeof(void*), RegExpTestCache);
+        }
+        return this->testCache;
+    }
+
+    /* static */
+    uint RegexPattern::GetTestCacheIndex(Js::JavascriptString* str)
+    {
+        return (uint)(((uintptr_t)str) >> PolymorphicInlineCacheShift) & (TestCacheSize - 1);
+    }
+
 #if ENABLE_REGEX_CONFIG_OPTIONS
     void RegexPattern::Print(DebugWriter* w)
     {
@@ -177,6 +203,34 @@ namespace UnifiedRegex
         w->Print(_u(", "));
         w->Print(isLiteral ? _u("literal") : _u("dynamic"));
         w->Print(_u(" */"));
+    }
+
+    /* static */
+    void RegexPattern::TraceTestCache(bool cacheHit, Js::JavascriptString* input, Js::JavascriptString* cachedValue, bool disabled)
+    {
+        if (REGEX_CONFIG_FLAG(RegexTracing))
+        {
+            if (disabled)
+            {
+                Output::Print(_u("Regexp Test Cache Disabled.\n"));
+            }
+            else if (cacheHit)
+            {
+                Output::Print(_u("Regexp Test Cache Hit.\n"));
+            }
+            else
+            {
+                Output::Print(_u("Regexp Test Cache Miss. "));
+                if (cachedValue != nullptr)
+                {
+                    Output::Print(_u("Input: (%p); Cached String: (%p) '%s'\n"), input, cachedValue, cachedValue->GetString());
+                }
+                else
+                {
+                    Output::Print(_u("Cache was empty\n"));
+                }
+            }
+        }
     }
 #endif
 }

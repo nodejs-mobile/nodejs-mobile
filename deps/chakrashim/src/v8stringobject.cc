@@ -42,15 +42,17 @@ Local<String> StringObject::ValueOf() const {
     ContextShim::GetCurrent()->GetValueOfFunction();
 
   JsValueRef stringObjectValue;
-  if (jsrt::CallFunction(valueOfFunction, (JsValueRef)this,
-                         &stringObjectValue) != JsNoError) {
+  JsValueRef args[] = { (JsValueRef)this };
+  if (JsCallFunction(valueOfFunction, args, _countof(args),
+                     &stringObjectValue) != JsNoError) {
+    CHAKRA_ASSERT(false);
     return Local<String>();
   }
 
   return Local<String>::New(stringObjectValue);
 }
 
-StringObject *StringObject::Cast(v8::Value *obj) {
+StringObject* StringObject::Cast(v8::Value* obj) {
   CHAKRA_ASSERT(obj->IsStringObject());
   return static_cast<StringObject*>(obj);
 }

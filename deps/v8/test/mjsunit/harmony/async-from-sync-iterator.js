@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-async-iteration --allow-natives-syntax
+// Flags: --allow-natives-syntax
 
 let testFailed = false;
 let testFailure;
@@ -625,6 +625,11 @@ if (testFailed) {
 }
 
 (function ExtractedAsyncFromSyncIteratorMethods() {
+  // TODO(ishell, caitp): Rewrite the test without using function.caller.
+  // According to ES#sec-built-in-function-objects all built-in functions
+  // must be strict. And ES#sec-forbidden-extensions states that the value of
+  // a function.caller must not be a strict function.
+  return;
   // Async-from-Sync iterator methods can be extracted via function.caller.
   // TODO(caitp): test extracted `throw` method using yield* in async generator.
   let extractor = [0, 1, 2, 3, 4,5,6,7,8,9];
@@ -712,8 +717,8 @@ if (testFailed) {
     next_: 0,
     get next() {
       log.push("get syncIterable.next");
-      let i = this.next_++;
       return (...args) => {
+        let i = this.next_++;
         log.push("call syncIterable.next(" + args.join(", ") + ")");
         return results[i];
       }
@@ -743,14 +748,12 @@ if (testFailed) {
       "get nextValue#1.then",
       "call nextValue#1.then",
       "got value value1",
-      "get syncIterable.next",
       "call syncIterable.next()",
       "get iterResult #2.done",
       "get iterResult #2.value",
       "get nextValue#2.then",
       "call nextValue#2.then",
       "got value value2",
-      "get syncIterable.next",
       "call syncIterable.next()",
       "get iterResult #3.done",
       "get iterResult #3.value",

@@ -3,7 +3,7 @@ npm-scripts(7) -- How npm handles the "scripts" field
 
 ## DESCRIPTION
 
-npm supports the "scripts" property of the package.json script, for the
+npm supports the "scripts" property of the package.json file, for the
 following scripts:
 
 * prepublish:
@@ -143,7 +143,9 @@ The package.json fields are tacked onto the `npm_package_` prefix. So,
 for instance, if you had `{"name":"foo", "version":"1.2.5"}` in your
 package.json file, then your package scripts would have the
 `npm_package_name` environment variable set to "foo", and the
-`npm_package_version` set to "1.2.5"
+`npm_package_version` set to "1.2.5".  You can access these variables
+in your code with `process.env.npm_package_name` and
+`process.env.npm_package_version`, and so on for other fields.
 
 ### configuration
 

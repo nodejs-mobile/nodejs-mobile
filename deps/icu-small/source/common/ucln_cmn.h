@@ -33,9 +33,10 @@ Please keep the order of enums declared in same order
 as the cleanup functions are suppose to be called. */
 typedef enum ECleanupCommonType {
     UCLN_COMMON_START = -1,
+    UCLN_COMMON_NUMPARSE_UNISETS,
     UCLN_COMMON_USPREP,
     UCLN_COMMON_BREAKITERATOR,
-    UCLN_COMMON_BREAKITERATOR_DICT,
+    UCLN_COMMON_RBBI,
     UCLN_COMMON_SERVICE,
     UCLN_COMMON_LOCALE_KEY_TYPE,
     UCLN_COMMON_LOCALE,

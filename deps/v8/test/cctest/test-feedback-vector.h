@@ -5,8 +5,9 @@
 #ifndef V8_TEST_FEEDBACK_VECTOR_H_
 #define V8_TEST_FEEDBACK_VECTOR_H_
 
+#include "src/feedback-vector.h"
 #include "src/objects.h"
-
+#include "src/objects/shared-function-info.h"
 
 namespace v8 {
 namespace internal {
@@ -17,7 +18,7 @@ class FeedbackVectorHelper {
  public:
   explicit FeedbackVectorHelper(Handle<FeedbackVector> vector)
       : vector_(vector) {
-    int slot_count = vector->slot_count();
+    int slot_count = vector->length();
     slots_.reserve(slot_count);
     FeedbackMetadataIterator iter(vector->metadata());
     while (iter.HasNext()) {
@@ -42,9 +43,12 @@ class FeedbackVectorHelper {
 template <typename Spec>
 Handle<FeedbackVector> NewFeedbackVector(Isolate* isolate, Spec* spec) {
   Handle<FeedbackMetadata> metadata = FeedbackMetadata::New(isolate, spec);
-  Handle<SharedFunctionInfo> shared = isolate->factory()->NewSharedFunctionInfo(
-      isolate->factory()->empty_string(), MaybeHandle<Code>(), false);
-  shared->set_feedback_metadata(*metadata);
+  Handle<SharedFunctionInfo> shared =
+      isolate->factory()->NewSharedFunctionInfoForBuiltin(
+          isolate->factory()->empty_string(), Builtins::kIllegal);
+  // Set the raw feedback metadata to circumvent checks that we are not
+  // overwriting existing metadata.
+  shared->set_raw_outer_scope_info_or_feedback_metadata(*metadata);
   return FeedbackVector::New(isolate, shared);
 }
 

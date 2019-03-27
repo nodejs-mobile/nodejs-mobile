@@ -2,6 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Flags: --max-old-space-size=1600 --nostress-incremental-marking
+
+// This test uses a lot of memory and fails with flaky OOM when run
+// with --stress-incremental-marking on TSAN.
+
 s1 = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 s1 += s1;
 s1 += s1;

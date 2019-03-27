@@ -30,11 +30,15 @@ namespace Js
         friend class BuiltInPropertyRecords;
         friend class DOMBuiltInPropertyRecords;
 
+#if DBG
+        DEFINE_VTABLE_CTOR_NOBASE(PropertyRecord); // used for type assertions
+#endif
+
     private:
         Field(PropertyId) pid;
         //Made this mutable so that we can set it for Built-In js property records when we are adding it.
         //If we try to set it when initializing; we get extra code added for each built in; and thus increasing the size of chakracore
-        mutable Field(uint) hash;
+        mutable Field(hash_t) hash;
         Field(bool) isNumeric;
         Field(bool) isBound;
         Field(bool) isSymbol;
@@ -73,6 +77,8 @@ namespace Js
         bool IsBound() const { return isBound; }
         bool IsSymbol() const { return isSymbol; }
 
+        bool ShouldDisableWriteCache() const;
+
         void SetHash(uint hash) const
         {
             this->hash = hash;
@@ -100,6 +106,11 @@ namespace Js
         }
 
         virtual void Mark(Recycler *recycler) override { AssertMsg(false, "Mark called on object that isn't TrackableObject"); }
+
+#if DBG_DUMP
+    public:
+        void Dump(unsigned indent = 0) const;
+#endif
     };
 
     // This struct maps to the layout of runtime allocated PropertyRecord. Used for creating built-in PropertyRecords statically.
@@ -116,8 +127,36 @@ namespace Js
 
         bool Equals(JsUtil::CharacterBuffer<WCHAR> const & str) const
         {
-            return (LEN - 1 == str.GetLength() &&
-                JsUtil::CharacterBuffer<WCHAR>::StaticEquals(buffer, str.GetBuffer(), LEN - 1));
+#ifndef _NTBUILD
+            AssertMsg(false, "Do you really have to use this interface?");
+#endif
+            return Equals(str.GetBuffer(), str.GetLength());
+        }
+
+        bool Equals(JavascriptString * str) const
+        {
+            const PropertyRecord * propRecord = nullptr;
+            str->GetPropertyRecord(&propRecord);
+
+            if (propRecord == nullptr)
+            {
+                return Equals(str->GetString(), str->GetLength());
+            }
+            else
+            {
+                return Equals(propRecord->GetPropertyId());
+            }
+        }
+
+        bool Equals(const PropertyId & propertyId) const
+        {
+            return propertyId == propertyRecord.GetPropertyId();
+        }
+
+        bool Equals(const WCHAR * str, const charcount_t length) const
+        {
+            return (LEN - 1 == length &&
+                JsUtil::CharacterBuffer<WCHAR>::StaticEquals(buffer, str, LEN - 1));
         }
     };
 
@@ -164,8 +203,7 @@ namespace Js
     {
         inline static bool Equals(PropertyRecord const * str1, PropertyRecord const * str2)
         {
-            return (str1->GetLength() == str2->GetLength() &&
-                JsUtil::CharacterBuffer<WCHAR>::StaticEquals(str1->GetBuffer(), str2->GetBuffer(), str1->GetLength()));
+            return str1->GetPropertyId() == str2->GetPropertyId();
         }
 
         inline static bool Equals(PropertyRecord const * str1, JsUtil::CharacterBuffer<WCHAR> const * str2)

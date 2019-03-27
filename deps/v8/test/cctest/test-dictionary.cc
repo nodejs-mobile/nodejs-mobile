@@ -32,14 +32,16 @@
 #include "src/builtins/builtins-constructor.h"
 #include "src/debug/debug.h"
 #include "src/execution.h"
-#include "src/factory.h"
 #include "src/global-handles.h"
+#include "src/heap/factory.h"
 #include "src/heap/spaces.h"
 #include "src/macro-assembler.h"
 #include "src/objects-inl.h"
+#include "src/objects/hash-table-inl.h"
 #include "test/cctest/heap/heap-utils.h"
 
-using namespace v8::internal;
+namespace v8 {
+namespace internal {
 
 namespace {
 
@@ -84,17 +86,17 @@ static void TestHashMap(Handle<HashMap> table) {
     CHECK_EQ(table->NumberOfElements(), i + 1);
     CHECK_NE(table->FindEntry(key), HashMap::kNotFound);
     CHECK_EQ(table->Lookup(key), *value);
-    CHECK(JSReceiver::GetIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetIdentityHash(isolate)->IsSmi());
   }
 
   // Keys never added to the map which already have an identity hash
   // code should not be found.
   for (int i = 0; i < 100; i++) {
     Handle<JSReceiver> key = factory->NewJSArray(7);
-    CHECK(JSReceiver::GetOrCreateIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetOrCreateIdentityHash(isolate)->IsSmi());
     CHECK_EQ(table->FindEntry(key), HashMap::kNotFound);
     CHECK_EQ(table->Lookup(key), CcTest::heap()->the_hole_value());
-    CHECK(JSReceiver::GetIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetIdentityHash(isolate)->IsSmi());
   }
 
   // Keys that don't have an identity hash should not be found and also
@@ -102,7 +104,7 @@ static void TestHashMap(Handle<HashMap> table) {
   for (int i = 0; i < 100; i++) {
     Handle<JSReceiver> key = factory->NewJSArray(7);
     CHECK_EQ(table->Lookup(key), CcTest::heap()->the_hole_value());
-    Object* identity_hash = JSReceiver::GetIdentityHash(isolate, key);
+    Object* identity_hash = key->GetIdentityHash(isolate);
     CHECK_EQ(CcTest::heap()->undefined_value(), identity_hash);
   }
 }
@@ -155,16 +157,16 @@ static void TestHashSet(Handle<HashSet> table) {
     table = HashSet::Add(table, key);
     CHECK_EQ(table->NumberOfElements(), i + 2);
     CHECK(table->Has(isolate, key));
-    CHECK(JSReceiver::GetIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetIdentityHash(isolate)->IsSmi());
   }
 
   // Keys never added to the map which already have an identity hash
   // code should not be found.
   for (int i = 0; i < 100; i++) {
     Handle<JSReceiver> key = factory->NewJSArray(7);
-    CHECK(JSReceiver::GetOrCreateIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetOrCreateIdentityHash(isolate)->IsSmi());
     CHECK(!table->Has(isolate, key));
-    CHECK(JSReceiver::GetIdentityHash(isolate, key)->IsSmi());
+    CHECK(key->GetIdentityHash(isolate)->IsSmi());
   }
 
   // Keys that don't have an identity hash should not be found and also
@@ -172,7 +174,7 @@ static void TestHashSet(Handle<HashSet> table) {
   for (int i = 0; i < 100; i++) {
     Handle<JSReceiver> key = factory->NewJSArray(7);
     CHECK(!table->Has(isolate, key));
-    Object* identity_hash = JSReceiver::GetIdentityHash(isolate, key);
+    Object* identity_hash = key->GetIdentityHash(isolate);
     CHECK_EQ(CcTest::heap()->undefined_value(), identity_hash);
   }
 }
@@ -193,7 +195,7 @@ class ObjectHashTableTest: public ObjectHashTable {
 
   int lookup(int key) {
     Handle<Object> key_obj(Smi::FromInt(key), GetIsolate());
-    return Smi::cast(Lookup(key_obj))->value();
+    return Smi::ToInt(Lookup(key_obj));
   }
 
   int capacity() {
@@ -214,7 +216,7 @@ TEST(HashTableRehash) {
     for (int i = 0; i < capacity - 1; i++) {
       t->insert(i, i * i, i);
     }
-    t->Rehash(handle(Smi::kZero, isolate));
+    t->Rehash();
     for (int i = 0; i < capacity - 1; i++) {
       CHECK_EQ(i, t->lookup(i * i));
     }
@@ -227,7 +229,7 @@ TEST(HashTableRehash) {
     for (int i = 0; i < capacity / 2; i++) {
       t->insert(i, i * i, i);
     }
-    t->Rehash(handle(Smi::kZero, isolate));
+    t->Rehash();
     for (int i = 0; i < capacity / 2; i++) {
       CHECK_EQ(i, t->lookup(i * i));
     }
@@ -267,15 +269,15 @@ static void TestHashSetCausesGC(Handle<HashSet> table) {
 
 
 #ifdef DEBUG
-template<class HashMap>
-static void TestHashMapCausesGC(Handle<HashMap> table) {
+template <class HashMap>
+static void TestHashMapDoesNotCauseGC(Handle<HashMap> table) {
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
 
   Handle<JSObject> key = factory->NewJSArray(0);
 
-  // Simulate a full heap so that generating an identity hash code
-  // in subsequent calls will request GC.
+  // Even though we simulate a full heap, generating an identity hash
+  // code in subsequent calls will not request GC.
   heap::SimulateFullSpace(CcTest::heap()->new_space());
   heap::SimulateFullSpace(CcTest::heap()->old_space());
 
@@ -285,7 +287,7 @@ static void TestHashMapCausesGC(Handle<HashMap> table) {
   // Calling Put() should request GC by returning a failure.
   int gc_count = isolate->heap()->gc_count();
   HashMap::Put(table, key, key);
-  CHECK(gc_count < isolate->heap()->gc_count());
+  CHECK(gc_count == isolate->heap()->gc_count());
 }
 
 
@@ -294,23 +296,9 @@ TEST(ObjectHashTableCausesGC) {
   LocalContext context;
   v8::HandleScope scope(context->GetIsolate());
   Isolate* isolate = CcTest::i_isolate();
-  TestHashMapCausesGC(ObjectHashTable::New(isolate, 1));
+  TestHashMapDoesNotCauseGC(ObjectHashTable::New(isolate, 1));
 }
 #endif
-
-TEST(SetRequiresCopyOnCapacityChange) {
-  LocalContext context;
-  v8::HandleScope scope(context->GetIsolate());
-  Isolate* isolate = CcTest::i_isolate();
-  Handle<NameDictionary> dict = NameDictionary::New(isolate, 0, TENURED);
-  dict->SetRequiresCopyOnCapacityChange();
-  Handle<Name> key = isolate->factory()->InternalizeString(
-      v8::Utils::OpenHandle(*v8_str("key")));
-  Handle<Object> value = handle(Smi::kZero, isolate);
-  Handle<NameDictionary> new_dict =
-      NameDictionary::Add(dict, key, value, PropertyDetails::Empty());
-  CHECK_NE(*dict, *new_dict);
-}
 
 TEST(MaximumClonedShallowObjectProperties) {
   // Assert that a NameDictionary with kMaximumClonedShallowObjectProperties is
@@ -324,3 +312,6 @@ TEST(MaximumClonedShallowObjectProperties) {
 }
 
 }  // namespace
+
+}  // namespace internal
+}  // namespace v8

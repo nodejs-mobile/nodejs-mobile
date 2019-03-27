@@ -36,6 +36,7 @@ enum class ExternalDataTypes {
   ObjectData,
   FunctionTemplateData,
   FunctionCallbackData,
+  PromiseResolverData,
 };
 
 // Base class for external object data
@@ -75,6 +76,77 @@ class ExternalData {
   static bool TryGet(JsValueRef ref, T** data) {
     return GetExternalData(ref, data) == JsNoError && *data != nullptr;
   }
+
+  template <class T>
+  static bool TryGetFromProperty(JsValueRef ref, JsPropertyIdRef propertyId,
+                                 T** data) {
+    JsValueRef propertyValue = nullptr;
+    if (JsGetProperty(ref, propertyId, &propertyValue) != JsNoError) {
+      return false;
+    }
+
+    return T::TryGet(propertyValue, data);
+  }
+};
+
+struct SetterGetterInterceptor {
+  NamedPropertyGetterCallback namedPropertyGetter;
+  NamedPropertySetterCallback namedPropertySetter;
+  NamedPropertyQueryCallback namedPropertyQuery;
+  NamedPropertyDeleterCallback namedPropertyDeleter;
+  NamedPropertyEnumeratorCallback namedPropertyEnumerator;
+  NamedPropertyDefinerCallback namedPropertyDefiner;
+  NamedPropertyDescriptorCallback namedPropertyDescriptor;
+  Persistent<Value> namedPropertyInterceptorData;
+  IndexedPropertyGetterCallback indexedPropertyGetter;
+  IndexedPropertySetterCallback indexedPropertySetter;
+  IndexedPropertyQueryCallback indexedPropertyQuery;
+  IndexedPropertyDeleterCallback indexedPropertyDeleter;
+  IndexedPropertyEnumeratorCallback indexedPropertyEnumerator;
+  IndexedPropertyDefinerCallback indexedPropertyDefiner;
+  IndexedPropertyDescriptorCallback indexedPropertyDescriptor;
+  Persistent<Value> indexedPropertyInterceptorData;
+
+  explicit SetterGetterInterceptor(
+    SetterGetterInterceptor * setterGetterInterceptor):
+    namedPropertyGetter(setterGetterInterceptor->namedPropertyGetter),
+    namedPropertySetter(setterGetterInterceptor->namedPropertySetter),
+    namedPropertyQuery(setterGetterInterceptor->namedPropertyQuery),
+    namedPropertyDeleter(setterGetterInterceptor->namedPropertyDeleter),
+    namedPropertyEnumerator(setterGetterInterceptor->namedPropertyEnumerator),
+    namedPropertyDefiner(setterGetterInterceptor->namedPropertyDefiner),
+    namedPropertyDescriptor(setterGetterInterceptor->namedPropertyDescriptor),
+    namedPropertyInterceptorData(
+      nullptr, setterGetterInterceptor->namedPropertyInterceptorData),
+    indexedPropertyGetter(setterGetterInterceptor->indexedPropertyGetter),
+    indexedPropertySetter(setterGetterInterceptor->indexedPropertySetter),
+    indexedPropertyQuery(setterGetterInterceptor->indexedPropertyQuery),
+    indexedPropertyDeleter(setterGetterInterceptor->indexedPropertyDeleter),
+    indexedPropertyEnumerator(
+      setterGetterInterceptor->indexedPropertyEnumerator),
+    indexedPropertyDefiner(setterGetterInterceptor->indexedPropertyDefiner),
+    indexedPropertyDescriptor(
+      setterGetterInterceptor->indexedPropertyDescriptor),
+    indexedPropertyInterceptorData(nullptr,
+      setterGetterInterceptor->indexedPropertyInterceptorData) {
+  }
+
+  SetterGetterInterceptor():
+    namedPropertyGetter(nullptr),
+    namedPropertySetter(nullptr),
+    namedPropertyQuery(nullptr),
+    namedPropertyDeleter(nullptr),
+    namedPropertyEnumerator(nullptr),
+    namedPropertyDefiner(nullptr),
+    namedPropertyDescriptor(nullptr),
+    indexedPropertyGetter(nullptr),
+    indexedPropertySetter(nullptr),
+    indexedPropertyQuery(nullptr),
+    indexedPropertyDeleter(nullptr),
+    indexedPropertyEnumerator(nullptr),
+    indexedPropertyDefiner(nullptr),
+    indexedPropertyDescriptor(nullptr) {
+  }
 };
 
 class ObjectData: public ExternalData {
@@ -101,26 +173,14 @@ class ObjectData: public ExternalData {
     bool isRefValue;
   };
 
-  JsValueRef objectInstance;
   Persistent<ObjectTemplate> objectTemplate;  // Original ObjectTemplate
-  NamedPropertyGetterCallback namedPropertyGetter;
-  NamedPropertySetterCallback namedPropertySetter;
-  NamedPropertyQueryCallback namedPropertyQuery;
-  NamedPropertyDeleterCallback namedPropertyDeleter;
-  NamedPropertyEnumeratorCallback namedPropertyEnumerator;
-  Persistent<Value> namedPropertyInterceptorData;
-  IndexedPropertyGetterCallback indexedPropertyGetter;
-  IndexedPropertySetterCallback indexedPropertySetter;
-  IndexedPropertyQueryCallback indexedPropertyQuery;
-  IndexedPropertyDeleterCallback indexedPropertyDeleter;
-  IndexedPropertyEnumeratorCallback indexedPropertyEnumerator;
-  Persistent<Value> indexedPropertyInterceptorData;
+  SetterGetterInterceptor * setterGetterInterceptor;
   int internalFieldCount;
   FieldValue* internalFields;
 
-  ObjectData(ObjectTemplate* objectTemplate, ObjectTemplateData *templateData);
+  ObjectData(ObjectTemplate* objectTemplate, ObjectTemplateData* templateData);
   ~ObjectData();
-  static void CHAKRA_CALLBACK FinalizeCallback(void *data);
+  static void CHAKRA_CALLBACK FinalizeCallback(void* data);
 
   static FieldValue* GetInternalField(Object* object, int index);
 };
@@ -147,38 +207,38 @@ class Utils {
   static JsValueRef CHAKRA_CALLBACK AccessorHandler(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
 
   static JsValueRef CHAKRA_CALLBACK GetCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
   static JsValueRef CHAKRA_CALLBACK SetCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
   static JsValueRef CHAKRA_CALLBACK DeletePropertyCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
 
   static JsValueRef HasPropertyHandler(
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount);  // NOLINT(runtime/int)
   static JsValueRef CHAKRA_CALLBACK HasCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
 
   static JsValueRef GetPropertiesEnumeratorHandler(
       JsValueRef* arguments,
@@ -186,9 +246,9 @@ class Utils {
   static JsValueRef CHAKRA_CALLBACK EnumerateCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
 
   static JsValueRef GetPropertiesHandler(
       JsValueRef* arguments,
@@ -197,18 +257,24 @@ class Utils {
   static JsValueRef CHAKRA_CALLBACK OwnKeysCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
   static JsValueRef CHAKRA_CALLBACK GetOwnPropertyDescriptorCallback(
       JsValueRef callee,
       bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState);
+      void* callbackState);
+  static JsValueRef CHAKRA_CALLBACK DefinePropertyCallback(
+    JsValueRef callee,
+    bool isConstructCall,
+    JsValueRef* arguments,
+    unsigned short argumentCount,  // NOLINT(runtime/int)
+    void* callbackState);
 
   static void CHAKRA_CALLBACK WeakReferenceCallbackWrapperCallback(
-      JsRef ref, void *data);
+      JsRef ref, void* data);
 
   // Create a Local<T> internally (use private constructor)
   template <class T>
@@ -247,7 +313,7 @@ class Utils {
     return **objectTemplate;
   }
 
-  static MaybeLocal<String> NewString(const char *data, int length = -1);
+  static MaybeLocal<String> NewString(const char* data, int length = -1);
 };
 
 

@@ -70,10 +70,12 @@ public:
     static DWORD const PageSize = 4096;
 #endif
 
+    static size_t const MaxPageCount = SIZE_MAX / PageSize;
+
 #ifdef STACK_ALIGN
     static DWORD const StackAlign = STACK_ALIGN;
 #else
-# if defined(_WIN64)
+# if defined(TARGET_64)
     static DWORD const StackAlign = 16;
 # elif defined(_M_ARM)
     static DWORD const StackAlign = 8;

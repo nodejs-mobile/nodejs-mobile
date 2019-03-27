@@ -187,13 +187,17 @@ Js::Var Js::InterpreterStackFrame::INTERPRETERLOOPNAME()
     {
         INTERPRETER_OPCODE op = READ_OP(ip);
 
-#ifdef ENABLE_BASIC_TELEMETRY
-        if( TELEMETRY_OPCODE_OFFSET_ENABLED )
+#ifndef INTERPRETER_ASMJS
+#if ENABLE_TTD
+        //In case where we don't have a BP set at the final statemnt
+        if(this->scriptContext->ShouldPerformReplayDebuggerAction())
         {
-            OpcodeTelemetry& opcodeTelemetry = this->scriptContext->GetTelemetry().GetOpcodeTelemetry();
-            opcodeTelemetry.ProgramLocationFunctionId    ( this->function->GetFunctionInfo()->GetLocalFunctionId() );
-            opcodeTelemetry.ProgramLocationBytecodeOffset( this->m_reader.GetCurrentOffset() );
+            if(op != INTERPRETER_OPCODE::Break)
+            {
+                this->scriptContext->GetThreadContext()->TTDExecutionInfo->ManageLastSourceInfoChecks(this->m_functionBody, false);
+            }
         }
+#endif
 #endif
 
 #if DEBUGGING_LOOP
@@ -221,6 +225,11 @@ Js::Var Js::InterpreterStackFrame::INTERPRETERLOOPNAME()
                 if(bpTaken && this->scriptContext->GetThreadContext()->IsRuntimeInTTDMode())
                 {
                     this->scriptContext->GetThreadContext()->TTDExecutionInfo->ProcessBPInfoPostBreak(this->m_functionBody);
+                }
+
+                if(this->scriptContext->ShouldPerformReplayDebuggerAction())
+                {
+                    this->scriptContext->GetThreadContext()->TTDExecutionInfo->ManageLastSourceInfoChecks(this->m_functionBody, true);
                 }
 #endif
 
@@ -259,6 +268,11 @@ Js::Var Js::InterpreterStackFrame::INTERPRETERLOOPNAME()
                 if(bpTaken && this->scriptContext->GetThreadContext()->IsRuntimeInTTDMode())
                 {
                     this->scriptContext->GetThreadContext()->TTDExecutionInfo->ProcessBPInfoPostBreak(this->m_functionBody);
+                }
+
+                if(this->scriptContext->ShouldPerformReplayDebuggerAction())
+                {
+                    this->scriptContext->GetThreadContext()->TTDExecutionInfo->ManageLastSourceInfoChecks(this->m_functionBody, true);
                 }
 #endif
 
@@ -412,6 +426,11 @@ SWAP_BP_FOR_OPCODE:
                     {
                         this->scriptContext->GetThreadContext()->TTDExecutionInfo->ProcessBPInfoPostBreak(this->m_functionBody);
                     }
+
+                    if(this->scriptContext->ShouldPerformReplayDebuggerAction())
+                    {
+                        this->scriptContext->GetThreadContext()->TTDExecutionInfo->ManageLastSourceInfoChecks(this->m_functionBody, true);
+                    }
 #endif
 
                     if (prevOffset != m_reader.GetCurrentOffset())
@@ -447,6 +466,11 @@ SWAP_BP_FOR_OPCODE:
                         if(bpTaken && this->scriptContext->GetThreadContext()->IsRuntimeInTTDMode())
                         {
                             this->scriptContext->GetThreadContext()->TTDExecutionInfo->ProcessBPInfoPostBreak(this->m_functionBody);
+                        }
+
+                        if(this->scriptContext->ShouldPerformReplayDebuggerAction())
+                        {
+                            this->scriptContext->GetThreadContext()->TTDExecutionInfo->ManageLastSourceInfoChecks(this->m_functionBody, true);
                         }
 #endif
 

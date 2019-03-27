@@ -21,18 +21,24 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>
-          $(ChakraCoreRootDirectory)Lib\Jsrt;
-          $(MSBuildThisFileDirectory);
-          $(ChakraCoreRootDirectory)Lib\Common;
-          $(ChakraCoreRootDirectory)bin\External;
-          %(AdditionalIncludeDirectories)
+        $(ChakraCoreRootDirectory)Lib\Jsrt;
+        $(ChakraCoreRootDirectory)Lib\Common;
+        $(ChakraCoreRootDirectory)bin\External;
+        $(ChakraCoreRootDirectory)bin\ChakraCore;
+        $(MSBuildThisFileDirectory);
+        %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>
+        ENABLE_TEST_HOOKS=1;
+        %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <SmallerTypeCheck>false</SmallerTypeCheck>
       <MinimalRebuild>false</MinimalRebuild>
       <!-- <CallingConvention Condition="'$(Platform)'=='Win32'">CDecl</CallingConvention> -->
     </ClCompile>
     <Link>
+      <ModuleDefinitionFile>NativeTests.def</ModuleDefinitionFile>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
@@ -42,13 +48,16 @@
     <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CodexAssert.cpp" />
     <ClCompile Include="CodexTests.cpp" />
     <ClCompile Include="FileLoadHelpers.cpp" />
-    <ClCompile Include="CodexAssert.cpp" />
+    <ClCompile Include="FunctionExecutionTest.cpp" />
+    <ClCompile Include="JsDiagApiTest.cpp" />
     <ClCompile Include="JsRTApiTest.cpp" />
     <ClCompile Include="MemoryPolicyTest.cpp" />
     <ClCompile Include="NativeTests.cpp" />
     <ClCompile Include="ThreadServiceTest.cpp" />
+    <ClCompile Include="UnicodeTextTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\lib\Common\Codex\Chakra.Common.Codex.vcxproj">

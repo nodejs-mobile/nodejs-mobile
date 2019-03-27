@@ -9,7 +9,9 @@
 
 #include "Library/RegexHelper.h"
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Debug/DiagHelperMethodWrapper.h"
+#endif
 #include "Math/CrtSSE2Math.h"
 #include "Library/JavascriptGeneratorFunction.h"
 #include "RuntimeMathPch.h"
@@ -23,8 +25,6 @@ intptr_t const JnHelperMethodAddresses[] =
 // Because of order-of-initialization problems with the vtable address static field
 // and this array, we're going to have to fill these in as we go along.
 #include "JnHelperMethodList.h"
-#undef HELPERCALL
-
     NULL
 };
 
@@ -65,6 +65,7 @@ void CheckJnHelperTable(intptr_t const* table)
 }
 #endif
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 static intptr_t const helperMethodWrappers[] = {
     reinterpret_cast<intptr_t>(&Js::HelperMethodWrapper0),
     reinterpret_cast<intptr_t>(&Js::HelperMethodWrapper1),
@@ -84,6 +85,7 @@ static intptr_t const helperMethodWrappers[] = {
     reinterpret_cast<intptr_t>(&Js::HelperMethodWrapper15),
     reinterpret_cast<intptr_t>(&Js::HelperMethodWrapper16),
 };
+#endif
 
 ///----------------------------------------------------------------------------
 ///
@@ -97,7 +99,7 @@ intptr_t
 GetMethodAddress(ThreadContextInfo * context, IR::HelperCallOpnd* opnd)
 {
     Assert(opnd);
-
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #if defined(_M_ARM32_OR_ARM64)
 #define LowererMDFinal LowererMD
 #else
@@ -120,7 +122,7 @@ GetMethodAddress(ThreadContextInfo * context, IR::HelperCallOpnd* opnd)
             AssertMsg(FALSE, "Unsupported arg count (need to implement).");
         }
     }
-
+#endif
     return GetMethodOriginalAddress(context, opnd->m_fnHelper);
 }
 
@@ -145,116 +147,100 @@ DECLSPEC_GUARDIGNORE  _NOINLINE intptr_t GetNonTableMethodAddress(ThreadContextI
     //  DllImport methods
     //
 #if defined(_M_IX86)
-        // TODO: OOP JIT, have some way to validate that these are all loaded from CRT
+    // These are internal CRT functions which don't use a standard calling convention
     case HelperDirectMath_Acos:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_acos);
+        return ShiftAddr(context, __libm_sse2_acos);
 
     case HelperDirectMath_Asin:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_asin);
+        return ShiftAddr(context, __libm_sse2_asin);
 
     case HelperDirectMath_Atan:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_atan);
+        return ShiftAddr(context, __libm_sse2_atan);
 
     case HelperDirectMath_Atan2:
-        return ShiftAddr(context, (double(*)(double, double))__libm_sse2_atan2);
+        return ShiftAddr(context, __libm_sse2_atan2);
 
     case HelperDirectMath_Cos:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_cos);
+        return ShiftAddr(context, __libm_sse2_cos);
 
     case HelperDirectMath_Exp:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_exp);
+        return ShiftAddr(context, __libm_sse2_exp);
 
     case HelperDirectMath_Log:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_log);
+        return ShiftAddr(context, __libm_sse2_log);
 
     case HelperDirectMath_Sin:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_sin);
+        return ShiftAddr(context, __libm_sse2_sin);
 
     case HelperDirectMath_Tan:
-        return ShiftAddr(context, (double(*)(double))__libm_sse2_tan);
+        return ShiftAddr(context, __libm_sse2_tan);
+
+    case HelperAtomicStore64:
+        return ShiftAddr(context, (double(*)(double))InterlockedExchange64);
+
+    case HelperMemoryBarrier:
+#ifdef _M_HYBRID_X86_ARM64
+        AssertOrFailFastMsg(false, "The usage below fails to build for CHPE, and HelperMemoryBarrier is only required "
+                                   "for WASM threads, which are currently disabled");
+        return 0;
+#else
+        return ShiftAddr(context, (void(*)())MemoryBarrier);
+#endif // !_M_HYBRID_X86_ARM64
 #endif
 
     case HelperDirectMath_FloorDb:
-        return ShiftAddr(context, (double(*)(double))floor);
+        return ShiftStdcallAddr(context, Js::JavascriptMath::Floor);
 
     case HelperDirectMath_CeilDb:
-        return ShiftAddr(context, (double(*)(double))ceil);
-
-    //
-    // These are statically initialized to an import thunk, but let's keep them out of the table in case a new CRT changes this
-    //
-    case HelperWMemCmp:
-        return ShiftAddr(context, (int(*)(const char16 *, const char16 *, size_t))wmemcmp);
-
-    case HelperMemCpy:
-        return ShiftAddr(context, (void*(*)(void *, void const*, size_t))memcpy);
+        return ShiftStdcallAddr(context, Js::JavascriptMath::Ceil);
 
     case HelperDirectMath_FloorFlt:
-        return ShiftAddr(context, (float(*)(float))floor);
+        return ShiftStdcallAddr(context, Js::JavascriptMath::FloorF);
 
     case HelperDirectMath_CeilFlt:
-        return ShiftAddr(context, (float(*)(float))ceil);
+        return ShiftStdcallAddr(context, Js::JavascriptMath::CeilF);
 
-#if defined(_M_X64)
+        //
+        // These are statically initialized to an import thunk, but let's keep them out of the table in case a new CRT changes this
+        //
+    case HelperWMemCmp:
+        return ShiftCdeclAddr(context, wmemcmp);
+
+    case HelperMemCpy:
+        return ShiftCdeclAddr(context, (void *(__cdecl *)(void *, void const*, size_t))memcpy);
+
+#if defined(_M_X64) || defined(_M_ARM32_OR_ARM64)
     case HelperDirectMath_Acos:
-        return ShiftAddr(context, (double(*)(double))acos);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))acos);
 
     case HelperDirectMath_Asin:
-        return ShiftAddr(context, (double(*)(double))asin);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))asin);
 
     case HelperDirectMath_Atan:
-        return ShiftAddr(context, (double(*)(double))atan);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))atan);
 
     case HelperDirectMath_Atan2:
-        return ShiftAddr(context, (double(*)(double, double))atan2);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double, double))atan2);
 
     case HelperDirectMath_Cos:
-        return ShiftAddr(context, (double(*)(double))cos);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))cos);
 
     case HelperDirectMath_Exp:
-        return ShiftAddr(context, (double(*)(double))exp);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))exp);
 
     case HelperDirectMath_Log:
-        return ShiftAddr(context, (double(*)(double))log);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))log);
 
     case HelperDirectMath_Sin:
-        return ShiftAddr(context, (double(*)(double))sin);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))sin);
 
     case HelperDirectMath_Tan:
-        return ShiftAddr(context, (double(*)(double))tan);
-
-#elif defined(_M_ARM32_OR_ARM64)
-    case HelperDirectMath_Acos:
-        return ShiftAddr(context, (double(*)(double))acos);
-
-    case HelperDirectMath_Asin:
-        return ShiftAddr(context, (double(*)(double))asin);
-
-    case HelperDirectMath_Atan:
-        return ShiftAddr(context, (double(*)(double))atan);
-
-    case HelperDirectMath_Atan2:
-        return ShiftAddr(context, (double(*)(double, double))atan2);
-
-    case HelperDirectMath_Cos:
-        return ShiftAddr(context, (double(*)(double))cos);
-
-    case HelperDirectMath_Exp:
-        return ShiftAddr(context, (double(*)(double))exp);
-
-    case HelperDirectMath_Log:
-        return ShiftAddr(context, (double(*)(double))log);
-
-    case HelperDirectMath_Sin:
-        return ShiftAddr(context, (double(*)(double))sin);
-
-    case HelperDirectMath_Tan:
-        return ShiftAddr(context, (double(*)(double))tan);
+        return ShiftCdeclAddr(context, (double(__cdecl *)(double))tan);
 #endif
 
-    //
-    // Methods that we don't want to get marked as CFG targets as they make unprotected calls
-    //
+        //
+        // Methods that we don't want to get marked as CFG targets as they make unprotected calls
+        //
 
 #ifdef _CONTROL_FLOW_GUARD
     case HelperGuardCheckCall:
@@ -262,29 +248,29 @@ DECLSPEC_GUARDIGNORE  _NOINLINE intptr_t GetNonTableMethodAddress(ThreadContextI
 #endif
 
     case HelperOp_TryCatch:
-        return ShiftAddr(context, Js::JavascriptExceptionOperators::OP_TryCatch);
+        return ShiftStdcallAddr(context, Js::JavascriptExceptionOperators::OP_TryCatch);
 
     case HelperOp_TryFinally:
-        return ShiftAddr(context, Js::JavascriptExceptionOperators::OP_TryFinally);
+        return ShiftStdcallAddr(context, Js::JavascriptExceptionOperators::OP_TryFinally);
 
 
-    case HelperOp_TryFinallySimpleJit:
-        return ShiftAddr(context, Js::JavascriptExceptionOperators::OP_TryFinallySimpleJit);
+    case HelperOp_TryFinallyNoOpt:
+        return ShiftStdcallAddr(context, Js::JavascriptExceptionOperators::OP_TryFinallyNoOpt);
 
-    //
-    // Methods that we don't want to get marked as CFG targets as they dump all registers to a controlled address
-    //
+        //
+        // Methods that we don't want to get marked as CFG targets as they dump all registers to a controlled address
+        //
     case HelperSaveAllRegistersAndBailOut:
-        return ShiftAddr(context, LinearScanMD::SaveAllRegistersAndBailOut);
+        return ShiftStdcallAddr(context, LinearScanMD::SaveAllRegistersAndBailOut);
     case HelperSaveAllRegistersAndBranchBailOut:
-        return ShiftAddr(context, LinearScanMD::SaveAllRegistersAndBranchBailOut);
+        return ShiftStdcallAddr(context, LinearScanMD::SaveAllRegistersAndBranchBailOut);
 
-    #ifdef _M_IX86
+#ifdef _M_IX86
     case HelperSaveAllRegistersNoSse2AndBailOut:
-        return ShiftAddr(context, LinearScanMD::SaveAllRegistersNoSse2AndBailOut);
+        return ShiftStdcallAddr(context, LinearScanMD::SaveAllRegistersNoSse2AndBailOut);
     case HelperSaveAllRegistersNoSse2AndBranchBailOut:
-        return ShiftAddr(context, LinearScanMD::SaveAllRegistersNoSse2AndBranchBailOut);
-    #endif
+        return ShiftStdcallAddr(context, LinearScanMD::SaveAllRegistersNoSse2AndBranchBailOut);
+#endif
 
     }
 
@@ -303,6 +289,7 @@ DECLSPEC_GUARDIGNORE  _NOINLINE intptr_t GetNonTableMethodAddress(ThreadContextI
 ///----------------------------------------------------------------------------
 intptr_t GetMethodOriginalAddress(ThreadContextInfo * context, JnHelperMethod helperMethod)
 {
+    AssertOrFailFast(helperMethod >= 0 && helperMethod < IR::JnHelperMethodCount);
     intptr_t address = GetHelperMethods()[static_cast<WORD>(helperMethod)];
     if (address == 0)
     {
@@ -320,8 +307,6 @@ char16 const * const JnHelperMethodNames[] =
 {
 #define HELPERCALL(Name, Address, Attributes) _u("") STRINGIZEW(Name) _u(""),
 #include "JnHelperMethodList.h"
-#undef HELPERCALL
-
     NULL
 };
 
@@ -453,6 +438,12 @@ const char16 *GetVtableName(VTableValue value)
     case VtableStackScriptFunction:
         return _u("vtable StackScriptFunction");
         break;
+    case VtableScriptFunctionWithInlineCacheAndHomeObj:
+        return _u("vtable ScriptFunctionWithInlineCacheAndHomeObj");
+        break;
+    case VtableScriptFunctionWithInlineCacheHomeObjAndComputedName:
+        return _u("vtable ScriptFunctionWithInlineCacheHomeObjAndComputedName");
+        break;
     case VtableConcatStringMulti:
         return _u("vtable ConcatStringMulti");
         break;
@@ -477,7 +468,6 @@ static const BYTE JnHelperMethodAttributes[] =
 {
 #define HELPERCALL(Name, Address, Attributes) Attributes,
 #include "JnHelperMethodList.h"
-#undef HELPERCALL
 };
 
 // Returns true if the helper can throw non-OOM / non-SO exception.
@@ -490,5 +480,29 @@ bool IsInVariant(IR::JnHelperMethod helper)
 {
     return (JnHelperMethodAttributes[helper] & AttrInVariant) != 0;
 }
+
+bool CanBeReentrant(IR::JnHelperMethod helper)
+{
+    return (JnHelperMethodAttributes[helper] & AttrCanNotBeReentrant) == 0;
+}
+
+bool TempObjectProducing(IR::JnHelperMethod helper)
+{
+    return (JnHelperMethodAttributes[helper] & AttrTempObjectProducing) != 0;
+}
+
+#ifdef DBG_DUMP
+struct ValidateHelperHeaders
+{
+    ValidateHelperHeaders()
+    {
+#define HELPERCALL(Name, Address, Attributes)
+#define HELPERCALLCHK(Name, Address, Attributes) \
+        Assert(JitHelperUtils::helper##Name##_implemented);
+#include "../Backend/JnHelperMethodList.h"
+    }
+};
+ValidateHelperHeaders validateHelperHeaders;
+#endif
 
 } //namespace HelperMethodAttributes

@@ -118,7 +118,7 @@ namespace UnifiedRegex
         , ArenaAllocator* ctAllocator
         , StandardChars<EncodedChar>* standardEncodedChars
         , StandardChars<Char>* standardChars
-        , bool isFromExternalSource
+        , bool isUtf8
 #if ENABLE_REGEX_CONFIG_OPTIONS
         , DebugWriter* w
 #endif
@@ -151,8 +151,7 @@ namespace UnifiedRegex
         , deferredIfNotUnicodeError(nullptr)
         , deferredIfUnicodeError(nullptr)
     {
-        if (isFromExternalSource)
-            this->FromExternalSource();
+        this->SetIsUtf8(isUtf8);
     }
 
     //
@@ -258,6 +257,7 @@ namespace UnifiedRegex
 
             if (codePoint > 0x10FFFF)
             {
+                DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
                 return 0;
             }
             i++;
@@ -755,6 +755,9 @@ namespace UnifiedRegex
             else if (next->tag == Node::Alt)
             {
                 AltNode* nextList = (AltNode*)next;
+                // Since we just had to dereference next to get here, we know that nextList
+                // can't be nullptr in this case.
+                AnalysisAssert(nextList != nullptr);
                 // Append inner list to current list
                 revisedPrev = UnionNodes(last == 0 ? node : last->head, nextList->head);
                 if (revisedPrev != 0)
@@ -766,11 +769,11 @@ namespace UnifiedRegex
                         last->head = revisedPrev;
                     nextList = nextList->tail;
                 }
-                AnalysisAssert(nextList != nullptr);
                 if (last == 0)
                     node = Anew(ctAllocator, AltNode, node, nextList);
                 else
                     last->tail = nextList;
+                AnalysisAssert(nextList != nullptr);
                 while (nextList->tail != 0)
                     nextList = nextList->tail;
                 last = nextList;
@@ -982,11 +985,17 @@ namespace UnifiedRegex
                     last->head = FinalTerm(last->head, &deferredLiteralNode);
                     last->tail = nextList;
                 }
+                // NextList can't be nullptr, since it was last set as next, which
+                // was dereferenced, or it was set on a path that already has this
+                // analysis assert.
+                AnalysisAssert(nextList != nullptr);
                 while (nextList->tail != 0)
                     nextList = nextList->tail;
                 last = nextList;
                 // No outstanding literals
                 Assert(deferredLiteralNode.length == 0);
+                // We just set this from nextList, which we know is not nullptr.
+                AnalysisAssert(last != nullptr);
                 if (last->head->LiteralLength() > 0)
                 {
                     // If the list ends with a literal, transfer it into deferredLiteralNode
@@ -1112,16 +1121,40 @@ namespace UnifiedRegex
             if (!standardEncodedChars->IsDigit(ec))
             {
                 if (digits == 0)
+                {
                     Fail(JSERR_RegExpSyntax);
+                }
+
                 return n;
             }
+
             if (n > MaxCharCount / 10)
-                Fail(JSERR_RegExpSyntax);
+            {
+                break;
+            }
+
             n *= 10;
             if (n > MaxCharCount - standardEncodedChars->DigitValue(ec))
-                Fail(JSERR_RegExpSyntax);
+            {
+                break;
+            }
+
             n += standardEncodedChars->DigitValue(ec);
             digits++;
+            ECConsume();
+        }
+
+        Assert(digits != 0); // shouldn't be able to reach here with (digits == 0)
+
+        // The token had a value larger than MaxCharCount so we didn't return the value and reached here instead.
+        // Consume the rest of the token and return MaxCharCount.
+        while (true)
+        {
+            EncodedChar ec = ECLookahead();
+            if (!standardEncodedChars->IsDigit(ec))
+            {
+                return MaxCharCount;
+            }
             ECConsume();
         }
     }
@@ -1496,7 +1529,13 @@ namespace UnifiedRegex
         else if (ECLookahead() == 'c')
         {
             if (standardEncodedChars->IsLetter(ECLookahead(1))) // terminating 0 is not a letter
+            {
                 ECConsume(2);
+            }
+            else
+            {
+                DeferredFailIfUnicode(JSERR_RegExpInvalidEscape);
+            }
             return false;
         }
         else
@@ -1741,7 +1780,28 @@ namespace UnifiedRegex
                 }
                 // Take to be identity escape if ill-formed as per Annex B
                 break;
+            case '^':
+            case '$':
+            case '\\':
+            case '.':
+            case '*':
+            case '+':
+            case '?':
+            case '(':
+            case ')':
+            case '[':
+            case ']':
+            case '{':
+            case '}':
+            case '|':
+            case '/':
+                break; // fall-through for identity escape
             default:
+                if (this->unicodeFlagPresent)
+                {
+                    // As per #sec-forbidden-extensions, if unicode flag is present, we must disallow any other escape.
+                    this->Fail(JSERR_RegExpInvalidEscape); // throw SyntaxError
+                }
                 // As per Annex B, allow anything other than newlines and above. Embedded 0 is ok
                 break;
             }
@@ -1877,6 +1937,7 @@ namespace UnifiedRegex
         codepoint_t pendingRangeStart = INVALID_CODEPOINT;
         codepoint_t pendingRangeEnd = INVALID_CODEPOINT;
         bool previousSurrogatePart = false;
+
         while(nextChar != ']')
         {
             current = next;
@@ -1980,7 +2041,7 @@ namespace UnifiedRegex
 
                     lastCodepoint = INVALID_CODEPOINT;
                 }
-                // If we the next character is the end of range ']', then we can't have a surrogate pair.
+                // If the next character is the end of range ']', then we can't have a surrogate pair.
                 // The current character is the range end, if we don't already have a candidate.
                 else if (ECLookahead() == ']' && pendingRangeEnd == INVALID_CODEPOINT)
                 {
@@ -2070,6 +2131,10 @@ namespace UnifiedRegex
         codepoint_t pendingRangeStart = INVALID_CODEPOINT;
         EncodedChar nextChar = ECLookahead();
         bool previousWasASurrogate = false;
+        bool currIsACharSet = false;
+        bool prevWasACharSetAndPartOfRange = false;
+        bool prevprevWasACharSetAndPartOfRange = false;
+
         while(nextChar != ']')
         {
             codepoint_t codePointToSet = INVALID_CODEPOINT;
@@ -2079,6 +2144,7 @@ namespace UnifiedRegex
             {
                 ECConsume();
             }
+
             // These if-blocks are the logical ClassAtomPass1, they weren't grouped into a method to simplify dealing with multiple out parameters.
             if (containsSurrogates && this->currentSurrogatePairNode != nullptr && this->currentSurrogatePairNode->location == this->next)
             {
@@ -2093,22 +2159,30 @@ namespace UnifiedRegex
             else if (nextChar == '\\')
             {
                 Node* returnedNode = ClassEscapePass1(&deferredCharNode, &deferredSetNode, previousWasASurrogate);
+                codePointToSet = pendingCodePoint;
 
                 if (returnedNode->tag == Node::MatchSet)
                 {
-                    codePointToSet = pendingCodePoint;
-                    pendingCodePoint = INVALID_CODEPOINT;
                     if (pendingRangeStart != INVALID_CODEPOINT)
                     {
+                        if (unicodeFlagPresent)
+                        {
+                            //A range containing a character class and the unicode flag is present, thus we end up having to throw a "Syntax" error here
+                            //This breaks the notion of Pass0 check for valid syntax, because during that time, the unicode flag is unknown.
+                            Fail(JSERR_UnicodeRegExpRangeContainsCharClass); //From #sec-patterns-static-semantics-early-errors-annexb
+                        }
+
                         codePointSet.Set(ctAllocator, '-');
                     }
+
+                    pendingCodePoint = INVALID_CODEPOINT;
                     pendingRangeStart = INVALID_CODEPOINT;
                     codePointSet.UnionInPlace(ctAllocator, deferredSetNode.set);
+                    currIsACharSet = true;
                 }
                 else
                 {
                     // Just a character
-                    codePointToSet = pendingCodePoint;
                     pendingCodePoint = deferredCharNode.cs[0];
                 }
             }
@@ -2134,9 +2208,26 @@ namespace UnifiedRegex
                 pendingCodePoint = NextChar();
             }
 
-            if (codePointToSet != INVALID_CODEPOINT)
+            if (codePointToSet != INVALID_CODEPOINT || prevprevWasACharSetAndPartOfRange)
             {
-                if (pendingRangeStart != INVALID_CODEPOINT)
+                if (prevprevWasACharSetAndPartOfRange)
+                {
+                    //A range containing a character class and the unicode flag is present, thus we end up having to throw a "Syntax" error here
+                    //This breaks the notion of Pass0 check for valid syntax, because during that time, the unicode flag is unknown.
+                    if (unicodeFlagPresent)
+                    {
+                        Fail(JSERR_UnicodeRegExpRangeContainsCharClass);
+                    }
+
+                    if (pendingCodePoint != INVALID_CODEPOINT)
+                    {
+                        codePointSet.Set(ctAllocator, pendingCodePoint);
+                    }
+
+                    codePointSet.Set(ctAllocator, '-'); //Add '-' to set because a range was detected but turned out to be a union of character set with '-' and another atom.
+                    pendingRangeStart = pendingCodePoint = INVALID_CODEPOINT;
+                }
+                else if (pendingRangeStart != INVALID_CODEPOINT)
                 {
                     if (pendingRangeStart > pendingCodePoint)
                     {
@@ -2145,6 +2236,7 @@ namespace UnifiedRegex
                         Assert(!unicodeFlagPresent);
                         Fail(JSERR_RegExpBadRange);
                     }
+
                     codePointSet.SetRange(ctAllocator, pendingRangeStart, pendingCodePoint);
                     pendingRangeStart = pendingCodePoint = INVALID_CODEPOINT;
                 }
@@ -2155,6 +2247,9 @@ namespace UnifiedRegex
             }
 
             nextChar = ECLookahead();
+            prevprevWasACharSetAndPartOfRange = prevWasACharSetAndPartOfRange;
+            prevWasACharSetAndPartOfRange = currIsACharSet && nextChar == '-';
+            currIsACharSet = false;
         }
 
         if (pendingCodePoint != INVALID_CODEPOINT)
@@ -2405,6 +2500,8 @@ namespace UnifiedRegex
                 }
                 else
                 {
+                    DeferredFailIfUnicode(JSERR_RegExpInvalidEscape); // Fail in unicode mode for non-letter escaped control characters according to 262 Annex-B RegExp grammar spec #prod-annexB-Term
+
                     if (!IsEOF())
                     {
                         EncodedChar ecLookahead = ECLookahead();
@@ -2536,7 +2633,7 @@ namespace UnifiedRegex
                 standardChars->SetNonWordChars(ctAllocator, deferredSetNode->set);
                 return deferredSetNode;
             case 'c':
-                if (standardEncodedChars->IsLetter(ECLookahead())) // terminating 0 is not a letter
+                if (standardEncodedChars->IsWord(ECLookahead())) // terminating 0 is not a word character
                 {
                     c = UTC(Chars<EncodedChar>::CTU(ECLookahead()) % 32);
                     ECConsume();
@@ -2544,25 +2641,11 @@ namespace UnifiedRegex
                 }
                 else
                 {
-                    // SPEC DEVIATION: For non-letters, still take lower 5 bits, e.g. [\c1] == [\x11].
-                    //                 However, '-', ']', and EOF make the \c just a 'c'.
-                    if (!IsEOF())
-                    {
-                        EncodedChar ec = ECLookahead();
-                        switch (ec)
-                        {
-                        case '-':
-                        case ']':
-                            // fall-through for identity escape with 'c'
-                            break;
-                        default:
-                            c = UTC(Chars<EncodedChar>::CTU(ec) % 32);
-                            ECConsume();
-                            // fall-through for identity escape
-                            break;
-                        }
-                    }
-                    // else: fall-through for identity escape with 'c'
+                    // If the lookahead is a non-alphanumeric and not an underscore ('_'), then treat '\' and 'c' separately.
+                    //#sec-regular-expression-patterns-semantics
+                    ECRevert(1); //Put cursor back at 'c' and treat it as a non-escaped character.
+                    deferredCharNode->cs[0] = '\\';
+                    return deferredCharNode;
                 }
                 break;
             case 'x':
@@ -2685,7 +2768,7 @@ namespace UnifiedRegex
                     }
                     flags = (RegexFlags)(flags | UnicodeRegexFlag);
                     // For telemetry
-                    CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(UnicodeRegexFlag, scriptContext);
+                    CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, UnicodeRegexFlag, scriptContext);
 
                     break;
                 }
@@ -2698,7 +2781,7 @@ namespace UnifiedRegex
                     }
                     flags = (RegexFlags)(flags | StickyRegexFlag);
                     // For telemetry
-                    CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(StickyRegexFlag, scriptContext);
+                    CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, StickyRegexFlag, scriptContext);
 
                     break;
                 }
@@ -2951,6 +3034,8 @@ namespace UnifiedRegex
 #ifdef PROFILE_EXEC
         this->scriptContext->ProfileEnd(Js::RegexCompilePhase);
 #endif
+        // CaptureSourceAndGroups throws if this condition doesn't hold.
+        Assert(0 < pattern->NumGroups() && pattern->NumGroups() <= MAX_NUM_GROUPS);
 
         return pattern;
     }
@@ -2982,7 +3067,17 @@ namespace UnifiedRegex
         program->source[bodyChars] = 0;
         program->sourceLen = bodyChars;
 
-        program->numGroups = nextGroupId;
+        // We expect nextGroupId to be positive, because the full regexp itself always
+        // counts as a capturing group.
+        Assert(nextGroupId > 0);
+        if (nextGroupId > MAX_NUM_GROUPS)
+        {
+            Js::JavascriptError::ThrowRangeError(this->scriptContext, JSERR_RegExpTooManyCapturingGroups);
+        }
+        else
+        {
+            program->numGroups = static_cast<uint16>(nextGroupId);
+        }
 
         // Remaining to set during compilation: litbuf, litbufLen, numLoops, insts, instsLen, entryPointLabel
     }

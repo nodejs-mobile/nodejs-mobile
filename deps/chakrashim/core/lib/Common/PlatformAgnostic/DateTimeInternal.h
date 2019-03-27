@@ -2,9 +2,7 @@
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
-
-#ifndef RUNTIME_PLATFORM_AGNOSTIC_DATETIME_INTERNAL
-#define RUNTIME_PLATFORM_AGNOSTIC_DATETIME_INTERNAL
+#pragma once
 
 #include "Core/CommonTypedefs.h"
 
@@ -44,10 +42,16 @@ namespace DateTime
         void Update(const double time);
     };
 
-    struct DaylightTimeHelperPlatformData // DaylightHelper.cpp
+    class DaylightTimeHelperPlatformData // DaylightHelper.cpp
     {
+    public:
         TimeZoneInfo cache1, cache2;
         bool useFirstCache;
+
+        DaylightTimeHelperPlatformData() :
+            useFirstCache(true)
+        {
+        }
     };
 
     class UtilityPlatformData
@@ -57,7 +61,7 @@ namespace DateTime
         uint32 lastTimeZoneUpdateTickCount;
 
         void UpdateTimeZoneInfo();
-        UtilityPlatformData(): lastTimeZoneUpdateTickCount(0) { }
+        UtilityPlatformData() : lastTimeZoneUpdateTickCount(0) { GetTimeZoneInformation(&timeZoneInfo); }
     };
 
     class HiresTimerPlatformData
@@ -73,9 +77,17 @@ namespace DateTime
         bool fInit;
         bool fHiResAvailable;
 
-        HiresTimerPlatformData(): fInit(false), dBaseTime(0),
-        baseMsCount(0),  fHiResAvailable(true),
-        dLastTime(0), dAdjustFactor(1), fReset(true) {}
+        HiresTimerPlatformData() :
+            dBaseTime(0),
+            dLastTime(0),
+            dAdjustFactor(1),
+            baseMsCount(0),
+            freq(0),
+            fReset(true),
+            fInit(false),
+            fHiResAvailable(true)
+        {
+        }
 
         void Reset() { fReset = true; }
     };
@@ -107,5 +119,3 @@ namespace DateTime
 
 } // namespace DateTime
 } // namespace PlatformAgnostic
-
-#endif // RUNTIME_PLATFORM_AGNOSTIC_DATETIME_INTERNAL

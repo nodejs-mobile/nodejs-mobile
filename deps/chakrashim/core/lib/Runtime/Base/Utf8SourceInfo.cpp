@@ -3,10 +3,12 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeBasePch.h"
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Debug/DiagProbe.h"
 #include "Debug/BreakpointProbe.h"
 #include "Debug/DebugDocument.h"
 #include "Debug/DebugManager.h"
+#endif
 
 namespace Js
 {
@@ -18,12 +20,12 @@ namespace Js
         ScriptContext* scriptContext, bool isLibraryCode, Js::Var scriptSource):
         sourceHolder(mappableSource),
         m_cchLength(cchLength),
-        m_pHostBuffer(nullptr),
         m_srcInfo(srcInfo),
         m_secondaryHostSourceContext(secondaryHostSourceContext),
+#ifdef ENABLE_SCRIPT_DEBUGGING
         m_debugDocument(nullptr),
+#endif
         m_sourceInfoId(scriptContext->GetThreadContext()->NewSourceInfoNumber()),
-        m_hasHostBuffer(false),
         m_isCesu8(false),
         m_isLibraryCode(isLibraryCode),
         m_isXDomain(false),
@@ -33,32 +35,39 @@ namespace Js
         m_deferredFunctionsDictionary(nullptr),
         m_deferredFunctionsInitialized(false),
         topLevelFunctionInfoList(nullptr),
+#ifdef ENABLE_SCRIPT_DEBUGGING
         debugModeSource(nullptr),
         debugModeSourceIsEmpty(false),
         debugModeSourceLength(0),
         m_isInDebugMode(false),
-        callerUtf8SourceInfo(nullptr)
+#endif
+        callerUtf8SourceInfo(nullptr),
+        boundedPropertyRecordHashSet(scriptContext->GetRecycler())
 #ifndef NTBUILD
         ,sourceRef(scriptSource)
 #endif
     {
+#ifdef ENABLE_SCRIPT_DEBUGGING
         if (!sourceHolder->IsDeferrable())
         {
             this->debugModeSource = this->sourceHolder->GetSource(_u("Entering Debug Mode"));
             this->debugModeSourceLength = this->sourceHolder->GetByteLength(_u("Entering Debug Mode"));
             this->debugModeSourceIsEmpty = !this->HasSource() || this->debugModeSource == nullptr;
         }
+#endif
     }
 
     LPCUTF8 Utf8SourceInfo::GetSource(const char16 * reason) const
     {
         AssertMsg(this->sourceHolder != nullptr, "We have no source mapper.");
+#ifdef ENABLE_SCRIPT_DEBUGGING
         if (this->IsInDebugMode())
         {
             AssertMsg(this->debugModeSource != nullptr || this->debugModeSourceIsEmpty, "Debug mode source should have been set by this point.");
             return debugModeSource;
         }
         else
+#endif
         {
             return sourceHolder->GetSource(reason == nullptr ? _u("Utf8SourceInfo::GetSource") : reason);
         }
@@ -67,12 +76,14 @@ namespace Js
     size_t Utf8SourceInfo::GetCbLength(const char16 * reason) const
     {
         AssertMsg(this->sourceHolder != nullptr, "We have no source mapper.");
+#ifdef ENABLE_SCRIPT_DEBUGGING
         if (this->IsInDebugMode())
         {
             AssertMsg(this->debugModeSource != nullptr || this->debugModeSourceIsEmpty, "Debug mode source should have been set by this point.");
             return debugModeSourceLength;
         }
         else
+#endif
         {
             return sourceHolder->GetByteLength(reason == nullptr ? _u("Utf8SourceInfo::GetSource") : reason);
         }
@@ -82,27 +93,15 @@ namespace Js
     void
     Utf8SourceInfo::Dispose(bool isShutdown)
     {
+#ifdef ENABLE_SCRIPT_DEBUGGING
         ClearDebugDocument();
+        this->debugModeSource = nullptr;
+#endif
 #ifndef NTBUILD
         this->sourceRef = nullptr;
 #endif
-        this->debugModeSource = nullptr;
-        if (this->m_hasHostBuffer)
-        {
-            PERF_COUNTER_DEC(Basic, ScriptCodeBufferCount);
-            HeapFree(GetProcessHeap(), 0 , m_pHostBuffer);
-            m_pHostBuffer = nullptr;
-        }
     };
 
-    void
-    Utf8SourceInfo::SetHostBuffer(BYTE * pcszCode)
-    {
-        Assert(!this->m_hasHostBuffer);
-        Assert(this->m_pHostBuffer == nullptr);
-        this->m_hasHostBuffer = true;
-        this->m_pHostBuffer = pcszCode;
-    }
     enum
     {
         fsiHostManaged = 0x01,
@@ -195,10 +194,12 @@ namespace Js
     {
         // TODO: make this finalizable? Or have a finalizable version which would HeapDelete the string? Is this needed?
         DWORD_PTR secondaryHostSourceContext = Js::Constants::NoHostSourceContext;
+#ifdef ENABLE_SCRIPT_DEBUGGING
         if (srcInfo->sourceContextInfo->IsDynamic())
         {
             secondaryHostSourceContext = scriptContext->GetThreadContext()->GetDebugManager()->AllocateSecondaryHostSourceContext();
         }
+#endif
 
         Recycler * recycler = scriptContext->GetRecycler();
 
@@ -206,12 +207,14 @@ namespace Js
             Utf8SourceInfo, sourceHolder, length, SRCINFO::Copy(recycler, srcInfo),
             secondaryHostSourceContext, scriptContext, isLibraryCode, scriptSource);
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
         if (!isLibraryCode && scriptContext->IsScriptContextInDebugMode())
         {
             toReturn->debugModeSource = sourceHolder->GetSource(_u("Debug Mode Loading"));
             toReturn->debugModeSourceLength = sourceHolder->GetByteLength(_u("Debug Mode Loading"));
             toReturn->debugModeSourceIsEmpty = toReturn->debugModeSource == nullptr || sourceHolder->IsEmpty();
         }
+#endif
 
         return toReturn;
     }
@@ -233,27 +236,6 @@ namespace Js
         ISourceHolder* sourceHolder = RecyclerNew(scriptContext->GetRecycler(), SimpleSourceHolder, utf8String, numBytes);
 
         return NewWithHolder(scriptContext, sourceHolder, length, srcInfo, isLibraryCode, scriptSource);
-    }
-
-
-    Utf8SourceInfo*
-    Utf8SourceInfo::Clone(ScriptContext* scriptContext, const Utf8SourceInfo* sourceInfo)
-    {
-        Utf8SourceInfo* newSourceInfo = Utf8SourceInfo::NewWithHolder(scriptContext,
-            sourceInfo->GetSourceHolder()->Clone(scriptContext), sourceInfo->m_cchLength,
-            SRCINFO::Copy(scriptContext->GetRecycler(), sourceInfo->GetSrcInfo()),
-            sourceInfo->m_isLibraryCode);
-        newSourceInfo->m_isXDomain = sourceInfo->m_isXDomain;
-        newSourceInfo->m_isXDomainString = sourceInfo->m_isXDomainString;
-        newSourceInfo->m_isLibraryCode = sourceInfo->m_isLibraryCode;
-        newSourceInfo->SetIsCesu8(sourceInfo->GetIsCesu8());
-        newSourceInfo->m_lineOffsetCache = sourceInfo->m_lineOffsetCache;
-
-        if (scriptContext->IsScriptContextInDebugMode() && !newSourceInfo->GetIsLibraryCode())
-        {
-            newSourceInfo->SetInDebugMode(true);
-        }
-        return newSourceInfo;
     }
 
     HRESULT Utf8SourceInfo::EnsureLineOffsetCacheNoThrow()
@@ -284,7 +266,7 @@ namespace Js
             int64 byteStartOffset = (sourceAfterBOM - sourceStart);
 
             Recycler* recycler = this->m_scriptContext->GetRecycler();
-            this->m_lineOffsetCache = RecyclerNew(recycler, JsUtil::LineOffsetCache<Recycler>, recycler, sourceAfterBOM, sourceEnd, startChar, (int)byteStartOffset);
+            this->m_lineOffsetCache = RecyclerNew(recycler, LineOffsetCache, recycler, sourceAfterBOM, sourceEnd, startChar, (int)byteStartOffset);
         }
     }
 
@@ -323,7 +305,7 @@ namespace Js
             Assert((sourceAfterBOM - sourceStart) < MAXUINT32);
             charcount_t byteStartOffset = (charcount_t)(sourceAfterBOM - sourceStart);
 
-            line = JsUtil::LineOffsetCache<Recycler>::FindLineForCharacterOffset(sourceAfterBOM, sourceEnd, lineCharOffset, byteStartOffset, charPosition);
+            line = LineOffsetCache::FindLineForCharacterOffset(sourceAfterBOM, sourceEnd, lineCharOffset, byteStartOffset, charPosition);
 
             *outLineByteOffset = byteStartOffset;
         }
@@ -338,11 +320,11 @@ namespace Js
         *outColumn = charPosition - lineCharOffset;
     }
 
-    void Utf8SourceInfo::CreateLineOffsetCache(const JsUtil::LineOffsetCache<Recycler>::LineOffsetCacheItem *items, charcount_t numberOfItems)
+    void Utf8SourceInfo::CreateLineOffsetCache(const charcount_t *lineCharacterOffsets, const charcount_t *lineByteOffsets, charcount_t numberOfItems)
     {
         AssertMsg(this->m_lineOffsetCache == nullptr, "LineOffsetCache is already initialized!");
         Recycler* recycler = this->m_scriptContext->GetRecycler();
-        this->m_lineOffsetCache = RecyclerNew(recycler, JsUtil::LineOffsetCache<Recycler>, recycler, items, numberOfItems);
+        this->m_lineOffsetCache = RecyclerNew(recycler, LineOffsetCache, recycler, lineCharacterOffsets, lineByteOffsets, numberOfItems);
     }
 
     DWORD_PTR Utf8SourceInfo::GetHostSourceContext() const
@@ -422,6 +404,7 @@ namespace Js
         }
     }
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
     void Utf8SourceInfo::ClearDebugDocument(bool close)
     {
         if (this->m_debugDocument != nullptr)
@@ -434,10 +417,11 @@ namespace Js
             this->m_debugDocument = nullptr;
         }
     }
+#endif
 
+#ifdef NTBUILD
     bool Utf8SourceInfo::GetDebugDocumentName(BSTR * sourceName)
     {
-#if defined(ENABLE_SCRIPT_DEBUGGING) && defined(_WIN32)
         if (this->HasDebugDocument() && this->GetDebugDocument()->HasDocumentText())
         {
             // ToDo (SaAgarwa): Fix for JsRT debugging
@@ -447,7 +431,7 @@ namespace Js
                 return true;
             }
         }
-#endif
         return false;
     }
+#endif
 }

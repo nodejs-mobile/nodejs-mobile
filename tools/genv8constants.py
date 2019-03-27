@@ -78,16 +78,16 @@ for line in pipe:
     # format, but this is the most obvious robust approach.  We could almost
     # rely on looking at numbered fields, but some instructions look very
     # much like hex numbers (e.g., "adc"), and we don't want to risk picking
-    # those up by mistake, so we look at character-based columns intead.
+    # those up by mistake, so we look at character-based columns instead.
     #
     for i in range (0, 3):
       # 6-character margin, 2-characters + 1 space for each field
       idx = 6 + i * 3;
       octetstr = line[idx:idx+3]
-      if not numpattern.match(octetstr):
+      if curr_octet > octets:
         break;
 
-      if curr_octet > octets:
+      if not numpattern.match(octetstr):
         break;
 
       curr_val += int('0x%s' % octetstr, 16) << (curr_octet * 8);

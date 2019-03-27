@@ -5,7 +5,7 @@
 #include "Backend.h"
 
 InliningDecider::InliningDecider(Js::FunctionBody *const topFunc, bool isLoopBody, bool isInDebugMode, const ExecutionMode jitMode)
-    : topFunc(topFunc), isLoopBody(isLoopBody), isInDebugMode(isInDebugMode), jitMode(jitMode), bytecodeInlinedCount(0), numberOfInlineesWithLoop (0), threshold(topFunc->GetByteCodeWithoutLDACount(), isLoopBody)
+    : topFunc(topFunc), isLoopBody(isLoopBody), isInDebugMode(isInDebugMode), jitMode(jitMode), bytecodeInlinedCount(0), numberOfInlineesWithLoop(0), threshold(topFunc->GetByteCodeWithoutLDACount(), isLoopBody, topFunc->GetIsAsmjsMode())
 {
     Assert(topFunc);
 }
@@ -23,17 +23,18 @@ bool InliningDecider::InlineIntoTopFunc() const
     {
         return false;
     }
-
+#ifdef _M_IX86
     if (this->topFunc->GetHasTry())
     {
 #if defined(DBG_DUMP) || defined(ENABLE_DEBUG_CONFIG_OPTIONS)
         char16 debugStringBuffer[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
 #endif
         INLINE_TESTTRACE(_u("INLINING: Skip Inline: Has try\tCaller: %s (%s)\n"), this->topFunc->GetDisplayName(),
-            this->topFunc->GetDebugNumberSet(debugStringBuffer));
+        this->topFunc->GetDebugNumberSet(debugStringBuffer));
         // Glob opt doesn't run on function with try, so we can't generate bailout for it
         return false;
     }
+#endif
 
     return InlineIntoInliner(topFunc);
 }
@@ -89,6 +90,17 @@ Js::FunctionInfo *InliningDecider::GetCallSiteFuncInfo(Js::FunctionBody *const i
     return profileData->GetCallSiteInfo(inliner, profiledCallSiteId, isConstructorCall, isPolymorphicCall);
 }
 
+Js::FunctionInfo * InliningDecider::GetCallSiteCallbackInfo(Js::FunctionBody *const inliner, const Js::ProfileId profiledCallSiteId)
+{
+    Assert(inliner != nullptr);
+    Assert(profiledCallSiteId < inliner->GetProfiledCallSiteCount());
+
+    Js::DynamicProfileInfo * profileData = inliner->GetAnyDynamicProfileInfo();
+    Assert(profileData != nullptr);
+
+    return profileData->GetCallbackInfo(inliner, profiledCallSiteId);
+}
+
 uint16 InliningDecider::GetConstantArgInfo(Js::FunctionBody *const inliner, const Js::ProfileId profiledCallSiteId)
 {
     Assert(inliner);
@@ -120,7 +132,17 @@ Js::FunctionInfo *InliningDecider::InlineCallSite(Js::FunctionBody *const inline
     Js::FunctionInfo *functionInfo = GetCallSiteFuncInfo(inliner, profiledCallSiteId, &isConstructorCall, &isPolymorphicCall);
     if (functionInfo)
     {
-        return Inline(inliner, functionInfo, isConstructorCall, false, GetConstantArgInfo(inliner, profiledCallSiteId), profiledCallSiteId, recursiveInlineDepth, true);
+        return Inline(inliner, functionInfo, isConstructorCall, false, false, GetConstantArgInfo(inliner, profiledCallSiteId), profiledCallSiteId, recursiveInlineDepth, true);
+    }
+    return nullptr;
+}
+
+Js::FunctionInfo * InliningDecider::InlineCallback(Js::FunctionBody *const inliner, const Js::ProfileId profiledCallSiteId, uint recursiveInlineDepth)
+{
+    Js::FunctionInfo * functionInfo = GetCallSiteCallbackInfo(inliner, profiledCallSiteId);
+    if (functionInfo)
+    {
+        return Inline(inliner, functionInfo, false, false, true, GetConstantArgInfo(inliner, profiledCallSiteId), profiledCallSiteId, recursiveInlineDepth, true);
     }
     return nullptr;
 }
@@ -151,7 +173,7 @@ uint InliningDecider::InlinePolymorphicCallSite(Js::FunctionBody *const inliner,
             AssertMsg(inlineeCount >= 2, "There are at least two polymorphic call site");
             break;
         }
-        if (Inline(inliner, functionBodyArray[inlineeCount]->GetFunctionInfo(), isConstructorCall, true /*isPolymorphicCall*/, 0, profiledCallSiteId, recursiveInlineDepth, false))
+        if (Inline(inliner, functionBodyArray[inlineeCount]->GetFunctionInfo(), isConstructorCall, true /*isPolymorphicCall*/, false /*isCallback*/, 0, profiledCallSiteId, recursiveInlineDepth, false))
         {
             canInlineArray[inlineeCount] = true;
             actualInlineeCount++;
@@ -180,8 +202,15 @@ uint InliningDecider::InlinePolymorphicCallSite(Js::FunctionBody *const inliner,
     return inlineeCount;
 }
 
-Js::FunctionInfo *InliningDecider::Inline(Js::FunctionBody *const inliner, Js::FunctionInfo* functionInfo,
-    bool isConstructorCall, bool isPolymorphicCall, uint16 constantArgInfo, Js::ProfileId callSiteId, uint recursiveInlineDepth, bool allowRecursiveInlining)
+Js::FunctionInfo *InliningDecider::Inline(Js::FunctionBody *const inliner, 
+    Js::FunctionInfo* functionInfo,
+    bool isConstructorCall, 
+    bool isPolymorphicCall, 
+    bool isCallback, 
+    uint16 constantArgInfo, 
+    Js::ProfileId callSiteId, 
+    uint recursiveInlineDepth, 
+    bool allowRecursiveInlining)
 {
 #if defined(DBG_DUMP) || defined(ENABLE_DEBUG_CONFIG_OPTIONS)
     char16 debugStringBuffer[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
@@ -218,13 +247,15 @@ Js::FunctionInfo *InliningDecider::Inline(Js::FunctionBody *const inliner, Js::F
             return nullptr;
         }
 
+#ifdef _M_IX86
         if (inlinee->GetHasTry())
         {
             INLINE_TESTTRACE(_u("INLINING: Skip Inline: Has try\tInlinee: %s (%s)\tCaller: %s (%s)\n"),
-                inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inliner->GetDisplayName(),
-                inliner->GetDebugNumberSet(debugStringBuffer2));
+            inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inliner->GetDisplayName(),
+            inliner->GetDebugNumberSet(debugStringBuffer2));
             return nullptr;
         }
+#endif
 
         // This is a hard limit as the argOuts array is statically sized.
         if (inlinee->GetInParamsCount() > Js::InlineeCallInfo::MaxInlineeArgoutCount)
@@ -235,7 +266,8 @@ Js::FunctionInfo *InliningDecider::Inline(Js::FunctionBody *const inliner, Js::F
             return nullptr;
         }
 
-        if (inlinee->GetInParamsCount() == 0)
+        // Wasm functions can have no params
+        if (inlinee->GetInParamsCount() == 0 && !inlinee->GetIsAsmjsMode())
         {
             // Inline candidate has no params, not even a this pointer.  This can only be the global function,
             // which we shouldn't inline.
@@ -268,7 +300,7 @@ Js::FunctionInfo *InliningDecider::Inline(Js::FunctionBody *const inliner, Js::F
         }
 
 #if defined(ENABLE_DEBUG_CONFIG_OPTIONS)
-        TraceInlining(inliner, inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inlinee->GetByteCodeCount(), this->topFunc, this->bytecodeInlinedCount, inlinee, callSiteId, this->isLoopBody);
+        TraceInlining(inliner, inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inlinee->GetByteCodeCount(), this->topFunc, this->bytecodeInlinedCount, inlinee, callSiteId, this->isLoopBody, isCallback);
 #endif
 
         this->bytecodeInlinedCount += inlinee->GetByteCodeCount();
@@ -459,7 +491,6 @@ bool InliningDecider::GetBuiltInInfoCommon(
     case Js::JavascriptBuiltInFunction::JavascriptArray_Splice:
 
     case Js::JavascriptBuiltInFunction::JavascriptString_Link:
-    case Js::JavascriptBuiltInFunction::JavascriptString_LocaleCompare:
         goto CallDirectCommon;
 
     case Js::JavascriptBuiltInFunction::JavascriptArray_Join:
@@ -670,12 +701,16 @@ bool InliningDecider::DeciderInlineIntoInliner(Js::FunctionBody * inlinee, Js::F
         return false;
     }
 
-    if (inlinee->GetIsAsmjsMode() || inliner->GetIsAsmjsMode())
+    if (inliner->GetIsAsmjsMode() != inlinee->GetIsAsmjsMode())
     {
         return false;
     }
-
-    if (PHASE_FORCE(Js::InlinePhase, this->topFunc) ||
+// Force inline all Js Builtins functions
+// The existing JsBuiltInForceInline flag can work only when we explictly create scriptFunction
+// We can also have methods that we define on the prototype like next of ArrayIterator for which we don't explictly create a script function
+// TODO (megupta) : use forceInline for methods defined on the prototype using ObjectDefineProperty
+    if (inlinee->GetSourceContextId() == Js::Constants::JsBuiltInSourceContextId ||
+        PHASE_FORCE(Js::InlinePhase, this->topFunc) ||
         PHASE_FORCE(Js::InlinePhase, inliner) ||
         PHASE_FORCE(Js::InlinePhase, inlinee))
     {
@@ -757,7 +792,7 @@ bool InliningDecider::DeciderInlineIntoInliner(Js::FunctionBody * inlinee, Js::F
             isConstructorCall ||                                                     // If the function is constructor with loops, don't inline.
             PHASE_OFF(Js::InlineFunctionsWithLoopsPhase, this->topFunc))
         {
-            INLINE_TESTTRACE(_u("INLINING: Skip Inline: Has loops \tBytecode size: %d \tgetNumberOfInlineesWithLoop: %d\tloopCount: %d\thasNestedLoop: %B\tisConstructorCall:%B\tInlinee: %s (%s)\tCaller: %s (%s) \tRoot: %s (%s)\n"),
+            INLINE_TESTTRACE(_u("INLINING: Skip Inline: Has loops \tBytecode size: %d \tgetNumberOfInlineesWithLoop: %d\tloopCount: %d\thasNestedLoop: %d\tisConstructorCall:%d\tInlinee: %s (%s)\tCaller: %s (%s) \tRoot: %s (%s)\n"),
                 inlinee->GetByteCodeCount(),
                 GetNumberOfInlineesWithLoop(),
                 inlinee->GetLoopCount(),
@@ -851,6 +886,12 @@ bool InliningDecider::DeciderInlineIntoInliner(Js::FunctionBody * inlinee, Js::F
     }
     else
     {
+        INLINE_TESTTRACE(_u("INLINING: Skip Inline: Too long \tBytecode size: %d\tThreshold: %d\tInlinee: %s (%s)\tCaller: %s (%s) \tRoot: %s (%s)\n"),
+            inlinee->GetByteCodeCount(),
+            inlineThreshold,
+            inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer),
+            inliner->GetDisplayName(), inliner->GetDebugNumberSet(debugStringBuffer2),
+            topFunc->GetDisplayName(), topFunc->GetDebugNumberSet(debugStringBuffer3));
         return false;
     }
 }
@@ -875,7 +916,7 @@ bool InliningDecider::ContinueInliningUserDefinedFunctions(uint32 bytecodeInline
 #if defined(ENABLE_DEBUG_CONFIG_OPTIONS)
 // static
 void InliningDecider::TraceInlining(Js::FunctionBody *const inliner, const char16* inlineeName, const char16* inlineeFunctionIdandNumberString, uint inlineeByteCodeCount,
-    Js::FunctionBody* topFunc, uint inlinedByteCodeCount, Js::FunctionBody *const inlinee, uint callSiteId, bool inLoopBody, uint builtIn)
+    Js::FunctionBody* topFunc, uint inlinedByteCodeCount, Js::FunctionBody *const inlinee, uint callSiteId, bool inLoopBody, bool isCallback, uint builtIn)
 {
     char16 debugStringBuffer[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
     char16 debugStringBuffer2[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE];
@@ -886,17 +927,9 @@ void InliningDecider::TraceInlining(Js::FunctionBody *const inliner, const char1
         Assert(len > 14);
         inlineeName = debugStringBuffer3;
     }
-    INLINE_TESTTRACE(_u("INLINING %s: Inlinee: %s (%s)\tSize: %d\tCaller: %s (%s)\tSize: %d\tInlineCount: %d\tRoot: %s (%s)\tSize: %d\tCallSiteId: %d\n"),
-        inLoopBody ? _u("IN LOOP BODY") : _u(""),
-        inlineeName, inlineeFunctionIdandNumberString, inlineeByteCodeCount,
-        inliner->GetDisplayName(), inliner->GetDebugNumberSet(debugStringBuffer), inliner->GetByteCodeCount(),
-        inlinedByteCodeCount,
-        topFunc->GetDisplayName(), topFunc->GetDebugNumberSet(debugStringBuffer2), topFunc->GetByteCodeCount(),
-        callSiteId
-        );
-
-    INLINE_TRACE(_u("INLINING %s: Inlinee: %s(%s)\tSize : %d\tCaller : %s(%s)\tSize : %d\tInlineCount : %d\tRoot : %s(%s)\tSize : %d\tCallSiteId : %d\n"),
-        inLoopBody ? _u("IN LOOP BODY") : _u(""),
+    INLINE_TRACE_AND_TESTTRACE(_u("INLINING%s %s: Inlinee: %s (%s)\tSize: %d\tCaller: %s (%s)\tSize: %d\tInlineCount: %d\tRoot: %s (%s)\tSize: %d\tCallSiteId: %d\n"),
+        isCallback ? _u(" CALLBACK") : _u(""),
+        inLoopBody ? _u(" IN LOOP BODY") : _u(""),
         inlineeName, inlineeFunctionIdandNumberString, inlineeByteCodeCount,
         inliner->GetDisplayName(), inliner->GetDebugNumberSet(debugStringBuffer), inliner->GetByteCodeCount(),
         inlinedByteCodeCount,
@@ -915,13 +948,7 @@ void InliningDecider::TraceInlining(Js::FunctionBody *const inliner, const char1
 
     if (inliner->GetSourceContextId() != inlinee->GetSourceContextId())
     {
-        INLINE_TESTTRACE(_u("INLINING_ACROSS_FILES: Inlinee: %s (%s)\tSize: %d\tCaller: %s (%s)\tSize: %d\tInlineCount: %d\tRoot: %s (%s)\tSize: %d\n"),
-            inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inlinee->GetByteCodeCount(),
-            inliner->GetDisplayName(), inliner->GetDebugNumberSet(debugStringBuffer2), inliner->GetByteCodeCount(), inlinedByteCodeCount,
-            topFunc->GetDisplayName(), topFunc->GetDebugNumberSet(debugStringBuffer3), topFunc->GetByteCodeCount()
-            );
-
-        INLINE_TRACE(_u("INLINING_ACROSS_FILES: Inlinee: %s (%s)\tSize: %d\tCaller: %s (%s)\tSize: %d\tInlineCount: %d\tRoot: %s (%s)\tSize: %d\n"),
+        INLINE_TRACE_AND_TESTTRACE(_u("INLINING_ACROSS_FILES: Inlinee: %s (%s)\tSize: %d\tCaller: %s (%s)\tSize: %d\tInlineCount: %d\tRoot: %s (%s)\tSize: %d\n"),
             inlinee->GetDisplayName(), inlinee->GetDebugNumberSet(debugStringBuffer), inlinee->GetByteCodeCount(),
             inliner->GetDisplayName(), inliner->GetDebugNumberSet(debugStringBuffer2), inliner->GetByteCodeCount(), inlinedByteCodeCount,
             topFunc->GetDisplayName(), topFunc->GetDebugNumberSet(debugStringBuffer3), topFunc->GetByteCodeCount()

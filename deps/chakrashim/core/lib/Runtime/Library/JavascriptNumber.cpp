@@ -36,9 +36,13 @@ namespace Js
 
     Var JavascriptNumber::ToVarInPlace(int64 value, ScriptContext* scriptContext, JavascriptNumber *result)
     {
-        return InPlaceNew((double)value, scriptContext, result);
-    }
+        if (!TaggedInt::IsOverflow(value))
+        {
+            return TaggedInt::ToVarUnchecked(static_cast<int>(value));
+        }
 
+        return InPlaceNew(static_cast<double>(value), scriptContext, result);
+    }
 
     Var JavascriptNumber::ToVarMaybeInPlace(double value, ScriptContext* scriptContext, JavascriptNumber *result)
     {
@@ -368,10 +372,8 @@ namespace Js
         //
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && newTarget != nullptr && !JavascriptOperators::IsUndefined(newTarget);
-        Assert(isCtorSuperCall || !(callInfo.Flags & CallFlags_New) || args[0] == nullptr
-            || JavascriptOperators::GetTypeId(args[0]) == TypeIds_HostDispatch);
+        Var newTarget = args.GetNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
 
         Var result;
 
@@ -675,7 +677,7 @@ namespace Js
         {
             return ToStringNan(scriptContext);
         }
-        if(value >= 1e21)
+        if(value >= 1e21 || value <= -1e21)
         {
             return ToStringRadix10(value, scriptContext);
         }
@@ -779,14 +781,22 @@ namespace Js
                 JavascriptFunction* func = intlExtensionObject->GetNumberToLocaleString();
                 if (func)
                 {
-                    return JavascriptString::FromVar(func->CallFunction(args));
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        return JavascriptString::FromVar(func->CallFunction(args));
+                    }
+                    END_SAFE_REENTRANT_CALL
                 }
                 // Initialize Number.prototype.toLocaleString
                 scriptContext->GetLibrary()->InitializeIntlForNumberPrototype();
                 func = intlExtensionObject->GetNumberToLocaleString();
                 if (func)
                 {
-                    return JavascriptString::FromVar(func->CallFunction(args));
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                    {
+                        return JavascriptString::FromVar(func->CallFunction(args));
+                    }
+                    END_SAFE_REENTRANT_CALL
                 }
             }
         }
@@ -898,7 +908,7 @@ namespace Js
         else if (JavascriptNumberObject::Is(value))
         {
             JavascriptNumberObject* obj = JavascriptNumberObject::FromVar(value);
-            return CrossSite::MarshalVar(scriptContext, obj->Unwrap());
+            return CrossSite::MarshalVar(scriptContext, obj->Unwrap(), obj->GetScriptContext());
         }
         else if (Js::JavascriptOperators::GetTypeId(value) == TypeIds_Int64Number)
         {
@@ -923,7 +933,8 @@ namespace Js
         }
     }
 
-    static const int bufSize = 256;
+    // The largest string representing a number is the base 2 representation of -Math.pow(2,-1073), at 1076 characters.
+    static const int bufSize = 1280;
 
     JavascriptString* JavascriptNumber::ToString(double value, ScriptContext* scriptContext)
     {
@@ -997,22 +1008,22 @@ namespace Js
     {
         TypeId typeId = JavascriptOperators::GetTypeId(aValue);
 
-        if (typeId == TypeIds_Null || typeId == TypeIds_Undefined)
+        if (typeId <= TypeIds_UndefinedOrNull)
         {
             return FALSE;
         }
 
-        if (TaggedInt::Is(aValue))
+        if (typeId == TypeIds_Integer)
         {
             *pDouble = TaggedInt::ToDouble(aValue);
             return TRUE;
         }
-        else if (Js::JavascriptOperators::GetTypeId(aValue) == TypeIds_Int64Number)
+        else if (typeId == TypeIds_Int64Number)
         {
             *pDouble = (double)JavascriptInt64Number::FromVar(aValue)->GetValue();
             return TRUE;
         }
-        else if (Js::JavascriptOperators::GetTypeId(aValue) == TypeIds_UInt64Number)
+        else if (typeId == TypeIds_UInt64Number)
         {
             *pDouble = (double)JavascriptUInt64Number::FromVar(aValue)->GetValue();
             return TRUE;
@@ -1022,7 +1033,7 @@ namespace Js
             *pDouble = JavascriptNumber::GetValue(aValue);
             return TRUE;
         }
-        else if (JavascriptNumberObject::Is(aValue))
+        else if (typeId == TypeIds_NumberObject)
         {
             JavascriptNumberObject* obj = JavascriptNumberObject::FromVar(aValue);
             *pDouble = obj->GetValue();

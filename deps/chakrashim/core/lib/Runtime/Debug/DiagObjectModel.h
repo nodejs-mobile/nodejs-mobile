@@ -150,8 +150,8 @@ namespace Js
         FW_None                   = 0x0,
         FW_MakeGroups             = 0x1,  // Make groups such as [Scope], [Globals] etc.
         FW_EnumWithScopeAlso      = 0x2,  // While walking include the with scope as well.
-        FW_AllowLexicalThis       = 0x4,  // Do not filter out Js::PropertyIds::_lexicalThisSlotSymbol
-        FW_AllowSuperReference    = 0x8,  // Allow walking of Js::PropertyIds::_superReferenceSymbol and Js::PropertyIds::_superCtorReferenceSymbol
+        FW_AllowLexicalThis       = 0x4,  // Do not filter out Js::PropertyIds::_this
+        FW_AllowSuperReference    = 0x8,  // Allow walking of Js::PropertyIds::_super and Js::PropertyIds::_superConstructor
         FW_DontAddGlobalsDirectly = 0x10, // Do not add global object directly.
     };
 
@@ -218,7 +218,7 @@ namespace Js
         bool IsPropertyValid(PropertyId propertyId, RegSlot location, bool *isPropertyInDebuggerScope, bool* isConst, bool* isInDeadZone) const;
 
     private:
-        static JavascriptString * ParseFunctionName(JavascriptString* displayName, ScriptContext* scriptContext);
+        static const char16 * ParseFunctionName(const char16* displayNameBuffer, const charcount_t displayNameBufferLength, ScriptContext* scriptContext);
     };
 
 
@@ -251,8 +251,9 @@ namespace Js
         virtual void PopulateMembers() override;
         virtual IDiagObjectAddress * GetObjectAddress(int index) override;
 
-        ScopeSlots GetSlotArray() {
-            Var *slotArray = (Var *) instance;
+        ScopeSlots GetSlotArray()
+        {
+            Field(Var) *slotArray = (Field(Var) *) instance;
             Assert(slotArray != nullptr);
             return ScopeSlots(slotArray);
         }
@@ -370,7 +371,7 @@ namespace Js
                             {
                                 activeScopeObject->SetPropertyWithAttributes(
                                     resolveObject.propId,
-                                    JavascriptOperators::BoxStackInstance(resolveObject.obj, scriptContext), //The value escapes, box if necessary.
+                                    JavascriptOperators::BoxStackInstance(resolveObject.obj, scriptContext, /* allowStackFunction */ false, /* deepCopy */ false), //The value escapes, box if necessary.
                                     resolveObject.isConst ? PropertyConstDefaults : PropertyDynamicTypeDefaults,
                                     nullptr);
                             }
@@ -993,59 +994,4 @@ namespace Js
         virtual uint32 GetChildrenCount() override;
     };
 #endif
-
-#ifdef ENABLE_SIMDJS
-    // For SIMD walker
-    template <typename simdType, uint elementCount>
-    class RecyclableSimdObjectWalker : public RecyclableObjectWalker
-    {
-    public:
-        RecyclableSimdObjectWalker(ScriptContext* pContext, Var instance) : RecyclableObjectWalker(pContext, instance) { }
-
-        virtual BOOL Get(int i, ResolvedObject* pResolvedObject) override;
-
-        virtual uint32 GetChildrenCount() override { return elementCount; }
-    };
-
-    // For SIMD concrete walker: specify SIMD type and total elementCount
-    // elementCount can be 4, 8 or 16 for SIMD type like int32x4, int16x8, int8x16
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDFloat32x4, 4>  RecyclableSimdFloat32x4ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDInt32x4,   4>  RecyclableSimdInt32x4ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDInt8x16,  16>  RecyclableSimdInt8x16ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDInt16x8,   8>  RecyclableSimdInt16x8ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDBool32x4,  4>  RecyclableSimdBool32x4ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDBool8x16, 16>  RecyclableSimdBool8x16ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDBool16x8,  8>  RecyclableSimdBool16x8ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDUint32x4,  4>  RecyclableSimdUint32x4ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDUint8x16, 16>  RecyclableSimdUint8x16ObjectWalker;
-    typedef RecyclableSimdObjectWalker<JavascriptSIMDUint16x8,  8>  RecyclableSimdUint16x8ObjectWalker;
-
-    // For SIMD display
-    template <typename simdType, typename simdWalker>
-    class RecyclableSimdObjectDisplay : public RecyclableObjectDisplay
-    {
-    public:
-        RecyclableSimdObjectDisplay(ResolvedObject* resolvedObject) : RecyclableObjectDisplay(resolvedObject) {};
-
-        virtual LPCWSTR Type() override;
-        virtual LPCWSTR Value(int radix) override;
-        virtual BOOL HasChildren() override { return TRUE; }
-        virtual WeakArenaReference<IDiagObjectModelWalkerBase>* CreateWalker() override;
-        virtual DBGPROP_ATTRIB_FLAGS GetTypeAttribute() override { return DBGPROP_ATTRIB_VALUE_IS_EXPANDABLE | DBGPROP_ATTRIB_VALUE_IS_FAKE | DBGPROP_ATTRIB_VALUE_READONLY; }
-        virtual DiagObjectModelDisplayType GetType() { return DiagObjectModelDisplayType_RecyclableSimdDisplay; }
-    };
-
-    // For SIMD concrete display: specify SIMD type and concrete simd walker
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDFloat32x4, RecyclableSimdFloat32x4ObjectWalker>   RecyclableSimdFloat32x4ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDInt32x4,   RecyclableSimdInt32x4ObjectWalker>     RecyclableSimdInt32x4ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDInt8x16,   RecyclableSimdInt8x16ObjectWalker>     RecyclableSimdInt8x16ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDInt16x8,   RecyclableSimdInt16x8ObjectWalker>     RecyclableSimdInt16x8ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDBool32x4,  RecyclableSimdBool32x4ObjectWalker>    RecyclableSimdBool32x4ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDBool8x16,  RecyclableSimdBool8x16ObjectWalker>    RecyclableSimdBool8x16ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDBool16x8,  RecyclableSimdBool16x8ObjectWalker>    RecyclableSimdBool16x8ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDUint32x4,  RecyclableSimdUint32x4ObjectWalker>    RecyclableSimdUint32x4ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDUint8x16,  RecyclableSimdUint8x16ObjectWalker>    RecyclableSimdUint8x16ObjectDisplay;
-    typedef RecyclableSimdObjectDisplay<JavascriptSIMDUint16x8,  RecyclableSimdUint16x8ObjectWalker>    RecyclableSimdUint16x8ObjectDisplay;
-
-#endif // #ifdef ENABLE_SIMDJS
 }

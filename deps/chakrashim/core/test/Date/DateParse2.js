@@ -49,6 +49,10 @@ testParseDate("Tue Feb 02 2012 01:02:03 GMT-0000");
 testParseDate("Tue Feb 02 2012 01:02:03 GMT+0430 (prisec@)");
 testParseDate("Tue Feb 2 01:02:03 PST 2013 B.C.");
 testParseDate("Thu Feb 2 01:02:03 PST 2012");
+testParseDate("Thu, 23 Sep -");
+testParseDate("Thu, 23 Sep-");
+testParseDate("Tue Feb 02 -");
+testParseDate("Tue Feb 02-");
 
 function CUT_NAME(str) {
     return str.replace("(PST)", "(Pacific Standard Time)")

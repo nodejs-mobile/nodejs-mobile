@@ -32,10 +32,10 @@
 void TTReportLastIOError() {
 #ifdef _WIN32
   DWORD lastError = GetLastError();
-  LPTSTR pTemp = NULL;
+  LPTSTR pTemp = nullptr;
   FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                 FORMAT_MESSAGE_ARGUMENT_ARRAY,
-                NULL, lastError, 0, (LPTSTR)&pTemp, 0, NULL);
+                nullptr, lastError, 0, (LPTSTR)&pTemp, 0, nullptr);
   fprintf(stderr, "Error is: %i %s\n", lastError, pTemp);
 #else
   fprintf(stderr, "Error is: %i %s\n", errno, strerror(errno));
@@ -229,7 +229,8 @@ IsolateShim::IsolateShim(JsRuntimeHandle runtime)
       isDisposing(false),
       contextScopeStack(nullptr),
       tryCatchStackTop(nullptr),
-      embeddedData() {
+      embeddedData(),
+      microtaskQueue() {
   // CHAKRA-TODO: multithread locking for s_isolateList?
   this->prevnext = &s_isolateList;
   this->next = s_isolateList;
@@ -243,8 +244,15 @@ IsolateShim::~IsolateShim() {
   assert(this->prevnext == nullptr);
 
   if (IsolateShim::IsIdleGcEnabled()) {
+    uv_prepare_stop(idleGc_prepare_handle());
     uv_close(reinterpret_cast<uv_handle_t*>(idleGc_prepare_handle()), nullptr);
+    uv_timer_stop(idleGc_timer_handle());
     uv_close(reinterpret_cast<uv_handle_t*>(idleGc_timer_handle()), nullptr);
+    // We need to run the UV loop to properly clean up these handles,
+    // but we don't want to run much script code since we are tearing
+    // down the isolate. UV_RUN_NOWAIT should clean up the handles
+    // with the least amount of additonal work.
+    uv_run(uv_default_loop(), UV_RUN_NOWAIT);
   }
 }
 
@@ -266,7 +274,7 @@ IsolateShim::~IsolateShim() {
       error = JsCreateRuntime(attributes, nullptr, &runtime);
   } else {
     if (doRecord) {
-      error = JsTTDCreateRecordRuntime(attributes, snapInterval,
+      error = JsTTDCreateRecordRuntime(attributes, doDebug, snapInterval,
                                        snapHistoryLength,
                                        &TTCreateStreamCallback,
                                        &TTWriteBytesToStreamCallback,
@@ -297,8 +305,7 @@ IsolateShim::~IsolateShim() {
     uv_prepare_init(uv_default_loop(), newIsolateshim->idleGc_prepare_handle());
     uv_unref(reinterpret_cast<uv_handle_t*>(
       newIsolateshim->idleGc_prepare_handle()));
-    uv_timer_init(uv_default_loop(),
-      newIsolateshim->idleGc_timer_handle());
+    uv_timer_init(uv_default_loop(), newIsolateshim->idleGc_timer_handle());
     uv_unref(reinterpret_cast<uv_handle_t*>(
       newIsolateshim->idleGc_timer_handle()));
   }
@@ -318,7 +325,7 @@ IsolateShim::~IsolateShim() {
   return ToIsolate(s_currentIsolate);
 }
 
-/* static */ IsolateShim *IsolateShim::GetCurrent() {
+/* static */ IsolateShim* IsolateShim::GetCurrent() {
   assert(s_currentIsolate);
   return s_currentIsolate;
 }
@@ -377,7 +384,7 @@ bool IsolateShim::IsDisposing() {
 // CHAKRA-TODO: This is not called after cross context work in chakra. Fix this
 // else we will leak chakrashim object.
 void CHAKRA_CALLBACK IsolateShim::JsContextBeforeCollectCallback(
-    JsRef contextRef, void *data) {
+    JsRef contextRef, void* data) {
   IsolateShim * isolateShim = reinterpret_cast<IsolateShim *>(data);
   ContextShim * contextShim = isolateShim->GetContextShim(contextRef);
 
@@ -414,7 +421,7 @@ bool IsolateShim::NewContext(JsContextRef * context, bool exposeGC,
 /* static */
 ContextShim * IsolateShim::GetContextShim(JsContextRef contextRef) {
   assert(contextRef != JS_INVALID_REFERENCE);
-  void *data;
+  void* data;
   if (JsGetContextData(contextRef, &data) != JsNoError) {
     return nullptr;
   }
@@ -424,6 +431,10 @@ ContextShim * IsolateShim::GetContextShim(JsContextRef contextRef) {
 
 bool IsolateShim::GetMemoryUsage(size_t * memoryUsage) {
   return (JsGetRuntimeMemoryUsage(runtime, memoryUsage) == JsNoError);
+}
+
+void IsolateShim::CollectGarbage() {
+  JsCollectGarbage(runtime);
 }
 
 void IsolateShim::DisposeAll() {
@@ -639,15 +650,54 @@ JsValueRef IsolateShim::GetChakraInspectorShimJsArrayBuffer() {
   return chakraInspectorShimArrayBuffer;
 }
 
+void CHAKRA_CALLBACK IsolateShim::PromiseRejectionCallback(
+    JsValueRef promise, JsValueRef reason, bool handled, void* callbackState) {
+  CHAKRA_VERIFY(callbackState != nullptr);
+  v8::PromiseRejectCallback callback =
+      reinterpret_cast<v8::PromiseRejectCallback>(callbackState);
+
+  v8::PromiseRejectMessage message(
+      promise,
+      handled ? v8::kPromiseHandlerAddedAfterReject :
+          v8::kPromiseRejectWithNoHandler,
+      reason,
+      v8::Local<v8::StackTrace>());
+
+  callback(message);
+}
+
+void IsolateShim::SetPromiseRejectCallback(v8::PromiseRejectCallback callback) {
+  JsSetHostPromiseRejectionTracker(IsolateShim::PromiseRejectionCallback,
+                                   reinterpret_cast<void*>(callback));
+}
+
+void IsolateShim::RunMicrotasks() {
+  // Loop until we've handled all the tasks, including the ones
+  // added by these tasks
+  while (!this->microtaskQueue.empty()) {
+    std::vector<MicroTask> batch;
+    std::swap(batch, this->microtaskQueue);
+
+    for (const MicroTask& mt : batch) {
+      JsValueRef notUsed = JS_INVALID_REFERENCE;
+      if (jsrt::CallFunction(mt.task, &notUsed) != JsNoError) {
+        JsGetAndClearException(&notUsed);  // swallow any exception from task
+      }
+    }
+  }
+}
+
+void IsolateShim::QueueMicrotask(JsValueRef task) {
+  this->microtaskQueue.emplace_back(task);
+}
+
 /*static*/
 bool IsolateShim::RunSingleStepOfReverseMoveLoop(v8::Isolate* isolate,
                                                  uint64_t* moveMode,
                                                  int64_t* nextEventTime) {
     int64_t snapEventTime = -1;
     int64_t snapEventEndTime = -1;
-    int64_t origNETime = *nextEventTime;
-    // TODO(mrkmarron) JsTTDMoveMode is no longer 64 bit wide, fix use of
-    // moveMode parameter, convert to 32 bit?
+
     JsTTDMoveMode _moveMode = (JsTTDMoveMode)(*moveMode);
     JsRuntimeHandle rHandle =
         jsrt::IsolateShim::FromIsolate(isolate)->GetRuntimeHandle();

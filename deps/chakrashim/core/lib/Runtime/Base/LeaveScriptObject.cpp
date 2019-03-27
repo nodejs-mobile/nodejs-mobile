@@ -7,7 +7,7 @@
 namespace Js
 {
     EnterScriptObject::EnterScriptObject(ScriptContext* scriptContext, ScriptEntryExitRecord* entryExitRecord,
-        void * returnAddress, bool doCleanup, bool isCallRoot, bool hasCaller)
+        void * returnAddress, void * addrOfReturnAddress, bool doCleanup, bool isCallRoot, bool hasCaller)
     {
         Assert(scriptContext);
 
@@ -18,7 +18,7 @@ namespace Js
         if (scriptContext->GetThreadContext() &&
             scriptContext->GetThreadContext()->IsNoScriptScope())
         {
-            FromDOM_NoScriptScope_fatal_error();
+            FromDOM_NoScriptScope_unrecoverable_error();
         }
 
         // Keep a copy locally so the optimizer can just copy prop it to the dtor
@@ -36,6 +36,7 @@ namespace Js
 
         // Initialize the entry exit record
         entryExitRecord->returnAddrOfScriptEntryFunction = returnAddress;
+        entryExitRecord->addrOfReturnAddrOfScriptEntryFunction = addrOfReturnAddress;
         entryExitRecord->hasCaller = hasCaller;
         entryExitRecord->scriptContext = scriptContext;
 #ifdef EXCEPTION_CHECK

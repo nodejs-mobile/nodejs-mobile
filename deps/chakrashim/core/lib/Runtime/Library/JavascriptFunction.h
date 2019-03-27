@@ -13,17 +13,28 @@ namespace Js
     {
         union
         {
-            int retIntVal;
-            int64 retInt64Val;
-            float retFloatVal;
-            double retDoubleVal;
-            AsmJsSIMDValue retSimdVal;
+            byte xmm[sizeof(AsmJsSIMDValue)];
+            float f32;
+            double f64;
+            AsmJsSIMDValue simd;
+        };
+        union
+        {
+            int32 i32;
+            int64 i64;
+            struct
+            {
+                int32 low;
+                int32 high;
+            };
         };
     };
 
 #if _M_X64
    extern "C" Var amd64_CallFunction(RecyclableObject *function, JavascriptMethod entryPoint, CallInfo callInfo, uint argc, Var *argv);
 #endif
+
+    extern "C" Var BreakSpeculation(Var passthroughObject);
 
     class JavascriptFunction : public DynamicObject
     {
@@ -32,11 +43,8 @@ namespace Js
 
         // Need a constructor cache on every function (script and native) to avoid extra checks on the fast path, if the function isn't fixed.
         Field(ConstructorCache*) constructorCache;
-
     protected:
-
         Field(FunctionInfo *) functionInfo;  // Underlying function
-
 
         DEFINE_VTABLE_CTOR(JavascriptFunction, DynamicObject);
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptFunction);
@@ -78,6 +86,9 @@ namespace Js
             static FunctionInfo SymbolHasInstance;
 
             static FunctionInfo NewAsyncFunctionInstance;
+#ifdef ALLOW_JIT_REPRO
+            static FunctionInfo InvokeJit;
+#endif
         };
 
         static const int numberLinesPrependedToAnonymousFunction = 1;
@@ -95,16 +106,20 @@ namespace Js
 
         static Var NewAsyncFunctionInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var NewAsyncFunctionInstanceRestrictedMode(RecyclableObject* function, CallInfo callInfo, ...);
+#ifdef ALLOW_JIT_REPRO
+        static Var EntryInvokeJit(RecyclableObject* function, CallInfo callInfo, ...);
+#endif
 
         static bool Is(Var aValue);
         static JavascriptFunction* FromVar(Var aValue);
+        static JavascriptFunction* UnsafeFromVar(Var aValue);
         Var CallFunction(Arguments args);
         Var CallRootFunction(Arguments args, ScriptContext * scriptContext, bool inScript);
 #ifdef ASMJS_PLAT
         template <typename T>
-        static T VECTORCALL CallAsmJsFunction(RecyclableObject * function, JavascriptMethod entryPoint, uint argc, Var * argv);
+        static T VECTORCALL CallAsmJsFunction(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg);
+        static PossibleAsmJsReturnValues CallAsmJsFunctionX86Thunk(RecyclableObject * function, JavascriptMethod entryPoint, Var * argv, uint argsSize, byte* reg);
 #endif
-        static PossibleAsmJsReturnValues CallAsmJsFunctionX86Thunk(RecyclableObject * function, JavascriptMethod entryPoint, uint argc, Var * argv);
         template <bool isConstruct>
         static Var CalloutHelper(RecyclableObject* function, Var thisArg, Var overridingNewTarget, Var argArray, ScriptContext* scriptContext);
 
@@ -119,11 +134,11 @@ namespace Js
         static void CheckValidDebugThunk(ScriptContext* scriptContext, RecyclableObject *function);
 #endif
         template <bool doStackProbe>
-        static Var CallFunction(RecyclableObject* obj, JavascriptMethod entryPoint, Arguments args);
+        static Var CallFunction(RecyclableObject* obj, JavascriptMethod entryPoint, Arguments args, bool useLargeArgCount = false);
         static Var CallRootFunction(RecyclableObject* obj, Arguments args, ScriptContext * scriptContext, bool inScript);
         static Var CallRootFunctionInternal(RecyclableObject* obj, Arguments args, ScriptContext * scriptContext, bool inScript);
         static Var CallSpreadFunction(RecyclableObject* obj, Arguments args, const Js::AuxArray<uint32> *spreadIndices);
-        static uint32 GetSpreadSize(const Arguments args, const Js::AuxArray<uint32> *spreadIndices, ScriptContext *scriptContext);
+        static uint GetSpreadSize(const Arguments args, const Js::AuxArray<uint32> *spreadIndices, ScriptContext *scriptContext);
         static void SpreadArgs(const Arguments args, Arguments& destArgs, const Js::AuxArray<uint32> *spreadIndices, ScriptContext *scriptContext);
         static Var EntrySpreadCall(const Js::AuxArray<uint32> *spreadIndices, RecyclableObject* function, CallInfo callInfo, ...);
         static void CheckAlignment();
@@ -164,7 +179,7 @@ namespace Js
 
         BOOL IsScriptFunction() const;
         virtual Var GetSourceString() const { return nullptr; }
-        virtual Var EnsureSourceString();
+        virtual JavascriptString * EnsureSourceString();
         virtual BOOL IsExternalFunction() { return FALSE; }
         virtual BOOL IsWinRTFunction() { return FALSE; }
         BOOL IsStrictMode() const;
@@ -179,14 +194,14 @@ namespace Js
 
         virtual bool HasReadOnlyPropertiesInvisibleToTypeHandler() override { return true; }
 
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyReferenceQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual BOOL SetProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info) override;
         virtual BOOL SetProperty(JavascriptString* propertyNameString, Var value, PropertyOperationFlags flags, PropertyValueInfo* info) override;
         virtual BOOL SetPropertyWithAttributes(PropertyId propertyId, Var value, PropertyAttributes attributes, PropertyValueInfo* info, PropertyOperationFlags flags = PropertyOperation_None, SideEffects possibleSideEffects = SideEffects_Any) override;
-        virtual BOOL GetAccessors(PropertyId propertyId, Var *getter, Var *setter, ScriptContext * requestContext) override;
+        _Check_return_ _Success_(return) virtual BOOL GetAccessors(PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter, ScriptContext* requestContext) override;
         virtual DescriptorFlags GetSetter(PropertyId propertyId, Var *setterValue, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual DescriptorFlags GetSetter(JavascriptString* propertyNameString, Var *setterValue, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual BOOL IsConfigurable(PropertyId propertyId) override;

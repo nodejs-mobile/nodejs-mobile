@@ -27,6 +27,35 @@ private:
 
 #if _WIN32
 
+// This needs to be delay loaded because SetThreadDescription is available only
+// on Win10 1607+
+class Kernel32Library : protected DelayLoadLibrary
+{
+private:
+    typedef HRESULT (WINAPI *PFnSetThreadDescription)(
+      _In_ HANDLE hThread,
+      _In_ PCWSTR lpThreadDescription
+    );
+
+    PFnSetThreadDescription setThreadDescription;
+
+  public:
+    static Kernel32Library* Instance;
+
+    Kernel32Library() : DelayLoadLibrary(),
+      setThreadDescription(NULL)
+    {
+        this->EnsureFromSystemDirOnly();
+    }
+
+    LPCTSTR GetLibraryName() const;
+
+    HRESULT WINAPI SetThreadDescription(
+        _In_ HANDLE hThread,
+        _In_ PCWSTR lpThreadDescription
+        );
+};
+
 // This needs to be delay loaded because it is available on
 // Win8 only
 class NtdllLibrary : protected DelayLoadLibrary
@@ -34,6 +63,7 @@ class NtdllLibrary : protected DelayLoadLibrary
 public:
     // needed for InitializeObjectAttributes
     static const ULONG OBJ_KERNEL_HANDLE = 0x00000200;
+    static const ULONG MAP_PROCESS = 1;
 
     typedef struct _UNICODE_STRING {
         USHORT Length;
@@ -105,6 +135,13 @@ private:
     typedef NTSTATUS(NTAPI *PFnNtClose)(_In_ HANDLE Handle);
     PFnNtClose close;
 
+    typedef NTSTATUS(NTAPI *PFnNtUnlockVirtualMemory)(
+        _In_ HANDLE ProcessHandle,
+        _Inout_ PVOID *BaseAddress,
+        _Inout_ PSIZE_T RegionSize,
+        _In_ ULONG MapType);
+    PFnNtUnlockVirtualMemory unlock;
+
 public:
     static NtdllLibrary* Instance;
 
@@ -117,7 +154,8 @@ public:
         createSection(NULL),
         mapViewOfSection(NULL),
         unmapViewOfSection(NULL),
-        close(NULL)
+        close(NULL),
+        unlock(nullptr)
     {
         this->EnsureFromSystemDirOnly();
     }
@@ -126,7 +164,7 @@ public:
 
 #if PDATA_ENABLED
     _Success_(return == 0)
-    DWORD AddGrowableFunctionTable(_Out_ PVOID * DynamicTable,
+    NTSTATUS AddGrowableFunctionTable(_Out_ PVOID * DynamicTable,
         _In_reads_(MaximumEntryCount) PRUNTIME_FUNCTION FunctionTable,
         _In_ DWORD EntryCount,
         _In_ DWORD MaximumEntryCount,
@@ -175,6 +213,13 @@ public:
 
     NTSTATUS Close(
         _In_ HANDLE Handle
+    );
+
+    NTSTATUS UnlockVirtualMemory(
+        _In_ HANDLE ProcessHandle,
+        _Inout_ PVOID *BaseAddress,
+        _Inout_ PSIZE_T RegionSize,
+        _In_ ULONG MapType
     );
 };
 #endif

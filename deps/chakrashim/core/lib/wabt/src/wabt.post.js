@@ -47,15 +47,15 @@ function allocateBuffer(buf) {
   if (buf instanceof ArrayBuffer) {
     size = buf.byteLength;
     addr = malloc(size);
-    (new Uint8Array(Module.buffer, addr, size)).set(new Uint8Array(buf))
+    (new Uint8Array(HEAP8.buffer, addr, size)).set(new Uint8Array(buf))
   } else if (ArrayBuffer.isView(buf)) {
     size = buf.buffer.byteLength;
     addr = malloc(size);
-    (new Uint8Array(Module.buffer, addr, size)).set(buf);
+    (new Uint8Array(HEAP8.buffer, addr, size)).set(buf);
   } else if (typeof buf == 'string') {
     size = buf.length;
     addr = malloc(size);
-    Module.writeAsciiToMemory(buf, addr, true);  // don't null-terminate
+    writeAsciiToMemory(buf, addr, true);  // don't null-terminate
   } else {
     throw new Error('unknown buffer type: ' + buf);
   }
@@ -65,7 +65,7 @@ function allocateBuffer(buf) {
 function allocateCString(s) {
   var size = s.length;
   var addr = malloc(size);
-  Module.writeAsciiToMemory(s, addr);
+  writeAsciiToMemory(s, addr);
   return {addr: addr, size: size};
 }
 
@@ -111,7 +111,7 @@ OutputBuffer.prototype.toString = function() {
 
   var addr = Module._wabt_output_buffer_get_data(this.addr);
   var size = Module._wabt_output_buffer_get_size(this.addr);
-  return Module.Pointer_stringify(addr, size);
+  return Pointer_stringify(addr, size);
 };
 
 OutputBuffer.prototype.destroy = function() {
@@ -134,7 +134,7 @@ ErrorHandler.prototype = Object.create(Object.prototype);
 ErrorHandler.prototype.getMessage = function() {
   var addr = Module._wabt_error_handler_buffer_get_data(this.addr);
   var size = Module._wabt_error_handler_buffer_get_size(this.addr);
-  return Module.Pointer_stringify(addr, size);
+  return Pointer_stringify(addr, size);
 }
 
 ErrorHandler.prototype.destroy = function() {
@@ -142,29 +142,28 @@ ErrorHandler.prototype.destroy = function() {
 };
 
 
-/// parseWast
-function parseWast(filename, buffer) {
+/// parseWat
+function parseWat(filename, buffer) {
   var lexer = new Lexer(filename, buffer);
   var errorHandler = new ErrorHandler('text');
 
   try {
     var parseResult_addr =
-        Module._wabt_parse_wast(lexer.addr, errorHandler.addr);
+        Module._wabt_parse_wat(lexer.addr, errorHandler.addr);
 
-    var result =
-        Module._wabt_parse_wast_result_get_result(parseResult_addr);
+    var result = Module._wabt_parse_wat_result_get_result(parseResult_addr);
     if (result !== WABT_OK) {
-      throw new Error('parseWast failed:\n' + errorHandler.getMessage());
+      throw new Error('parseWat failed:\n' + errorHandler.getMessage());
     }
 
-    var script_addr =
-        Module._wabt_parse_wast_result_release_script(parseResult_addr);
-    var result = new WasmScript(lexer, script_addr);
+    var module_addr =
+        Module._wabt_parse_wat_result_release_module(parseResult_addr);
+    var result = new WasmModule(lexer, module_addr);
     // Clear lexer so it isn't destroyed below.
     lexer = null;
     return result;
   } finally {
-    Module._wabt_destroy_parse_wast_result(parseResult_addr);
+    Module._wabt_destroy_parse_wat_result(parseResult_addr);
     errorHandler.destroy();
     if (lexer) {
       lexer.destroy();
@@ -191,7 +190,7 @@ function readWasm(buffer, options) {
 
     var module_addr =
         Module._wabt_read_binary_result_release_module(readBinaryResult_addr);
-    var result = new WasmModule(module_addr);
+    var result = new WasmModule(null, module_addr);
     return result;
   } finally {
     Module._wabt_destroy_read_binary_result(readBinaryResult_addr);
@@ -201,31 +200,19 @@ function readWasm(buffer, options) {
 }
 
 
-/// WasmScript
-function WasmScript(lexer, script_addr) {
+// WasmModule (can't call it Module because emscripten has claimed it.)
+function WasmModule(lexer, module_addr) {
   this.lexer = lexer;
-  this.script_addr = script_addr;
+  this.module_addr = module_addr;
 }
-WasmScript.prototype = Object.create(Object.prototype);
+WasmModule.prototype = Object.create(Object.prototype);
 
-WasmScript.prototype.resolveNames = function() {
+WasmModule.prototype.validate = function() {
   var errorHandler = new ErrorHandler('text');
   try {
-    var result = Module._wabt_resolve_names_script(
-        this.lexer.addr, this.script_addr, errorHandler.addr);
-    if (result !== WABT_OK) {
-      throw new Error('resolveNames failed:\n' + errorHandler.getMessage());
-    }
-  } finally {
-    errorHandler.destroy();
-  }
-};
-
-WasmScript.prototype.validate = function() {
-  var errorHandler = new ErrorHandler('text');
-  try {
-    var result = Module._wabt_validate_script(
-        this.lexer.addr, this.script_addr, errorHandler.addr);
+    var lexer_addr = this.lexer ? this.lexer.addr : null;
+    var result = Module._wabt_validate_module(
+        lexer_addr, this.module_addr, errorHandler.addr);
     if (result !== WABT_OK) {
       throw new Error('validate failed:\n' + errorHandler.getMessage());
     }
@@ -234,23 +221,19 @@ WasmScript.prototype.validate = function() {
   }
 };
 
-WasmScript.prototype.toBinary = function(options) {
-  var module_addr = Module._wabt_get_first_module(this.script_addr);
-  var module = new WasmModule(module_addr);
-  return module.toBinary(options);
+WasmModule.prototype.resolveNames = function() {
+  var errorHandler = new ErrorHandler('text');
+  try {
+    var lexer_addr = this.lexer ? this.lexer.addr : null;
+    var result = Module._wabt_resolve_names_module(
+        lexer_addr, this.module_addr, errorHandler.addr);
+    if (result !== WABT_OK) {
+      throw new Error('resolveNames failed:\n' + errorHandler.getMessage());
+    }
+  } finally {
+    errorHandler.destroy();
+  }
 };
-
-WasmScript.prototype.destroy = function() {
-  Module._wabt_destroy_script(this.script_addr);
-  this.lexer.destroy();
-};
-
-
-// WasmModule (can't call it Module because emscripten has claimed it.)
-function WasmModule(module_addr) {
-  this.module_addr = module_addr;
-}
-WasmModule.prototype = Object.create(Object.prototype);
 
 WasmModule.prototype.generateNames = function() {
   var result = Module._wabt_generate_names_module(this.module_addr);
@@ -337,19 +320,10 @@ WasmModule.prototype.toBinary = function(options) {
 
 WasmModule.prototype.destroy = function() {
   Module._wabt_destroy_module(this.module_addr);
+  if (this.lexer) {
+    this.lexer.destroy();
+  }
 };
 
-var exports = {
-  ready: Promise.resolve(),
-  parseWast: parseWast,
-  readWasm: readWasm,
-};
-
-if (typeof module !== "undefined" && module && module.exports)
-  module.exports = exports;
-else if (typeof define === "function" && define.amd)
-  define(function() { return exports; });
-else
-  (typeof global !== "undefined" && global || typeof window !== "undefined" && window || this).wabt = exports;
-
-})();  // Call IIFE from wabt.pre.js.
+Module['parseWat'] = parseWat;
+Module['readWasm'] = readWasm;

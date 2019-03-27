@@ -79,21 +79,28 @@ class ContextShim {
   JsValueRef GetRegExpConstructor();
   JsValueRef GetProxyConstructor();
   JsValueRef GetMapConstructor();
+  JsValueRef GetSetConstructor();
+  JsValueRef GetArrayConstructor();
   JsValueRef GetGlobalType(GlobalType index);
 
   JsValueRef GetToStringFunction();
   JsValueRef GetValueOfFunction();
   JsValueRef GetStringConcatFunction();
+  JsValueRef GetArrayFromFunction();
   JsValueRef GetArrayPushFunction();
   JsValueRef GetGlobalPrototypeFunction(GlobalPrototypeFunction index);
   JsValueRef GetProxyOfGlobal();
   JsValueRef GetMapGetFunction();
   JsValueRef GetMapSetFunction();
   JsValueRef GetMapHasFunction();
+  JsValueRef GetSetAddFunction();
 
+  uint32_t GetNumberOfEmbedderDataFields();
   void * GetAlignedPointerFromEmbedderData(int index);
   void SetAlignedPointerInEmbedderData(int index, void * value);
-  void RunMicrotasks();
+
+  void CacheGlobalProperties();
+  void ResolveGlobalChanges(JsValueRef sandbox);
 
   static ContextShim * GetCurrent();
 
@@ -133,10 +140,9 @@ class ContextShim {
   JsValueRef proxyOfGlobal;
 
   JsValueRef globalPrototypeFunction[GlobalPrototypeFunction::_FunctionCount];
-  JsValueRef getOwnPropertyDescriptorFunction;
-
-  JsValueRef promiseContinuationFunction;
   std::vector<void*> embedderData;
+
+  JsValueRef cachedDescriptors;
 
 #define DECLARE_CHAKRASHIM_FUNCTION_GETTER(F) \
  public: \
@@ -161,12 +167,12 @@ class ContextShim {
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(getSymbolKeyFor);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(getSymbolFor);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(ensureDebug);
-  DECLARE_CHAKRASHIM_FUNCTION_GETTER(enqueueMicrotask);
-  DECLARE_CHAKRASHIM_FUNCTION_GETTER(dequeueMicrotask);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(getPropertyAttributes);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(getOwnPropertyNames);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(jsonParse);
   DECLARE_CHAKRASHIM_FUNCTION_GETTER(jsonStringify);
+  DECLARE_CHAKRASHIM_FUNCTION_GETTER(beforeContext);
+  DECLARE_CHAKRASHIM_FUNCTION_GETTER(afterContext);
 };
 
 }  // namespace jsrt

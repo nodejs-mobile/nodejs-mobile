@@ -5,10 +5,13 @@
 
 #pragma once
 
+#include "CommonDefines.h"
+
 #ifdef __midl
 import "wtypes.idl";
 #include "sdkddkver.h"
 #endif
+
 
 #if defined(WINVER) && WINVER >= _WIN32_WINNT_WINBLUE // on 8.1+, RPC can marshal process handle for us
 #ifdef __midl
@@ -17,7 +20,7 @@ cpp_quote("#define USE_RPC_HANDLE_MARSHALLING 1")
 #define USE_RPC_HANDLE_MARSHALLING 1
 #endif
 
-#if defined(_M_IX86) || defined(_M_ARM)
+#if defined(TARGET_32)
 #ifdef __midl
 #define CHAKRA_WB_PTR int
 #else
@@ -25,7 +28,7 @@ cpp_quote("#define USE_RPC_HANDLE_MARSHALLING 1")
 #endif
 #define CHAKRA_PTR int
 #define BV_SHIFT 5
-#elif defined(_M_X64) || defined(_M_ARM64)
+#elif defined(TARGET_64)
 #ifdef __midl
 #define CHAKRA_WB_PTR __int64
 #else
@@ -45,13 +48,13 @@ cpp_quote("#define USE_RPC_HANDLE_MARSHALLING 1")
 #define IDL_PAD2(num) IDL_Field(short) struct_pad_##num;
 #define IDL_PAD4(num) IDL_Field(int) struct_pad_##num;
 
-#if defined(_M_X64) || defined(_M_ARM64)
+#if defined(TARGET_64)
 #define X64_PAD4(num) IDL_Field(int) struct_pad_##num;
 #else
 #define X64_PAD4(num)
 #endif
 
-#if defined(_M_IX86) || defined(_M_ARM)
+#if defined(TARGET_32)
 #define X86_PAD4(num) IDL_Field(int) struct_pad_##num;
 #else
 #define X86_PAD4(num)
@@ -75,7 +78,7 @@ typedef unsigned char boolean;
 #define __JITTypes_h__
 
 // TODO: OOP JIT, how do we make this better?
-const int VTABLE_COUNT = 48;
+const int VTABLE_COUNT = 51;
 const int EQUIVALENT_TYPE_CACHE_SIZE = 8;
 
 typedef IDL_DEF([context_handle]) void * PTHREADCONTEXT_HANDLE;
@@ -124,15 +127,22 @@ typedef struct EquivalentTypeSetIDL
 
 typedef struct FixedFieldIDL
 {
+    IDL_Field(unsigned short) valueType;
     IDL_Field(boolean) nextHasSameFixedField;
     IDL_Field(boolean) isClassCtor;
-    IDL_Field(unsigned short) valueType;
     IDL_Field(unsigned int) localFuncId;
     IDL_Field(TypeIDL) type;
     IDL_Field(CHAKRA_WB_PTR) fieldValue;
     IDL_Field(CHAKRA_WB_PTR) funcInfoAddr;
     IDL_Field(CHAKRA_WB_PTR) environmentAddr;
 } FixedFieldIDL;
+
+typedef struct ObjTypeSpecPolymorphicInfoIDL
+{
+    IDL_Field(unsigned short) slotIndex;
+    IDL_Field(boolean) usesAuxSlot;
+    IDL_PAD1(0)
+} ObjTypeSpecPolymorphicInfoIDL;
 
 typedef struct JITTimeConstructorCacheIDL
 {
@@ -158,18 +168,20 @@ typedef struct ObjTypeSpecFldIDL
 {
     IDL_Field(unsigned short) flags;
     IDL_Field(unsigned short) slotIndex;
+    IDL_Field(unsigned short) polymorphicInfoCount;
     IDL_Field(unsigned short) fixedFieldCount;
     IDL_Field(unsigned short) fixedFieldInfoArraySize; // 1 (when fixedFieldCount is 0) or fixedFieldCount
+    IDL_PAD2(0)
     IDL_Field(int) propertyId;
     IDL_Field(int) typeId;
     IDL_Field(unsigned int) id;
-    X64_PAD4(0)
     IDL_Field(CHAKRA_WB_PTR) protoObjectAddr;
     IDL_Field(CHAKRA_WB_PTR) propertyGuardValueAddr;
     IDL_Field(EquivalentTypeSetIDL *) typeSet;
     IDL_Field(TypeIDL *) initialType;
     IDL_Field(JITTimeConstructorCacheIDL *) ctorCache;
     IDL_DEF([size_is(fixedFieldInfoArraySize)]) IDL_Field(FixedFieldIDL *) fixedFieldInfoArray;
+    IDL_DEF([size_is(polymorphicInfoCount)]) IDL_Field(ObjTypeSpecPolymorphicInfoIDL *) polymorphicInfoArray;
 } ObjTypeSpecFldIDL;
 
 typedef struct PinnedTypeRefsIDL
@@ -201,6 +213,15 @@ typedef struct BVSparseNodeIDL
     X64_PAD4(0)
     __int64 data;
 } BVSparseNodeIDL;
+
+typedef struct CallbackInfoIDL
+{
+    byte argInfoButs;
+    IDL_PAD1(0)
+    IDL_PAD2(1)
+    unsigned int sourceId;
+    unsigned int functionId;
+} CallbackInfoIDL;
 
 typedef struct CallSiteIDL
 {
@@ -237,19 +258,26 @@ typedef struct ArrayCallSiteIDL
 #endif
 } ArrayCallSiteIDL;
 
+typedef struct LdLenIDL
+{
+    unsigned short arrayType;
+    byte bits;
+    IDL_PAD1(0)
+} LdLenIDL;
+
 typedef struct LdElemIDL
 {
     unsigned short arrayType;
     unsigned short elemType;
+    byte flags;
     byte bits;
-    IDL_PAD1(0)
 } LdElemIDL;
 
 typedef struct StElemIDL
 {
     unsigned short arrayType;
+    byte flags;
     byte bits;
-    IDL_PAD1(0)
 } StElemIDL;
 
 typedef struct ProfileDataIDL
@@ -259,12 +287,14 @@ typedef struct ProfileDataIDL
 
     ThisIDL thisData;
 
+    unsigned short profiledLdLenCount;
     unsigned short profiledLdElemCount;
     unsigned short profiledStElemCount;
     unsigned short profiledArrayCallSiteCount;
 
     unsigned short profiledSlotCount;
     unsigned short profiledCallSiteCount;
+    unsigned short profiledCallbackCount;
 
     unsigned short profiledReturnTypeCount;
     unsigned short profiledDivOrRemCount;
@@ -275,6 +305,8 @@ typedef struct ProfileDataIDL
     unsigned int loopCount;
 
     BVFixedIDL * loopFlags;
+
+    IDL_DEF([size_is(profiledLdLenCount)]) LdLenIDL * ldLenData;
 
     IDL_DEF([size_is(profiledLdElemCount)]) LdElemIDL * ldElemData;
 
@@ -288,6 +320,8 @@ typedef struct ProfileDataIDL
     IDL_DEF([size_is(profiledSlotCount)]) unsigned short * slotData;
 
     IDL_DEF([size_is(profiledCallSiteCount)]) CallSiteIDL * callSiteData;
+
+    IDL_DEF([size_is(profiledCallbackCount)]) CallbackInfoIDL * callbackData;
 
     IDL_DEF([size_is(profiledReturnTypeCount)]) unsigned short * returnTypeData;
 
@@ -311,8 +345,6 @@ typedef struct ThreadContextDataIDL
 
     IDL_PAD2(0)
     X64_PAD4(1)
-    CHAKRA_PTR chakraBaseAddress;
-    CHAKRA_PTR crtBaseAddress;
     CHAKRA_PTR threadStackLimitAddr;
     CHAKRA_PTR scriptStackLimit;
     CHAKRA_PTR bailOutRegisterSaveSpaceAddr;
@@ -327,12 +359,7 @@ typedef struct ScriptContextDataIDL
 {
     boolean isRecyclerVerifyEnabled;
     boolean recyclerAllowNativeCodeBumpAllocation;
-#ifdef ENABLE_SIMDJS
-    boolean isSIMDEnabled;
-#else
-    IDL_PAD1(0)
-#endif
-    IDL_PAD1(1)
+    IDL_PAD2(1)
     unsigned int recyclerVerifyPad;
     CHAKRA_PTR vtableAddresses[VTABLE_COUNT];
 
@@ -346,6 +373,7 @@ typedef struct ScriptContextDataIDL
     CHAKRA_PTR negativeZeroAddr;
     CHAKRA_PTR numberTypeStaticAddr;
     CHAKRA_PTR stringTypeStaticAddr;
+    CHAKRA_PTR symbolTypeStaticAddr;
     CHAKRA_PTR objectTypeAddr;
     CHAKRA_PTR objectHeaderInlinedTypeAddr;
     CHAKRA_PTR regexTypeAddr;
@@ -363,10 +391,13 @@ typedef struct ScriptContextDataIDL
     CHAKRA_PTR numberAllocatorAddr;
     CHAKRA_PTR recyclerAddr;
     CHAKRA_PTR builtinFunctionsBaseAddr;
+#ifdef ENABLE_SCRIPT_DEBUGGING
     CHAKRA_PTR debuggingFlagsAddr;
     CHAKRA_PTR debugStepTypeAddr;
     CHAKRA_PTR debugFrameAddressAddr;
     CHAKRA_PTR debugScriptIdWhenSetAddr;
+    CHAKRA_PTR chakraLibAddr;
+#endif
 } ScriptContextDataIDL;
 
 typedef struct SmallSpanSequenceIDL
@@ -383,7 +414,8 @@ typedef struct JITLoopHeaderIDL
 {
     boolean isNested;
     boolean isInTry;
-    IDL_PAD2(0)
+    boolean isInTryFinally;
+    IDL_PAD1(0)
     unsigned int interpretCount;
     unsigned int startOffset;
     unsigned int endOffset;
@@ -403,13 +435,14 @@ typedef struct StatementMapIDL
 
 typedef struct WasmSignatureIDL
 {
-    int resultType;
     unsigned int id;
+    unsigned int resultsCount;
     unsigned short paramSize;
     unsigned short paramsCount;
     X64_PAD4(0)
     CHAKRA_PTR shortSig;
     IDL_DEF([size_is(paramsCount)]) int * params;
+    IDL_DEF([size_is(resultsCount)]) int * results;
 } WasmSignatureIDL;
 
 typedef struct TypedSlotInfo
@@ -427,7 +460,7 @@ typedef struct TypedSlotInfo
 typedef struct AsmJsDataIDL
 {
     boolean usesHeapBuffer;
-    IDL_PAD1(0)
+    boolean wasmIsSharedMemory;
     unsigned short argByteSize;
     unsigned short argCount;
     IDL_PAD2(1)
@@ -634,7 +667,9 @@ typedef struct FunctionJITTimeDataIDL
 
     IDL_DEF([size_is(ldFldInlineeCount)]) struct FunctionJITTimeDataIDL ** ldFldInlinees;
 
-    X64_PAD4(1)
+    IDL_DEF([size_is(callbackInlineeCount)]) struct FunctionJITTimeDataIDL ** callbackInlinees;
+
+    unsigned int callbackInlineeCount;
     unsigned int objTypeSpecFldInfoCount;
     IDL_DEF([size_is(objTypeSpecFldInfoCount)]) ObjTypeSpecFldIDL ** objTypeSpecFldInfoArray;
 
@@ -645,8 +680,10 @@ typedef struct FunctionJITTimeDataIDL
     CHAKRA_PTR functionInfoAddr;
     CHAKRA_PTR callsCountAddress;
     CHAKRA_PTR weakFuncRef;
+    CHAKRA_PTR entryPointInfoAddr;
 } FunctionJITTimeDataIDL;
 
+#if !FLOATVAR
 typedef struct XProcNumberPageSegment
 {
     struct XProcNumberPageSegment* nextSegment;
@@ -658,6 +695,7 @@ typedef struct XProcNumberPageSegment
     CHAKRA_PTR allocEndAddress;
     CHAKRA_PTR pageSegment;
 } XProcNumberPageSegment;
+#endif
 
 typedef struct PolymorphicInlineCacheIDL
 {
@@ -692,7 +730,9 @@ typedef struct CodeGenWorkItemIDL
     unsigned int inlineeInfoCount;
     unsigned int symIdToValueTypeMapCount;
     X64_PAD4(1)
+#if !FLOATVAR
     XProcNumberPageSegment * xProcNumberPageSegment;
+#endif
 
     PolymorphicInlineCacheInfoIDL * selfInfo;
 
@@ -823,9 +863,9 @@ typedef struct JITOutputIDL
     unsigned int propertyGuardCount;
     unsigned int ctorCachesCount;
 
-#if defined(_M_X64)
+#if TARGET_64
     CHAKRA_PTR xdataAddr;
-#elif defined(_M_ARM) || defined(_M_ARM64)
+#elif defined(_M_ARM)
     unsigned int xdataOffset;
 #else
     X86_PAD4(0)
@@ -840,7 +880,9 @@ typedef struct JITOutputIDL
     NativeDataFixupTable* nativeDataFixupTable;
     NativeDataBuffer* buffer;
     EquivalentTypeGuardOffsets* equivalentTypeGuardOffsets;
+#if !FLOATVAR
     XProcNumberPageSegment* numberPageSegments;
+#endif
     __int64 startTime;
 } JITOutputIDL;
 

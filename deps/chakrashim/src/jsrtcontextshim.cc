@@ -80,7 +80,6 @@ ContextShim::ContextShim(IsolateShim * isolateShim,
       zero(JS_INVALID_REFERENCE),
       globalObject(JS_INVALID_REFERENCE),
       proxyOfGlobal(JS_INVALID_REFERENCE),
-      promiseContinuationFunction(JS_INVALID_REFERENCE),
 #include "jsrtcachedpropertyidref.inc"
 #undef DEF_IS_TYPE
       cloneObjectFunction(JS_INVALID_REFERENCE),
@@ -96,12 +95,13 @@ ContextShim::ContextShim(IsolateShim * isolateShim,
       getSymbolKeyForFunction(JS_INVALID_REFERENCE),
       getSymbolForFunction(JS_INVALID_REFERENCE),
       ensureDebugFunction(JS_INVALID_REFERENCE),
-      enqueueMicrotaskFunction(JS_INVALID_REFERENCE),
-      dequeueMicrotaskFunction(JS_INVALID_REFERENCE),
       getPropertyAttributesFunction(JS_INVALID_REFERENCE),
       getOwnPropertyNamesFunction(JS_INVALID_REFERENCE),
       jsonParseFunction(JS_INVALID_REFERENCE),
-      jsonStringifyFunction(JS_INVALID_REFERENCE) {
+      jsonStringifyFunction(JS_INVALID_REFERENCE),
+      beforeContextFunction(JS_INVALID_REFERENCE),
+      afterContextFunction(JS_INVALID_REFERENCE),
+      cachedDescriptors(JS_INVALID_REFERENCE) {
   memset(globalConstructor, 0, sizeof(globalConstructor));
   memset(globalPrototypeFunction, 0, sizeof(globalPrototypeFunction));
 }
@@ -142,6 +142,10 @@ ContextShim * ContextShim::GetCurrent() {
   return IsolateShim::GetCurrent()->GetCurrentContextShim();
 }
 
+uint32_t ContextShim::GetNumberOfEmbedderDataFields() {
+  return static_cast<uint32_t>(embedderData.size());
+}
+
 void* ContextShim::GetAlignedPointerFromEmbedderData(int index) {
   if (index >= 0 &&
       static_cast<std::vector<void*>::size_type>(index) < embedderData.size()) {
@@ -176,7 +180,7 @@ bool ContextShim::InitializeBuiltIn(JsValueRef * builtInValue, Fn getBuiltIn) {
   *builtInValue = value;
 
   // TTD_NODE
-  JsAddRef(*builtInValue, nullptr);
+  JsTTDNotifyLongLivedReferenceAdd(*builtInValue);
 
   return true;
 }
@@ -197,7 +201,12 @@ static const char* s_globalTypeNames[] = {
 
 bool ContextShim::InitializeGlobalTypes() {
   for (int i = 0; i < GlobalType::_TypeCount; i++) {
-    if (!InitializeBuiltIn(&globalConstructor[i], s_globalTypeNames[i])) {
+    // TODO(boingoing): Remove this shim when BigUint64Array is supported in
+    //                  chakra
+    const char* globalName = (i != GlobalType::BigUint64Array) ?
+      s_globalTypeNames[i] :
+      s_globalTypeNames[GlobalType::Uint32Array];
+    if (!InitializeBuiltIn(&globalConstructor[i], globalName)) {
       return false;
     }
   }
@@ -262,7 +271,7 @@ bool ContextShim::InitializeBuiltIns() {
   keepAliveObject = newKeepAliveObject;
 
   // TTD_NODE
-  JsAddRef(keepAliveObject, nullptr);
+  JsTTDNotifyLongLivedReferenceAdd(keepAliveObject);
 
   // true and false is needed by DefineProperty to create the property
   // descriptor
@@ -312,9 +321,9 @@ bool ContextShim::InitializeBuiltIns() {
 static JsValueRef CHAKRA_CALLBACK ProxyOfGlobalGetPrototypeOfCallback(
     JsValueRef callee,
     bool isConstructCall,
-    JsValueRef *arguments,
+    JsValueRef* arguments,
     unsigned short argumentCount,  // NOLINT(runtime/int)
-    void *callbackState) {
+    void* callbackState) {
   // Return the target (which is the global object)
   CHAKRA_VERIFY(argumentCount >= 2);
   return arguments[1];
@@ -485,21 +494,31 @@ void ContextShim::SetAlignedPointerInEmbedderData(int index, void * value) {
   }
 }
 
-void ContextShim::RunMicrotasks() {
-  JsValueRef dequeueMicrotaskFunction = GetdequeueMicrotaskFunction();
-
-  for (;;) {
-    JsValueRef task;
-    if (jsrt::CallFunction(dequeueMicrotaskFunction, &task) != JsNoError ||
-      reinterpret_cast<v8::Value*>(task)->IsUndefined()) {
-      break;
-    }
-
-    JsValueRef notUsed;
-    if (jsrt::CallFunction(task, &notUsed) != JsNoError) {
-      JsGetAndClearException(&notUsed);  // swallow any exception from task
-    }
+void ContextShim::CacheGlobalProperties() {
+  JsValueRef beforeContext = this->GetbeforeContextFunction();
+  JsValueRef result = JS_INVALID_REFERENCE;
+  if (jsrt::CallFunction(beforeContext, globalObject, &result) != JsNoError) {
+    return;
   }
+  this->cachedDescriptors = result;
+  JsAddRef(this->cachedDescriptors, nullptr);
+}
+
+void ContextShim::ResolveGlobalChanges(JsValueRef sandbox) {
+  JsValueRef beforeDescriptors = this->cachedDescriptors;
+  this->cachedDescriptors = JS_INVALID_REFERENCE;
+  if (beforeDescriptors == JS_INVALID_REFERENCE) {
+    return;
+  }
+  JsRelease(beforeDescriptors, nullptr);
+  JsValueRef afterContext = this->GetafterContextFunction();
+  JsValueRef result = JS_INVALID_REFERENCE;
+  jsrt::CallFunction(
+    afterContext,
+    beforeDescriptors,
+    globalObject,
+    sandbox,
+    &result);
 }
 
 // check initialization state first instead of calling
@@ -532,6 +551,10 @@ DECLARE_GETOBJECT(ProxyConstructor,
                   globalConstructor[GlobalType::Proxy])
 DECLARE_GETOBJECT(MapConstructor,
                   globalConstructor[GlobalType::Map])
+DECLARE_GETOBJECT(SetConstructor,
+                  globalConstructor[GlobalType::Set])
+DECLARE_GETOBJECT(ArrayConstructor,
+                  globalConstructor[GlobalType::Array])
 DECLARE_GETOBJECT(ToStringFunction,
                   globalPrototypeFunction[GlobalPrototypeFunction
                     ::Object_toString])
@@ -541,6 +564,9 @@ DECLARE_GETOBJECT(ValueOfFunction,
 DECLARE_GETOBJECT(StringConcatFunction,
                   globalPrototypeFunction[GlobalPrototypeFunction
                     ::String_concat])
+DECLARE_GETOBJECT(ArrayFromFunction,
+                  globalPrototypeFunction[GlobalPrototypeFunction
+                    ::Array_from])
 DECLARE_GETOBJECT(ArrayPushFunction,
                   globalPrototypeFunction[GlobalPrototypeFunction
                     ::Array_push])
@@ -553,6 +579,9 @@ DECLARE_GETOBJECT(MapSetFunction,
 DECLARE_GETOBJECT(MapHasFunction,
                   globalPrototypeFunction[GlobalPrototypeFunction
                     ::Map_has])
+DECLARE_GETOBJECT(SetAddFunction,
+                  globalPrototypeFunction[GlobalPrototypeFunction
+                    ::Set_add])
 
 
 JsValueRef ContextShim::GetProxyOfGlobal() {
@@ -580,7 +609,7 @@ JsValueRef ContextShim::GetCachedShimFunction(CachedPropertyIdRef id,
                   func);
 
     // TTD_NODE
-    JsAddRef(*func, nullptr);
+    JsTTDNotifyLongLivedReferenceAdd(*func);
 
     CHAKRA_VERIFY(error == JsNoError);
   }
@@ -606,12 +635,12 @@ CHAKRASHIM_FUNCTION_GETTER(getStackTrace)
 CHAKRASHIM_FUNCTION_GETTER(getSymbolKeyFor)
 CHAKRASHIM_FUNCTION_GETTER(getSymbolFor)
 CHAKRASHIM_FUNCTION_GETTER(ensureDebug)
-CHAKRASHIM_FUNCTION_GETTER(enqueueMicrotask);
-CHAKRASHIM_FUNCTION_GETTER(dequeueMicrotask);
 CHAKRASHIM_FUNCTION_GETTER(getPropertyAttributes);
 CHAKRASHIM_FUNCTION_GETTER(getOwnPropertyNames);
 CHAKRASHIM_FUNCTION_GETTER(jsonParse);
 CHAKRASHIM_FUNCTION_GETTER(jsonStringify);
+CHAKRASHIM_FUNCTION_GETTER(beforeContext);
+CHAKRASHIM_FUNCTION_GETTER(afterContext);
 
 #define DEF_IS_TYPE(F) CHAKRASHIM_FUNCTION_GETTER(F)
 #include "jsrtcachedpropertyidref.inc"

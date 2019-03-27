@@ -4,6 +4,8 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "Backend.h"
+#include "NativeEntryPointData.h"
+#include "JitTransferData.h"
 
 JITOutput::JITOutput(JITOutputIDL * outputData) :
     m_outputData(outputData),
@@ -198,7 +200,7 @@ void
 JITOutput::RecordNativeCode(const BYTE* sourceBuffer, BYTE* localCodeAddress, TEmitBufferAllocation allocation, TCodeGenAllocators codeGenAllocators)
 {
     Assert(m_outputData->codeAddress == (intptr_t)allocation->allocation->address);
-    if (!codeGenAllocators->emitBufferManager.CommitBuffer(allocation, localCodeAddress, m_outputData->codeSize, sourceBuffer))
+    if (!codeGenAllocators->emitBufferManager.CommitBuffer(allocation, allocation->bytesCommitted, localCodeAddress, m_outputData->codeSize, sourceBuffer))
     {
         Js::Throw::OutOfMemory();
     }
@@ -218,7 +220,7 @@ JITOutput::RecordInlineeFrameOffsetsInfo(unsigned int offsetsArrayOffset, unsign
     m_outputData->inlineeFrameOffsetArrayCount = offsetsArrayCount;
 }
 
-#if _M_X64
+#if TARGET_64
 void
 JITOutput::RecordUnwindInfo(BYTE *unwindInfo, size_t size, BYTE * xdataAddr, BYTE* localXdataAddr)
 {
@@ -229,12 +231,12 @@ JITOutput::RecordUnwindInfo(BYTE *unwindInfo, size_t size, BYTE * xdataAddr, BYT
 
 #elif _M_ARM
 size_t
-JITOutput::RecordUnwindInfo(size_t offset, BYTE *unwindInfo, size_t size, BYTE * xdataAddr)
+JITOutput::RecordUnwindInfo(size_t offset, const BYTE *unwindInfo, size_t size, BYTE * xdataAddr)
 {
     BYTE *xdataFinal = xdataAddr + offset;
 
     Assert(xdataFinal);
-    Assert(((DWORD)xdataFinal & 0x3) == 0); // 4 byte aligned
+    Assert(((ULONG_PTR)xdataFinal & 0x3) == 0); // 4 byte aligned
     memcpy_s(xdataFinal, size, unwindInfo, size);
 
     return (size_t)xdataFinal;
@@ -250,44 +252,64 @@ JITOutput::RecordXData(BYTE * xdata)
 void
 JITOutput::FinalizeNativeCode()
 {
+    CustomHeap::Allocation * allocation = GetAllocation();
 #if ENABLE_OOP_NATIVE_CODEGEN
     if (JITManager::GetJITManager()->IsJITServer())
     {
         m_func->GetOOPCodeGenAllocators()->emitBufferManager.CompletePreviousAllocation(m_oopAlloc);
-#if defined(_CONTROL_FLOW_GUARD)
-#if _M_IX86 || _M_X64
+
+#if defined(_CONTROL_FLOW_GUARD) && !defined(_M_ARM)
         if (!m_func->IsLoopBody() && CONFIG_FLAG(UseJITTrampoline))
         {
-            m_outputData->thunkAddress = m_func->GetOOPThreadContext()->GetJITThunkEmitter()->CreateThunk(m_outputData->codeAddress);
+            allocation->thunkAddress = m_func->GetOOPThreadContext()->GetJITThunkEmitter()->CreateThunk(m_outputData->codeAddress);
         }
-#endif
 #endif
     }
     else
 #endif
     {
         m_func->GetInProcCodeGenAllocators()->emitBufferManager.CompletePreviousAllocation(m_inProcAlloc);
-        m_func->GetInProcJITEntryPointInfo()->SetInProcJITNativeCodeData(m_func->GetNativeCodeDataAllocator()->Finalize());
+        m_func->GetInProcJITEntryPointInfo()->GetInProcNativeEntryPointData()->SetNativeCodeData(m_func->GetNativeCodeDataAllocator()->Finalize());
         m_func->GetInProcJITEntryPointInfo()->GetJitTransferData()->SetRawData(m_func->GetTransferDataAllocator()->Finalize());
 #if !FLOATVAR
         CodeGenNumberChunk * numberChunks = m_func->GetNumberAllocator()->Finalize();
-        m_func->GetInProcJITEntryPointInfo()->SetNumberChunks(numberChunks);
+        m_func->GetInProcJITEntryPointInfo()->GetInProcNativeEntryPointData()->SetNumberChunks(numberChunks);
 #endif
 
-#if defined(_CONTROL_FLOW_GUARD)
-#if _M_IX86 || _M_X64
+#if defined(_CONTROL_FLOW_GUARD) && !defined(_M_ARM)
         if (!m_func->IsLoopBody() && CONFIG_FLAG(UseJITTrampoline))
         {
-            m_outputData->thunkAddress = m_func->GetInProcThreadContext()->GetJITThunkEmitter()->CreateThunk(m_outputData->codeAddress);
+            allocation->thunkAddress = m_func->GetInProcThreadContext()->GetJITThunkEmitter()->CreateThunk(m_outputData->codeAddress);
         }
 #endif
-#endif
     }
-
-    if (!m_outputData->thunkAddress && CONFIG_FLAG(OOPCFGRegistration))
+    m_outputData->thunkAddress = allocation->thunkAddress;
+    if (!allocation->thunkAddress && CONFIG_FLAG(OOPCFGRegistration))
     {
-        m_func->GetThreadContextInfo()->SetValidCallTargetForCFG((PVOID)m_outputData->codeAddress);
+        PVOID callTarget = (PVOID)m_outputData->codeAddress;
+#if ENABLE_OOP_NATIVE_CODEGEN
+        if (JITManager::GetJITManager()->IsJITServer())
+        {
+            m_func->GetOOPCodeGenAllocators()->emitBufferManager.SetValidCallTarget(m_oopAlloc, callTarget, true);
+        }
+        else
+#endif
+        {
+            m_func->GetInProcCodeGenAllocators()->emitBufferManager.SetValidCallTarget(m_inProcAlloc, callTarget, true);
+        }
     }
+}
+
+CustomHeap::Allocation *
+JITOutput::GetAllocation() const
+{
+#if ENABLE_OOP_NATIVE_CODEGEN
+    if (JITManager::GetJITManager()->IsJITServer())
+    {
+        return m_oopAlloc->allocation;
+    }
+#endif
+    return m_inProcAlloc->allocation;
 }
 
 JITOutputIDL *

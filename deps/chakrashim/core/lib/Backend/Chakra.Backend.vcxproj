@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Condition="'$(ChakraBuildPathImported)'!='true'" Project="$(SolutionDir)Chakra.Build.Paths.props" />
   <Import Project="$(BuildConfigPropsPath)Chakra.Build.ProjectConfiguration.props" />
@@ -36,13 +36,10 @@
         $(MSBuildThisFileDirectory)..\Parser;
         $(MSBuildThisFileDirectory)..\WasmReader;
         $(ChakraJITIDLIntDir);
-        $(IcuIncludeDir)\common;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>BackEnd.h</PrecompiledHeaderFile>
-      <!-- # Check out https://osgwiki.com/wiki/Dev_14_Migration for more details about -Zc:implicitNoexcept- -->
-      <AdditionalOptions>-Zc:implicitNoexcept- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(OptimizedBuild)'!='true'">
@@ -122,6 +119,11 @@
       <!-- Since there are more then one LowerMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
       <ObjectFileName Condition="'$(Platform)'!='ARM'">$(IntDir)\arm</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\LowerMD.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <!-- Since there are more then one LowerMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)arm\PeepsMD.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM'">true</ExcludedFromBuild>
       <!-- Since there are more then one PeepsMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
@@ -129,19 +131,46 @@
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)arm\LegalizeMD.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM'">true</ExcludedFromBuild>
+      <!-- Since there are more then one LegalizeMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM'">$(IntDir)\arm</ObjectFileName>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)arm\UnwindInfoManager.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM'">true</ExcludedFromBuild>
+      <!-- Since there are more then one UnwindInfoManager.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM'">$(IntDir)\arm</ObjectFileName>
     </ClCompile>
-    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\LowerMD.cpp">
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\ARM64LogicalImmediates.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
-      <!-- Since there are more then one LowerMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
-      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\Arm64</ObjectFileName>
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\ARM64UnwindEncoder.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)arm64\EncoderMD.cpp">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
       <!-- Since there are more then one EncoderMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
-      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\Arm64</ObjectFileName>
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\LinearScanMD.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <!-- Since there are more then one LinearScanMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\PeepsMD.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <!-- Since there are more then one PeepsMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\LegalizeMD.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <!-- Since there are more then one LegalizeMD.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="$(MSBuildThisFileDirectory)arm64\UnwindInfoManager.cpp">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <!-- Since there are more then one UnwindInfoManager.cpp, we need to set them output into different directory, even when they are ExcludedFromBuild -->
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
     </ClCompile>
     <ClCompile Include="$(MSBuildThisFileDirectory)IRBuilderAsmJs.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)BackendOpCodeAttrAsmJs.cpp" />
@@ -151,9 +180,9 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)CodeGenAllocators.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)CodeGenNumberAllocator.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)DbCheckPostLower.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)EquivalentTypeSet.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptBailOut.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptExpr.cpp" />
-    <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptSimd128.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptFields.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptIntBounds.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Backend.cpp">
@@ -167,6 +196,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)FlowGraph.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Func.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOpt.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptArrays.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)InductionVariable.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)InlineeFrameInfo.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)InliningHeuristics.cpp" />
@@ -177,6 +207,7 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)IRBuilder.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IRViewer.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)IRType.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)JavascriptNativeOperators.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JnHelperMethod.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)LinearScan.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)Lower.cpp" />
@@ -219,10 +250,24 @@
     <ClCompile Include="$(MSBuildThisFileDirectory)GlobOptBlockData.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)ValueInfo.cpp" />
     <ClCompile Include="$(MSBuildThisFileDirectory)JITThunkEmitter.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)IntConstMath.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)NativeEntryPointData.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)JitTransferData.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="JitTransferData.h" />
+    <ClInclude Include="NativeEntryPointData.h" />
     <ClInclude Include="AgenPeeps.h" />
-    <ClInclude Include="arm64\ARMEncode.h">
+    <ClInclude Include="arm64\ARM64Encoder.h">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="arm64\ARM64LogicalImmediates.h">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="arm64\ARM64NeonEncoder.h">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="arm64\ARM64UnwindEncoder.h">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="arm64\EncoderMD.h">
@@ -256,10 +301,13 @@
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="AsmJsJITInfo.h" />
+    <ClInclude Include="EquivalentTypeSet.h" />
     <ClInclude Include="FunctionCodeGenJitTimeData.h" />
     <ClInclude Include="FunctionJITRuntimeInfo.h" />
     <ClInclude Include="FunctionJITTimeInfo.h" />
+    <ClInclude Include="GlobOptArrays.h" />
     <ClInclude Include="GlobOptBlockData.h" />
+    <ClInclude Include="IntConstMath.h" />
     <ClInclude Include="IRBaseTypeList.h" />
     <ClInclude Include="IRBuilderAsmJs.h" />
     <ClInclude Include="BackendOpCodeAttrAsmJs.h" />
@@ -334,6 +382,9 @@
     <ClInclude Include="arm\LegalizeMD.h">
       <ExcludedFromBuild Condition="'$(Platform)'!='arm'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="arm64\LegalizeMD.h">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="arm\LinearScanMD.h">
       <ExcludedFromBuild Condition="'$(Platform)'!='arm'">true</ExcludedFromBuild>
     </ClInclude>
@@ -392,6 +443,7 @@
     <ClInclude Include="IRViewer.h" />
     <ClInclude Include="IRType.h" />
     <ClInclude Include="IRTypeList.h" />
+    <ClInclude Include="JavascriptNativeOperators.h" />
     <ClInclude Include="JITThunkEmitter.h" />
     <ClInclude Include="ObjTypeSpecFldInfo.h" />
     <ClInclude Include="JITOutput.h" />
@@ -445,6 +497,10 @@
       <ExcludedFromBuild Condition="'$(Platform)'!='x64'">true</ExcludedFromBuild>
       <ObjectFileName Condition="'$(Platform)'!='x64'">$(IntDir)\x64</ObjectFileName>
     </MASM>
+    <ARMASM Include="$(MSBuildThisFileDirectory)arm64\LinearScanMdA.asm">
+      <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
+      <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
+    </ARMASM>
     <ARMASM Include="$(MSBuildThisFileDirectory)arm64\Thunks.asm">
       <ExcludedFromBuild Condition="'$(Platform)'!='ARM64'">true</ExcludedFromBuild>
       <ObjectFileName Condition="'$(Platform)'!='ARM64'">$(IntDir)\arm64</ObjectFileName>
@@ -471,11 +527,6 @@
     <ProjectReference Include="..\JITIDL\Chakra.JITIDL.vcxproj">
       <Project>{0db5ecbc-9385-4a65-be2c-4ef7c65cb719}</Project>
     </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="CRC.h">
-      <FileType>CppCode</FileType>
-    </ClInclude>
   </ItemGroup>
   <Import Project="$(BuildConfigPropsPath)Chakra.Build.targets" Condition="exists('$(BuildConfigPropsPath)Chakra.Build.targets')" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

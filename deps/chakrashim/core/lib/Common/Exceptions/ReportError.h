@@ -27,39 +27,43 @@ enum ErrorReason
     Fatal_JsReentrancy_Error = 19,
     Fatal_TTDAbort = 20,
     Fatal_Failed_API_Result = 21,
+    Fatal_OutOfMemory = 22,
+    // Unused = 23,
+    Fatal_JsBuiltIn_Error = 24,
+    Fatal_XDataRegistration = 25,
 };
 
 extern "C" void ReportFatalException(
     __in ULONG_PTR context,
     __in HRESULT exceptionCode,
     __in ErrorReason reasonCode,
-    __in ULONG scenario);
+    __in ULONG_PTR scenario);
 
 // We can have other error handle code path with
 // unique call stack so we can collect data in Dr. Watson.
 void JavascriptDispatch_OOM_fatal_error(
     __in ULONG_PTR context);
 
-void CustomHeap_BadPageState_fatal_error(
+void CustomHeap_BadPageState_unrecoverable_error(
     __in ULONG_PTR context);
 
-void Amd64StackWalkerOutOfContexts_fatal_error(
+void Amd64StackWalkerOutOfContexts_unrecoverable_error(
     __in ULONG_PTR context);
 
-void FailedToBox_OOM_fatal_error(
+void FailedToBox_OOM_unrecoverable_error(
     __in ULONG_PTR context);
 
-#if defined(RECYCLER_WRITE_BARRIER) && defined(_M_X64_OR_ARM64)
-void X64WriteBarrier_OOM_fatal_error();
+#if defined(RECYCLER_WRITE_BARRIER) && defined(TARGET_64)
+void X64WriteBarrier_OOM_unrecoverable_error();
 #endif
 
 void DebugHeap_OOM_fatal_error();
 
-void MarkStack_OOM_fatal_error();
+void MarkStack_OOM_unrecoverable_error();
 
 void Binary_Inconsistency_fatal_error();
 void Version_Inconsistency_fatal_error();
-void EntryExitRecord_Corrupted_fatal_error();
+void EntryExitRecord_Corrupted_unrecoverable_error();
 void UnexpectedExceptionHandling_fatal_error();
 
 #ifdef LARGEHEAPBLOCK_ENCODING
@@ -67,16 +71,87 @@ void LargeHeapBlock_Metadata_Corrupted(
     __in ULONG_PTR context, __in unsigned char calculatedCheckSum);
 #endif
 
-void FromDOM_NoScriptScope_fatal_error();
-void Debugger_AttachDetach_fatal_error(HRESULT hr);
-void RpcFailure_fatal_error(HRESULT hr);
+void FromDOM_NoScriptScope_unrecoverable_error();
+void Debugger_AttachDetach_unrecoverable_error(HRESULT hr);
+void RpcFailure_unrecoverable_error(HRESULT hr);
+void OutOfMemory_unrecoverable_error();
+void RecyclerSingleAllocationLimit_unrecoverable_error();
+void MemGCSingleAllocationLimit_unrecoverable_error();
+
+void OutOfMemoryTooManyPinnedObjects_unrecoverable_error();
+void OutOfMemoryTooManyClosedContexts_unrecoverable_error();
+void OutOfMemoryAllocationPolicy_unrecoverable_error();
+
+void OutOfMemoryTooManyPinnedObjects_unrecoverable_error_visible();
+void OutOfMemoryTooManyClosedContexts_unrecoverable_error_visible();
+void OutOfMemoryAllocationPolicy_unrecoverable_error_visible();
+
+void OutOfMemoryTooManyPinnedObjects_unrecoverable_error_notvisible();
+void OutOfMemoryTooManyClosedContexts_unrecoverable_error_notvisible();
+void OutOfMemoryAllocationPolicy_unrecoverable_error_notvisible();
+
+void XDataRegistration_unrecoverable_error(HRESULT hr, ULONG_PTR scenario);
+
+inline void OutOfMemoryTooManyPinnedObjects_unrecoverable_error(BYTE visibility)
+{
+    switch (visibility)
+    {
+    case 1:
+        OutOfMemoryTooManyPinnedObjects_unrecoverable_error_visible();
+        break;
+    case 2:
+        OutOfMemoryTooManyPinnedObjects_unrecoverable_error_notvisible();
+        break;
+    default:
+        OutOfMemoryTooManyPinnedObjects_unrecoverable_error();
+        break;
+    }
+}
+
+inline void OutOfMemoryTooManyClosedContexts_unrecoverable_error(BYTE visibility)
+{
+    switch (visibility)
+    {
+    case 1:
+        OutOfMemoryTooManyClosedContexts_unrecoverable_error_visible();
+        break;
+    case 2:
+        OutOfMemoryTooManyClosedContexts_unrecoverable_error_notvisible();
+        break;
+    default:
+        OutOfMemoryTooManyClosedContexts_unrecoverable_error();
+        break;
+    }
+}
+
+inline void OutOfMemoryAllocationPolicy_unrecoverable_error(BYTE visibility)
+{
+    switch (visibility)
+    {
+    case 1:
+        OutOfMemoryAllocationPolicy_unrecoverable_error_visible();
+        break;
+    case 2:
+        OutOfMemoryAllocationPolicy_unrecoverable_error_notvisible();
+        break;
+    default:
+        OutOfMemoryAllocationPolicy_unrecoverable_error();
+        break;
+    }
+}
 
 #ifndef DISABLE_SEH
 // RtlReportException is available on Vista and up, but we cannot use it for OOB release.
 // Use UnhandleExceptionFilter to let the default handler handles it.
 inline LONG FatalExceptionFilter(
-    __in LPEXCEPTION_POINTERS lpep)
+    __in LPEXCEPTION_POINTERS lpep, 
+    __in void * addressToBlame = nullptr)
 {
+    if (addressToBlame != nullptr)
+    {
+        lpep->ExceptionRecord->ExceptionAddress = addressToBlame;
+    }
+
     LONG rc = UnhandledExceptionFilter(lpep);
 
     // re == EXCEPTION_EXECUTE_HANDLER means there is no debugger attached, let's terminate

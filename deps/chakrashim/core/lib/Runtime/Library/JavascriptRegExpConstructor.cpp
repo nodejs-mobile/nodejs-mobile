@@ -17,6 +17,7 @@ namespace Js
     JavascriptRegExpConstructor::JavascriptRegExpConstructor(DynamicType * type) :
         RuntimeFunction(type, &JavascriptRegExp::EntryInfo::NewInstance),
         reset(false),
+        invalidatedLastMatch(false),
         lastPattern(nullptr),
         lastMatch() // undefined
     {
@@ -35,11 +36,11 @@ namespace Js
         }
     }
 
-    BOOL JavascriptRegExpConstructor::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL JavascriptRegExpConstructor::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
         return GetEnumeratorWithPrefix(
             RecyclerNew(GetScriptContext()->GetRecycler(), JavascriptRegExpEnumerator, this, flags, requestContext),
-            enumerator, flags, requestContext, forInCache);
+            enumerator, flags, requestContext, enumeratorCache);
     }
 
     void JavascriptRegExpConstructor::SetLastMatch(UnifiedRegex::RegexPattern* lastPattern, JavascriptString* lastInput, UnifiedRegex::GroupInfo lastMatch)
@@ -53,18 +54,44 @@ namespace Js
         this->lastInput = lastInput;
         this->lastMatch = lastMatch;
         this->reset = true;
+        this->invalidatedLastMatch = false;
+    }
+
+    void JavascriptRegExpConstructor::InvalidateLastMatch(UnifiedRegex::RegexPattern* lastPattern, JavascriptString* lastInput)
+    {
+        AssertMsg(lastPattern != nullptr, "lastPattern should not be null");
+        AssertMsg(lastInput != nullptr, "lastInput should not be null");
+        AssertMsg(JavascriptOperators::GetTypeId(lastInput) != TypeIds_Null, "lastInput should not be JavaScript null");
+
+        this->lastPattern = lastPattern;
+        this->lastInput = lastInput;
+        this->lastMatch.Reset();
+        this->reset = true;
+        this->invalidatedLastMatch = true;
     }
 
     void JavascriptRegExpConstructor::EnsureValues()
     {
         if (reset)
         {
-            Assert(!lastMatch.IsUndefined());
             ScriptContext* scriptContext = this->GetScriptContext();
-            UnifiedRegex::RegexPattern* pattern = lastPattern;
-            JavascriptString* emptyString = scriptContext->GetLibrary()->GetEmptyString();
             const CharCount lastInputLen = lastInput->GetLength();
-            // IE8 quirk: match of length 0 is regarded as length 1
+            const char16* lastInputStr = lastInput->GetString();
+            UnifiedRegex::RegexPattern* pattern = lastPattern;
+
+            // When we perform a regex test operation it's possible the result of the operation will be loaded from a cache and the match will not be computed and updated in the ctor.
+            // In that case we invalidate the last match stored in the ctor and will need to compute it before it will be accessible via $1 etc.
+            // Since we only do this for the case of RegExp.prototype.test cache hit, we know several things:
+            //  - The regex is not global or sticky
+            //  - There was a match (test returned true)
+            if (invalidatedLastMatch)
+            {
+                this->lastMatch = RegexHelper::SimpleMatch(scriptContext, pattern, lastInputStr, lastInputLen, 0);
+                invalidatedLastMatch = false;
+            }
+
+            Assert(!lastMatch.IsUndefined());
+            JavascriptString* emptyString = scriptContext->GetLibrary()->GetEmptyString();
             CharCount lastIndexVal = lastMatch.EndOffset();
             this->index = JavascriptNumber::ToVar(lastMatch.offset, scriptContext);
             this->lastIndex = JavascriptNumber::ToVar(lastIndexVal, scriptContext);
@@ -82,7 +109,7 @@ namespace Js
                 // every match is prohibitively slow. Instead, run the match again using the known last input string.
                 if (!pattern->WasLastMatchSuccessful())
                 {
-                    RegexHelper::SimpleMatch(scriptContext, pattern, lastInput->GetString(), lastInputLen, lastMatch.offset);
+                    RegexHelper::SimpleMatch(scriptContext, pattern, lastInputStr, lastInputLen, lastMatch.offset);
                 }
                 Assert(pattern->WasLastMatchSuccessful());
                 for (int groupId = 1; groupId < min(numGroups, NumCtorCaptures); groupId++)
@@ -99,6 +126,11 @@ namespace Js
             for (int groupId = numGroups; groupId < NumCtorCaptures; groupId++)
                 captures[groupId] = emptyString;
             reset = false;
+        }
+        else
+        {
+            // If we are not resetting the values, the last match cannot be invalidated.
+            Assert(!invalidatedLastMatch);
         }
     }
 
@@ -141,7 +173,7 @@ namespace Js
         PropertyIds::index,
     };
 
-    PropertyQueryFlags JavascriptRegExpConstructor::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags JavascriptRegExpConstructor::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         switch (propertyId)
         {
@@ -167,7 +199,7 @@ namespace Js
         case PropertyIds::$9:
             return PropertyQueryFlags::Property_Found;
         default:
-            return JavascriptFunction::HasPropertyQuery(propertyId);
+            return JavascriptFunction::HasPropertyQuery(propertyId, info);
         }
     }
 
@@ -322,8 +354,12 @@ namespace Js
         case PropertyIds::input:
         case PropertyIds::$_:
             //TODO: review: although the 'input' property is marked as readonly, it has a set on V5.8. There is no spec on this.
-            EnsureValues(); // The last match info relies on the last input. Use it before it is changed.
-            this->lastInput = JavascriptConversion::ToString(value, this->GetScriptContext());
+            {
+                auto tempInput = JavascriptConversion::ToString(value, this->GetScriptContext());
+                // Above toString call can cause user code to be called, which may call .match to invalidate our state, ensure that we have proper values in case that happens.
+                EnsureValues(); // The last match info relies on the last input. Use it before it is changed.
+                this->lastInput = tempInput;
+            }
             *result = true;
             return true;
         case PropertyIds::lastMatch:
@@ -391,28 +427,30 @@ namespace Js
 
     BOOL JavascriptRegExpConstructor::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags)
     {
-        JsUtil::CharacterBuffer<WCHAR> propertyName(propertyNameString->GetString(), propertyNameString->GetLength());
-        if (BuiltInPropertyRecords::input.Equals(propertyName)
-            || BuiltInPropertyRecords::$_.Equals(propertyName)
-            || BuiltInPropertyRecords::length.Equals(propertyName)
-            || BuiltInPropertyRecords::lastMatch.Equals(propertyName)
-            || BuiltInPropertyRecords::$Ampersand.Equals(propertyName)
-            || BuiltInPropertyRecords::lastParen.Equals(propertyName)
-            || BuiltInPropertyRecords::$Plus.Equals(propertyName)
-            || BuiltInPropertyRecords::leftContext.Equals(propertyName)
-            || BuiltInPropertyRecords::$BackTick.Equals(propertyName)
-            || BuiltInPropertyRecords::rightContext.Equals(propertyName)
-            || BuiltInPropertyRecords::$Tick.Equals(propertyName)
-            || BuiltInPropertyRecords::$1.Equals(propertyName)
-            || BuiltInPropertyRecords::$2.Equals(propertyName)
-            || BuiltInPropertyRecords::$3.Equals(propertyName)
-            || BuiltInPropertyRecords::$4.Equals(propertyName)
-            || BuiltInPropertyRecords::$5.Equals(propertyName)
-            || BuiltInPropertyRecords::$6.Equals(propertyName)
-            || BuiltInPropertyRecords::$7.Equals(propertyName)
-            || BuiltInPropertyRecords::$8.Equals(propertyName)
-            || BuiltInPropertyRecords::$9.Equals(propertyName)
-            || BuiltInPropertyRecords::index.Equals(propertyName))
+        PropertyRecord const * propertyRecord = nullptr;
+        propertyNameString->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
+        PropertyId propertyId = propertyRecord->GetPropertyId();
+
+        if (BuiltInPropertyRecords::input.Equals(propertyId)
+            || BuiltInPropertyRecords::$_.Equals(propertyId)
+            || BuiltInPropertyRecords::lastMatch.Equals(propertyId)
+            || BuiltInPropertyRecords::$Ampersand.Equals(propertyId)
+            || BuiltInPropertyRecords::lastParen.Equals(propertyId)
+            || BuiltInPropertyRecords::$Plus.Equals(propertyId)
+            || BuiltInPropertyRecords::leftContext.Equals(propertyId)
+            || BuiltInPropertyRecords::$BackTick.Equals(propertyId)
+            || BuiltInPropertyRecords::rightContext.Equals(propertyId)
+            || BuiltInPropertyRecords::$Tick.Equals(propertyId)
+            || BuiltInPropertyRecords::$1.Equals(propertyId)
+            || BuiltInPropertyRecords::$2.Equals(propertyId)
+            || BuiltInPropertyRecords::$3.Equals(propertyId)
+            || BuiltInPropertyRecords::$4.Equals(propertyId)
+            || BuiltInPropertyRecords::$5.Equals(propertyId)
+            || BuiltInPropertyRecords::$6.Equals(propertyId)
+            || BuiltInPropertyRecords::$7.Equals(propertyId)
+            || BuiltInPropertyRecords::$8.Equals(propertyId)
+            || BuiltInPropertyRecords::$9.Equals(propertyId)
+            || BuiltInPropertyRecords::index.Equals(propertyId))
         {
             JavascriptError::ThrowCantDeleteIfStrictMode(flags, GetScriptContext(), propertyNameString->GetString());
             return false;

@@ -320,7 +320,7 @@ var tests = {
       var pd = { value: 1 };
       Object.defineProperty(o, propertyName, pd);
       pd = { value: 2, writable: true };
-      assert.throws(function() { Object.defineProperty(o, propertyName, pd); }, TypeError);
+      assert.throws(function() { Object.defineProperty(o, propertyName, pd); }, TypeError, '', 'Cannot redefine non-configurable property \'foo21\'');
       return true;
     }
   },
@@ -333,7 +333,7 @@ var tests = {
       var pd = { value: 1 };
       Object.defineProperty(o, propertyName, pd);
       pd = { value: 2, writable: false };
-      assert.throws(function() { Object.defineProperty(o, propertyName, pd); }, TypeError);
+      assert.throws(function() { Object.defineProperty(o, propertyName, pd); }, TypeError, '', 'Cannot modify non-writable property \'foo22\'');
     }
   },
 
@@ -527,6 +527,20 @@ var tests = {
       assert.areEqual(expected, Object.getOwnPropertyDescriptor(o, propertyName), "wrong value of getOwnPropertyDescriptor");
       assert.areEqual(val, o[propertyName], "the property value is wrong");
       assert.areEqual(false, Object.isExtensible(o), "isExtensible() changed");
+    }
+  },
+
+  test35: {
+    name: "Set and unset getter property on a non-configurable property",
+    body: function() {
+        function function_1(a,b,c)
+        {
+            return 1;
+        }
+
+        function_1.__defineGetter__("length",function(){});
+        Object.defineProperty(function_1,"length", { value:(0x0a000030/2) });
+        assert.areEqual(function_1.length, 0x0a000030/2, "value in defineProperty not assigned");
     }
   },
 

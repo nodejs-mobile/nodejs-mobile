@@ -11,6 +11,8 @@ typedef _Return_type_success_(return >= 0) LONG NTSTATUS;
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
 #endif
 
+#define MAKE_HR(errnum) (MAKE_HRESULT(SEVERITY_ERROR, FACILITY_CONTROL, errnum))
+
 // If we're using the PAL for C++ standard library compat,
 // we don't need to include wchar for string handling
 #ifndef USING_PAL_STDLIB
@@ -30,7 +32,6 @@ typedef _Return_type_success_(return >= 0) LONG NTSTATUS;
 #endif
 
 #include "Common/GetCurrentFrameId.h"
-
 namespace Js
 {
     typedef int32 PropertyId;
@@ -116,7 +117,6 @@ template<> struct IntMath<int64> { using Type = Int64Math; };
 #include "DataStructures/GrowingArray.h"
 #include "DataStructures/EvalMapString.h"
 #include "DataStructures/RegexKey.h"
-#include "DataStructures/LineOffsetCache.h"
 
 #include "Core/ICustomConfigFlags.h"
 #include "Core/CmdParser.h"
@@ -143,9 +143,11 @@ class AutoExpDummyClass
 #pragma warning(push)
 #if defined(PROFILE_RECYCLER_ALLOC) || defined(HEAP_TRACK_ALLOC) || defined(ENABLE_DEBUG_CONFIG_OPTIONS)
 #ifdef _MSC_VER
-#include <typeinfo.h>
-#else
+#ifdef _UCRT
 #include <typeinfo>
+#else
+#include <typeinfo.h>
+#endif
 #endif
 #endif
 #pragma warning(pop)

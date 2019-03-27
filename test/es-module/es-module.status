@@ -1,7 +1,43 @@
-prefix parallel
+prefix es-module
 
 # To mark a test as flaky, list the test name in the appropriate section
 # below, without ".js", followed by ": PASS,FLAKY". Example:
 # sample-test                        : PASS,FLAKY
 
 [true] # This section applies to all platforms
+
+[$jsEngine==chakracore]
+# These tests are failing for Node-Chakracore and should eventually be fixed
+test-esm-basic-imports : SKIP
+test-esm-cjs-main : SKIP
+test-esm-cyclic-dynamic-import : SKIP
+test-esm-double-encoding : SKIP
+test-esm-dynamic-import : SKIP
+test-esm-encoded-path : SKIP
+test-esm-encoded-path-native : SKIP
+test-esm-error-cache : SKIP
+test-esm-example-loader : SKIP
+test-esm-forbidden-globals : SKIP
+test-esm-import-meta: SKIP
+test-esm-json : SKIP
+test-esm-live-binding : SKIP
+test-esm-loader-dependency : SKIP
+test-esm-loader-invalid-format : SKIP
+test-esm-loader-invalid-url : SKIP
+test-esm-loader-missing-dynamic-instantiate-hook : SKIP
+test-esm-loader-modulemap : SKIP
+test-esm-main-lookup : SKIP
+test-esm-named-exports : SKIP
+test-esm-namespace : SKIP
+test-esm-preserve-symlinks : SKIP
+test-esm-preserve-symlinks-main : SKIP
+test-esm-preserve-symlinks-not-found : SKIP
+test-esm-preserve-symlinks-not-found-plain : SKIP
+test-esm-require-cache : SKIP
+test-esm-resolve-hook : SKIP
+test-esm-shared-loader-dep : SKIP
+test-esm-shebang : SKIP
+test-esm-snapshot : SKIP
+test-esm-symlink : SKIP
+test-esm-symlink-main : SKIP
+test-esm-throw-undefined : SKIP

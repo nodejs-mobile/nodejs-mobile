@@ -49,21 +49,18 @@
     <default>
       <files>valuesAndEntries.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
-      <tags>BugFix</tags>
     </default>
   </test>
   <test>
     <default>
       <files>misc_bugs.js</files>
       <compile-flags>-es6experimental -args summary -endargs</compile-flags>
-      <tags>BugFix</tags>
     </default>
   </test>
   <test>
     <default>
       <files>misc_bugs.js</files>
       <compile-flags>-es6experimental -ForceDeferParse -args summary -endargs</compile-flags>
-      <tags>BugFix</tags>
     </default>
   </test>
   <test>
@@ -76,7 +73,6 @@
     <default>
       <files>lookupgettersetter.js</files>
       <compile-flags>-args summary -endargs</compile-flags>
-      <tags>BugFix</tags>
     </default>
   </test>
   <test>
@@ -89,21 +85,14 @@
     <default>
       <files>atomics_test.js</files>
       <compile-flags>-ESSharedArrayBuffer -args summary -endargs</compile-flags>
-      <tags>exclude_xplat</tags>
     </default>
   </test>
-  <test>
+    <test>
     <default>
-      <files>arraybuffer_transfer.js</files>
-      <compile-flags>-es6experimental -args 0x1000 -endargs</compile-flags>
-      <tags>exclude_amd64</tags>
-    </default>
-  </test>
-  <test>
-    <default>
-      <files>arraybuffer_transfer.js</files>
-      <compile-flags>-es6experimental -args 0 -endargs</compile-flags>
-      <tags>exclude_amd64</tags>
+      <files>PromiseRejectionTracking.js</files>
+      <compile-flags>-TrackRejectedPromises -args summary -endargs -nodeferparse</compile-flags>
+      <baseline>PromiseRejectionTracking.baseline</baseline>
+      <tags>exclude_jshost</tags>
     </default>
   </test>
 </regress-exe>

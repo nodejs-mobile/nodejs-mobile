@@ -4,13 +4,16 @@
 //-------------------------------------------------------------------------------------------------------
 #pragma once
 
-#include "CommonDefines.h"
 #include "CommonMin.h"
 
 #ifdef _MSC_VER
 #pragma warning(push)
 #if defined(PROFILE_RECYCLER_ALLOC) || defined(HEAP_TRACK_ALLOC) || defined(ENABLE_DEBUG_CONFIG_OPTIONS)
+#ifdef _UCRT
+#include <typeinfo>
+#else
 #include <typeinfo.h>
+#endif
 #endif
 #pragma warning(pop)
 #endif

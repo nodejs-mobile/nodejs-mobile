@@ -27,6 +27,7 @@
 #include "Common/Jobs.inl"
 #include "Core/CommonMinMax.h"
 #include "Memory/RecyclerWriteBarrierManager.h"
+#include "Memory/XDataAllocator.h"
 
 namespace JsUtil
 {
@@ -483,6 +484,24 @@ namespace JsUtil
     // BackgroundJobProcessor
     // -------------------------------------------------------------------------------------------------------------------------
 
+    ParallelThreadData::ParallelThreadData(AllocationPolicyManager* policyManager) :
+        threadHandle(0),
+        isWaitingForJobs(false),
+        canDecommit(true),
+        currentJob(nullptr),
+        threadStartedOrClosing(false),
+        backgroundPageAllocator(policyManager, Js::Configuration::Global.flags, PageAllocatorType_BGJIT,
+        (AutoSystemInfo::Data.IsLowMemoryProcess() ?
+            PageAllocator::DefaultLowMaxFreePageCount :
+            PageAllocator::DefaultMaxFreePageCount)),
+        threadArena(nullptr),
+        processor(nullptr),
+        parser(nullptr),
+        pse(nullptr),
+        scriptContextBG(nullptr)
+    {
+    }
+
     void BackgroundJobProcessor::InitializeThreadCount()
     {
         if (CONFIG_FLAG(ForceMaxJitThreadCount))
@@ -534,7 +553,14 @@ namespace JsUtil
 
             this->parallelThreadData[i]->processor = this;
             // Make sure to create the thread suspended so the thread handle can be assigned before the thread starts running
-            this->parallelThreadData[i]->threadHandle = reinterpret_cast<HANDLE>(PlatformAgnostic::Thread::Create(0, &StaticThreadProc, this->parallelThreadData[i], PlatformAgnostic::Thread::ThreadInitCreateSuspended));
+            auto threadHandle = PlatformAgnostic::Thread::Create(0, &StaticThreadProc,
+                this->parallelThreadData[i], PlatformAgnostic::Thread::ThreadInitCreateSuspended, _u("Chakra Parallel Worker Thread"));
+
+            if (threadHandle != PlatformAgnostic::Thread::InvalidHandle)
+            {
+                this->parallelThreadData[i]->threadHandle = reinterpret_cast<HANDLE>(threadHandle);
+            }
+
             if (!this->parallelThreadData[i]->threadHandle)
             {
                 HeapDelete(parallelThreadData[i]);
@@ -615,6 +641,9 @@ namespace JsUtil
         threadService(threadService),
         threadCount(0),
         maxThreadCount(0)
+#if PDATA_ENABLED && defined(_WIN32)
+        ,hasExtraWork(0)
+#endif
     {
         if (!threadService->HasCallback())
         {
@@ -676,6 +705,10 @@ namespace JsUtil
         //Wait for 1 sec on jobReady and shutdownBackgroundThread events.
         unsigned int result = WaitForMultipleObjectsEx(_countof(handles), handles, false, 1000, false);
 
+#if PDATA_ENABLED && defined(_WIN32)
+        DoExtraWork();
+#endif
+
         while (result == WAIT_TIMEOUT)
         {
             if (threadData->CanDecommit())
@@ -685,6 +718,7 @@ namespace JsUtil
                 this->ForEachManager([&](JobManager *manager){
                     manager->OnDecommit(threadData);
                 });
+
                 result = WaitForMultipleObjectsEx(_countof(handles), handles, false, INFINITE, false);
             }
             else
@@ -700,6 +734,17 @@ namespace JsUtil
 
         return result == WAIT_OBJECT_0;
     }
+
+#if PDATA_ENABLED && defined(_WIN32)
+    void BackgroundJobProcessor::DoExtraWork()
+    {
+        while (InterlockedExchangeAdd(&hasExtraWork, 0) > 0)
+        {
+            DelayDeletingFunctionTable::Clear();
+            Sleep(50);
+        }        
+    }
+#endif
 
     bool BackgroundJobProcessor::WaitWithThreadForThreadStartedOrClosingEvent(ParallelThreadData *parallelThreadData, const unsigned int milliseconds)
     {
@@ -840,6 +885,12 @@ namespace JsUtil
         {
             AutoCriticalSection lock(&criticalSection);
             // Managers must remove themselves. Hence, Close does not remove managers. So, not asserting on !IsClosed().
+
+            if (!HasManager(manager))
+            {
+                // Since this manager isn't owned by this processor, no need to remove and cleanup
+                return;
+            }
 
             managers.Unlink(manager);
             if(manager->numJobsAddedToProcessor == 0)
@@ -1069,39 +1120,53 @@ namespace JsUtil
                     threadData->isWaitingForJobs = false;
                     continue;
                 }
-
-                Assert(numJobs != 0);
-                --numJobs;
-                threadData->currentJob = job;
-                criticalSection.Leave();
-
-                const bool succeeded = Process(job, threadData);
-
-                criticalSection.Enter();
-                threadData->currentJob = 0;
-                JobManager *const manager = job->Manager();
-                JobProcessed(manager, job, succeeded); // the job may be deleted during this and should not be used afterwards
-                Assert(manager->numJobsAddedToProcessor != 0);
-                --manager->numJobsAddedToProcessor;
-                if(manager->isWaitable)
+                else
                 {
-                    WaitableJobManager *const waitableManager = static_cast<WaitableJobManager *>(manager);
-                    Assert(!(waitableManager->jobBeingWaitedUpon && waitableManager->isWaitingForQueuedJobs));
-                    if(waitableManager->jobBeingWaitedUpon == job)
+                    // Job found. Proceed with Processing
+                    Assert(numJobs != 0);
+                    --numJobs;
+                    threadData->currentJob = job;
+
+                    JobManager *const manager = job->Manager();
+                    manager->JobProcessing(job);
+
+                    criticalSection.Leave();
+
+                    const bool succeeded = Process(job, threadData);
+
+                    criticalSection.Enter();
+                    threadData->currentJob = 0;
+                    
+                    JobProcessed(manager, job, succeeded); // the job may be deleted during this and should not be used afterwards
+                    Assert(manager->numJobsAddedToProcessor != 0);
+                    --manager->numJobsAddedToProcessor;
+                    if (manager->isWaitable)
                     {
-                        waitableManager->jobBeingWaitedUpon = 0;
-                        waitableManager->jobBeingWaitedUponProcessed.Set();
+                        WaitableJobManager *const waitableManager = static_cast<WaitableJobManager *>(manager);
+                        Assert(!(waitableManager->jobBeingWaitedUpon && waitableManager->isWaitingForQueuedJobs));
+                        if (waitableManager->jobBeingWaitedUpon == job)
+                        {
+                            waitableManager->jobBeingWaitedUpon = 0;
+                            waitableManager->jobBeingWaitedUponProcessed.Set();
+                        }
+                        else if (waitableManager->isWaitingForQueuedJobs && manager->numJobsAddedToProcessor == 0)
+                        {
+                            waitableManager->isWaitingForQueuedJobs = false;
+                            waitableManager->queuedJobsProcessed.Set();
+                        }
                     }
-                    else if(waitableManager->isWaitingForQueuedJobs && manager->numJobsAddedToProcessor == 0)
+                    if (manager->numJobsAddedToProcessor == 0)
                     {
-                        waitableManager->isWaitingForQueuedJobs = false;
-                        waitableManager->queuedJobsProcessed.Set();
+                        LastJobProcessed(manager); // the manager may be deleted during this and should not be used afterwards
                     }
                 }
-                if(manager->numJobsAddedToProcessor == 0)
-                    LastJobProcessed(manager); // the manager may be deleted during this and should not be used afterwards
             }
             criticalSection.Leave();
+
+#if PDATA_ENABLED && defined(_WIN32)
+            // flush the function tables in background thread after closed and before shutting down thread
+            DelayDeletingFunctionTable::Clear();
+#endif
 
             EDGE_ETW_INTERNAL(EventWriteJSCRIPT_NATIVECODEGEN_STOP(this, 0));
         }
@@ -1226,7 +1291,7 @@ namespace JsUtil
     {
         Assert(lpParam);
 
-#ifdef _M_X64_OR_ARM64
+#ifdef TARGET_64
 #ifdef RECYCLER_WRITE_BARRIER
         Memory::RecyclerWriteBarrierManager::OnThreadInit();
 #endif
@@ -1402,6 +1467,21 @@ namespace JsUtil
         pageAllocator->ClearConcurrentThreadId();
 #endif
     }
+
+#if PDATA_ENABLED && defined(_WIN32)
+    void BackgroundJobProcessor::StartExtraWork()
+    {
+        InterlockedIncrement(&hasExtraWork);
+
+        // Signal the background thread to wake up and process the extra work.
+        jobReady.Set();
+    }
+    void BackgroundJobProcessor::EndExtraWork()
+    {
+        LONG newValue = InterlockedDecrement(&hasExtraWork);
+        Assert(newValue >= 0);
+    }
+#endif
 
 #if DBG_DUMP
     //Just for debugging purpose

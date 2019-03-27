@@ -4,22 +4,6 @@
 //-------------------------------------------------------------------------------------------------------
 #include "stdafx.h"
 
-#ifndef _WIN32
-HANDLE CreateSemaphoreW(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount, LONG lMaximumCount, LPCWSTR lpName)
-{
-    // xplat-todo: implement this in PAL
-    Assert(false);
-    return INVALID_HANDLE_VALUE;
-}
-BOOL ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount, LPLONG lpPreviousCount)
-{
-    // xplat-todo: implement this in PAL
-    Assert(false);
-    return FALSE;
-}
-
-#endif
-
 void RuntimeThreadLocalData::Initialize(RuntimeThreadData* threadData)
 {
     this->threadData = threadData;
@@ -29,7 +13,6 @@ void RuntimeThreadLocalData::Uninitialize()
 {
 }
 
-
 THREAD_LOCAL RuntimeThreadLocalData threadLocalData;
 
 RuntimeThreadLocalData& GetRuntimeThreadLocalData()
@@ -37,19 +20,21 @@ RuntimeThreadLocalData& GetRuntimeThreadLocalData()
     return threadLocalData;
 }
 
-RuntimeThreadData::RuntimeThreadData()
+RuntimeThreadData::RuntimeThreadData() :
+    hSemaphore(nullptr), 
+    hThread(nullptr),
+    sharedContent(nullptr),
+    receiveBroadcastCallbackFunc(nullptr),
+    runtime(nullptr),
+    context(nullptr),
+    parent(nullptr),
+    leaving(false)
 {
     this->hevntInitialScriptCompleted = CreateEvent(NULL, TRUE, FALSE, NULL);
     this->hevntReceivedBroadcast = CreateEvent(NULL, FALSE, FALSE, NULL);
     this->hevntShutdown = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    this->sharedContent = nullptr;
-    this->receiveBroadcastCallbackFunc = nullptr;
-
-    this->leaving = false;
-
     InitializeCriticalSection(&csReportQ);
-
 }
 
 RuntimeThreadData::~RuntimeThreadData()

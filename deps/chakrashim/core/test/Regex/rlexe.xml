@@ -39,6 +39,11 @@
   </test>
   <test>
     <default>
+      <files>clampNumericQuantifier.js</files>
+    </default>
+  </test>
+  <test>
+    <default>
       <files>rx1.js</files>
       <baseline>rx1.baseline</baseline>
     </default>
@@ -89,6 +94,12 @@
     <default>
       <files>undefined_option.js</files>
       <baseline>undefined_option.baseline</baseline>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>unicode_forbidden_escapes.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
   <test>
@@ -153,7 +164,7 @@
       <files>BoiHardFail.js</files>
       <baseline>BoiHardFail.baseline</baseline>
       <compile-flags>-regexDebug</compile-flags>
-      <tags>exclude_fre,exclude_serialized</tags>
+      <tags>exclude_test,exclude_serialized</tags>
     </default>
   </test>
   <test>
@@ -198,6 +209,36 @@
     <default>
       <files>Bug1153694.js</files>
       <baseline>Bug1153694.baseline</baseline>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>Bug14859460.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>bug_OS14763260.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>Bug15992535.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>characterclass_with_range.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
+    </default>
+  </test>
+  <test>
+    <default>
+      <files>control_character_escapes.js</files>
+      <compile-flags>-args summary -endargs</compile-flags>
     </default>
   </test>
 </regress-exe>

@@ -6,7 +6,16 @@
 
 namespace Js
 {
-    __forceinline TypeId JavascriptOperators::GetTypeId(const Var aValue)
+    __forceinline TypeId JavascriptOperators::GetTypeId(_In_ RecyclableObject* obj)
+    {
+        AssertMsg(obj != nullptr, "GetTypeId aValue is null");
+
+        auto typeId = obj->GetTypeId();
+        AssertMsg(typeId < TypeIds_Limit || obj->IsExternal(), "GetTypeId aValue has invalid TypeId");
+        return typeId;
+    }
+
+    __forceinline TypeId JavascriptOperators::GetTypeId(_In_ const Var aValue)
     {
         AssertMsg(aValue != nullptr, "GetTypeId aValue is null");
 
@@ -22,12 +31,7 @@ namespace Js
 #endif
         else
         {
-            auto typeId = RecyclableObject::FromVar(aValue)->GetTypeId();
-#if DBG
-            auto isExternal = RecyclableObject::FromVar(aValue)->CanHaveInterceptors();
-            AssertMsg(typeId < TypeIds_Limit || isExternal, "GetTypeId aValue has invalid TypeId");
-#endif
-            return typeId;
+            return JavascriptOperators::GetTypeId(RecyclableObject::UnsafeFromVar(aValue));
         }
     }
 
@@ -58,6 +62,7 @@ namespace Js
     {
         Var nextItem = nullptr;
         bool shouldCallReturn = false;
+        JavascriptExceptionObject *exception = nullptr;
         try
         {
             while (JavascriptOperators::IteratorStepAndValue(iterator, scriptContext, &nextItem))
@@ -69,13 +74,17 @@ namespace Js
         }
         catch (const JavascriptException& err)
         {
-            JavascriptExceptionObject * exceptionObj = err.GetAndClear();
+            exception = err.GetAndClear();
+        }
+
+        if (exception != nullptr)
+        {
             if (shouldCallReturn)
             {
                 // Closing the iterator
                 JavascriptOperators::IteratorClose(iterator, scriptContext);
             }
-            JavascriptExceptionOperators::DoThrow(exceptionObj, scriptContext);
+            JavascriptExceptionOperators::DoThrowCheckClone(exception, scriptContext);
         }
     }
 
@@ -147,6 +156,26 @@ namespace Js
         else
         {
             return CheckPrototypesForAccessorOrNonWritablePropertyCore<PropertyKeyType, /*doFastProtoChainCheck*/false, false>(instance, propertyKey, setterValue, flags, nullptr, scriptContext);
+        }
+    }
+
+    template <typename Fn>
+    Var JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(RecyclableObject* constructor, bool isDefaultConstructor, ThreadContext * threadContext, Fn newObjectCreationFunction)
+    {
+        if (!isDefaultConstructor)
+        {
+            return threadContext->ExecuteImplicitCall(constructor, Js::ImplicitCall_Accessor, [=]()->Js::Var
+            {
+                return newObjectCreationFunction();
+            });
+        }
+        else
+        {
+            BEGIN_SAFE_REENTRANT_CALL(threadContext)
+            {
+                return newObjectCreationFunction();
+            }
+            END_SAFE_REENTRANT_CALL
         }
     }
 }

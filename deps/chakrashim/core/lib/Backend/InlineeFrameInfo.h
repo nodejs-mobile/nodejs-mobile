@@ -5,6 +5,8 @@
 
 #pragma once
 
+class Value;
+
 struct BailoutConstantValue {
 public:
     void InitIntConstValue(int32 value) { this->type = TyInt32; this->u.intConst.value = (IntConstType)value; };
@@ -108,7 +110,7 @@ struct InlineeFrameRecord
     }
 
     void PopulateParent(Func* func);
-    void RestoreFrames(Js::FunctionBody* functionBody, InlinedFrameLayout* outerMostInlinee, Js::JavascriptCallStackLayout* callstack);
+    void RestoreFrames(Js::FunctionBody* functionBody, InlinedFrameLayout* outerMostInlinee, Js::JavascriptCallStackLayout* callstack, bool boxValues);
     void Finalize(Func* inlinee, uint currentOffset);
 #if DBG_DUMP
     void Dump() const;
@@ -123,8 +125,8 @@ struct InlineeFrameRecord
     }
 
 private:
-    void Restore(Js::FunctionBody* functionBody, InlinedFrameLayout *outerMostFrame, Js::JavascriptCallStackLayout * layout) const;
-    Js::Var Restore(int offset, bool isFloat64, bool isInt32, Js::JavascriptCallStackLayout * layout, Js::FunctionBody* functionBody) const;
+    void Restore(Js::FunctionBody* functionBody, InlinedFrameLayout *outerMostFrame, Js::JavascriptCallStackLayout * layout, bool boxValues) const;
+    Js::Var Restore(int offset, bool isFloat64, bool isInt32, Js::JavascriptCallStackLayout * layout, Js::FunctionBody* functionBody, bool boxValue) const;
     InlineeFrameRecord* Reverse();
 };
 
@@ -149,16 +151,8 @@ struct InlineeFrameInfo
     InlineeFrameRecord* record;
     BVSparse<JitArenaAllocator>* floatSyms;
     BVSparse<JitArenaAllocator>* intSyms;
-
-#ifdef ENABLE_SIMDJS
-    BVSparse<JitArenaAllocator>* simd128F4Syms;
-    BVSparse<JitArenaAllocator>* simd128I4Syms;
-    BVSparse<JitArenaAllocator>* simd128I8Syms;
-    BVSparse<JitArenaAllocator>* simd128I16Syms;
-    BVSparse<JitArenaAllocator>* simd128U4Syms;
-    BVSparse<JitArenaAllocator>* simd128U8Syms;
-    BVSparse<JitArenaAllocator>* simd128U16Syms;
-#endif
+    BVSparse<JitArenaAllocator>* varSyms;
+    Value* functionSymStartValue;
 
     bool isRecorded;
 

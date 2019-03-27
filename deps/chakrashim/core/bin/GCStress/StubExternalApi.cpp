@@ -9,7 +9,7 @@
 
 bool ConfigParserAPI::FillConsoleTitle(__ecount(cchBufferSize) LPWSTR buffer, size_t cchBufferSize, __in LPWSTR moduleName)
 {
-    swprintf_s(buffer, cchBufferSize, _u("Chakra GC: %d - %s"), GetCurrentProcessId(), moduleName);
+    swprintf_s(buffer, cchBufferSize, _u("Chakra GC: %lu - %s"), GetCurrentProcessId(), moduleName);
 
     return true;
 }
@@ -21,7 +21,7 @@ void ConfigParserAPI::DisplayInitialOutput(__in LPWSTR moduleName)
     Output::Print(_u("INIT: DLL Path   : %s\n"), moduleName);
 }
 
-#ifdef ENABLE_JS_ETW
+#if defined(ENABLE_JS_ETW) && !defined(ENABLE_JS_LTTNG)
 void EtwCallbackApi::OnSessionChange(ULONG /* controlCode */, PVOID /* callbackContext */)
 {
     // Does nothing
@@ -82,16 +82,9 @@ bool GetDeviceFamilyInfo(
 void
 ChakraBinaryAutoSystemInfoInit(AutoSystemInfo * autoSystemInfo)
 {
-    ULONGLONG UAPInfo;
-    ULONG DeviceFamily;
-    ULONG DeviceForm;
-    if (GetDeviceFamilyInfo(&UAPInfo, &DeviceFamily, &DeviceForm))
-    {
-        bool isMobile = (DeviceFamily == 0x00000004 /*DEVICEFAMILYINFOENUM_MOBILE*/);
-        autoSystemInfo->shouldQCMoreFrequently = isMobile;
-        autoSystemInfo->supportsOnlyMultiThreadedCOM = isMobile;  //TODO: pick some other platform to the list
-        autoSystemInfo->isLowMemoryDevice = isMobile;  //TODO: pick some other platform to the list
-    }
+    autoSystemInfo->shouldQCMoreFrequently = false;
+    autoSystemInfo->supportsOnlyMultiThreadedCOM = false;  //TODO: pick some other platform to the list
+    autoSystemInfo->isLowMemoryDevice = false;  //TODO: pick some other platform to the list
 }
 
 enum MemProtectHeapCollectFlags {};
@@ -112,10 +105,4 @@ HRESULT MemProtectHeapSynchronizeWithCollector(void * heapHandle) { return E_NOT
 void MemProtectHeapSetDisableConcurrentThreadExitedCheck(void * heapHandle) {};
 #endif
 
-#if DBG && defined(RECYCLER_VERIFY_MARK)
-bool IsLikelyRuntimeFalseReference(char* objectStartAddress, size_t offset,
-    const char* typeName)
-{
-    return false;
-}
-#endif
+IMPLEMENT_STUB_IsLikelyRuntimeFalseReference()

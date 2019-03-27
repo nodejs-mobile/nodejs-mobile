@@ -1,10 +1,10 @@
-
 #ifndef SRC_ALIASED_BUFFER_H_
 #define SRC_ALIASED_BUFFER_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include "chakra_ttd.h"
 #include "v8.h"
-#include "util.h"
 #include "util-inl.h"
 
 namespace node {
@@ -15,7 +15,7 @@ namespace node {
  * going through JS, and the data is then available to user's via the exposed
  * JS object.
  *
- * While this technique is computationaly efficient, it is effectively a
+ * While this technique is computationally efficient, it is effectively a
  * write to JS program state w/out going through the standard
  * (monitored) API. Thus any VM capabilities to detect the modification are
  * circumvented.
@@ -97,6 +97,21 @@ class AliasedBuffer {
     js_array_.Reset();
   }
 
+  AliasedBuffer& operator=(AliasedBuffer&& that) {
+    this->~AliasedBuffer();
+    isolate_ = that.isolate_;
+    count_ = that.count_;
+    byte_offset_ = that.byte_offset_;
+    buffer_ = that.buffer_;
+    free_buffer_ = that.free_buffer_;
+
+    js_array_.Reset(isolate_, that.js_array_.Get(isolate_));
+
+    that.buffer_ = nullptr;
+    that.js_array_.Reset();
+    return *this;
+  }
+
   /**
    * Helper class that is returned from operator[] to support assignment into
    * a specified location.
@@ -113,13 +128,33 @@ class AliasedBuffer {
           index_(that.index_) {
     }
 
-    inline Reference& operator=(const NativeT &val) {
+    inline Reference& operator=(const NativeT& val) {
       aliased_buffer_->SetValue(index_, val);
       return *this;
     }
 
+    inline Reference& operator=(const Reference& val) {
+      return *this = static_cast<NativeT>(val);
+    }
+
     operator NativeT() const {
       return aliased_buffer_->GetValue(index_);
+    }
+
+    inline Reference& operator+=(const NativeT& val) {
+      const NativeT current = aliased_buffer_->GetValue(index_);
+      aliased_buffer_->SetValue(index_, current + val);
+      return *this;
+    }
+
+    inline Reference& operator+=(const Reference& val) {
+      return this->operator+=(static_cast<NativeT>(val));
+    }
+
+    inline Reference& operator-=(const NativeT& val) {
+      const NativeT current = aliased_buffer_->GetValue(index_);
+      aliased_buffer_->SetValue(index_, current - val);
+      return *this;
     }
 
    private:
@@ -195,8 +230,12 @@ class AliasedBuffer {
     return GetValue(index);
   }
 
+  size_t Length() const {
+    return count_;
+  }
+
  private:
-  v8::Isolate* const isolate_;
+  v8::Isolate* isolate_;
   size_t count_;
   size_t byte_offset_;
   NativeT* buffer_;
@@ -204,5 +243,7 @@ class AliasedBuffer {
   bool free_buffer_;
 };
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_ALIASED_BUFFER_H_

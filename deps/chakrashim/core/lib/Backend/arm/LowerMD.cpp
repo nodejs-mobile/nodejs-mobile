@@ -1,5 +1,5 @@
 //-------------------------------------------------------------------------------------------------------
-// Copyright (C) Microsoft. All rights reserved.
+// Copyright (C) Microsoft Corporation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -7,6 +7,7 @@
 #include "Language/JavascriptFunctionArgIndex.h"
 
 const Js::OpCode LowererMD::MDUncondBranchOpcode = Js::OpCode::B;
+const Js::OpCode LowererMD::MDMultiBranchOpcode = Js::OpCode::BX;
 const Js::OpCode LowererMD::MDTestOpcode = Js::OpCode::TST;
 const Js::OpCode LowererMD::MDOrOpcode = Js::OpCode::ORR;
 const Js::OpCode LowererMD::MDXorOpcode = Js::OpCode::EOR;
@@ -16,6 +17,7 @@ const Js::OpCode LowererMD::MDConvertFloat32ToFloat64Opcode = Js::OpCode::VCVTF6
 const Js::OpCode LowererMD::MDConvertFloat64ToFloat32Opcode = Js::OpCode::VCVTF32F64;
 const Js::OpCode LowererMD::MDCallOpcode = Js::OpCode::Call;
 const Js::OpCode LowererMD::MDImulOpcode = Js::OpCode::MUL;
+const Js::OpCode LowererMD::MDLea = Js::OpCode::LEA;
 
 template<typename T>
 inline void Swap(T& x, T& y)
@@ -170,7 +172,7 @@ LowererMD::GenerateMemRef(intptr_t addr, IRType type, IR::Instr *instr, bool don
 {
     IR::RegOpnd *baseOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
     IR::AddrOpnd *addrOpnd = IR::AddrOpnd::New(addr, IR::AddrOpndKindDynamicMisc, this->m_func, dontEncode);
-    LowererMD::CreateAssign(baseOpnd, addrOpnd, instr);
+    Lowerer::InsertMove(baseOpnd, addrOpnd, instr);
 
     return IR::IndirOpnd::New(baseOpnd, 0, type, this->m_func);
 }
@@ -208,7 +210,9 @@ LowererMD::LowerCallHelper(IR::Instr *instrCall)
         IR::Instr *instrArg = regArg->m_sym->m_instrDef;
 
         Assert(instrArg->m_opcode == Js::OpCode::ArgOut_A ||
-            (helperMethod == IR::JnHelperMethod::HelperOP_InitCachedScope && instrArg->m_opcode == Js::OpCode::ExtendArg_A));
+            (helperMethod == IR::JnHelperMethod::HelperOP_InitCachedScope && instrArg->m_opcode == Js::OpCode::ExtendArg_A) ||
+            (helperMethod == IR::JnHelperMethod::HelperScrFunc_OP_NewScFuncHomeObj && instrArg->m_opcode == Js::OpCode::ExtendArg_A) ||
+            (helperMethod == IR::JnHelperMethod::HelperScrFunc_OP_NewScGenFuncHomeObj && instrArg->m_opcode == Js::OpCode::ExtendArg_A));
         prevInstr = this->LoadHelperArgument(prevInstr, instrArg->GetSrc1());
 
         argOpnd = instrArg->GetSrc2();
@@ -223,9 +227,24 @@ LowererMD::LowerCallHelper(IR::Instr *instrCall)
             regArg->Free(this->m_func);
             instrArg->Remove();
         }
+        else if (instrArg->m_opcode == Js::OpCode::ExtendArg_A)
+        {
+            if (instrArg->GetSrc1()->IsRegOpnd())
+            {
+                m_lowerer->addToLiveOnBackEdgeSyms->Set(instrArg->GetSrc1()->AsRegOpnd()->GetStackSym()->m_id);
+            }
+        }
     }
 
-    this->m_lowerer->LoadScriptContext(instrCall);
+    switch (helperMethod)
+    {
+    case IR::JnHelperMethod::HelperScrFunc_OP_NewScFuncHomeObj:
+    case IR::JnHelperMethod::HelperScrFunc_OP_NewScGenFuncHomeObj:
+        break;
+    default:
+        prevInstr = m_lowerer->LoadScriptContext(prevInstr);
+        break;
+    }
     this->FlipHelperCallArgsOrder();
     return this->ChangeToHelperCall(instrCall, helperMethod);
 }
@@ -240,7 +259,7 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
     AssertMsg(targetOpnd, "Call without a target?");
 
     // This is required here due to calls created during lowering
-    callInstr->m_func->SetHasCalls();
+    callInstr->m_func->SetHasCallsOnSelfAndParents();
 
     if (targetOpnd->IsRegOpnd())
     {
@@ -313,18 +332,18 @@ LowererMD::LowerCall(IR::Instr * callInstr, Js::ArgSlot argCount)
         IR::Opnd *helperArgOpnd = this->helperCallArgs[this->helperCallArgsCount - argsLeft];
         IR::Opnd * opndParam = nullptr;
 
-        if (helperArgOpnd->GetType() == TyMachDouble)
+        if (helperArgOpnd->IsFloat())
         {
-            opndParam = this->GetOpndForArgSlot(doubleArgsLeft - 1, true);
+            opndParam = this->GetOpndForArgSlot(doubleArgsLeft - 1, helperArgOpnd);
             AssertMsg(opndParam->IsRegOpnd(), "NYI for other kind of operands");
             --doubleArgsLeft;
         }
         else
         {
-            opndParam = this->GetOpndForArgSlot(intArgsLeft - 1);
+            opndParam = this->GetOpndForArgSlot(intArgsLeft - 1, helperArgOpnd);
             --intArgsLeft;
         }
-        LowererMD::CreateAssign(opndParam, helperArgOpnd, callInstr);
+        Lowerer::InsertMove(opndParam, helperArgOpnd, callInstr);
         --argsLeft;
     }
     Assert(doubleArgsLeft == 0 && intArgsLeft == 0 && argsLeft == 0);
@@ -344,7 +363,7 @@ LowererMD::LoadDynamicArgument(IR::Instr *instr, uint argNumber)
     IR::Opnd* dst = GetOpndForArgSlot((Js::ArgSlot) (argNumber - 1));
     instr->SetDst(dst);
     instr->m_opcode = Js::OpCode::MOV;
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     return instr;
 }
@@ -362,7 +381,7 @@ LowererMD::LoadDynamicArgumentUsingLength(IR::Instr *instr)
     IR::IndirOpnd *actualsLocation = IR::IndirOpnd::New(stackPointer, add->GetDst()->AsRegOpnd(), GetDefaultIndirScale(), TyMachReg, this->m_func);
     instr->SetDst(actualsLocation);
     instr->m_opcode = Js::OpCode::LDR;
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     return instr;
 }
@@ -376,6 +395,12 @@ LowererMD::SetMaxArgSlots(Js::ArgSlot actualCount /*including this*/)
         this->m_func->m_argSlotsForFunctionsCalled = (uint32)(actualCount + offset);
     }
     return;
+}
+
+void
+LowererMD::GenerateMemInit(IR::RegOpnd * opnd, int32 offset, size_t value, IR::Instr * insertBeforeInstr, bool isZeroed)
+{
+    m_lowerer->GenerateMemInit(opnd, offset, (uint32)value, insertBeforeInstr, isZeroed);
 }
 
 IR::Instr *
@@ -395,14 +420,14 @@ LowererMD::LowerCallIDynamic(IR::Instr *callInstr, IR::Instr*saveThisArgOutInstr
         callInstr->InsertBefore(IR::Instr::New(Js::OpCode::ADD, argsLength, argsLength, IR::IntConstOpnd::New(1, TyInt8, this->m_func), this->m_func));
         this->SetMaxArgSlots(Js::InlineeCallInfo::MaxInlineeArgoutCount);
     }
-    LowererMD::CreateAssign( this->GetOpndForArgSlot(1), argsLength, callInstr);
+    Lowerer::InsertMove( this->GetOpndForArgSlot(1), argsLength, callInstr);
 
     IR::RegOpnd    *funcObjOpnd = callInstr->UnlinkSrc1()->AsRegOpnd();
     GeneratePreCall(callInstr, funcObjOpnd);
 
     // functionOpnd is the first argument.
     IR::Opnd * opndParam = this->GetOpndForArgSlot(0);
-    LowererMD::CreateAssign(opndParam, funcObjOpnd, callInstr);
+    Lowerer::InsertMove(opndParam, funcObjOpnd, callInstr);
     return this->LowerCall(callInstr, 0);
 }
 
@@ -471,7 +496,7 @@ LowererMD::GeneratePreCall(IR::Instr * callInstr, IR::Opnd  *functionObjOpnd)
 
         IR::IndirOpnd* functionTypeIndirOpnd = IR::IndirOpnd::New(functionObjOpnd->AsRegOpnd(),
             Js::RecyclableObject::GetOffsetOfType(), TyMachReg, this->m_func);
-        LowererMD::CreateAssign(functionTypeRegOpnd, functionTypeIndirOpnd, callInstr);
+        Lowerer::InsertMove(functionTypeRegOpnd, functionTypeIndirOpnd, callInstr);
     }
     else
     {
@@ -481,7 +506,7 @@ LowererMD::GeneratePreCall(IR::Instr * callInstr, IR::Opnd  *functionObjOpnd)
     int entryPointOffset = Js::Type::GetOffsetOfEntryPoint();
     IR::IndirOpnd* entryPointOpnd = IR::IndirOpnd::New(functionTypeRegOpnd, entryPointOffset, TyMachPtr, this->m_func);
     IR::RegOpnd * targetAddrOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
-    IR::Instr * stackParamInsert = LowererMD::CreateAssign(targetAddrOpnd, entryPointOpnd, callInstr);
+    IR::Instr * stackParamInsert = Lowerer::InsertMove(targetAddrOpnd, entryPointOpnd, callInstr);
 
     // targetAddrOpnd is the address we'll call.
     callInstr->SetSrc1(targetAddrOpnd);
@@ -538,7 +563,7 @@ LowererMD::LowerCallI(IR::Instr * callInstr, ushort callFlags, bool isHelper, IR
 
     // functionObjOpnd is the first argument.
     IR::Opnd * opndParam = this->GetOpndForArgSlot(0);
-    LowererMD::CreateAssign(opndParam, functionObjOpnd, callInstr);
+    Lowerer::InsertMove(opndParam, functionObjOpnd, callInstr);
 
     IR::Opnd *const finalDst = callInstr->GetDst();
 
@@ -648,30 +673,9 @@ LowererMD::LowerCallArgs(IR::Instr *callInstr, IR::Instr *stackParamInsert, usho
         *callInfoOpndRef = opndCallInfo;
     }
     opndParam = this->GetOpndForArgSlot(extraParams);
-    LowererMD::CreateAssign(opndParam, opndCallInfo, callInstr);
+    Lowerer::InsertMove(opndParam, opndCallInfo, callInstr);
 
     return argCount + 1 + extraParams; // + 1 for call flags
-}
-
-IR::Instr *
-LowererMD::LowerCallPut(IR::Instr * callInstr)
-{
-    Js::ArgSlot argCount = (Js::ArgSlot)this->LowerCallArgs(callInstr, Js::CallFlags_None, 2);
-
-    //  load native entry point from script function
-    IR::Opnd * functionWrapOpnd = callInstr->UnlinkSrc1();
-    AssertMsg(functionWrapOpnd->IsRegOpnd() && functionWrapOpnd->AsRegOpnd()->m_sym->IsStackSym(),
-              "Expected call src to be stackSym");
-
-    // push function wrapper
-
-    this->LoadHelperArgument(callInstr, functionWrapOpnd);
-    this->m_lowerer->LoadScriptContext(callInstr);
-
-    IR::HelperCallOpnd  *helperCallOpnd = IR::HelperCallOpnd::New(IR::HelperOp_InvokePut, this->m_func);
-    callInstr->SetSrc1(helperCallOpnd);
-
-    return this->LowerCall(callInstr, argCount);
 }
 
 IR::Instr *
@@ -710,17 +714,18 @@ LowererMD::FinishArgLowering()
 }
 
 IR::Opnd *
-LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, bool isDoubleArgument)
+LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, IR::Opnd * argOpnd)
 {
     IR::Opnd * opndParam = nullptr;
 
-    if (!isDoubleArgument)
+    IRType type = argOpnd ? argOpnd->GetType() : TyMachReg;
+    if (argOpnd == nullptr || !argOpnd->IsFloat())
     {
         if (argSlot < NUM_INT_ARG_REGS)
         {
             // Return an instance of the next arg register.
             IR::RegOpnd *regOpnd;
-            regOpnd = IR::RegOpnd::New(nullptr, (RegNum)(argSlot + FIRST_INT_ARG_REG), TyMachReg, this->m_func);
+            regOpnd = IR::RegOpnd::New(nullptr, (RegNum)(argSlot + FIRST_INT_ARG_REG), type, this->m_func);
 
             regOpnd->m_isCallArg = true;
 
@@ -733,7 +738,7 @@ LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, bool isDoubleArgument)
             argSlot = argSlot - NUM_INT_ARG_REGS;
             IntConstType offset = argSlot * MachRegInt;
             IR::RegOpnd * spBase = IR::RegOpnd::New(nullptr, this->GetRegStackPointer(), TyMachReg, this->m_func);
-            opndParam = IR::IndirOpnd::New(spBase, offset, TyMachReg, this->m_func);
+            opndParam = IR::IndirOpnd::New(spBase, offset, type, this->m_func);
 
             if (this->m_func->m_argSlotsForFunctionsCalled < (uint32)(argSlot + 1))
             {
@@ -747,7 +752,7 @@ LowererMD::GetOpndForArgSlot(Js::ArgSlot argSlot, bool isDoubleArgument)
         {
             // Return an instance of the next arg register.
             IR::RegOpnd *regOpnd;
-            regOpnd = IR::RegOpnd::New(nullptr, (RegNum)(argSlot + FIRST_DOUBLE_ARG_REG), TyMachDouble, this->m_func);
+            regOpnd = IR::RegOpnd::New(nullptr, (RegNum)(argSlot + FIRST_DOUBLE_ARG_REG), type, this->m_func);
             regOpnd->m_isCallArg = true;
             opndParam = regOpnd;
         }
@@ -816,8 +821,8 @@ LowererMD::GenerateStackProbe(IR::Instr *insertInstr, bool afterProlog)
         // Load the current stack limit and add the current frame allocation.
         {
             intptr_t pLimit = m_func->GetThreadContextInfo()->GetThreadStackLimitAddr();
-            this->CreateAssign(scratchOpnd, IR::AddrOpnd::New(pLimit, IR::AddrOpndKindDynamicMisc, this->m_func), insertInstr);
-            this->CreateAssign(scratchOpnd, IR::IndirOpnd::New(scratchOpnd, 0, TyMachReg, this->m_func), insertInstr);
+            Lowerer::InsertMove(scratchOpnd, IR::AddrOpnd::New(pLimit, IR::AddrOpndKindDynamicMisc, this->m_func), insertInstr);
+            Lowerer::InsertMove(scratchOpnd, IR::IndirOpnd::New(scratchOpnd, 0, TyMachReg, this->m_func), insertInstr);
         }
 
         if (EncoderMD::CanEncodeModConst12(frameSize))
@@ -848,7 +853,7 @@ LowererMD::GenerateStackProbe(IR::Instr *insertInstr, bool afterProlog)
             }
 
             IR::Opnd *scratchOpnd2 = IR::RegOpnd::New(nullptr, SP_ALLOC_SCRATCH_REG, TyMachReg, this->m_func);
-            this->CreateAssign(scratchOpnd2, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func), insertInstr);
+            Lowerer::InsertMove(scratchOpnd2, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func), insertInstr);
 
             instr = IR::Instr::New(Js::OpCode::ADDS, scratchOpnd, scratchOpnd, scratchOpnd2, this->m_func);
             insertInstr->InsertBefore(instr);
@@ -872,7 +877,7 @@ LowererMD::GenerateStackProbe(IR::Instr *insertInstr, bool afterProlog)
     {
         uint32 scriptStackLimit = (uint32)m_func->GetThreadContextInfo()->GetScriptStackLimit();
         IR::Opnd *stackLimitOpnd = IR::IntConstOpnd::New(frameSize + scriptStackLimit, TyMachReg, this->m_func);
-        this->CreateAssign(scratchOpnd, stackLimitOpnd, insertInstr);
+        Lowerer::InsertMove(scratchOpnd, stackLimitOpnd, insertInstr);
     }
 
     IR::LabelInstr *doneLabelInstr = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, false);
@@ -892,19 +897,19 @@ LowererMD::GenerateStackProbe(IR::Instr *insertInstr, bool afterProlog)
     // Zero out the pointer to the list of stack nested funcs, since the functions won't be initialized on this path.
     scratchOpnd = IR::RegOpnd::New(nullptr, RegR0, TyMachReg, m_func);
     IR::RegOpnd *frameReg = IR::RegOpnd::New(nullptr, GetRegFramePointer(), TyMachReg, m_func);
-    CreateAssign(scratchOpnd, IR::IntConstOpnd::New(0, TyMachReg, m_func), insertInstr);
+    Lowerer::InsertMove(scratchOpnd, IR::IntConstOpnd::New(0, TyMachReg, m_func), insertInstr);
     IR::Opnd *indirOpnd = IR::IndirOpnd::New(
         frameReg, -(int32)(Js::Constants::StackNestedFuncList * sizeof(Js::Var)), TyMachReg, m_func);
-    CreateAssign(indirOpnd, scratchOpnd, insertInstr);
+    Lowerer::InsertMove(indirOpnd, scratchOpnd, insertInstr);
 
     IR::RegOpnd *r0Opnd = IR::RegOpnd::New(nullptr, RegR0, TyMachReg, this->m_func);
-    this->CreateAssign(r0Opnd, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func, true), insertInstr);
+    Lowerer::InsertMove(r0Opnd, IR::IntConstOpnd::New(frameSize, TyMachReg, this->m_func, true), insertInstr);
 
     IR::RegOpnd *r1Opnd = IR::RegOpnd::New(nullptr, RegR1, TyMachReg, this->m_func);
-    this->CreateAssign(r1Opnd, this->m_lowerer->LoadScriptContextOpnd(insertInstr), insertInstr);
+    Lowerer::InsertMove(r1Opnd, this->m_lowerer->LoadScriptContextOpnd(insertInstr), insertInstr);
 
     IR::RegOpnd *r2Opnd = IR::RegOpnd::New(nullptr, RegR2, TyMachReg, m_func);
-    this->CreateAssign(r2Opnd, IR::HelperCallOpnd::New(IR::HelperProbeCurrentStack, this->m_func), insertInstr);
+    Lowerer::InsertMove(r2Opnd, IR::HelperCallOpnd::New(IR::HelperProbeCurrentStack, this->m_func), insertInstr);
 
     instr = IR::Instr::New(afterProlog? Js::OpCode::BLX : Js::OpCode::BX, this->m_func);
     instr->SetSrc1(r2Opnd);
@@ -975,7 +980,7 @@ LowererMD::GenerateStackDeallocation(IR::Instr *instr, uint32 allocSize)
         spOpnd,
         IR::IntConstOpnd::New(allocSize, TyMachReg, this->m_func, true), this->m_func);
     instr->InsertBefore(spAdjustInstr);
-    LegalizeMD::LegalizeInstr(spAdjustInstr, true);
+    LegalizeMD::LegalizeInstr(spAdjustInstr);
 }
 
 //------------------------------------------------------------------------------------------
@@ -1065,8 +1070,14 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
 //    }
 //#endif
 
-
     //First calculate the local stack
+    if (this->m_func->HasInlinee())
+    {
+        // Allocate the inlined arg out stack in the locals. Allocate an additional slot so that
+        // we can unconditionally clear the first slot past the current frame.
+        this->m_func->m_localStackHeight += this->m_func->GetInlineeArgumentStackSize();
+    }
+
     if (hasTry)
     {
         // If there's a try in the function, then the locals area must be 8-byte-aligned. That's because
@@ -1074,14 +1085,6 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         // but without a locals area, and both must be 8-byte aligned. So adding the locals area can't change
         // the alignment.
         this->m_func->m_localStackHeight = Math::Align<int32>(this->m_func->m_localStackHeight, MachStackAlignment);
-    }
-
-    if (this->m_func->GetMaxInlineeArgOutCount())
-    {
-        Assert(this->m_func->HasInlinee());
-        // Allocate the inlined arg out stack in the locals. Allocate an additional slot so that
-        // we can unconditionally clear the first slot past the current frame.
-        this->m_func->m_localStackHeight += this->m_func->GetInlineeArgumentStackSize();
     }
 
     int32 stackAdjust = this->m_func->m_localStackHeight + (this->m_func->m_argSlotsForFunctionsCalled * MachPtr);
@@ -1102,6 +1105,11 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         // Just force it to have calls if we have stack nested func so we have a stable
         // location for the stack nested function list
         hasStackNestedFuncList = true;
+        unwindInfo->SetHasCalls(true);
+    }
+
+    if (Lowerer::IsArgSaveRequired(this->m_func))
+    {
         unwindInfo->SetHasCalls(true);
     }
 
@@ -1335,7 +1343,7 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
     }
     Assert(fpOffsetSize >= 0);
 
-    if (this->m_func->GetMaxInlineeArgOutCount())
+    if (m_func->GetMaxInlineeArgOutSize() != 0)
     {
         // subtracting 2 for frame pointer & return address
         this->m_func->GetJITOutput()->SetFrameHeight(this->m_func->m_localStackHeight + this->m_func->m_ArgumentsOffset - 2 * MachRegInt);
@@ -1415,7 +1423,7 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
     if (hasTry)
     {
         // Copy the value of SP before we allocate the locals area. We'll save this value on the stack below.
-        LowererMD::CreateAssign(
+        Lowerer::InsertMove(
             IR::RegOpnd::New(nullptr, EH_STACK_SAVE_REG, TyMachReg, this->m_func),
             IR::RegOpnd::New(nullptr, RegSP, TyMachReg, this->m_func),
             insertInstr);
@@ -1443,7 +1451,7 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
         }
 
         // Set up the locals pointer.
-        LowererMD::CreateAssign(
+        Lowerer::InsertMove(
             IR::RegOpnd::New(nullptr, localsReg, TyMachReg, this->m_func),
             IR::RegOpnd::New(nullptr, RegSP, TyMachReg, this->m_func),
             insertInstr);
@@ -1474,7 +1482,7 @@ LowererMD::LowerEntryInstr(IR::EntryInstr * entryInstr)
     //As we have already allocated the stack here, we can safely zero out the inlinee argout slot.
 
     // Zero initialize the first inlinee frames argc.
-    if (this->m_func->GetMaxInlineeArgOutCount())
+    if (m_func->GetMaxInlineeArgOutSize() != 0)
     {
         // This is done post prolog. so we don't have to emit unwind data.
         if (r12Opnd == nullptr || isScratchRegisterThrashed)
@@ -1534,7 +1542,7 @@ LowererMD::LowerExitInstr(IR::ExitInstr * exitInstr)
     else if (localsReg != RegSP)
     {
         // We're going to restore SP from the locals pointer and then deallocate only the locals area.
-        LowererMD::CreateAssign(
+        Lowerer::InsertMove(
             IR::RegOpnd::New(nullptr, RegSP, TyMachReg, this->m_func),
             IR::RegOpnd::New(nullptr, localsReg, TyMachReg, this->m_func),
             exitInstr);
@@ -1608,7 +1616,7 @@ LowererMD::LowerExitInstr(IR::ExitInstr * exitInstr)
             this->m_func);
         exitInstr->InsertBefore(instrPop);
 
-        LowererMD::CreateAssign(
+        Lowerer::InsertMove(
             IR::RegOpnd::New(nullptr, RegSP, TyMachReg, this->m_func),
             IR::RegOpnd::New(nullptr, EH_STACK_SAVE_REG, TyMachReg, this->m_func),
             exitInstr);
@@ -1725,10 +1733,10 @@ LowererMD::LowerTry(IR::Instr * tryInstr, IR::JnHelperMethod helperMethod)
     // Arg 7: ScriptContext
     this->m_lowerer->LoadScriptContext(tryAddr);
 
-    if (tryInstr->m_opcode == Js::OpCode::TryCatch || this->m_func->DoOptimizeTry())
+    if (tryInstr->m_opcode == Js::OpCode::TryCatch || this->m_func->DoOptimizeTry() || (this->m_func->IsSimpleJit() && this->m_func->hasBailout))
     {
         // Arg 6 : hasBailedOutOffset
-        IR::Opnd * hasBailedOutOffset = IR::IntConstOpnd::New(this->m_func->m_hasBailedOutSym->m_offset, TyInt32, this->m_func);
+        IR::Opnd * hasBailedOutOffset = IR::IntConstOpnd::New(this->m_func->m_hasBailedOutSym->m_offset + tryInstr->m_func->GetInlineeArgumentStackSize(), TyInt32, this->m_func);
         this->LoadHelperArgument(tryAddr, hasBailedOutOffset);
     }
 
@@ -1769,28 +1777,6 @@ LowererMD::LowerTry(IR::Instr * tryInstr, IR::JnHelperMethod helperMethod)
 }
 
 IR::Instr *
-LowererMD::LowerLeave(IR::Instr * leaveInstr, IR::LabelInstr * targetInstr, bool fromFinalLower, bool isOrphanedLeave)
-{
-    if (isOrphanedLeave)
-    {
-        Assert(this->m_func->IsLoopBodyInTry());
-        leaveInstr->m_opcode = Js::OpCode::B;
-        return leaveInstr->m_prev;
-    }
-
-    IR::Instr * instrPrev = leaveInstr->m_prev;
-    IR::LabelOpnd *labelOpnd = IR::LabelOpnd::New(targetInstr, this->m_func);
-    this->LowerEHRegionReturn(leaveInstr, labelOpnd);
-
-    if (fromFinalLower)
-    {
-        instrPrev = leaveInstr->m_prev;
-    }
-    leaveInstr->Remove();
-    return instrPrev;
-}
-
-IR::Instr *
 LowererMD::LowerLeaveNull(IR::Instr * leaveInstr)
 {
     IR::Instr * instrPrev = leaveInstr->m_prev;
@@ -1808,7 +1794,7 @@ LowererMD::LowerEHRegionReturn(IR::Instr * insertBeforeInstr, IR::Opnd * targetO
     IR::RegOpnd *retReg    = IR::RegOpnd::New(nullptr, RETURN_REG, TyMachReg, this->m_func);
 
     // Load the continuation address into the return register.
-    LowererMD::CreateAssign(retReg, targetOpnd, insertBeforeInstr);
+    Lowerer::InsertMove(retReg, targetOpnd, insertBeforeInstr);
 
     IR::LabelInstr *epilogLabel = this->EnsureEpilogLabel();
     IR::BranchInstr *jmpInstr = IR::BranchInstr::New(Js::OpCode::B, epilogLabel, this->m_func);
@@ -1816,23 +1802,6 @@ LowererMD::LowerEHRegionReturn(IR::Instr * insertBeforeInstr, IR::Opnd * targetO
 
     // return the last instruction inserted
     return jmpInstr;
-}
-
-IR::Instr *
-LowererMD::LowerCatch(IR::Instr * instr)
-{
-    // t1 = catch    =>    t2(r1) = catch
-    //               =>    t1 = t2(r1)
-
-    IR::Opnd *catchObj = instr->UnlinkDst();
-    IR::RegOpnd *catchParamReg = IR::RegOpnd::New(TyMachPtr, this->m_func);
-    catchParamReg->SetReg(CATCH_OBJ_REG);
-
-    instr->SetDst(catchParamReg);
-
-    instr->InsertAfter(IR::Instr::New(Js::OpCode::MOV, catchObj, catchParamReg, this->m_func));
-
-    return instr->m_prev;
 }
 
 ///----------------------------------------------------------------------------
@@ -1873,10 +1842,7 @@ LowererMD::LoadInputParamPtr(IR::Instr * instrInsert, IR::RegOpnd * optionalDstO
     else
     {
         StackSym * paramSym = GetImplicitParamSlotSym(3);
-
-        IR::Instr * instr = this->LoadStackAddress(paramSym);
-        instrInsert->InsertBefore(instr);
-        return instr;
+        return this->m_lowerer->InsertLoadStackAddress(paramSym, instrInsert);
     }
 }
 
@@ -1912,27 +1878,13 @@ LowererMD::LoadInputParamCount(IR::Instr * instrInsert, int adjust, bool needFla
     // mask the "calling eval" bit and subtract it from the incoming count.
     // ("Calling eval" means the last param is the frame display, which only the eval built-in should see.)
 
-    IR::RegOpnd * evalBitOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
-    instr = IR::Instr::New(Js::OpCode::LSR, evalBitOpnd, dstOpnd, IR::IntConstOpnd::New(Math::Log2(Js::CallFlags_ExtraArg) + Js::CallInfo::ksizeofCount, TyMachReg, this->m_func), this->m_func);
-    instrInsert->InsertBefore(instr);
-
-    // Mask off other call flags from callinfo
-    instr = IR::Instr::New(Js::OpCode::AND, evalBitOpnd, evalBitOpnd, IR::IntConstOpnd::New(0x01, TyUint8, this->m_func), this->m_func);
-    instrInsert->InsertBefore(instr);
-
     instr = IR::Instr::New(Js::OpCode::LSL, dstOpnd, dstOpnd, IR::IntConstOpnd::New(Js::CallInfo::ksizeofCallFlags, TyMachReg, this->m_func), this->m_func);
     instrInsert->InsertBefore(instr);
 
     instr = IR::Instr::New(Js::OpCode::LSR, dstOpnd, dstOpnd, IR::IntConstOpnd::New(Js::CallInfo::ksizeofCallFlags, TyMachReg, this->m_func), this->m_func);
     instrInsert->InsertBefore(instr);
 
-    if (adjust != 0)
-    {
-        Assert(adjust < 0);
-        Lowerer::InsertAdd(false, evalBitOpnd, evalBitOpnd, IR::IntConstOpnd::New(-adjust, TyUint32, this->m_func), instrInsert);
-    }
-
-    return Lowerer::InsertSub(needFlags, dstOpnd, dstOpnd, evalBitOpnd, instrInsert);
+    return Lowerer::InsertSub(needFlags, dstOpnd, dstOpnd, IR::IntConstOpnd::New(-adjust, TyUint32, this->m_func), instrInsert);
 }
 
 IR::Instr *
@@ -1951,7 +1903,7 @@ LowererMD::LoadStackArgPtr(IR::Instr * instr)
         size_t offset = Js::InterpreterStackFrame::GetOffsetOfInParams();
         IR::IndirOpnd *indirOpnd = IR::IndirOpnd::New(baseOpnd, (int32)offset, TyMachReg, this->m_func);
         IR::RegOpnd *tmpOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
-        LowererMD::CreateAssign(tmpOpnd, indirOpnd, instr);
+        Lowerer::InsertMove(tmpOpnd, indirOpnd, instr);
 
         instr->SetSrc1(tmpOpnd);
         instr->SetSrc2(IR::IntConstOpnd::New(sizeof(Js::Var), TyMachReg, this->m_func));
@@ -2095,8 +2047,7 @@ LowererMD::LoadHeapArguments(IR::Instr * instrArgs)
             // s3 = address of first actual argument (after "this").
             StackSym *firstRealArgSlotSym = func->GetInlineeArgvSlotOpnd()->m_sym->AsStackSym();
             this->m_func->SetArgOffset(firstRealArgSlotSym, firstRealArgSlotSym->m_offset + MachPtr);
-            IR::Instr *instr = this->LoadStackAddress(firstRealArgSlotSym);
-            instrArgs->InsertBefore(instr);
+            IR::Instr *instr = this->m_lowerer->InsertLoadStackAddress(firstRealArgSlotSym, instrArgs);
             this->LoadHelperArgument(instrArgs, instr->GetDst());
 
             // s2 = actual argument count (without counting "this").
@@ -2107,7 +2058,7 @@ LowererMD::LoadHeapArguments(IR::Instr * instrArgs)
 
             // Save the newly-created args object to its dedicated stack slot.
             IR::SymOpnd *argObjSlotOpnd = func->GetInlineeArgumentsObjectSlotOpnd();
-            LowererMD::CreateAssign(argObjSlotOpnd,instrArgs->GetDst(), instrArgs->m_next);
+            Lowerer::InsertMove(argObjSlotOpnd,instrArgs->GetDst(), instrArgs->m_next);
         }
         else
         {
@@ -2130,7 +2081,7 @@ LowererMD::LoadHeapArguments(IR::Instr * instrArgs)
             // Save the newly-created args object to its dedicated stack slot.
             IR::IndirOpnd *indirOpnd = IR::IndirOpnd::New(IR::RegOpnd::New(nullptr, FRAME_REG , TyMachReg, func),
                 -MachArgsSlotOffset, TyMachPtr, m_func);
-            LowererMD::CreateAssign(indirOpnd, instrArgs->GetDst(), instrArgs->m_next);
+            Lowerer::InsertMove(indirOpnd, instrArgs->GetDst(), instrArgs->m_next);
         }
         this->ChangeToHelperCall(instrArgs, IR::HelperOp_LoadHeapArguments);
     }
@@ -2193,8 +2144,7 @@ LowererMD::LoadHeapArgsCached(IR::Instr * instrArgs)
             StackSym *firstRealArgSlotSym = func->GetInlineeArgvSlotOpnd()->m_sym->AsStackSym();
             this->m_func->SetArgOffset(firstRealArgSlotSym, firstRealArgSlotSym->m_offset + MachPtr);
 
-            IR::Instr *instr = this->LoadStackAddress(firstRealArgSlotSym);
-            instrArgs->InsertBefore(instr);
+            IR::Instr *instr = this->m_lowerer->InsertLoadStackAddress(firstRealArgSlotSym, instrArgs);
             this->LoadHelperArgument(instrArgs, instr->GetDst());
 
             // s3 = formal argument count (without counting "this").
@@ -2209,7 +2159,7 @@ LowererMD::LoadHeapArgsCached(IR::Instr * instrArgs)
 
             // Save the newly-created args object to its dedicated stack slot.
             IR::SymOpnd *argObjSlotOpnd = func->GetInlineeArgumentsObjectSlotOpnd();
-            LowererMD::CreateAssign(argObjSlotOpnd, instrArgs->GetDst(), instrArgs->m_next);
+            Lowerer::InsertMove(argObjSlotOpnd, instrArgs->GetDst(), instrArgs->m_next);
         }
         else
         {
@@ -2234,7 +2184,7 @@ LowererMD::LoadHeapArgsCached(IR::Instr * instrArgs)
             // Save the newly-created args object to its dedicated stack slot.
             IR::IndirOpnd *indirOpnd = IR::IndirOpnd::New(IR::RegOpnd::New(nullptr, FRAME_REG, TyMachReg, func),
                 -MachArgsSlotOffset, TyMachPtr, m_func);
-            LowererMD::CreateAssign(indirOpnd, instrArgs->GetDst(), instrArgs->m_next);
+            Lowerer::InsertMove(indirOpnd, instrArgs->GetDst(), instrArgs->m_next);
 
         }
 
@@ -2255,6 +2205,9 @@ IR::Instr *
 LowererMD::ChangeToHelperCall(IR::Instr * callInstr, IR::JnHelperMethod helperMethod, IR::LabelInstr *labelBailOut,
                               IR::Opnd *opndInstance, IR::PropertySymOpnd *propSymOpnd, bool isHelperContinuation)
 {
+#if DBG
+    this->m_lowerer->ReconcileWithLowererStateOnHelperCall(callInstr, helperMethod);
+#endif
     IR::Instr * bailOutInstr = callInstr;
     if (callInstr->HasBailOutInfo())
     {
@@ -2360,7 +2313,9 @@ LowererMD::ChangeToAssign(IR::Instr * instr, IRType type)
     {
         instr->m_opcode = LowererMD::GetMoveOp(type);
     }
-    LegalizeMD::LegalizeInstr(instr, false);
+
+    AutoRestoreLegalize restore(instr->m_func, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     return instr;
 }
@@ -2372,43 +2327,6 @@ LowererMD::ChangeToWriteBarrierAssign(IR::Instr * assignInstr, const Func* func)
     // WriteBarrier-TODO- Implement ARM JIT
 #endif
     return ChangeToAssignNoBarrierCheck(assignInstr);
-}
-
-///----------------------------------------------------------------------------
-///
-/// LowererMD::ChangeToLea
-///
-///     Change to a load-effective-address
-///
-///----------------------------------------------------------------------------
-
-IR::Instr *
-LowererMD::ChangeToLea(IR::Instr * instr, bool postRegAlloc)
-{
-    Assert(instr);
-    Assert(instr->GetDst());
-    Assert(instr->GetDst()->IsRegOpnd());
-    Assert(instr->GetSrc1());
-    Assert(instr->GetSrc1()->IsIndirOpnd() || instr->GetSrc1()->IsSymOpnd());
-    Assert(!instr->GetSrc2());
-
-    instr->m_opcode = Js::OpCode::LEA;
-    Legalize(instr, postRegAlloc);
-    return instr;
-}
-
-///----------------------------------------------------------------------------
-///
-/// LowererMD::CreateAssign
-///
-///     Create a copy from src to dst. Let ChangeToAssign handle riscification
-/// of operands.
-///----------------------------------------------------------------------------
-
-IR::Instr *
-LowererMD::CreateAssign(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsertPt, bool generateWriteBarrier)
-{
-    return Lowerer::InsertMove(dst, src, instrInsertPt, generateWriteBarrier);
 }
 
 ///----------------------------------------------------------------------------
@@ -2431,33 +2349,6 @@ LowererMD::LowerRet(IR::Instr * retInstr)
     retInstr->SetSrc1(retReg);
 
     return retInstr;
-}
-
-
-///----------------------------------------------------------------------------
-///
-/// LowererMD::LowerUncondBranch
-///
-///----------------------------------------------------------------------------
-
-IR::Instr *
-LowererMD::LowerUncondBranch(IR::Instr * instr)
-{
-    instr->m_opcode = Js::OpCode::B;
-    return instr;
-}
-
-///----------------------------------------------------------------------------
-///
-/// LowererMD::LowerMultiBranch
-///
-///----------------------------------------------------------------------------
-
-IR::Instr *
-LowererMD::LowerMultiBranch(IR::Instr * instr)
-{
-    instr->m_opcode = Js::OpCode::BX;
-    return instr;
 }
 
 ///----------------------------------------------------------------------------
@@ -2736,7 +2627,7 @@ LowererMD::LowerCondBranch(IR::Instr * instr)
                 instrPrev->SetSrc1(opndSrc1);
                 instrPrev->SetSrc2(opndSrc2);
                 instr->InsertBefore(instrPrev);
-                LegalizeMD::LegalizeInstr(instrPrev, false);
+                LegalizeMD::LegalizeInstr(instrPrev);
 
                 //Transfer the result to ARM status register control register.
                 instrPrev = IR::Instr::New(Js::OpCode::VMRS, this->m_func);
@@ -2753,7 +2644,7 @@ LowererMD::LowerCondBranch(IR::Instr * instr)
                 instrPrev->SetSrc2(opndSrc2);
                 instr->InsertBefore(instrPrev);
 
-                LegalizeMD::LegalizeInstr(instrPrev, false);
+                LegalizeMD::LegalizeInstr(instrPrev);
 
                 instr->m_opcode = MDBranchOpcode(instr->m_opcode);
             }
@@ -2795,7 +2686,7 @@ LowererMD::LoadFunctionObjectOpnd(IR::Instr *instr, IR::Opnd *&functionObjOpnd)
         StackSym *paramSym = GetImplicitParamSlotSym(0);
         IR::SymOpnd *paramOpnd = IR::SymOpnd::New(paramSym, TyMachPtr, m_func);
 
-        instrPrev = LowererMD::CreateAssign(regOpnd, paramOpnd, instr);
+        instrPrev = Lowerer::InsertMove(regOpnd, paramOpnd, instr);
         functionObjOpnd = instrPrev->GetDst();
     }
     else
@@ -2807,19 +2698,6 @@ LowererMD::LoadFunctionObjectOpnd(IR::Instr *instr, IR::Opnd *&functionObjOpnd)
             Assert(functionObjOpnd->IsAddrOpnd());
         }
     }
-
-    return instrPrev;
-}
-
-IR::Instr *
-LowererMD::LowerLdSuper(IR::Instr * instr, IR::JnHelperMethod helperOpCode)
-{
-    IR::Opnd * functionObjOpnd;
-    IR::Instr * instrPrev = LoadFunctionObjectOpnd(instr, functionObjOpnd);
-
-    m_lowerer->LoadScriptContext(instr);
-    LoadHelperArgument(instr, functionObjOpnd);
-    ChangeToHelperCall(instr, helperOpCode);
 
     return instrPrev;
 }
@@ -2875,7 +2753,7 @@ LowererMD::GenerateFastDivByPow2(IR::Instr *instrDiv)
     //// s1 =  AND  src1, 0x80000001 | ((src2Value - 1) << 1)
     //instr = IR::Instr::New(Js::OpCode::AND, s1, src1, IR::IntConstOpnd::New((0x80000001 | ((src2Value - 1) << 1)), TyInt32, m_func), m_func);
     //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr, false);
+    //LegalizeMD::LegalizeInstr(instr);
 
     ////       CMP s1, 1
     //instr = IR::Instr::New(Js::OpCode::CMP, m_func);
@@ -2890,12 +2768,12 @@ LowererMD::GenerateFastDivByPow2(IR::Instr *instrDiv)
     //// s1  = ASR  src1, log2(src2Value)  -- do the equal divide
     //instr = IR::Instr::New(Js::OpCode::ASR, s1, src1, IR::IntConstOpnd::New(Math::Log2(src2Value), TyInt32, m_func), m_func);
     //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr, false);
+    //LegalizeMD::LegalizeInstr(instr);
 
     //// dst = ORR   s1, 1                 -- restore tagged int bit
     //instr = IR::Instr::New(Js::OpCode::ORR, dst, s1, IR::IntConstOpnd::New(1, TyInt32, m_func), m_func);
     //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr, false);
+    //LegalizeMD::LegalizeInstr(instr);
     //
     ////       B  $done
     //instr = IR::BranchInstr::New(Js::OpCode::B, done, m_func);
@@ -2920,7 +2798,7 @@ LowererMD::GenerateFastDivByPow2(IR::Instr *instrDiv)
     //// s1 =  ASR  src1, log2(src2Value) + 1 -- do the integer divide and also shift out the tagged int bit
     //instr = IR::Instr::New(Js::OpCode::ASR, s1, src1, IR::IntConstOpnd::New(Math::Log2(src2Value) + 1, TyInt32, m_func), m_func);
     //instrDiv->InsertBefore(instr);
-    //LegalizeMD::LegalizeInstr(instr, false);
+    //LegalizeMD::LegalizeInstr(instr);
 
     //// Arg2: scriptContext
     //IR::JnHelperMethod helperMethod;
@@ -2931,9 +2809,8 @@ LowererMD::GenerateFastDivByPow2(IR::Instr *instrDiv)
     //    Assert(dst->IsRegOpnd());
     //    StackSym * tempNumberSym = this->m_lowerer->GetTempNumberSym(dst, instr->dstIsTempNumberTransferred);
 
-    //    instr = this->LoadStackAddress(tempNumberSym);
-    //    instrDiv->InsertBefore(instr);
-    //    LegalizeMD::LegalizeInstr(instr, false);
+    //    instr = this->m_lowerer->InsertLoadStackAddress(tempNumberSym, instrDiv);
+    //    LegalizeMD::LegalizeInstr(instr);
 
     //    this->LoadHelperArgument(instrDiv, instr->GetDst());
     //}
@@ -3032,11 +2909,11 @@ bool LowererMD::GenerateFastCmXxTaggedInt(IR::Instr *instr, bool isInHelper  /* 
     Assert(src1 && src2 && dst);
 
     // Not tagged ints?
-    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return false;
     }
-    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return false;
     }
@@ -3117,13 +2994,13 @@ bool LowererMD::GenerateFastCmXxTaggedInt(IR::Instr *instr, bool isInHelper  /* 
     if (dst->IsEqual(src1))
     {
         IR::RegOpnd *newSrc1 = IR::RegOpnd::New(TyMachReg, m_func);
-        LowererMD::CreateAssign(newSrc1, src1, instr);
+        Lowerer::InsertMove(newSrc1, src1, instr);
         src1 = newSrc1;
     }
     if (dst->IsEqual(src2))
     {
         IR::RegOpnd *newSrc2 = IR::RegOpnd::New(TyMachReg, m_func);
-        LowererMD::CreateAssign(newSrc2, src2, instr);
+        Lowerer::InsertMove(newSrc2, src2, instr);
         src2 = newSrc2;
     }
 
@@ -3151,7 +3028,7 @@ bool LowererMD::GenerateFastCmXxTaggedInt(IR::Instr *instr, bool isInHelper  /* 
     instrCmp->SetSrc1(src1);
     instrCmp->SetSrc2(src2);
     instr->InsertBefore(instrCmp);
-    LegalizeMD::LegalizeInstr(instrCmp,false);
+    LegalizeMD::LegalizeInstr(instrCmp);
 
     instr->InsertBefore(IR::BranchInstr::New(opcode, fallthru, m_func));
     instr->InsertBefore(IR::Instr::New(Js::OpCode::LDIMM, dst, opndFalse, m_func));
@@ -3194,7 +3071,7 @@ IR::Instr * LowererMD::GenerateConvBool(IR::Instr *instr)
     instrTst->SetSrc1(src1);
     instrTst->SetSrc2(src1);
     instr->InsertBefore(instrTst);
-    LegalizeMD::LegalizeInstr(instrTst, false);
+    LegalizeMD::LegalizeInstr(instrTst);
 
     // BNE fallthrough
     instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, fallthru, m_func));
@@ -3250,12 +3127,12 @@ LowererMD::GenerateFastAdd(IR::Instr * instrAdd)
 
     // Generate fastpath for Incr_A anyway -
     // Incrementing strings representing integers can be inter-mixed with integers e.g. "1"++ -> converts 1 to an int and thereafter, integer increment is expected.
-    if (opndSrc1->IsRegOpnd() && (opndSrc1->AsRegOpnd()->m_sym->m_isNotInt || opndSrc1->GetValueType().IsString()
+    if (opndSrc1->IsRegOpnd() && (opndSrc1->AsRegOpnd()->m_sym->m_isNotNumber || opndSrc1->GetValueType().IsString()
         || (instrAdd->m_opcode != Js::OpCode::Incr_A && opndSrc1->GetValueType().IsLikelyString())))
     {
         return false;
     }
-    if (opndSrc2->IsRegOpnd() && (opndSrc2->AsRegOpnd()->m_sym->m_isNotInt ||
+    if (opndSrc2->IsRegOpnd() && (opndSrc2->AsRegOpnd()->m_sym->m_isNotNumber ||
         opndSrc2->GetValueType().IsLikelyString()))
     {
         return true;
@@ -3265,13 +3142,13 @@ LowererMD::GenerateFastAdd(IR::Instr * instrAdd)
     if (!opndSrc1->IsRegOpnd())
     {
         opndSrc1 = IR::RegOpnd::New(opndSrc1->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc1, instrAdd->GetSrc1(), instrAdd);
+        Lowerer::InsertMove(opndSrc1, instrAdd->GetSrc1(), instrAdd);
     }
 
     if (!opndSrc2->IsRegOpnd())
     {
         opndSrc2 = IR::RegOpnd::New(opndSrc2->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc2, instrAdd->GetSrc2(), instrAdd);
+        Lowerer::InsertMove(opndSrc2, instrAdd->GetSrc2(), instrAdd);
     }
 
     labelHelper = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);
@@ -3305,7 +3182,7 @@ LowererMD::GenerateFastAdd(IR::Instr * instrAdd)
     instrAdd->InsertBefore(instr);
 
     // dst = MOV tmp
-    LowererMD::CreateAssign(instrAdd->GetDst(), opndTmp, instrAdd);
+    Lowerer::InsertMove(instrAdd->GetDst(), opndTmp, instrAdd);
 
     //      B $done
     labelDone = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
@@ -3359,8 +3236,8 @@ LowererMD::GenerateFastSub(IR::Instr * instrSub)
     AssertMsg(opndSrc1 && opndSrc2, "Expected 2 src opnd's on Sub instruction");
 
     // Not tagged ints?
-    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotInt ||
-        opndSrc2->IsRegOpnd() && opndSrc2->AsRegOpnd()->m_sym->m_isNotInt)
+    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotNumber ||
+        opndSrc2->IsRegOpnd() && opndSrc2->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return false;
     }
@@ -3369,13 +3246,13 @@ LowererMD::GenerateFastSub(IR::Instr * instrSub)
     if (!opndSrc1->IsRegOpnd())
     {
         opndSrc1 = IR::RegOpnd::New(opndSrc1->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc1, instrSub->GetSrc1(), instrSub);
+        Lowerer::InsertMove(opndSrc1, instrSub->GetSrc1(), instrSub);
     }
 
     if (!opndSrc2->IsRegOpnd())
     {
         opndSrc2 = IR::RegOpnd::New(opndSrc2->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc2, instrSub->GetSrc2(), instrSub);
+        Lowerer::InsertMove(opndSrc2, instrSub->GetSrc2(), instrSub);
     }
 
     labelHelper = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);
@@ -3400,7 +3277,7 @@ LowererMD::GenerateFastSub(IR::Instr * instrSub)
     // dst = ADD s1, 1        -- restore the var tag on the result
     instr = IR::Instr::New(Js::OpCode::ADD, instrSub->GetDst(), opndReg, IR::IntConstOpnd::New(1, TyMachReg, this->m_func), this->m_func);
     instrSub->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     //      B $fallthru
     labelFallThru = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
@@ -3466,8 +3343,8 @@ LowererMD::GenerateFastMul(IR::Instr * instrMul)
     AssertMsg(opndSrc1 && opndSrc2, "Expected 2 src opnd's on mul instruction");
 
     // (If not 2 Int31's, jump to $helper.)
-    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotInt ||
-        opndSrc2->IsRegOpnd() && opndSrc2->AsRegOpnd()->m_sym->m_isNotInt)
+    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotNumber ||
+        opndSrc2->IsRegOpnd() && opndSrc2->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
@@ -3480,13 +3357,13 @@ LowererMD::GenerateFastMul(IR::Instr * instrMul)
     if (!opndSrc1->IsRegOpnd())
     {
         opndSrc1 = IR::RegOpnd::New(opndSrc1->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc1, instrMul->GetSrc1(), instrMul);
+        Lowerer::InsertMove(opndSrc1, instrMul->GetSrc1(), instrMul);
     }
 
     if (!opndSrc2->IsRegOpnd())
     {
         opndSrc2 = IR::RegOpnd::New(opndSrc2->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc2, instrMul->GetSrc2(), instrMul);
+        Lowerer::InsertMove(opndSrc2, instrMul->GetSrc2(), instrMul);
     }
 
     bool isTaggedInts = opndSrc1->IsTaggedInt() && opndSrc2->IsTaggedInt();
@@ -3513,9 +3390,9 @@ LowererMD::GenerateFastMul(IR::Instr * instrMul)
 
     // (SMULL doesn't set the flags but we don't have 32bit overflow <=> r12-unsigned ? r12==0 : all 33 bits of 64bit result are 1's
     //      CMP r12, s1, ASR #31 -- check for overflow (== means no overflow)
-    IR::RegOpnd* opndRegR12 = IR::RegOpnd::New(nullptr, RegR12, TyMachReg, this->m_func);
+    IR::RegOpnd* opndRegScratch = IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachReg, this->m_func);
     instr = IR::Instr::New(Js::OpCode::CMP_ASR31, this->m_func);
-    instr->SetSrc1(opndRegR12);
+    instr->SetSrc1(opndRegScratch);
     instr->SetSrc2(opndReg1);
     instrMul->InsertBefore(instr);
 
@@ -3543,8 +3420,8 @@ LowererMD::GenerateFastMul(IR::Instr * instrMul)
     instrMul->InsertBefore(instr);
 
     // dst= ToVar(-0.0)       -- load negative 0
-    instr = LowererMD::CreateAssign(instrMul->GetDst(), m_lowerer->LoadLibraryValueOpnd(instrMul, LibraryValue::ValueNegativeZero), instrMul);
-    // No need to insert: CreateAssign creates legalized instr and inserts it.
+    instr = Lowerer::InsertMove(instrMul->GetDst(), m_lowerer->LoadLibraryValueOpnd(instrMul, LibraryValue::ValueNegativeZero), instrMul);
+    // No need to insert: InsertMove creates legalized instr and inserts it.
 
     //      B $fallthru
     instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, this->m_func);
@@ -3556,7 +3433,7 @@ LowererMD::GenerateFastMul(IR::Instr * instrMul)
     // dst= ORR s1, AtomTag   -- make sure var tag is set on the result
     instr = IR::Instr::New(Js::OpCode::ORR, instrMul->GetDst(), opndReg1, IR::IntConstOpnd::New(Js::AtomTag, TyVar, this->m_func), this->m_func);
     instrMul->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     //      B $fallthru
     instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, this->m_func);
@@ -3613,11 +3490,11 @@ LowererMD::GenerateFastAnd(IR::Instr * instrAnd)
     IR::Instr *instr;
 
     // Not tagged ints?
-    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
-    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
@@ -3636,7 +3513,7 @@ LowererMD::GenerateFastAnd(IR::Instr * instrAnd)
     // dstReg = AND src1, src2
     instr = IR::Instr::New(Js::OpCode::AND, dst, src1, src2, this->m_func);
     instrAnd->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     if (isInt)
     {
@@ -3666,7 +3543,7 @@ LowererMD::GenerateFastAnd(IR::Instr * instrAnd)
         instrAnd->InsertBefore(instr);
 
         // dst = STR dstReg
-        LowererMD::CreateAssign(instrAnd->GetDst(), dst, instrAnd);
+        Lowerer::InsertMove(instrAnd->GetDst(), dst, instrAnd);
 
         //      B $done
         instr = IR::BranchInstr::New(Js::OpCode::B, labelDone, this->m_func);
@@ -3714,11 +3591,11 @@ LowererMD::GenerateFastOr(IR::Instr * instrOr)
     IR::LabelInstr *labelHelper = nullptr;
 
     // Not tagged ints?
-    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src1->IsRegOpnd() && src1->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
-    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotInt)
+    if (src2->IsRegOpnd() && src2->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
@@ -3730,13 +3607,13 @@ LowererMD::GenerateFastOr(IR::Instr * instrOr)
     if (!src1->IsRegOpnd())
     {
         src1 = IR::RegOpnd::New(src1->GetType(), this->m_func);
-        LowererMD::CreateAssign(src1, instrOr->GetSrc1(), instrOr);
+        Lowerer::InsertMove(src1, instrOr->GetSrc1(), instrOr);
     }
 
     if (!src2->IsRegOpnd())
     {
         src2 = IR::RegOpnd::New(src2->GetType(), this->m_func);
-        LowererMD::CreateAssign(src2, instrOr->GetSrc2(), instrOr);
+        Lowerer::InsertMove(src2, instrOr->GetSrc2(), instrOr);
     }
 
     if (!isInt)
@@ -3750,7 +3627,7 @@ LowererMD::GenerateFastOr(IR::Instr * instrOr)
     // dst = OR src1, src2
     instr = IR::Instr::New(Js::OpCode::ORR, dst, src1, src2, this->m_func);
     instrOr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     if (isInt)
     {
@@ -3839,7 +3716,7 @@ LowererMD::GenerateFastNot(IR::Instr * instrNot)
     {
         // Load the src at the top so we don't have to load it twice.
         src = IR::RegOpnd::New(src->GetType(), this->m_func);
-        LowererMD::CreateAssign(src, instrNot->GetSrc1(), instrNot);
+        Lowerer::InsertMove(src, instrNot->GetSrc1(), instrNot);
     }
 
     if (!dst->IsRegOpnd())
@@ -3873,7 +3750,7 @@ LowererMD::GenerateFastNot(IR::Instr * instrNot)
     if (dst != instrNot->GetDst())
     {
         // Now store the result.
-        LowererMD::CreateAssign(instrNot->GetDst(), dst, instrNot);
+        Lowerer::InsertMove(instrNot->GetDst(), dst, instrNot);
     }
 
     if (isInt)
@@ -3975,7 +3852,7 @@ LowererMD::GenerateFastNeg(IR::Instr * instrNeg)
 
     bool isInt = (opndSrc1->IsTaggedInt());
 
-    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotInt)
+    if (opndSrc1->IsRegOpnd() && opndSrc1->AsRegOpnd()->m_sym->m_isNotNumber)
     {
         return true;
     }
@@ -3986,7 +3863,7 @@ LowererMD::GenerateFastNeg(IR::Instr * instrNeg)
     if (!opndSrc1->IsRegOpnd())
     {
         opndSrc1 = IR::RegOpnd::New(opndSrc1->GetType(), this->m_func);
-        LowererMD::CreateAssign(opndSrc1, instrNeg->GetSrc1(), instrNeg);
+        Lowerer::InsertMove(opndSrc1, instrNeg->GetSrc1(), instrNeg);
     }
 
     if (!isInt)
@@ -4020,7 +3897,7 @@ LowererMD::GenerateFastNeg(IR::Instr * instrNeg)
     if (opndDst != instrNeg->GetDst())
     {
         //Now store the result.
-        LowererMD::CreateAssign(instrNeg->GetDst(), opndDst, instrNeg);
+        Lowerer::InsertMove(instrNeg->GetDst(), opndDst, instrNeg);
     }
 
     // B $fallthru
@@ -4297,388 +4174,6 @@ bool LowererMD::GenerateObjectTest(IR::Opnd * opndSrc, IR::Instr * insertInstr, 
     return true;
 }
 
-IR::BranchInstr *
-LowererMD::GenerateLocalInlineCacheCheck(
-    IR::Instr * instrLdSt,
-    IR::RegOpnd * opndType,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelNext,
-    bool checkTypeWithoutProperty)
-{
-    // Generate:
-    //
-    // s3 = LDR inlineCache->u.local.type
-    //      CMP type, s3
-    //      BNE $next
-
-    IR::Instr * instr;
-    IR::IndirOpnd * typeOpnd;
-
-    // s3 = LDR [inlineCache, offset(u.local.type)]
-    IR::RegOpnd * s3 = IR::RegOpnd::New(TyMachReg, instrLdSt->m_func);
-    if (checkTypeWithoutProperty)
-    {
-        typeOpnd = IR::IndirOpnd::New(opndInlineCache, (int32)offsetof(Js::InlineCache, u.local.typeWithoutProperty), TyMachPtr, instrLdSt->m_func);
-    }
-    else
-    {
-        typeOpnd = IR::IndirOpnd::New(opndInlineCache, (int32)offsetof(Js::InlineCache, u.local.type), TyMachPtr, instrLdSt->m_func);
-    }
-
-    instr = IR::Instr::New(Js::OpCode::LDR, s3, typeOpnd, instrLdSt->m_func);
-    instrLdSt->InsertBefore(instr);
-
-    // CMP s1, s3
-    instr = IR::Instr::New(Js::OpCode::CMP, instrLdSt->m_func);
-    instr->SetSrc1(opndType);
-    instr->SetSrc2(s3);
-    instrLdSt->InsertBefore(instr);
-
-    // BNE $next
-    IR::BranchInstr * branchInstr = IR::BranchInstr::New(Js::OpCode::BNE, labelNext, instrLdSt->m_func);
-    instrLdSt->InsertBefore(branchInstr);
-
-    return branchInstr;
-}
-
-void
-LowererMD::GenerateFlagInlineCacheCheckForGetterSetter(
-    IR::Instr * insertBeforeInstr,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelNext)
-{
-    uint accessorFlagMask;
-    if (PHASE_OFF(Js::InlineGettersPhase, insertBeforeInstr->m_func))
-    {
-        accessorFlagMask = Js::InlineCache::GetSetterFlagMask();
-    }
-    else if (PHASE_OFF(Js::InlineSettersPhase, insertBeforeInstr->m_func))
-    {
-        accessorFlagMask = Js::InlineCache::GetGetterFlagMask();
-    }
-    else
-    {
-        accessorFlagMask = Js::InlineCache::GetGetterSetterFlagMask();
-    }
-
-    // Generate:
-    //
-    //      TST [&(inlineCache->u.accessor.flags)], Js::InlineCacheGetterFlag | Js::InlineCacheSetterFlag
-    //      BEQ $next
-    IR::Instr * instr;
-    IR::Opnd* flagsOpnd;
-
-    flagsOpnd = IR::IndirOpnd::New(opndInlineCache, (int32)offsetof(Js::InlineCache, u.accessor.rawUInt16), TyInt8, this->m_func);
-    // AND [&(inlineCache->u.accessor.flags)], InlineCacheGetterFlag | InlineCacheSetterFlag
-    instr = IR::Instr::New(Js::OpCode::TST,this->m_func);
-    instr->SetSrc1(flagsOpnd);
-    instr->SetSrc2(IR::IntConstOpnd::New(accessorFlagMask, TyInt8, this->m_func));
-    insertBeforeInstr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
-
-    // BEQ $next
-    instr = IR::BranchInstr::New(Js::OpCode::BEQ, labelNext, this->m_func);
-    insertBeforeInstr->InsertBefore(instr);
-}
-
-IR::BranchInstr *
-LowererMD::GenerateFlagInlineCacheCheck(
-    IR::Instr * instrLdSt,
-    IR::RegOpnd * opndType,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelNext)
-{
-    // Generate:
-    //
-    // s3 = LDR inlineCache->u.flags.type
-    //      CMP type, s3
-    //      BNE $next
-
-    IR::Instr * instr;
-
-    // LDR s3, [inlineCache, offset(u.flags.type)]
-    IR::RegOpnd *s3 = IR::RegOpnd::New(TyMachReg, instrLdSt->m_func);
-    IR::IndirOpnd * opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.accessor.type), TyMachPtr, instrLdSt->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, s3, opndIndir, instrLdSt->m_func);
-    instrLdSt->InsertBefore(instr);
-
-    // CMP type, s3
-    instr = IR::Instr::New(Js::OpCode::CMP, instrLdSt->m_func);
-    instr->SetSrc1(opndType);
-    instr->SetSrc2(s3);
-    instrLdSt->InsertBefore(instr);
-
-    // BNE $next
-    IR::BranchInstr * branchInstr = IR::BranchInstr::New(Js::OpCode::BNE, labelNext, instrLdSt->m_func);
-    instrLdSt->InsertBefore(branchInstr);
-
-    return branchInstr;
-}
-
-IR::BranchInstr *
-LowererMD::GenerateProtoInlineCacheCheck(
-    IR::Instr * instrLdSt,
-    IR::RegOpnd * opndType,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelNext)
-{
-    // Generate:
-    //
-    // s3 = LDR inlineCache->u.proto.type
-    //      CMP type, s3
-    //      BNE $next
-
-    IR::Instr * instr;
-
-    // LDR s3, [inlineCache, offset(u.proto.type)]
-    IR::RegOpnd *s3 = IR::RegOpnd::New(TyMachReg, instrLdSt->m_func);
-    IR::IndirOpnd * opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.proto.type), TyMachPtr, instrLdSt->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, s3, opndIndir, instrLdSt->m_func);
-    instrLdSt->InsertBefore(instr);
-
-    // CMP type, s3
-    instr = IR::Instr::New(Js::OpCode::CMP, instrLdSt->m_func);
-    instr->SetSrc1(opndType);
-    instr->SetSrc2(s3);
-    instrLdSt->InsertBefore(instr);
-
-    // BNE $next
-    IR::BranchInstr * branchInstr = IR::BranchInstr::New(Js::OpCode::BNE, labelNext, instrLdSt->m_func);
-    instrLdSt->InsertBefore(branchInstr);
-
-    return branchInstr;
-}
-
-void
-LowererMD::GenerateLdFldFromLocalInlineCache(
-    IR::Instr * instrLdFld,
-    IR::RegOpnd * opndBase,
-    IR::Opnd * opndDst,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelFallThru,
-    bool isInlineSlot)
-{
-    // Generate:
-    //
-    //     LDR s1, [base, offset(slots)]
-    //     LDR s2, [inlineCache, offset(u.local.slotIndex)] -- load the cached slot index
-    //     LDR dst, [s1, s2, LSL #2]  -- load the value directly from the slot (dst = s3 + s4 * 4)
-    //     B $fallthru
-
-    IR::Instr * instr;
-    IR::IndirOpnd * opndIndir;
-    IR::RegOpnd * opndSlotArray = nullptr;
-
-    if (!isInlineSlot)
-    {
-        opndSlotArray = IR::RegOpnd::New(TyMachReg, instrLdFld->m_func);
-        opndIndir = IR::IndirOpnd::New(opndBase, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndSlotArray, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // s2 = LDR [inlineCache, offset(u.local.slotIndex)] -- load the cached slot index
-    IR::RegOpnd * s2 = IR::RegOpnd::New(TyUint16, instrLdFld->m_func);
-    opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.local.slotIndex), TyUint16, instrLdFld->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, s2, opndIndir, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-
-    if (isInlineSlot)
-    {
-        // LDR dst, [base, s2, LSL #2] -- load the value directly from the inline slot (dst = base + s2 * 4)
-        opndIndir = IR::IndirOpnd::New(opndBase, s2, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-    else
-    {
-        // LDR dst, [s1, s2, LSL #2]  -- load the value directly from the slot (dst = s1 + s2 * 4)
-        opndIndir = IR::IndirOpnd::New(opndSlotArray, s2, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // B $fallthru
-    instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-}
-
-void
-LowererMD::GenerateLdFldFromProtoInlineCache(
-    IR::Instr * instrLdFld,
-    IR::RegOpnd * opndBase,
-    IR::Opnd * opndDst,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelFallThru,
-    bool isInlineSlot)
-{
-    // Generate:
-    //
-    //     LDR s1, [inlineCache, offset(u.proto.prototypeObject)]
-    //     LDR s1, [s1, offset(slots)] -- load the slot array
-    //     LDR s2, [inlineCache, offset(u.proto.slotIndex)]
-    //     LDR dst, [s1, s2, LSL #2]
-    //     B $fallthru
-
-    IR::Instr * instr;
-    IR::RegOpnd * opndProtoSlots = nullptr;
-
-    // LDR s1, [inlineCache, offset(u.proto.prototypeObject)]
-    IR::RegOpnd * opndProto = IR::RegOpnd::New(TyMachReg, instrLdFld->m_func);
-    IR::IndirOpnd * opndIndir = IR::IndirOpnd::New(opndInlineCache, (int32)offsetof(Js::InlineCache, u.proto.prototypeObject), TyMachReg, instrLdFld->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, opndProto, opndIndir, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-
-    if (!isInlineSlot)
-    {
-        // LDR s1, [s1, offset(slots)] -- load the slot array
-        opndProtoSlots = IR::RegOpnd::New(TyMachReg, instrLdFld->m_func);
-        opndIndir = IR::IndirOpnd::New(opndProto, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndProtoSlots, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // LDR s2, [inlineCache, offset(u.proto.slotIndex)]
-    IR::RegOpnd * opndSlotIndex = IR::RegOpnd::New(TyUint16, instrLdFld->m_func);
-    opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.proto.slotIndex), TyUint16, instrLdFld->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, opndSlotIndex, opndIndir, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-
-    if (isInlineSlot)
-    {
-        // LDR dst, [s1, s8, LSL #2]
-        opndIndir = IR::IndirOpnd::New(opndProto, opndSlotIndex, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-    else
-    {
-        // LDR dst, [s7, s8, LSL #2]
-        opndIndir = IR::IndirOpnd::New(opndProtoSlots, opndSlotIndex, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // B $fallthru
-    instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-}
-
-void
-LowererMD::GenerateLdLocalFldFromFlagInlineCache(
-    IR::Instr * instrLdFld,
-    IR::RegOpnd * opndBase,
-    IR::Opnd * opndDst,
-    IR::RegOpnd * opndInlineCache,
-    IR::LabelInstr * labelFallThru,
-    bool isInlineSlot)
-{
-    // Generate:
-    //
-    //     LDR s1, [base, offset(slots)]
-    //     LDR s2, [inlineCache, offset(u.flags.slotIndex)] -- load the cached slot index
-    //     LDR dst, [s1, s2, LSL #2]  -- load the value directly from the slot (dst = s3 + s4 * 4)
-    //     B $fallthru
-
-    IR::Instr * instr;
-    IR::IndirOpnd * opndIndir;
-    IR::RegOpnd * opndSlotArray = nullptr;
-
-    if (!isInlineSlot)
-    {
-        opndSlotArray = IR::RegOpnd::New(TyMachReg, instrLdFld->m_func);
-        opndIndir = IR::IndirOpnd::New(opndBase, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndSlotArray, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // s2 = LDR [inlineCache, offset(u.local.slotIndex)] -- load the cached slot index
-    IR::RegOpnd * s2 = IR::RegOpnd::New(TyUint16, instrLdFld->m_func);
-    opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.accessor.slotIndex), TyUint16, instrLdFld->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, s2, opndIndir, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-
-    if (isInlineSlot)
-    {
-        // LDR dst, [base, s2, LSL #2] -- load the value directly from the inline slot (dst = base + s2 * 4)
-        opndIndir = IR::IndirOpnd::New(opndBase, s2, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-    else
-    {
-        // LDR dst, [s1, s2, LSL #2]  -- load the value directly from the slot (dst = s1 + s2 * 4)
-        opndIndir = IR::IndirOpnd::New(opndSlotArray, s2, GetDefaultIndirScale(), TyMachReg, instrLdFld->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, instrLdFld->m_func);
-        instrLdFld->InsertBefore(instr);
-    }
-
-    // B $fallthru
-    instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, instrLdFld->m_func);
-    instrLdFld->InsertBefore(instr);
-}
-
-void
-LowererMD::GenerateLdFldFromFlagInlineCache(
-    IR::Instr * insertBeforeInstr,
-    IR::RegOpnd * opndBase,
-    IR::RegOpnd * opndInlineCache,
-    IR::Opnd * opndDst,
-    IR::LabelInstr * labelFallThru,
-    bool isInlineSlot)
-{
-    // Generate:
-    //
-    //     LDR s1, [inlineCache, offset(u.flags.object)]
-    //     LDR s1, [s1, offset(slots)] -- load the slot array
-    //     LDR s2, [inlineCache, offset(u.flags.slotIndex)]
-    //     LDR dst, [s1, s2, LSL #2]
-    //     B $fallthru
-
-    IR::Instr * instr;
-    IR::RegOpnd * opndObjSlots = nullptr;
-
-    // LDR s1, [inlineCache, offset(u.flags.object)]
-    IR::RegOpnd * object = IR::RegOpnd::New(TyMachReg, this->m_func);
-    IR::IndirOpnd * opndIndir = IR::IndirOpnd::New(opndInlineCache, (int32)offsetof(Js::InlineCache, u.accessor.object), TyMachReg, this->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, object, opndIndir, this->m_func);
-    insertBeforeInstr->InsertBefore(instr);
-
-    if (!isInlineSlot)
-    {
-        // LDR s1, [s1, offset(slots)] -- load the slot array
-        opndObjSlots = IR::RegOpnd::New(TyMachReg, this->m_func);
-        opndIndir = IR::IndirOpnd::New(object, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, this->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndObjSlots, opndIndir, this->m_func);
-        insertBeforeInstr->InsertBefore(instr);
-    }
-
-    // LDR s2, [inlineCache, offset(u.flags.slotIndex)]
-    IR::RegOpnd * opndSlotIndex = IR::RegOpnd::New(TyUint16, this->m_func);
-    opndIndir = IR::IndirOpnd::New(opndInlineCache, offsetof(Js::InlineCache, u.accessor.slotIndex), TyUint16, this->m_func);
-    instr = IR::Instr::New(Js::OpCode::LDR, opndSlotIndex, opndIndir, this->m_func);
-    insertBeforeInstr->InsertBefore(instr);
-
-    if (isInlineSlot)
-    {
-        // LDR dst, [s1, s8, LSL #2]
-        opndIndir = IR::IndirOpnd::New(object, opndSlotIndex, this->GetDefaultIndirScale(), TyMachReg, this->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, this->m_func);
-        insertBeforeInstr->InsertBefore(instr);
-    }
-    else
-    {
-        // LDR dst, [s7, s8, LSL #2]
-        opndIndir = IR::IndirOpnd::New(opndObjSlots, opndSlotIndex, this->GetDefaultIndirScale(), TyMachReg, this->m_func);
-        instr = IR::Instr::New(Js::OpCode::LDR, opndDst, opndIndir, this->m_func);
-        insertBeforeInstr->InsertBefore(instr);
-    }
-
-    // B $fallthru
-    instr = IR::BranchInstr::New(Js::OpCode::B, labelFallThru, this->m_func);
-    insertBeforeInstr->InsertBefore(instr);
-}
-
 void
 LowererMD::GenerateLoadTaggedType(IR::Instr * instrLdSt, IR::RegOpnd * opndType, IR::RegOpnd * opndTaggedType)
 {
@@ -4723,92 +4218,6 @@ LowererMD::GenerateLoadPolymorphicInlineCacheSlot(IR::Instr * instrLdSt, IR::Reg
     // ADD inlineCache, inlineCache, r1
     instr = IR::Instr::New(Js::OpCode::ADD, opndInlineCache, opndInlineCache, opndOffset, instrLdSt->m_func);
     instrLdSt->InsertBefore(instr);
-}
-
-///----------------------------------------------------------------------------
-///
-/// LowererMD::GenerateFastLdMethodFromFlags
-///
-/// Make use of the helper to cache the type and slot index used to do a LdFld
-/// and do an inline load from the appropriate slot if the type hasn't changed
-/// since the last time this LdFld was executed.
-///
-///----------------------------------------------------------------------------
-
-bool
-LowererMD::GenerateFastLdMethodFromFlags(IR::Instr * instrLdFld)
-{
-    IR::LabelInstr *   labelFallThru;
-    IR::LabelInstr *   bailOutLabel;
-    IR::Opnd *         opndSrc;
-    IR::Opnd *         opndDst;
-    IR::RegOpnd *      opndBase;
-    IR::RegOpnd *      opndType;
-    IR::RegOpnd *      opndInlineCache;
-    intptr_t           inlineCache;
-
-    opndSrc = instrLdFld->GetSrc1();
-
-    AssertMsg(opndSrc->IsSymOpnd() && opndSrc->AsSymOpnd()->IsPropertySymOpnd() && opndSrc->AsSymOpnd()->m_sym->IsPropertySym(),
-              "Expected property sym operand as src of LdFldFlags");
-
-    IR::PropertySymOpnd * propertySymOpnd = opndSrc->AsPropertySymOpnd();
-
-    Assert(propertySymOpnd->m_runtimeInlineCache);
-
-    Assert(!instrLdFld->DoStackArgsOpt(this->m_func));
-
-    // TODO: LdMethodFromFlags doesn't participate in object type specialization.  We should be using a temporary
-    // register without a type sym here.
-    if (propertySymOpnd->IsTypeCheckSeqCandidate())
-    {
-        AssertMsg(propertySymOpnd->HasObjectTypeSym(), "Type optimized property sym operand without a type sym?");
-        StackSym *typeSym = propertySymOpnd->GetObjectTypeSym();
-        opndType = IR::RegOpnd::New(typeSym, TyMachReg, this->m_func);
-    }
-    else
-    {
-        opndType = IR::RegOpnd::New(TyMachReg, this->m_func);
-    }
-
-    opndBase = propertySymOpnd->CreatePropertyOwnerOpnd(m_func);
-    opndDst = instrLdFld->GetDst();
-
-    inlineCache = propertySymOpnd->m_runtimeInlineCache;
-    Assert(inlineCache != 0);
-
-    opndInlineCache = IR::RegOpnd::New(TyMachReg, this->m_func);
-
-    labelFallThru = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
-    // Label to jump to (or fall through to) when bailing out
-    bailOutLabel = IR::LabelInstr::New(Js::OpCode::Label, instrLdFld->m_func, true /* isOpHelper */);
-
-    LowererMD::CreateAssign(opndInlineCache, m_lowerer->LoadRuntimeInlineCacheOpnd(instrLdFld, propertySymOpnd), instrLdFld);
-    IR::LabelInstr * labelFlagAux = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
-    // Check the flag cache with the untagged type
-    this->m_lowerer->GenerateObjectTestAndTypeLoad(instrLdFld, opndBase, opndType, bailOutLabel);
-    //Blindly do the check for getter flag first and then do the type check
-    //We avoid repeated check for getter flag when the function object may be in either
-    //inline slots or auxiliary slots
-    GenerateFlagInlineCacheCheckForGetterSetter(instrLdFld, opndInlineCache, bailOutLabel);
-    GenerateFlagInlineCacheCheck(instrLdFld, opndType, opndInlineCache, labelFlagAux);
-    GenerateLdFldFromFlagInlineCache(instrLdFld, opndBase, opndInlineCache, opndDst, labelFallThru, true);
-
-    // Check the flag cache with the tagged type
-    instrLdFld->InsertBefore(labelFlagAux);
-    IR::RegOpnd * opndTaggedType = IR::RegOpnd::New(TyMachReg, this->m_func);
-    GenerateLoadTaggedType(instrLdFld, opndType, opndTaggedType);
-    GenerateFlagInlineCacheCheck(instrLdFld, opndTaggedType, opndInlineCache, bailOutLabel);
-    GenerateLdFldFromFlagInlineCache(instrLdFld, opndBase, opndInlineCache, opndDst, labelFallThru, false);
-
-    instrLdFld->InsertBefore(bailOutLabel);
-    instrLdFld->InsertAfter(labelFallThru);
-    instrLdFld->UnlinkSrc1();
-    // Generate the bailout helper call. 'instr' will be changed to the CALL into the bailout function, so it can't be used for
-    // ordering instructions anymore.
-    this->m_lowerer->GenerateBailOut(instrLdFld);
-
-    return true;
 }
 
 //----------------------------------------------------------------------------
@@ -4907,22 +4316,22 @@ LowererMD::GenerateFastScopedFld(IR::Instr * instrScopedFld, bool isLoad)
     // BNE $helper
 
     opndInlineCache = IR::RegOpnd::New(TyInt32, this->m_func);
-    opndReg2->m_sym->m_isNotInt = true;
+    opndReg2->m_sym->m_isNotNumber = true;
 
     IR::RegOpnd * opndType = IR::RegOpnd::New(TyMachReg, this->m_func);
     this->m_lowerer->GenerateObjectTestAndTypeLoad(instrScopedFld, opndReg2, opndType, labelHelper);
-    LowererMD::CreateAssign(opndInlineCache, m_lowerer->LoadRuntimeInlineCacheOpnd(instrScopedFld, propertySymOpnd), instrScopedFld);
+    Lowerer::InsertMove(opndInlineCache, m_lowerer->LoadRuntimeInlineCacheOpnd(instrScopedFld, propertySymOpnd), instrScopedFld);
 
     labelFallThru = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
 
     // Check the local cache with the tagged type
     IR::RegOpnd * opndTaggedType = IR::RegOpnd::New(TyMachReg, this->m_func);
     GenerateLoadTaggedType(instrScopedFld, opndType, opndTaggedType);
-    GenerateLocalInlineCacheCheck(instrScopedFld, opndTaggedType, opndInlineCache, labelHelper);
+    Lowerer::GenerateLocalInlineCacheCheck(instrScopedFld, opndTaggedType, opndInlineCache, labelHelper);
     if (isLoad)
     {
         IR::Opnd *opndDst = instrScopedFld->GetDst();
-        GenerateLdFldFromLocalInlineCache(instrScopedFld, opndReg2, opndDst, opndInlineCache, labelFallThru, false);
+        Lowerer::GenerateLdFldFromLocalInlineCache(instrScopedFld, opndReg2, opndDst, opndInlineCache, labelFallThru, false);
     }
     else
     {
@@ -5030,7 +4439,7 @@ LowererMD::GenerateStFldFromLocalInlineCache(
         // s2 = MOV base->slots -- load the slot array
         opndSlotArray = IR::RegOpnd::New(TyMachReg, instrStFld->m_func);
         opndIndir = IR::IndirOpnd::New(opndBase, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, instrStFld->m_func);
-        LowererMD::CreateAssign(opndSlotArray, opndIndir, instrStFld);
+        Lowerer::InsertMove(opndSlotArray, opndIndir, instrStFld);
     }
 
     // LDR s5, [s2, offset(u.local.slotIndex)] -- load the cached slot index
@@ -5045,7 +4454,7 @@ LowererMD::GenerateStFldFromLocalInlineCache(
         opndIndir = IR::IndirOpnd::New(opndBase, opndSlotIndex, LowererMD::GetDefaultIndirScale(), TyMachReg, instrStFld->m_func);
         instr = IR::Instr::New(Js::OpCode::STR, opndIndir, opndSrc, instrStFld->m_func);
         instrStFld->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
     }
     else
     {
@@ -5053,7 +4462,7 @@ LowererMD::GenerateStFldFromLocalInlineCache(
         opndIndir = IR::IndirOpnd::New(opndSlotArray, opndSlotIndex, LowererMD::GetDefaultIndirScale(), TyMachReg, instrStFld->m_func);
         instr = IR::Instr::New(Js::OpCode::STR, opndIndir, opndSrc, instrStFld->m_func);
         instrStFld->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
     }
 
     // B $done
@@ -5127,7 +4536,7 @@ LowererMD::GenerateUntagVar(IR::RegOpnd * opnd, IR::LabelInstr * instrFail, IR::
     IR::Instr *instr = IR::Instr::New(Js::OpCode::ASRS, int32Opnd, opnd,
         IR::IntConstOpnd::New(Js::VarTag_Shift, TyInt8, this->m_func), this->m_func);
     insertBeforeInstr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     // No need to check if we already know that it is a tagged int.
     if (generateTagCheck)
@@ -5200,52 +4609,6 @@ IR::RegOpnd *LowererMD::LoadNonnegativeIndex(
         Lowerer::InsertBranch(Js::OpCode::BMI, negativeLabel, insertBeforeInstr);
     }
     return indexOpnd;
-}
-
-bool LowererMD::GenerateJSBooleanTest(IR::RegOpnd * regSrc, IR::Instr * insertInstr, IR::LabelInstr * labelTarget, bool fContinueLabel)
-{
-    IR::Instr* instr;
-    if (regSrc->GetValueType().IsBoolean())
-    {
-        if (fContinueLabel)
-        {
-            // B $labelTarget
-            instr = IR::BranchInstr::New(Js::OpCode::B, labelTarget, this->m_func);
-            insertInstr->InsertBefore(instr);
-#if DBG
-            if (labelTarget->isOpHelper)
-            {
-                labelTarget->m_noHelperAssert = true;
-            }
-#endif
-        }
-        return false;
-    }
-
-    // CMP src1, vtable<JavaScriptBoolean>
-    instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-    IR::IndirOpnd *vtablePtrOpnd = IR::IndirOpnd::New(regSrc, 0, TyMachPtr, this->m_func);
-    instr->SetSrc1(vtablePtrOpnd);
-    IR::Opnd *jsBooleanVTable = m_lowerer->LoadVTableValueOpnd(insertInstr, VTableValue::VtableJavascriptBoolean);
-    instr->SetSrc2(jsBooleanVTable);
-    insertInstr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
-
-    if (fContinueLabel)
-    {
-        // BEQ $labelTarget
-        instr = IR::BranchInstr::New(Js::OpCode::BEQ, labelTarget, this->m_func);
-        insertInstr->InsertBefore(instr);
-        IR::LabelInstr *labelHelper = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);
-        insertInstr->InsertBefore(labelHelper);
-    }
-    else
-    {
-        // BNE $labelTarget
-        instr = IR::BranchInstr::New(Js::OpCode::BNE, labelTarget, this->m_func);
-        insertInstr->InsertBefore(instr);
-    }
-    return true;
 }
 
 // Inlines fast-path for int Mul/Add or int Mul/Sub.  If not int, call MulAdd/MulSub helper
@@ -5327,9 +4690,9 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
     *pInstrPrev = instrMul->m_prev;
 
     // Generate int31 fast-path for Mul-Add, go to MulAdd helper if it fails, or one of the source is marked notInt
-    if (!(addSrc->IsRegOpnd() && addSrc->AsRegOpnd()->m_sym->AsStackSym()->m_isNotInt)
-        && !(mulSrc1->IsRegOpnd() && mulSrc1->AsRegOpnd()->m_sym->AsStackSym()->m_isNotInt)
-        && !(mulSrc2->IsRegOpnd() && mulSrc2->AsRegOpnd()->m_sym->AsStackSym()->m_isNotInt))
+    if (!(addSrc->IsRegOpnd() && addSrc->AsRegOpnd()->m_sym->AsStackSym()->m_isNotNumber)
+        && !(mulSrc1->IsRegOpnd() && mulSrc1->AsRegOpnd()->m_sym->AsStackSym()->m_isNotNumber)
+        && !(mulSrc2->IsRegOpnd() && mulSrc2->AsRegOpnd()->m_sym->AsStackSym()->m_isNotNumber))
     {
         // General idea:
         // - mulSrc1: clear 1 but keep *2  - need special test for tagged int
@@ -5365,18 +4728,18 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
         IR::RegOpnd* s1 = IR::RegOpnd::New(mulSrc1->GetType(), this->m_func);
         IR::RegOpnd* s2 = IR::RegOpnd::New(mulSrc2->GetType(), this->m_func);
         IR::RegOpnd* s3 = IR::RegOpnd::New(addSrc->GetType(), this->m_func);
-        IR::RegOpnd* opndRegR12 = IR::RegOpnd::New(nullptr, RegR12, TyMachReg, this->m_func);
+        IR::RegOpnd* opndRegScratch = IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachReg, this->m_func);
 
         // (Load mulSrc1 at the top so we don't have to do it repeatedly)
         if (!mulSrc1->IsRegOpnd())
         {
-            LowererMD::CreateAssign(s1, mulSrc1, instrAdd);
+            Lowerer::InsertMove(s1, mulSrc1, instrAdd);
             mulSrc1 = s1;
         }
         // Now: mulSrc1 is regOpnd (in case if it wasn't it's now s1).
 
         // Load addSrc into s3. We'll use it as source and destination of SMLAL.
-        LowererMD::CreateAssign(s3, addSrc, instrAdd);
+        Lowerer::InsertMove(s3, addSrc, instrAdd);
 
         // (If not mulSrc1 and addSrc are Int31's, jump to $helper)
         bool areTaggedInts = mulSrc1->IsTaggedInt() && s3->IsTaggedInt();
@@ -5393,7 +4756,7 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
         //       BCC  $helper        -- if not tagged int, jmp to $helper
         instr = IR::Instr::New(Js::OpCode::ASRS, s2, mulSrc2, IR::IntConstOpnd::New(Js::VarTag_Shift, TyVar, this->m_func), m_func);
         instrAdd->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
         if (!mulSrc2->IsTaggedInt())    // If we already pre-know it's tagged int, no need to check.
         {
             instr = IR::BranchInstr::New(Js::OpCode::BCC, labelHelper, this->m_func);
@@ -5403,7 +4766,7 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
         // Now: mulSrc1 in s1, mulSrc2 in s2.
 
         // r12 = ASR s3, 31      -- make r12 to be sign-extension of the addSrc.
-        instr = IR::Instr::New(Js::OpCode::ASR, opndRegR12, s3, IR::IntConstOpnd::New(31, TyVar, this->m_func), m_func);
+        instr = IR::Instr::New(Js::OpCode::ASR, opndRegScratch, s3, IR::IntConstOpnd::New(31, TyVar, this->m_func), m_func);
         instrAdd->InsertBefore(instr);
 
         // r12:s3 = SMLAL s1, s2  -- note: the add source comes from r12:s3, result is already tagged int = mulSrc1Val*2 * mulSrc2Val + addSrcVal * 2 + 1
@@ -5415,7 +4778,7 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
         //      CMP r12, s3, ASR #31 -- check for overflow (== means no overflow)
         //      BNE $helper       -- bail if the result overflowed
         instr = IR::Instr::New(Js::OpCode::CMP_ASR31, this->m_func);
-        instr->SetSrc1(opndRegR12);
+        instr->SetSrc1(opndRegScratch);
         instr->SetSrc2(s3);
         instrAdd->InsertBefore(instr);
         instr = IR::BranchInstr::New(Js::OpCode::BNE, labelHelper, this->m_func);
@@ -5423,8 +4786,8 @@ bool LowererMD::TryGenerateFastMulAdd(IR::Instr * instrAdd, IR::Instr ** pInstrP
 
         // Copy the result into dst
         // dst = s3
-        LowererMD::CreateAssign(instrAdd->GetDst(), s3, instrAdd);
-        LegalizeMD::LegalizeInstr(instr, false);
+        Lowerer::InsertMove(instrAdd->GetDst(), s3, instrAdd);
+        LegalizeMD::LegalizeInstr(instr);
 
         //       B $done
         instr = IR::BranchInstr::New(Js::OpCode::B, labelDone, this->m_func);
@@ -5506,7 +4869,7 @@ LowererMD::LoadCheckedFloat(
                                             IR::IntConstOpnd::New(Js::AtomTag, TyMachReg, this->m_func),
                                             this->m_func);
     instrInsert->InsertBefore(instrFirst);
-    LegalizeMD::LegalizeInstr(instrFirst, false);
+    LegalizeMD::LegalizeInstr(instrFirst);
 
     IR::LabelInstr * labelVar = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
     instr = IR::BranchInstr::New(Js::OpCode::BCC, labelVar, this->m_func);
@@ -5631,7 +4994,7 @@ LowererMD::EmitLoadFloatFromNumber(IR::Opnd *dst, IR::Opnd *src, IR::Instr *inse
         // VLDR dst, [pResult].f64
         instr = IR::Instr::New(Js::OpCode::VLDR, dst, tempSymOpnd, this->m_func);
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
     }
 }
 
@@ -5655,7 +5018,7 @@ LowererMD::EmitLoadFloatCommon(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertIn
         regFloatOpnd = IR::RegOpnd::New(TyFloat64, this->m_func);
         instr = IR::Instr::New(Js::OpCode::VLDR, regFloatOpnd, memRef, this->m_func);
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
         isFloatConst = true;
     }
     // Src is constant?
@@ -5683,7 +5046,7 @@ LowererMD::EmitLoadFloatCommon(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertIn
             instr = IR::Instr::New(Js::OpCode::VMOV, dst, regFloatOpnd, this->m_func);
             insertInstr->InsertBefore(instr);
         }
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
         return nullptr;
     }
     Assert(src->IsRegOpnd());
@@ -5722,7 +5085,7 @@ LowererMD::EmitLoadFloatCommon(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertIn
         instr = IR::Instr::New(Js::OpCode::VMOV, dst, reg2, this->m_func);
         insertInstr->InsertBefore(instr);
     }
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     // B $Done
     instr = IR::BranchInstr::New(Js::OpCode::B, labelDone, this->m_func);
@@ -5749,7 +5112,7 @@ LowererMD::EmitLoadFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertInstr, I
 
     if (dst->IsIndirOpnd())
     {
-        LegalizeMD::LegalizeIndirOpndForVFP(insertInstr, dst->AsIndirOpnd(), false);
+        LegalizeMD::LegalizeIndirOpndForVFP(insertInstr, dst->AsIndirOpnd());
     }
 
     labelDone = EmitLoadFloatCommon(dst, src, insertInstr, true);
@@ -5829,7 +5192,7 @@ LowererMD::EmitLoadFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *insertInstr, I
         Js::OpCode opcode = (dst->GetType() == TyFloat32)? Js::OpCode::VLDR32: Js::OpCode::VLDR;
         instr = IR::Instr::New(opcode, dst , memAddress, this->m_func);
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
     }
 
     // $Done
@@ -5868,7 +5231,7 @@ LowererMD::GenerateNumberAllocation(IR::RegOpnd * opndDst, IR::Instr * instrInse
     checkInstr->SetSrc1(nextMemBlockOpnd);
     checkInstr->SetSrc2(endAddressOpnd);
     instrInsert->InsertBefore(checkInstr);
-    LegalizeMD::LegalizeInstr(checkInstr, false);
+    LegalizeMD::LegalizeInstr(checkInstr);
 
     // BHI $helper
     IR::LabelInstr * helperLabel = IR::LabelInstr::New(Js::OpCode::Label, this->m_func, true);
@@ -5927,21 +5290,21 @@ LowererMD::GenerateFastRecyclerAlloc(size_t allocSize, IR::RegOpnd* newObjDst, I
     // LDR newObjDst, allocator->freeObjectList
     IR::Instr * loadMemBlockInstr = IR::Instr::New(Js::OpCode::LDR, newObjDst, freeObjectListOpnd, this->m_func);
     insertionPointInstr->InsertBefore(loadMemBlockInstr);
-    LegalizeMD::LegalizeInstr(loadMemBlockInstr, false);
+    LegalizeMD::LegalizeInstr(loadMemBlockInstr);
 
     // nextMemBlock = ADD newObjDst, allocSize
     IR::RegOpnd * nextMemBlockOpnd = IR::RegOpnd::New(TyMachPtr, this->m_func);
     IR::IntConstOpnd* allocSizeOpnd = IR::IntConstOpnd::New((int32)allocSize, TyInt32, this->m_func);
     IR::Instr * loadNextMemBlockInstr = IR::Instr::New(Js::OpCode::ADD, nextMemBlockOpnd, newObjDst, allocSizeOpnd, this->m_func);
     insertionPointInstr->InsertBefore(loadNextMemBlockInstr);
-    LegalizeMD::LegalizeInstr(loadNextMemBlockInstr, false);
+    LegalizeMD::LegalizeInstr(loadNextMemBlockInstr);
 
     // CMP nextMemBlock, allocator->endAddress
     IR::Instr * checkInstr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
     checkInstr->SetSrc1(nextMemBlockOpnd);
     checkInstr->SetSrc2(endAddressOpnd);
     insertionPointInstr->InsertBefore(checkInstr);
-    LegalizeMD::LegalizeInstr(checkInstr, false);
+    LegalizeMD::LegalizeInstr(checkInstr);
 
     // BHI $allocHelper
     IR::BranchInstr * branchToAllocHelperInstr = IR::BranchInstr::New(Js::OpCode::BHI, allocHelperLabel, this->m_func);
@@ -5950,7 +5313,7 @@ LowererMD::GenerateFastRecyclerAlloc(size_t allocSize, IR::RegOpnd* newObjDst, I
     // LDR allocator->freeObjectList, nextMemBlock
     IR::Instr * setFreeObjectListInstr = IR::Instr::New(Js::OpCode::LDR, freeObjectListOpnd, nextMemBlockOpnd, this->m_func);
     insertionPointInstr->InsertBefore(setFreeObjectListInstr);
-    LegalizeMD::LegalizeInstr(setFreeObjectListInstr, false);
+    LegalizeMD::LegalizeInstr(setFreeObjectListInstr);
 
     // B $allocDone
     IR::BranchInstr * branchToAllocDoneInstr = IR::BranchInstr::New(Js::OpCode::B, allocDoneLabel, this->m_func);
@@ -5963,7 +5326,7 @@ LowererMD::GenerateClz(IR::Instr * instr)
     Assert(instr->GetSrc1()->IsInt32() || instr->GetSrc1()->IsUInt32());
     Assert(IRType_IsNativeInt(instr->GetDst()->GetType()));
     instr->m_opcode = Js::OpCode::CLZ;
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 }
 
 void
@@ -5984,7 +5347,7 @@ LowererMD::SaveDoubleToVar(IR::RegOpnd * dstOpnd, IR::RegOpnd *opndFloat, IR::In
         IR::SymOpnd * symTempSrc = IR::SymOpnd::New(tempNumberSym, TyMachPtr, this->m_func);
         newInstr = IR::Instr::New(Js::OpCode::LEA, dstOpnd, symTempSrc, this->m_func);
         instrInsert->InsertBefore(newInstr);
-        LegalizeMD::LegalizeInstr(newInstr, false);
+        LegalizeMD::LegalizeInstr(newInstr);
 
         symVTableDst = IR::SymOpnd::New(tempNumberSym, TyMachPtr, this->m_func);
         symDblDst = IR::SymOpnd::New(tempNumberSym, (uint32)Js::JavascriptNumber::GetValueOffset(), TyFloat64, this->m_func);
@@ -6018,19 +5381,19 @@ LowererMD::SaveDoubleToVar(IR::RegOpnd * dstOpnd, IR::RegOpnd *opndFloat, IR::In
         // STR dst->vtable, JavascriptNumber::vtable
         newInstr = IR::Instr::New(Js::OpCode::STR, symVTableDst, jsNumberVTable, this->m_func);
         numberInitInsertInstr->InsertBefore(newInstr);
-        LegalizeMD::LegalizeInstr(newInstr, false);
+        LegalizeMD::LegalizeInstr(newInstr);
 
         // STR dst->type, JavascriptNumber_type
         IR::Opnd *typeOpnd = m_lowerer->LoadLibraryValueOpnd(numberInitInsertInstr, LibraryValue::ValueNumberTypeStatic);
         newInstr = IR::Instr::New(Js::OpCode::STR, symTypeDst, typeOpnd, this->m_func);
         numberInitInsertInstr->InsertBefore(newInstr);
-        LegalizeMD::LegalizeInstr(newInstr, false);
+        LegalizeMD::LegalizeInstr(newInstr);
     }
 
     // VSTR dst->value, opndFloat   ; copy the float result to the temp JavascriptNumber
     newInstr = IR::Instr::New(Js::OpCode::VSTR, symDblDst, opndFloat, this->m_func);
     instrInsert->InsertBefore(newInstr);
-    LegalizeMD::LegalizeInstr(newInstr, false);
+    LegalizeMD::LegalizeInstr(newInstr);
 
 
 }
@@ -6084,7 +5447,7 @@ LowererMD::GenerateFastAbs(IR::Opnd *dst, IR::Opnd *src, IR::Instr *callInstr, I
         if (!Js::TaggedInt::IsOverflow(absValue))
         {
             varOpnd->SetAddress(Js::TaggedInt::ToVarUnchecked(absValue), IR::AddrOpndKindConstantVar);
-            LowererMD::CreateAssign(dst, varOpnd, insertInstr);
+            Lowerer::InsertMove(dst, varOpnd, insertInstr);
         }
     }
 
@@ -6094,7 +5457,7 @@ LowererMD::GenerateFastAbs(IR::Opnd *dst, IR::Opnd *src, IR::Instr *callInstr, I
         IR::RegOpnd *regOpnd = IR::RegOpnd::New(TyVar, this->m_func);
         instr = IR::Instr::New(Js::OpCode::MOV, regOpnd, src, this->m_func);
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
         src = regOpnd;
     }
 
@@ -6152,7 +5515,7 @@ LowererMD::GenerateFastAbs(IR::Opnd *dst, IR::Opnd *src, IR::Instr *callInstr, I
         instr = IR::Instr::New(
             Js::OpCode::ADD, dst, dst32, IR::IntConstOpnd::New(Js::AtomTag, TyMachReg, this->m_func), this->m_func);
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
     }
 
     if (labelFloat)
@@ -6173,7 +5536,7 @@ LowererMD::GenerateFastAbs(IR::Opnd *dst, IR::Opnd *src, IR::Instr *callInstr, I
         instr->SetSrc1(opnd);
         instr->SetSrc2(m_lowerer->LoadVTableValueOpnd(insertInstr, VTableValue::VtableJavascriptNumber));
         insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
+        LegalizeMD::LegalizeInstr(instr);
 
         // BNE $helper
         instr = IR::BranchInstr::New(Js::OpCode::BNE, labelHelper, this->m_func);
@@ -6195,203 +5558,9 @@ LowererMD::GenerateFastAbs(IR::Opnd *dst, IR::Opnd *src, IR::Instr *callInstr, I
      }
 }
 
-bool LowererMD::GenerateFastCharAt(Js::BuiltinFunction index, IR::Opnd *dst, IR::Opnd *srcStr, IR::Opnd *srcIndex, IR::Instr *callInstr,
-                                  IR::Instr *insertInstr, IR::LabelInstr *labelHelper, IR::LabelInstr *labelDone)
+bool LowererMD::GenerateFastDivAndRem(IR::Instr* instrDiv, IR::LabelInstr* bailOutLabel)
 {
-    //                  TST regSrc, AtomTag
-    //                  BNE $helper
-    // type         =   LDR [regSrc + offset(type)]
-    // typeid       =   LDR [type + offset(typeid)]
-    //                  CMP typeid, TypeIds_String
-    //                  BNE $helper
-    // psz          =   LDR [regSrc + offset(m_pszValue)]
-    //                  CMP psz, 0
-    //                  BEQ $helper
-    // index32      =   ASRS srcIndex, VarShift
-    //                  BCC $helper
-    // length       =   LDR [regSrc + offset(length)]
-    //                  CMP length, index32
-    //                  BLS $helper
-    // char         =   LDRH [regSrc + index32, LSL #1]
-    //
-    // if (charAt)
-    // (r1)         =   MOV char
-    // (r0)         =   LDIMM scriptContext
-    // dst          =   CALL GetStringFromChar
-    //
-    // else
-    //      if (codePointAt)
-    //                  Lowerer.GenerateFastCodePointAt -- Common inline functions
-    //
-    // char         =   LSL char, VarShift
-    // dst          =   ADD char, AtomTag
-
-    bool isInt = false;
-    IR::Instr *instr;
-    IR::IndirOpnd *indirOpnd;
-    IR::RegOpnd *regSrcStr;
-
-    if (srcStr->IsRegOpnd())
-    {
-        if (srcStr->AsRegOpnd()->IsTaggedInt())
-        {
-            isInt = true;
-        }
-    }
-
-    if (isInt)
-    {
-        // Insert delete branch opcode to tell the dbChecks not to assert on this helper label
-        IR::Instr *fakeBr = IR::PragmaInstr::New(Js::OpCode::DeletedNonHelperBranch, 0, this->m_func);
-        insertInstr->InsertBefore(fakeBr);
-
-        // The "string" is an int. Just bail out.
-        instr = IR::BranchInstr::New(Js::OpCode::B, labelHelper, this->m_func);
-        insertInstr->InsertBefore(instr);
-        return false;
-    }
-
-    // Bail out if index a constant and is less than zero.
-    if (srcIndex->IsImmediateOpnd() && srcIndex->GetImmediateValue(this->m_func) < 0)
-    {
-        instr = IR::BranchInstr::New(Js::OpCode::B, labelHelper, this->m_func);
-        insertInstr->InsertBefore(instr);
-        return false;
-    }
-
-    // Force the string into a reg at the top. Otherwise we'll be loading it over and over...
-    if (srcStr->IsRegOpnd())
-    {
-        regSrcStr = srcStr->AsRegOpnd();
-    }
-    else
-    {
-        regSrcStr = IR::RegOpnd::New(TyMachReg, this->m_func);
-        LowererMD::CreateAssign(regSrcStr, srcStr, insertInstr);
-    }
-
-    this->m_lowerer->GenerateStringTest(regSrcStr, insertInstr, labelHelper);
-
-    // psz = LDR [regSrc + offset(m_pszValue)]
-    IR::RegOpnd *psz = IR::RegOpnd::New(TyMachPtr, this->m_func);
-    indirOpnd = IR::IndirOpnd::New(regSrcStr, Js::JavascriptString::GetOffsetOfpszValue(), TyMachPtr, this->m_func);
-    LowererMD::CreateAssign(psz, indirOpnd, insertInstr);
-
-    //      CMP psz, 0
-    instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-    instr->SetSrc1(psz);
-    instr->SetSrc2(IR::IntConstOpnd::New(0, TyMachPtr, this->m_func));
-    insertInstr->InsertBefore(instr);
-
-    //      BEQ $helper
-    instr = IR::BranchInstr::New(Js::OpCode::BEQ, labelHelper, this->m_func);
-    insertInstr->InsertBefore(instr);
-
-    // Arm should change to Uint32 for the length
-    // length = LDR [regSrcStr + offsetof(length)]
-    IR::RegOpnd *length = IR::RegOpnd::New(TyMachReg, this->m_func);
-    indirOpnd = IR::IndirOpnd::New(regSrcStr, offsetof(Js::JavascriptString, m_charLength), TyUint32, this->m_func);
-    LowererMD::CreateAssign(length, indirOpnd, insertInstr);
-
-    if (srcIndex->IsAddrOpnd())
-    {
-        // The index is a constant, so just use it.
-        uint32 constIndex = Js::TaggedInt::ToUInt32(srcIndex->AsAddrOpnd()->m_address);
-
-        // CMP length, index32
-        instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-        instr->SetSrc1(length);
-        instr->SetSrc2(IR::IntConstOpnd::New(constIndex, TyUint32, this->m_func));
-        insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
-
-        // Use unsigned compare, this should handle negative indexes as well (they become > INT_MAX)
-        // BLS $helper
-        instr = IR::BranchInstr::New(Js::OpCode::BLS, labelHelper, this->m_func);
-        insertInstr->InsertBefore(instr);
-
-        // indir = [psz + index32 * 2]
-        indirOpnd = IR::IndirOpnd::New(psz, constIndex * sizeof(char16), TyUint16, this->m_func);
-    }
-    else
-    {
-        // index32 = ASRS srcIndex, VarShift
-        IR::RegOpnd *index32 = IR::RegOpnd::New(TyMachReg, this->m_func);
-        instr = IR::Instr::New(Js::OpCode::ASRS, index32, srcIndex, IR::IntConstOpnd::New(Js::VarTag_Shift, TyInt8, this->m_func), this->m_func);
-        insertInstr->InsertBefore(instr);
-
-        if (!srcIndex->IsRegOpnd() || !srcIndex->AsRegOpnd()->IsTaggedInt())
-        {
-            // BCC $helper
-            instr = IR::BranchInstr::New(Js::OpCode::BCC, labelHelper, this->m_func);
-            insertInstr->InsertBefore(instr);
-        }
-
-        // CMP length, index32
-        instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-        instr->SetSrc1(length);
-        instr->SetSrc2(index32);
-        insertInstr->InsertBefore(instr);
-
-        // Use unsigned compare, this should handle negative indexes as well (they become > INT_MAX)
-        // BLS $helper
-        instr = IR::BranchInstr::New(Js::OpCode::BLS, labelHelper, this->m_func);
-        insertInstr->InsertBefore(instr);
-
-        // indir = [psz + index32 * 2]
-        indirOpnd = IR::IndirOpnd::New(psz, index32, (byte)Math::Log2(sizeof(char16)), TyUint16, this->m_func);
-    }
-
-    // char = LDRH [regSrc + index32, LSL #1]
-    IR::RegOpnd *charResult = IR::RegOpnd::New(TyUint32, this->m_func);
-    LowererMD::CreateAssign(charResult, indirOpnd, insertInstr);
-
-    if (index == Js::BuiltinFunction::JavascriptString_CharAt)
-    {
-        IR::Opnd *resultOpnd;
-        if (dst->IsEqual(srcStr))
-        {
-            resultOpnd = IR::RegOpnd::New(TyVar, this->m_func);
-        }
-        else
-        {
-            resultOpnd = dst;
-        }
-        this->m_lowerer->GenerateGetSingleCharString(charResult, resultOpnd, labelHelper, labelDone, insertInstr, false);
-    }
-    else
-    {
-        Assert(index == Js::BuiltinFunction::JavascriptString_CharCodeAt || index == Js::BuiltinFunction::JavascriptString_CodePointAt);
-
-        if (index == Js::BuiltinFunction::JavascriptString_CodePointAt)
-        {
-            this->m_lowerer->GenerateFastInlineStringCodePointAt(insertInstr, this->m_func, length, srcIndex, charResult, psz);
-        }
-        // result = LSL result, VarShift
-        instr = IR::Instr::New(Js::OpCode::LSL, charResult, charResult, IR::IntConstOpnd::New(Js::VarTag_Shift, TyInt8, this->m_func), this->m_func);
-        insertInstr->InsertBefore(instr);
-
-        // dst = ADD result, AtomTag
-        instr = IR::Instr::New(Js::OpCode::ADD, dst, charResult, IR::IntConstOpnd::New(Js::AtomTag, TyMachReg, this->m_func), this->m_func);
-        insertInstr->InsertBefore(instr);
-        LegalizeMD::LegalizeInstr(instr, false);
-    }
-
-    return true;
-}
-
-IR::Instr *
-LowererMD::LoadStackAddress(StackSym *sym, IR::RegOpnd* regDst)
-{
-    if (regDst == nullptr)
-    {
-        regDst = IR::RegOpnd::New(TyMachReg, this->m_func);
-    }
-
-    IR::SymOpnd * symSrc = IR::SymOpnd::New(sym, TyMachPtr, this->m_func);
-    IR::Instr * lea = IR::Instr::New(Js::OpCode::LEA, regDst, symSrc, this->m_func);
-
-    return lea;
+    return false;
 }
 
 void
@@ -6525,7 +5694,7 @@ br2_Common:
         break;
     }
 
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 }
 
 void
@@ -6714,7 +5883,7 @@ LowererMD::LowerInt4MulWithBailOut(
         insertInstr->SetSrc1(src1);
         insertInstr->SetSrc2(src2);
         bailOutLabel->InsertBefore(insertInstr);
-        LegalizeMD::LegalizeInstr(insertInstr, false);
+        LegalizeMD::LegalizeInstr(insertInstr);
         bailOutLabel->InsertBefore(IR::BranchInstr::New(Js::OpCode::BPL, skipBailOutLabel, instr->m_func));
 
         // Fall through to bailOutLabel
@@ -6729,9 +5898,9 @@ LowererMD::LowerInt4MulWithBailOut(
     {
         // (SMULL doesn't set the flags but we don't have 32bit overflow <=> r12-unsigned ? r12==0 : all 33 bits of 64bit result are 1's
         //      CMP r12, dst, ASR #31 -- check for overflow (== means no overflow)
-        IR::RegOpnd* opndRegR12 = IR::RegOpnd::New(nullptr, RegR12, TyMachReg, instr->m_func);
+        IR::RegOpnd* opndRegScratch = IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachReg, instr->m_func);
         insertInstr = IR::Instr::New(Js::OpCode::CMP_ASR31, instr->m_func);
-        insertInstr->SetSrc1(opndRegR12);
+        insertInstr->SetSrc1(opndRegScratch);
         insertInstr->SetSrc2(dst);
         insertBeforeInstr->InsertBefore(insertInstr);
 
@@ -6874,7 +6043,7 @@ LowererMD::EmitLoadVar(IR::Instr *instrLoad, bool isFromUint32, bool isHelper)
                 instr->SetSrc1(opnd32src1);
                 instr->SetSrc2(IR::IntConstOpnd::New((int32)0x80000000 >> Js::VarTag_Shift, TyInt32, this->m_func));
                 instrLoad->InsertBefore(instr);
-                LegalizeMD::LegalizeInstr(instr, false);
+                LegalizeMD::LegalizeInstr(instr);
 
                 //     BNE $helper
                 instr = IR::BranchInstr::New(Js::OpCode::BNE, labelToVar, this->m_func);
@@ -7082,68 +6251,6 @@ LowererMD::EmitLoadInt32(IR::Instr *instrLoad, bool conversionFromObjectAllowed,
     return false;
 }
 
-IR::Instr *
-LowererMD::LowerGetCachedFunc(IR::Instr *instr)
-{
-    // src1 is an ActivationObjectEx, and we want to get the function object identified by the index (src2)
-    // dst = MOV (src1)->GetFuncCacheEntry(src2)->func
-    //
-    // => [src1 + (offsetof(src1, cache) + (src2 * sizeof(FuncCacheEntry)) + offsetof(FuncCacheEntry, func))]
-
-    IR::IntConstOpnd *src2Opnd = instr->UnlinkSrc2()->AsIntConstOpnd();
-    IR::RegOpnd *src1Opnd = instr->UnlinkSrc1()->AsRegOpnd();
-    IR::Instr *instrPrev = instr->m_prev;
-
-    instr->SetSrc1(IR::IndirOpnd::New(src1Opnd, (src2Opnd->GetValue() * sizeof(Js::FuncCacheEntry)) + Js::ActivationObjectEx::GetOffsetOfCache() + offsetof(Js::FuncCacheEntry, func), TyVar, this->m_func));
-
-    this->ChangeToAssign(instr);
-
-    src2Opnd->Free(this->m_func);
-
-    return instrPrev;
-}
-
-IR::Instr *
-LowererMD::LowerCommitScope(IR::Instr *instrCommit)
-{
-    IR::Instr *instrPrev = instrCommit->m_prev;
-    IR::RegOpnd *baseOpnd = instrCommit->UnlinkSrc1()->AsRegOpnd();
-    IR::Opnd *opnd;
-    IR::Instr * insertInstr = instrCommit->m_next;
-
-    // Write undef to all the local var slots.
-
-    opnd = IR::IndirOpnd::New(baseOpnd, Js::ActivationObjectEx::GetOffsetOfCommitFlag(), TyInt8, this->m_func);
-    instrCommit->SetDst(opnd);
-    instrCommit->SetSrc1(IR::IntConstOpnd::New(1, TyInt8, this->m_func));
-    LowererMD::ChangeToAssign(instrCommit);
-
-    const Js::PropertyIdArray *propIds = instrCommit->m_func->GetJITFunctionBody()->GetFormalsPropIdArray();
-
-    uint firstVarSlot = (uint)Js::ActivationObjectEx::GetFirstVarSlot(propIds);
-    if (firstVarSlot < propIds->count)
-    {
-        // On ARM, instead of re-using the address of "undefined" for each store, put the address in a register
-        // and re-use that. (Would that be good for x86/amd64 as well?)
-        IR::RegOpnd *undefOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
-        LowererMD::CreateAssign(undefOpnd, m_lowerer->LoadLibraryValueOpnd(insertInstr, LibraryValue::ValueUndefined), insertInstr);
-
-        IR::RegOpnd *slotBaseOpnd = IR::RegOpnd::New(TyMachReg, this->m_func);
-
-        // Load a pointer to the aux slots. We assume that all ActivationObject's have only aux slots.
-
-        opnd = IR::IndirOpnd::New(baseOpnd, Js::DynamicObject::GetOffsetOfAuxSlots(), TyMachReg, this->m_func);
-        this->CreateAssign(slotBaseOpnd, opnd, insertInstr);
-
-        for (uint i = firstVarSlot; i < propIds->count; i++)
-        {
-            opnd = IR::IndirOpnd::New(slotBaseOpnd, i << this->GetDefaultIndirScale(), TyMachReg, this->m_func);
-            LowererMD::CreateAssign(opnd, undefOpnd, insertInstr);
-        }
-    }
-
-    return instrPrev;
-}
 
 void
 LowererMD::ImmedSrcToReg(IR::Instr * instr, IR::Opnd * newOpnd, int srcNum)
@@ -7169,33 +6276,10 @@ LowererMD::ImmedSrcToReg(IR::Instr * instr, IR::Opnd * newOpnd, int srcNum)
     }
 }
 
-void
-LowererMD::MarkOneFltTmpSym(StackSym *sym, BVSparse<JitArenaAllocator> *bvTmps, bool fFltPrefOp)
-{
-    // Nothing to do here. It may be called when lowering a switch if fast paths are on.
-}
-
 IR::LabelInstr *
 LowererMD::GetBailOutStackRestoreLabel(BailOutInfo * bailOutInfo, IR::LabelInstr * exitTargetInstr)
 {
     return exitTargetInstr;
-}
-
-bool
-LowererMD::AnyFloatTmps()
-{
-    // no float preferencing for ARM yet
-    return false;
-}
-
-IR::LabelInstr*
-LowererMD::InsertBeforeRecoveryForFloatTemps(
-    IR::Instr * insertBefore,
-    IR::LabelInstr * labelRecover,
-    const bool isInHelperBlock)
-{
-    AssertMsg(0, "NYI");
-    return nullptr;
 }
 
 StackSym *
@@ -7237,362 +6321,14 @@ LowererMD::EnsureEpilogLabel()
     return labelInstr;
 }
 
-bool
-LowererMD::GenerateLdThisStrict(IR::Instr* insertInstr)
-{
-    IR::RegOpnd * src1 = insertInstr->GetSrc1()->AsRegOpnd();
-    IR::RegOpnd * typeId = IR::RegOpnd::New(TyMachReg, this->m_func);
-    IR::RegOpnd * type = IR::RegOpnd::New(TyMachReg, this->m_func);
-    IR::LabelInstr * done = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-    IR::LabelInstr * fallthrough = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-    IR::LabelInstr * helper = IR::LabelInstr::New(Js::OpCode::Label, m_func, /*helper*/ true);
-    IR::Instr* instr;
-
-    bool assign = insertInstr->GetDst() && !insertInstr->GetDst()->IsEqual(src1);
-    if (!src1->m_sym->m_isNotInt)
-    {
-        GenerateObjectTest(src1, insertInstr, assign ? done : fallthrough);
-    }
-
-    // LDR r1, [src1 + offset(type)]
-    {
-        IR::IndirOpnd * indirOpnd = IR::IndirOpnd::New(src1->AsRegOpnd(), Js::RecyclableObject::GetOffsetOfType(), TyMachReg, this->m_func);
-        this->CreateAssign(type, indirOpnd, insertInstr);
-    }
-
-    // LDR r1, [r1 + offset(typeId)]
-    {
-        IR::IndirOpnd * indirOpnd = IR::IndirOpnd::New(type, Js::Type::GetOffsetOfTypeId(), TyMachReg, this->m_func);
-        this->CreateAssign(typeId, indirOpnd, insertInstr);
-    }
-
-    // CMP typeid, TypeIds_ActivationObject
-    instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-    instr->SetSrc1(typeId);
-    instr->SetSrc2(IR::IntConstOpnd::New(Js::TypeIds_ActivationObject, TyMachReg, this->m_func));
-    insertInstr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
-
-    // BE $helper
-    instr = IR::BranchInstr::New(Js::OpCode::BEQ, helper, this->m_func);
-    insertInstr->InsertBefore(instr);
-
-    if(assign)
-    {
-        //$done:
-        insertInstr->InsertBefore(done);
-
-        // LDR $dest, $src
-        LowererMD::CreateAssign(insertInstr->GetDst(), insertInstr->GetSrc1(), insertInstr);
-    }
-
-    // B $fallthrough
-    instr = IR::BranchInstr::New(Js::OpCode::B, fallthrough, this->m_func);
-    insertInstr->InsertBefore(instr);
-
-    insertInstr->InsertBefore(helper);
-    if(insertInstr->GetDst())
-    {
-        // LDR dst, undefined
-        LowererMD::CreateAssign(insertInstr->GetDst(), m_lowerer->LoadLibraryValueOpnd(insertInstr, LibraryValue::ValueUndefined), insertInstr);
-    }
-
-    // $fallthrough:
-    insertInstr->InsertAfter(fallthrough);
-    return true;
-}
-
-void LowererMD::GenerateIsDynamicObject(IR::RegOpnd *regOpnd, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, bool fContinueLabel)
-{
-    // CMP [srcReg], Js::DynamicObject::`vtable'
-
-    IR::Instr *cmp = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-    cmp->SetSrc1(IR::IndirOpnd::New(regOpnd, 0, TyMachPtr, m_func));
-    cmp->SetSrc2(m_lowerer->LoadVTableValueOpnd(insertInstr, VTableValue::VtableDynamicObject));
-    insertInstr->InsertBefore(cmp);
-    LegalizeMD::LegalizeInstr(cmp, false);
-
-    if (fContinueLabel)
-    {
-        // BEQ $continue
-        IR::Instr * jne = IR::BranchInstr::New(Js::OpCode::BEQ, labelHelper, this->m_func);
-        insertInstr->InsertBefore(jne);
-    }
-    else
-    {
-        // BNE $helper
-        IR::Instr * jne = IR::BranchInstr::New(Js::OpCode::BNE, labelHelper, this->m_func);
-        insertInstr->InsertBefore(jne);
-    }
-}
-
-void LowererMD::GenerateIsRecyclableObject(IR::RegOpnd *regOpnd, IR::Instr *insertInstr, IR::LabelInstr *labelHelper, bool checkObjectAndDynamicObject)
-{
-    // CMP [srcReg], Js::DynamicObject::`vtable'
-    // BEQ $fallThough
-    // LDR r1, [src1 + offset(type)]
-    // LDR r1, [r1 + offset(typeId)]
-    // SUB r1, -(~TypeIds_LastJavascriptPrimitiveType)       -- if (typeId > TypeIds_LastJavascriptPrimitiveType && typeId <= TypeIds_LastTrueJavascriptObjectType)
-    // CMP r1, (TypeIds_LastTrueJavascriptObjectType - TypeIds_LastJavascriptPrimitiveType - 1)
-    // BHI $helper
-    //fallThrough:
-
-
-    IR::LabelInstr *labelFallthrough = IR::LabelInstr::New(Js::OpCode::Label, this->m_func);
-
-    if (checkObjectAndDynamicObject)
-    {
-        if (!regOpnd->m_sym->m_isNotInt)
-        {
-            GenerateObjectTest(regOpnd, insertInstr, labelHelper);
-        }
-
-        this->GenerateIsDynamicObject(regOpnd, insertInstr, labelFallthrough, true);
-    }
-
-    IR::RegOpnd * r1 = IR::RegOpnd::New(TyMachReg, this->m_func);
-
-    //  LDR r1, [src1 + offset(type)]
-    {
-        IR::IndirOpnd * indirOpnd = IR::IndirOpnd::New(regOpnd, Js::RecyclableObject::GetOffsetOfType(), TyMachReg, this->m_func);
-        this->CreateAssign(r1, indirOpnd, insertInstr);
-    }
-
-    //  LDR r1, [r1 + offset(typeId)]
-    {
-        IR::IndirOpnd * indirOpnd = IR::IndirOpnd::New(r1, Js::Type::GetOffsetOfTypeId(), TyMachReg, this->m_func);
-        this->CreateAssign(r1, indirOpnd, insertInstr);
-    }
-
-    // SUB r1, -(~TypeIds_LastJavascriptPrimitiveType)
-    {
-        IR::Instr * add = IR::Instr::New(Js::OpCode::SUB, r1, r1, IR::IntConstOpnd::New(-(~Js::TypeIds_LastJavascriptPrimitiveType), TyInt32, this->m_func, true), this->m_func);
-        insertInstr->InsertBefore(add);
-        LegalizeMD::LegalizeInstr(add, false);
-    }
-
-    // CMP r1, (TypeIds_LastTrueJavascriptObjectType - TypeIds_LastJavascriptPrimitiveType - 1)
-    {
-        IR::Instr * cmp = IR::Instr::New(Js::OpCode::CMP, this->m_func);
-        cmp->SetSrc1(r1);
-        cmp->SetSrc2(IR::IntConstOpnd::New(Js::TypeIds_LastTrueJavascriptObjectType - Js::TypeIds_LastJavascriptPrimitiveType - 1, TyInt32, this->m_func));
-        insertInstr->InsertBefore(cmp);
-        LegalizeMD::LegalizeInstr(cmp, false);
-    }
-
-    // BHI $helper
-    {
-        IR::Instr * jbe = IR::BranchInstr::New(Js::OpCode::BHI, labelHelper, this->m_func);
-        insertInstr->InsertBefore(jbe);
-    }
-
-    // $fallThrough
-    insertInstr->InsertBefore(labelFallthrough);
-}
-
-bool
-LowererMD::GenerateLdThisCheck(IR::Instr * instr)
-{
-    //
-    // If not an object, jump to $helper
-    // MOV dst, src1                                      -- return the object itself
-    // B $fallthrough
-    // $helper:
-    //      (caller generates helper call)
-    // $fallthrough:
-    //
-    IR::RegOpnd * src1 = instr->GetSrc1()->AsRegOpnd();
-    IR::LabelInstr * helper = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
-    IR::LabelInstr * fallthrough = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-
-    this->GenerateIsRecyclableObject(src1, instr, helper);
-
-    // MOV dst, src1
-    if (instr->GetDst() && !instr->GetDst()->IsEqual(src1))
-    {
-        this->CreateAssign(instr->GetDst(), src1, instr);
-    }
-
-    // B $fallthrough
-    {
-        IR::Instr * jmp = IR::BranchInstr::New(Js::OpCode::B, fallthrough, this->m_func);
-        instr->InsertBefore(jmp);
-    }
-
-    // $helper:
-    //      (caller generates helper call)
-    // $fallthrough:
-    instr->InsertBefore(helper);
-    instr->InsertAfter(fallthrough);
-
-    return true;
-}
-
-// given object instanceof function, functionReg is a register with function,
-// objectReg is a register with instance and inlineCache is an InstIsInlineCache.
-// We want to generate:
-//
-// fallback on helper (will patch the inline cache) if function does not match the cache
-// LDIMM dst, Js::false
-// LDR cache, [&(inlineCache->function)]
-// CMP functionReg, cache
-// BNE helper
-//
-// fallback if object is a tagged int
-// TST objectReg, Js::AtomTag
-// BNE done
-//
-// return false if object is a primitive
-// LDR typeReg, objectSrc + offsetof(RecyclableObject::type)
-// LDR typeID, [typeReg + offsetof(Type::typeid)]
-// CMP typeID, TypeIds_LastJavascriptPrimitiveType
-// BLE done
-//
-// fallback if object's type is not the cached type
-// CMP typeReg, [&(inlineCache->type]
-// BNE helper
-//
-// use the cached result and fallthrough
-// LDR dst, [&(inlineCache->result)]
-// B done
-//
-// $helper
-// $done
-bool
-LowererMD::GenerateFastIsInst(IR::Instr * instr)
-{
-    IR::LabelInstr * helper = IR::LabelInstr::New(Js::OpCode::Label, m_func, true);
-    IR::LabelInstr * done = IR::LabelInstr::New(Js::OpCode::Label, m_func);
-    IR::RegOpnd * typeReg = IR::RegOpnd::New(TyMachReg, this->m_func);
-    IR::Opnd * objectSrc;
-    IR::RegOpnd * objectReg;
-    IR::Opnd * functionSrc;
-    IR::RegOpnd * functionReg;
-    intptr_t inlineCache;
-    IR::Instr * instrArg;
-
-    // We are going to use the extra ArgOut_A instructions to lower the helper call later,
-    // so we leave them alone here and clean them up then.
-    inlineCache = instr->m_func->GetJITFunctionBody()->GetIsInstInlineCache(instr->GetSrc1()->AsIntConstOpnd()->GetValue());
-    Assert(instr->GetSrc2()->AsRegOpnd()->m_sym->m_isSingleDef);
-    instrArg = instr->GetSrc2()->AsRegOpnd()->m_sym->m_instrDef;
-
-    objectSrc = instrArg->GetSrc1();
-    Assert(instrArg->GetSrc2()->AsRegOpnd()->m_sym->m_isSingleDef);
-    instrArg = instrArg->GetSrc2()->AsRegOpnd()->m_sym->m_instrDef;
-
-    functionSrc = instrArg->GetSrc1();
-    Assert(instrArg->GetSrc2() == nullptr);
-
-    IR::Opnd* opndDst = instr->GetDst();
-    if (!opndDst->IsRegOpnd())
-    {
-        opndDst = IR::RegOpnd::New(opndDst->GetType(), this->m_func);
-    }
-
-    // LDR dst, Js::false
-    instr->InsertBefore(IR::Instr::New(Js::OpCode::LDR, opndDst,
-        m_lowerer->LoadLibraryValueOpnd(instr, LibraryValue::ValueFalse), m_func));
-
-    if (functionSrc->IsRegOpnd())
-    {
-        functionReg = functionSrc->AsRegOpnd();
-    }
-    else
-    {
-        functionReg = IR::RegOpnd::New(TyMachReg, this->m_func);
-        LowererMD::CreateAssign(functionReg, functionSrc, instr);
-    }
-
-    // CMP functionReg, [&(inlineCache->function)]
-    {
-        IR::Instr * cmp = IR::Instr::New(Js::OpCode::CMP, m_func);
-        cmp->SetSrc1(functionReg);
-        cmp->SetSrc2(IR::MemRefOpnd::New(inlineCache + Js::IsInstInlineCache::OffsetOfFunction(), TyMachReg, m_func,
-            IR::AddrOpndKindDynamicIsInstInlineCacheFunctionRef));
-        instr->InsertBefore(cmp);
-        LegalizeMD::LegalizeInstr(cmp, false);
-    }
-
-    // BNE helper
-    instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, helper, m_func));
-
-    if (objectSrc->IsRegOpnd())
-    {
-        objectReg = objectSrc->AsRegOpnd();
-    }
-    else
-    {
-        objectReg = IR::RegOpnd::New(TyMachReg, this->m_func);
-        LowererMD::CreateAssign(objectReg, objectSrc, instr);
-    }
-
-    // TST objectReg, Js::AtomTag
-    // BNE done
-    if (!objectReg->m_sym->m_isNotInt)
-    {
-        GenerateObjectTest(objectReg, instr, done);
-    }
-
-    // LDR typeReg, objectSrc + offsetof(RecyclableObject::type)
-    instr->InsertBefore(IR::Instr::New(Js::OpCode::LDR, typeReg,
-        IR::IndirOpnd::New(objectReg, Js::RecyclableObject::GetOffsetOfType(), TyMachReg, m_func),
-        m_func));
-
-    // CMP [typeReg + offsetof(Type::typeid)], TypeIds_LastJavascriptPrimitiveType
-    {
-        IR::Instr * cmp = IR::Instr::New(Js::OpCode::CMP, m_func);
-        cmp->SetSrc1(IR::IndirOpnd::New(typeReg, Js::Type::GetOffsetOfTypeId(), TyInt32, m_func));
-        cmp->SetSrc2(IR::IntConstOpnd::New(Js::TypeId::TypeIds_LastJavascriptPrimitiveType, TyInt32, m_func));
-        instr->InsertBefore(cmp);
-        LegalizeMD::LegalizeInstr(cmp, false);
-    }
-
-    // BLE done
-    instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BLE, done, m_func));
-
-    // CMP typeReg, [&(inlineCache->type]
-    {
-        IR::Instr * cmp = IR::Instr::New(Js::OpCode::CMP, m_func);
-        cmp->SetSrc1(typeReg);
-        cmp->SetSrc2(IR::MemRefOpnd::New(inlineCache + Js::IsInstInlineCache::OffsetOfType(), TyMachReg, m_func));
-        instr->InsertBefore(cmp);
-        LegalizeMD::LegalizeInstr(cmp, false);
-    }
-
-    // BNE helper
-    instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BNE, helper, m_func));
-
-    // LDR dst, [&(inlineCache->result)]
-    IR::Instr *result = IR::Instr::New(Js::OpCode::LDR, opndDst,
-        IR::MemRefOpnd::New(inlineCache + Js::IsInstInlineCache::OffsetOfResult(), TyMachReg, m_func), m_func);
-    instr->InsertBefore(result);
-    LegalizeMD::LegalizeInstr(result, false);
-
-    if (opndDst != instr->GetDst())
-    {
-        LowererMD::CreateAssign(instr->GetDst(), opndDst, instr);
-    }
-
-    // B done
-    instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, done, m_func));
-
-    // LABEL helper
-    instr->InsertBefore(helper);
-
-    instr->InsertAfter(done);
-
-    return true;
-}
-
 // Helper method: inserts legalized assign for given srcOpnd into RegD0 in front of given instr in the following way:
-//   dstReg = CreateAssign srcOpnd
+//   dstReg = InsertMove srcOpnd
 // Used to put args of inline built-in call into RegD0 and RegD1 before we call actual CRT function.
 void LowererMD::GenerateAssignForBuiltinArg(RegNum dstReg, IR::Opnd* srcOpnd, IR::Instr* instr)
 {
     IR::RegOpnd* tempDst = IR::RegOpnd::New(nullptr, dstReg, TyMachDouble, this->m_func);
     tempDst->m_isCallArg = true; // This is to make sure that lifetime of opnd is virtually extended until next CALL instr.
-    this->CreateAssign(tempDst, srcOpnd, instr);
+    Lowerer::InsertMove(tempDst, srcOpnd, instr);
 }
 
 // For given InlineMathXXX instr, generate the call to actual CRT function/CPU instr.
@@ -7611,7 +6347,7 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
         Assert(helperMethod == (IR::JnHelperMethod)0);
         Assert(instr->GetSrc2() == nullptr);
         instr->m_opcode = Js::OpCode::VSQRT;
-        LegalizeMD::LegalizeInstr(instr, /* fPostRegAlloc = */ false);
+        LegalizeMD::LegalizeInstr(instr);
         break;
 
     case Js::OpCode::InlineMathAbs:
@@ -7643,9 +6379,24 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
 
             bool min = instr->m_opcode == Js::OpCode::InlineMathMin ? true : false;
 
-            //(V)MOV dst, src1;
-            Assert(!dst->IsEqual(src1));
-            this->m_lowerer->InsertMove(dst, src1, instr);
+            bool dstEqualsSrc1 = dst->IsEqual(src1);
+            bool dstEqualsSrc2 = dst->IsEqual(src2);
+
+            IR::Opnd * otherSrc = src2;
+            IR::Opnd * compareSrc1 = src1;
+            IR::Opnd * compareSrc2 = src2;
+
+            if (dstEqualsSrc2)
+            {
+                otherSrc = src1;
+                compareSrc1 = src2;
+                compareSrc2 = src1;
+            }
+            if (!dstEqualsSrc1 && !dstEqualsSrc2)
+            {
+                //(V)MOV dst, src1;
+                this->m_lowerer->InsertMove(dst, src1, instr);
+            }
 
             if(dst->IsInt32())
             {
@@ -7653,20 +6404,20 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
                 if(min)
                 {
                     // BLT $continueLabel
-                    branchInstr = IR::BranchInstr::New(Js::OpCode::BrLt_I4, doneLabel, src1, src2, instr->m_func);
+                    branchInstr = IR::BranchInstr::New(Js::OpCode::BrLt_I4, doneLabel, compareSrc1, compareSrc2, instr->m_func);
                     instr->InsertBefore(branchInstr);
                     this->EmitInt4Instr(branchInstr);
                 }
                 else
                 {
                     // BGT $continueLabel
-                    branchInstr = IR::BranchInstr::New(Js::OpCode::BrGt_I4, doneLabel, src1, src2, instr->m_func);
+                    branchInstr = IR::BranchInstr::New(Js::OpCode::BrGt_I4, doneLabel, compareSrc1, compareSrc2, instr->m_func);
                     instr->InsertBefore(branchInstr);
                     this->EmitInt4Instr(branchInstr);
                 }
 
                 // MOV dst, src2
-                this->m_lowerer->InsertMove(dst, src2, instr);
+                this->m_lowerer->InsertMove(dst, otherSrc, instr);
             }
 
             else if(dst->IsFloat64())
@@ -7698,18 +6449,18 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
 
                 if(min)
                 {
-                    this->m_lowerer->InsertCompareBranch(src1, src2, Js::OpCode::BrLt_A, doneLabel, instr); // Lowering of BrLt_A for floats is done to JA with operands swapped
+                    this->m_lowerer->InsertCompareBranch(compareSrc1, compareSrc2, Js::OpCode::BrLt_A, doneLabel, instr); // Lowering of BrLt_A for floats is done to JA with operands swapped
                 }
                 else
                 {
-                    this->m_lowerer->InsertCompareBranch(src1, src2, Js::OpCode::BrGt_A, doneLabel, instr);
+                    this->m_lowerer->InsertCompareBranch(compareSrc1, compareSrc2, Js::OpCode::BrGt_A, doneLabel, instr);
                 }
 
                 instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BVS, labelNaNHelper, instr->m_func));
 
                 instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::BEQ, labelNegZeroCheckHelper, instr->m_func));
 
-                this->m_lowerer->InsertMove(dst, src2, instr);
+                this->m_lowerer->InsertMove(dst, otherSrc, instr);
                 instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, doneLabel, instr->m_func));
 
                 instr->InsertBefore(labelNegZeroCheckHelper);
@@ -7717,16 +6468,16 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
                 IR::Opnd* isNegZero;
                 if(min)
                 {
-                    isNegZero =  IsOpndNegZero(src2, instr);
+                    isNegZero =  IsOpndNegZero(compareSrc2, instr);
                 }
                 else
                 {
-                    isNegZero =  IsOpndNegZero(src1, instr);
+                    isNegZero =  IsOpndNegZero(compareSrc1, instr);
                 }
 
                 this->m_lowerer->InsertCompareBranch(isNegZero, IR::IntConstOpnd::New(0x00000000, IRType::TyInt32, this->m_func), Js::OpCode::BrEq_A, doneLabel, instr);
 
-                this->m_lowerer->InsertMove(dst, src2, instr);
+                this->m_lowerer->InsertMove(dst, otherSrc, instr);
                 instr->InsertBefore(IR::BranchInstr::New(Js::OpCode::B, doneLabel, instr->m_func));
 
                 instr->InsertBefore(labelNaNHelper);
@@ -7745,10 +6496,10 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
         // Before:
         //      dst = <Built-in call> src1, src2
         // After:
-        //       d0 = CreateAssign src1
+        //       d0 = InsertMove src1
         //       lr = MOV helperAddr
         //            BLX lr
-        //      dst = CreateAssign call->dst (d0)
+        //      dst = InsertMove call->dst (d0)
 
         // Src1
         AssertMsg(instr->GetDst()->IsFloat(), "Currently accepting only float args for math helpers -- dst.");
@@ -7777,7 +6528,7 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
         floatCall->InsertBefore(movInstr);
 
         // Save the result.
-        this->CreateAssign(instr->UnlinkDst(), floatCall->GetDst(), instr);
+        Lowerer::InsertMove(instr->UnlinkDst(), floatCall->GetDst(), instr);
         instr->Remove();
         break;
     }
@@ -7786,7 +6537,7 @@ void LowererMD::GenerateFastInlineBuiltInCall(IR::Instr* instr, IR::JnHelperMeth
 void
 LowererMD::GenerateFastInlineBuiltInMathAbs(IR::Instr *inlineInstr)
 {
-    IR::Opnd* src = inlineInstr->GetSrc1();
+    IR::Opnd* src = inlineInstr->GetSrc1()->Copy(this->m_func);
     IR::Opnd* dst = inlineInstr->UnlinkDst();
     Assert(src);
     IR::Instr* tmpInstr;
@@ -7853,7 +6604,7 @@ LowererMD::GenerateFastInlineBuiltInMathFloor(IR::Instr* instr)
     instrCmp->SetSrc1(floatOpnd);
     instrCmp->SetSrc2(floatOpnd);
     instr->InsertBefore(instrCmp);
-    LegalizeMD::LegalizeInstr(instrCmp, false);
+    LegalizeMD::LegalizeInstr(instrCmp);
 
     // VMRS APSR, FPSCR
     // BVS  $bailoutLabel
@@ -7951,7 +6702,7 @@ LowererMD::GenerateFastInlineBuiltInMathCeil(IR::Instr* instr)
     instrCmp->SetSrc1(floatOpnd);
     instrCmp->SetSrc2(floatOpnd);
     instr->InsertBefore(instrCmp);
-    LegalizeMD::LegalizeInstr(instrCmp, false);
+    LegalizeMD::LegalizeInstr(instrCmp);
 
     // VMRS APSR, FPSCR
     // BVS  $bailoutLabel
@@ -8054,7 +6805,7 @@ LowererMD::GenerateFastInlineBuiltInMathRound(IR::Instr* instr)
     instrCmp->SetSrc1(floatOpnd);
     instrCmp->SetSrc2(floatOpnd);
     instr->InsertBefore(instrCmp);
-    LegalizeMD::LegalizeInstr(instrCmp, false);
+    LegalizeMD::LegalizeInstr(instrCmp);
 
     // VMRS APSR, FPSCR
     // BVS  $bailoutLabel
@@ -8198,7 +6949,7 @@ LowererMD::LowerToFloat(IR::Instr *instr)
         Assume(UNREACHED);
     }
 
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
     return instr;
 }
 
@@ -8217,7 +6968,7 @@ LowererMD::LowerFloatCondBranch(IR::BranchInstr *instrBranch, bool ignoreNaN)
     instrCmp->SetSrc1(src1);
     instrCmp->SetSrc2(src2);
     instrBranch->InsertBefore(instrCmp);
-    LegalizeMD::LegalizeInstr(instrCmp, false);
+    LegalizeMD::LegalizeInstr(instrCmp);
 
     instrBranch->InsertBefore(IR::Instr::New(Js::OpCode::VMRS, func));
 
@@ -8313,7 +7064,7 @@ LowererMD::EmitUIntToFloat(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert)
     IR::RegOpnd *floatReg = IR::RegOpnd::New(TyFloat64, this->m_func);
 
     Assert(dst->IsRegOpnd() && dst->IsFloat64());
-    Assert(src->IsRegOpnd() && src->IsInt32());
+    Assert(src->IsRegOpnd() && (src->IsInt32() || src->IsUInt32()));
 
     instr = IR::Instr::New(Js::OpCode::VMOVARMVFP, floatReg, src, this->m_func);
     instrInsert->InsertBefore(instr);
@@ -8369,7 +7120,7 @@ LowererMD::CheckOverflowOnFloatToInt32(IR::Instr* instrInsert, IR::Opnd* intOpnd
     instr->SetSrc1(intOpnd);
     instr->SetSrc2(IR::IntConstOpnd::New(0x80000000, TyInt32, this->m_func, true));
     instrInsert->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     // BEQ $helper
     instr = IR::BranchInstr::New(Js::OpCode::BEQ, labelHelper, this->m_func);
@@ -8384,13 +7135,13 @@ LowererMD::CheckOverflowOnFloatToInt32(IR::Instr* instrInsert, IR::Opnd* intOpnd
         IR::IntConstOpnd::New(0x80000000, TyInt32, this->m_func, true),
         this->m_func);
     instrInsert->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
     instr->SetSrc1(intOpnd);
     instr->SetSrc2(regOpnd);
     instrInsert->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr, false);
+    LegalizeMD::LegalizeInstr(instr);
 
     // BNE $done
     instr = IR::BranchInstr::New(Js::OpCode::BNE, labelDone, this->m_func);
@@ -8424,7 +7175,6 @@ LowererMD::EmitFloatToInt(IR::Opnd *dst, IR::Opnd *src, IR::Instr *instrInsert, 
 
     instr = IR::Instr::New(Js::OpCode::Call, dst, this->m_func);
     instrInsert->InsertBefore(instr);
-
     if (BailOutInfo::IsBailOutOnImplicitCalls(bailOutKind))
     {
         _Analysis_assume_(instrBailOut != nullptr);
@@ -8567,7 +7317,7 @@ LowererMD::LoadFloatValue(IR::Opnd * opndDst, double value, IR::Instr * instrIns
     }
     IR::Instr * instr = IR::Instr::New(Js::OpCode::VLDR, opndDst, opnd, instrInsert->m_func);
     instrInsert->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr,false);
+    LegalizeMD::LegalizeInstr(instr);
     return instr;
 }
 
@@ -8594,14 +7344,14 @@ void LowererMD::GenerateFloatTest(IR::RegOpnd * opndSrc, IR::Instr * insertInstr
 
     IR::RegOpnd *vt = IR::RegOpnd::New(TyMachPtr, this->m_func);
     IR::Opnd* opnd = IR::IndirOpnd::New(opndSrc, (int32)0, TyMachPtr, this->m_func);
-    LowererMD::CreateAssign(vt, opnd, insertInstr);
+    Lowerer::InsertMove(vt, opnd, insertInstr);
 
     // CMP [number], JavascriptNumber::vtable
     IR::Instr* instr = IR::Instr::New(Js::OpCode::CMP, this->m_func);
     instr->SetSrc1(vt);
     instr->SetSrc2(m_lowerer->LoadVTableValueOpnd(insertInstr, VTableValue::VtableJavascriptNumber));
     insertInstr->InsertBefore(instr);
-    LegalizeMD::LegalizeInstr(instr,false);
+    LegalizeMD::LegalizeInstr(instr);
 
     // BNE $helper
     instr = IR::BranchInstr::New(Js::OpCode::BNE, labelHelper, this->m_func);
@@ -8624,7 +7374,7 @@ void LowererMD::LoadFloatValue(IR::RegOpnd * javascriptNumber, IR::RegOpnd * opn
 
 template <bool verify>
 void
-LowererMD::Legalize(IR::Instr *const instr, bool fPostRegAlloc)
+LowererMD::Legalize(IR::Instr *const instr)
 {
     Func *const func = instr->m_func;
 
@@ -8641,7 +7391,7 @@ LowererMD::Legalize(IR::Instr *const instr, bool fPostRegAlloc)
         const IR::AutoReuseOpnd autoReuseFloat32Reg(float32Reg, func);
         IR::Instr *const newInstr = IR::Instr::New(Js::OpCode::VCVTS32F64, float32Reg, instr->GetSrc1(), func);
         instr->InsertBefore(newInstr);
-        LegalizeMD::LegalizeInstr(newInstr, false);
+        LegalizeMD::LegalizeInstr(newInstr);
         instr->m_opcode = Js::OpCode::VMOVARMVFP;
         instr->ReplaceSrc1(float32Reg);
     }
@@ -8651,12 +7401,12 @@ LowererMD::Legalize(IR::Instr *const instr, bool fPostRegAlloc)
         // NYI for the rest of legalization
         return;
     }
-    LegalizeMD::LegalizeInstr(instr, fPostRegAlloc);
+    LegalizeMD::LegalizeInstr(instr);
 }
 
-template void LowererMD::Legalize<false>(IR::Instr *const instr, bool fPostRegalloc);
+template void LowererMD::Legalize<false>(IR::Instr *const instr);
 #if DBG
-template void LowererMD::Legalize<true>(IR::Instr *const instr, bool fPostRegalloc);
+template void LowererMD::Legalize<true>(IR::Instr *const instr);
 #endif
 
 void
@@ -8684,7 +7434,7 @@ LowererMD::FinalLower()
                 break;
             case Js::OpCode::Leave:
                 Assert(this->m_func->DoOptimizeTry() && !this->m_func->IsLoopBodyInTry());
-                instrPrev = this->LowerLeave(instr, instr->AsBranchInstr()->GetTarget(), true /*fromFinalLower*/);
+                instrPrev = m_lowerer->LowerLeave(instr, instr->AsBranchInstr()->GetTarget(), true /*fromFinalLower*/);
                 break;
             }
         }
@@ -8758,7 +7508,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
 {
     if (instr->m_opcode == Js::OpCode::LDIMM)
     {
-        LegalizeMD::LegalizeInstr(instr, true);
+        LegalizeMD::LegalizeInstr(instr);
 
         // LDIMM can expand into MOV/MOVT when the immediate is more than 16 bytes,
         // it can also expand into multiple different no-op (normally MOV) instrs when we obfuscate it, which is randomly.
@@ -8769,7 +7519,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
         Assert(instr->GetDst()->IsRegOpnd());
         if (!instr->GetSrc1()->IsRegOpnd())
         {
-            LegalizeMD::LegalizeSrc(instr, instr->GetSrc1(), 1, true);
+            LegalizeMD::LegalizeSrc(instr, instr->GetSrc1(), 1);
             return true;
         }
         instr->m_opcode = (instr->GetSrc1()->GetType() == TyMachDouble) ? Js::OpCode::VMOV : Js::OpCode::MOV;
@@ -8779,7 +7529,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
         Assert(instr->GetSrc1()->IsRegOpnd());
         if (!instr->GetDst()->IsRegOpnd())
         {
-            LegalizeMD::LegalizeDst(instr, true);
+            LegalizeMD::LegalizeDst(instr);
             return true;
         }
         instr->m_opcode = (instr->GetDst()->GetType() == TyMachDouble) ? Js::OpCode::VMOV : Js::OpCode::MOV;
@@ -8795,7 +7545,7 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
         uint32 argOutSize = UInt32Math::Mul(this->m_func->m_argSlotsForFunctionsCalled, MachRegInt, Js::Throw::OutOfMemory);
         instr->SetSrc1(IR::IntConstOpnd::New(argOutSize, TyMachReg, this->m_func));
         instr->m_opcode = Js::OpCode::LDIMM;
-        LegalizeMD::LegalizeInstr(instr, true);
+        LegalizeMD::LegalizeInstr(instr);
         return true;
     }
     else if (instr->m_opcode == Js::OpCode::REM)
@@ -8804,12 +7554,12 @@ LowererMD::FinalLowerAssign(IR::Instr * instr)
         IR::Opnd* src1 = instr->GetSrc1();
         IR::Opnd* src2 = instr->GetSrc2();
 
-        Assert(src1->IsRegOpnd() && src1->AsRegOpnd()->GetReg() != RegR12);
-        Assert(src2->IsRegOpnd() && src2->AsRegOpnd()->GetReg() != RegR12);
+        Assert(src1->IsRegOpnd() && src1->AsRegOpnd()->GetReg() != SCRATCH_REG);
+        Assert(src2->IsRegOpnd() && src2->AsRegOpnd()->GetReg() != SCRATCH_REG);
 
         //r12 = SDIV src1, src2
-        IR::RegOpnd *regR12 = IR::RegOpnd::New(nullptr, RegR12, TyMachReg, instr->m_func);
-        IR::Instr *insertInstr = IR::Instr::New(Js::OpCode::SDIV, regR12, src1, src2, instr->m_func);
+        IR::RegOpnd *regScratch = IR::RegOpnd::New(nullptr, SCRATCH_REG, TyMachReg, instr->m_func);
+        IR::Instr *insertInstr = IR::Instr::New(Js::OpCode::SDIV, regScratch, src1, src2, instr->m_func);
         instr->InsertBefore(insertInstr);
 
         // dst = MLS (r12,) src2, src1
@@ -8843,8 +7593,8 @@ LowererMD::LowerDivI4AndBailOnReminder(IR::Instr * instr, IR::LabelInstr * bailO
 
     // delay assigning to the final dst.
     IR::Instr * sinkedInstr = instr->SinkDst(Js::OpCode::MOV);
-    LegalizeMD::LegalizeInstr(instr, false);
-    LegalizeMD::LegalizeInstr(sinkedInstr, false);
+    LegalizeMD::LegalizeInstr(instr);
+    LegalizeMD::LegalizeInstr(sinkedInstr);
 
     IR::Opnd * resultOpnd = instr->GetDst();
     IR::Opnd * numerator = instr->GetSrc1();
@@ -8857,7 +7607,7 @@ LowererMD::LowerDivI4AndBailOnReminder(IR::Instr * instr, IR::LabelInstr * bailO
     IR::RegOpnd * mulResult = IR::RegOpnd::New(TyInt32, m_func);
     IR::Instr * mulInstr = IR::Instr::New(Js::OpCode::MUL, mulResult, resultOpnd, denominatorOpnd, m_func);
     insertBeforeInstr->InsertBefore(mulInstr);
-    LegalizeMD::LegalizeInstr(mulInstr, false);
+    LegalizeMD::LegalizeInstr(mulInstr);
 
     this->m_lowerer->InsertCompareBranch(mulResult, numerator, Js::OpCode::BrNeq_A, bailOutLabel, insertBeforeInstr);
     return insertBeforeInstr;
@@ -8948,6 +7698,30 @@ LowererMD::LowerTypeof(IR::Instr* typeOfInstr)
     typeOfInstr->InsertBefore(helperLabel);
     typeOfInstr->InsertAfter(doneLabel);
     m_lowerer->LowerUnaryHelperMem(typeOfInstr, IR::HelperOp_Typeof);
+}
+
+IR::BranchInstr*
+LowererMD::InsertMissingItemCompareBranch(IR::Opnd* compareSrc, IR::Opnd* missingItemOpnd, Js::OpCode opcode, IR::LabelInstr* target, IR::Instr* insertBeforeInstr)
+{
+    Assert(compareSrc->IsFloat64() && missingItemOpnd->IsUInt32());
+
+    IR::Opnd * compareSrcUint32Opnd = IR::RegOpnd::New(TyUint32, m_func);
+    IR::RegOpnd* tmpDoubleRegOpnd = IR::RegOpnd::New(TyFloat64, m_func);
+
+    if (compareSrc->IsIndirOpnd())
+    {
+        Lowerer::InsertMove(tmpDoubleRegOpnd, compareSrc, insertBeforeInstr);
+    }
+    else
+    {
+        tmpDoubleRegOpnd = compareSrc->AsRegOpnd();
+    }
+
+    IR::Instr * movInstr = IR::Instr::New(Js::OpCode::VMOVF64R32U, compareSrcUint32Opnd, tmpDoubleRegOpnd, m_func);
+    insertBeforeInstr->InsertBefore(movInstr);
+    Legalize(movInstr);
+
+    return m_lowerer->InsertCompareBranch(missingItemOpnd, compareSrcUint32Opnd, opcode, target, insertBeforeInstr);
 }
 
 #if DBG

@@ -234,7 +234,7 @@
     (func (type 0))
     (table 0 anyfunc)
     (func
-      (call_indirect 0 (i32.const 0) (f32.const 0))))
+      (call_indirect (type 0) (i32.const 0) (f32.const 0))))
   "type mismatch")
 
 ;; call_indirect index
@@ -243,7 +243,7 @@
     (type (func))
     (func (type 0))
     (table 0 anyfunc)
-    (func (call_indirect 0 (f32.const 0))))
+    (func (call_indirect (type 0) (f32.const 0))))
   "type mismatch")
 
 ;; return
@@ -421,5 +421,5 @@
 (assert_invalid (module (func (f64.promote/f32 (i32.const 0)))) "type mismatch")
 (assert_invalid (module (func (f64.reinterpret/i64 (i32.const 0)))) "type mismatch")
 
-;; grow_memory
-(assert_invalid (module (memory 1) (func (grow_memory (f32.const 0)))) "type mismatch")
+;; memory.grow
+(assert_invalid (module (memory 1) (func (memory.grow (f32.const 0)))) "type mismatch")

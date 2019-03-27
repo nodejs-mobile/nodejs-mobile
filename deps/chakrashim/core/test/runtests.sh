@@ -14,7 +14,22 @@ popd > /dev/null
 build_type=
 binary_path=
 release_build=0
-test_variant=$1
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --iculib=*)
+        ICU4C_LIBRARY_PATH=$1
+        ICU4C_LIBRARY_PATH="${ICU4C_LIBRARY_PATH:9}"
+        export ICU4C_LIBRARY_PATH
+        ;;
+
+    *)
+        test_variant=$1
+        ;;
+    esac
+
+    shift
+done
 
 if [[ -f "$test_path/../out/Debug/ch" ]]; then
     echo "Warning: Debug build was found"
@@ -34,7 +49,7 @@ else
 fi
 
 if [[ $release_build != 1 ]]; then
-    "$test_path/runtests.py" $build_type --not-tag exclude_jenkins $test_variant
+    "$test_path/runtests.py" $build_type --not-tag exclude_jenkins --not-tag exclude_ch $test_variant
     if [[ $? != 0 ]]; then
         exit 1
     fi

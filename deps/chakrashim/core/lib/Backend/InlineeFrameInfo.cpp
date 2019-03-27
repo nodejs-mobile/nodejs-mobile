@@ -172,6 +172,10 @@ void InlineeFrameRecord::PopulateParent(Func* func)
 void InlineeFrameRecord::Finalize(Func* inlinee, uint32 currentOffset)
 {
     this->PopulateParent(inlinee);
+#if TARGET_32
+    const uint32 offsetMask = (~(uint32)0) >> (sizeof(uint) * CHAR_BIT - Js::InlineeCallInfo::ksizeofInlineeStartOffset);
+    AssertOrFailFast(currentOffset == (currentOffset & offsetMask));
+#endif
     this->inlineeStartOffset = currentOffset;
     this->inlineDepth = inlinee->inlineDepth;
 
@@ -199,13 +203,14 @@ void InlineeFrameRecord::Finalize(Func* inlinee, uint32 currentOffset)
     Assert(this->inlineDepth != 0);
 }
 
-void InlineeFrameRecord::Restore(Js::FunctionBody* functionBody, InlinedFrameLayout *inlinedFrame, Js::JavascriptCallStackLayout * layout) const
+void InlineeFrameRecord::Restore(Js::FunctionBody* functionBody, InlinedFrameLayout *inlinedFrame, Js::JavascriptCallStackLayout * layout, bool boxValues) const
 {
     Assert(this->inlineDepth != 0);
     Assert(inlineeStartOffset != 0);
 
     BAILOUT_VERBOSE_TRACE(functionBody, _u("Restore function object: "));
-    Js::Var varFunction =  this->Restore(this->functionOffset, /*isFloat64*/ false, /*isInt32*/ false, layout, functionBody);
+    // No deepCopy needed for just the function
+    Js::Var varFunction = this->Restore(this->functionOffset, /*isFloat64*/ false, /*isInt32*/ false, layout, functionBody, boxValues);
     Assert(Js::ScriptFunction::Is(varFunction));
 
     Js::ScriptFunction* function = Js::ScriptFunction::FromVar(varFunction);
@@ -219,9 +224,11 @@ void InlineeFrameRecord::Restore(Js::FunctionBody* functionBody, InlinedFrameLay
         bool isInt32 = losslessInt32Args.Test(i) != 0;
         BAILOUT_VERBOSE_TRACE(functionBody, _u("Restore argument %d: "), i);
 
-        Js::Var var = this->Restore(this->argOffsets[i], isFloat64, isInt32, layout, functionBody);
+        // Forward deepCopy flag for the arguments in case their data must be guaranteed
+        // to have its own lifetime
+        Js::Var var = this->Restore(this->argOffsets[i], isFloat64, isInt32, layout, functionBody, boxValues);
 #if DBG
-        if (!Js::TaggedNumber::Is(var))
+        if (boxValues && !Js::TaggedNumber::Is(var))
         {
             Js::RecyclableObject *const recyclableObject = Js::RecyclableObject::FromVar(var);
             Assert(!ThreadContext::IsOnStack(recyclableObject));
@@ -233,7 +240,10 @@ void InlineeFrameRecord::Restore(Js::FunctionBody* functionBody, InlinedFrameLay
     BAILOUT_FLUSH(functionBody);
 }
 
-void InlineeFrameRecord::RestoreFrames(Js::FunctionBody* functionBody, InlinedFrameLayout* outerMostFrame, Js::JavascriptCallStackLayout* callstack)
+// Note: the boxValues parameter should be true when this is called from a Bailout codepath to ensure that multiple vars to
+// the same object reuse the cached value during the transition to the interpreter.
+// Otherwise, this parameter should be false as the values are not required to be moved to the heap to restore the frame.
+void InlineeFrameRecord::RestoreFrames(Js::FunctionBody* functionBody, InlinedFrameLayout* outerMostFrame, Js::JavascriptCallStackLayout* callstack, bool boxValues)
 {
     InlineeFrameRecord* innerMostRecord = this;
     class AutoReverse
@@ -271,7 +281,7 @@ void InlineeFrameRecord::RestoreFrames(Js::FunctionBody* functionBody, InlinedFr
 
     while (currentRecord)
     {
-        currentRecord->Restore(functionBody, currentFrame, callstack);
+        currentRecord->Restore(functionBody, currentFrame, callstack, boxValues);
         currentRecord = currentRecord->parent;
         currentFrame = currentFrame->Next();
     }
@@ -280,10 +290,10 @@ void InlineeFrameRecord::RestoreFrames(Js::FunctionBody* functionBody, InlinedFr
     currentFrame->callInfo.Count = 0;
 }
 
-Js::Var InlineeFrameRecord::Restore(int offset, bool isFloat64, bool isInt32, Js::JavascriptCallStackLayout * layout, Js::FunctionBody* functionBody) const
+Js::Var InlineeFrameRecord::Restore(int offset, bool isFloat64, bool isInt32, Js::JavascriptCallStackLayout * layout, Js::FunctionBody* functionBody, bool boxValue) const
 {
     Js::Var value;
-    bool boxStackInstance = true;
+    bool boxStackInstance = boxValue;
     double dblValue;
     if (offset >= 0)
     {
@@ -321,8 +331,11 @@ Js::Var InlineeFrameRecord::Restore(int offset, bool isFloat64, bool isInt32, Js
         BAILOUT_VERBOSE_TRACE(functionBody, _u(", value: 0x%p"), value);
         if (boxStackInstance)
         {
+            // Do not deepCopy in this call to BoxStackInstance because this should be used for
+            // bailing out, where a shallow copy that is cached is needed to ensure that multiple
+            // vars pointing to the same boxed object reuse the new boxed value.
             Js::Var oldValue = value;
-            value = Js::JavascriptOperators::BoxStackInstance(oldValue, functionBody->GetScriptContext(), /* allowStackFunction */ true);
+            value = Js::JavascriptOperators::BoxStackInstance(oldValue, functionBody->GetScriptContext(), /* allowStackFunction */ true, false /* deepCopy */);
 
 #if ENABLE_DEBUG_CONFIG_OPTIONS
             if (oldValue != value)

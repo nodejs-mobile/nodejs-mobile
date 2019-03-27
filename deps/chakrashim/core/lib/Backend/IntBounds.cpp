@@ -178,7 +178,7 @@ void IntBounds::SetBound(
 
     // Aggressively merge the constant lower or upper bound of the base value, adjusted by the offset
     ValueInfo const * const baseValueInfo = baseValue->GetValueInfo();
-    int constantBoundBase;
+    int constantBoundBase = 0xCCCCCCCC;
     const bool success =
         Lower
             ? baseValueInfo->TryGetIntConstantLowerBound(&constantBoundBase, true)
@@ -342,7 +342,7 @@ bool IntBounds::IsGreaterThanOrEqualTo(const Value *const value, const int offse
     Assert(value);
 
     ValueInfo const * const valueInfo = value->GetValueInfo();
-    int constantBoundBase;
+    int constantBoundBase = INT32_MAX;
     const bool success = valueInfo->TryGetIntConstantUpperBound(&constantBoundBase, true);
     Assert(success);
     if(IsGreaterThanOrEqualTo(constantBoundBase, offset))
@@ -360,7 +360,7 @@ bool IntBounds::IsLessThanOrEqualTo(const Value *const value, const int offset) 
     Assert(value);
 
     ValueInfo const * const valueInfo = value->GetValueInfo();
-    int constantBoundBase;
+    int constantBoundBase = INT32_MIN;
     const bool success = valueInfo->TryGetIntConstantLowerBound(&constantBoundBase, true);
     Assert(success);
     if(IsLessThanOrEqualTo(constantBoundBase, offset))
@@ -743,22 +743,25 @@ bool IntBoundCheck::SetBoundOffset(const int offset, const bool isLoopCountBased
     // Determine the previous offset from the instruction (src1 <= src2 + dst)
     IR::IntConstOpnd *dstOpnd = nullptr;
     IntConstType previousOffset = 0;
+    IRType offsetType = TyMachReg;
     if (instr->GetDst())
     {
         dstOpnd = instr->GetDst()->AsIntConstOpnd();
         previousOffset = dstOpnd->GetValue();
+        offsetType = dstOpnd->GetType();
     }
 
     IR::IntConstOpnd *src1Opnd = nullptr;
     if (instr->GetSrc1()->IsIntConstOpnd())
     {
         src1Opnd = instr->GetSrc1()->AsIntConstOpnd();
-        if (IntConstMath::Sub(previousOffset, src1Opnd->GetValue(), &previousOffset))
+        if (IntConstMath::Sub(previousOffset, src1Opnd->GetValue(), src1Opnd->GetType(), &previousOffset))
             return false;
+        offsetType = src1Opnd->GetType();
     }
 
     IR::IntConstOpnd *src2Opnd = (instr->GetSrc2()->IsIntConstOpnd() ? instr->GetSrc2()->AsIntConstOpnd() : nullptr);
-    if(src2Opnd && IntConstMath::Add(previousOffset, src2Opnd->GetValue(), &previousOffset))
+    if(src2Opnd && IntConstMath::Add(previousOffset, src2Opnd->GetValue(), src2Opnd->GetType(), &previousOffset))
         return false;
 
     // Given a bounds check (a <= b + offset), the offset may only be decreased such that it does not invalidate the invariant
@@ -768,7 +771,7 @@ bool IntBoundCheck::SetBoundOffset(const int offset, const bool isLoopCountBased
         return true;
 
     IntConstType offsetDecrease;
-    if(IntConstMath::Sub(previousOffset, offset, &offsetDecrease))
+    if(IntConstMath::Sub(previousOffset, offset, offsetType, &offsetDecrease))
         return false;
 
     Assert(offsetDecrease > 0);
@@ -776,14 +779,14 @@ bool IntBoundCheck::SetBoundOffset(const int offset, const bool isLoopCountBased
     {
         // Prefer to increase src1, as this is an upper bound check and src1 corresponds to the index
         IntConstType newSrc1Value;
-        if(IntConstMath::Add(src1Opnd->GetValue(), offsetDecrease, &newSrc1Value))
+        if(IntConstMath::Add(src1Opnd->GetValue(), offsetDecrease, src1Opnd->GetType(), &newSrc1Value))
             return false;
         src1Opnd->SetValue(newSrc1Value);
     }
     else if(dstOpnd)
     {
         IntConstType newDstValue;
-        if(IntConstMath::Sub(dstOpnd->GetValue(), offsetDecrease, &newDstValue))
+        if(IntConstMath::Sub(dstOpnd->GetValue(), offsetDecrease, dstOpnd->GetType(), &newDstValue))
             return false;
         if (newDstValue == 0)
             instr->FreeDst();

@@ -10,7 +10,8 @@
 #if defined(ENABLE_TTD_NODE) && ENABLE_TTD_NODE
 extern bool s_doTTRecord;
 extern bool s_doTTReplay;
-extern bool s_doTTDebug;
+extern bool s_doTTEnableDebug;
+extern bool s_ttAutoTraceEnabled;
 #endif
 
 #endif  // SRC_CHAKRA_TTD_H_

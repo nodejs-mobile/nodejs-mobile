@@ -202,7 +202,7 @@ namespace TTD
             Js::Var message = InflateVarInReplay(executeContext, GetVarItem_0(errorData));
             TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(message, ctx);
 
-            *res = nullptr; 
+            *res = nullptr;
             switch(eventKind)
             {
             case EventKind::CreateErrorActionTag:
@@ -314,11 +314,13 @@ namespace TTD
         void AllocateExternalObject_Execute(const EventLogEntry* evt, ThreadContextTTD* executeContext)
         {
             TTD_REPLAY_ACTIVE_CONTEXT(executeContext);
+            const JsRTSingleVarArgumentAction* action = GetInlineEventDataAs<JsRTSingleVarArgumentAction, EventKind::AllocateExternalObjectActionTag>(evt);
+            Js::Var prototype = InflateVarInReplay(executeContext, GetVarItem_0(action));
 
             Js::Var res = nullptr;
-            executeContext->TTDExternalObjectFunctions.pfCreateExternalObject(ctx, &res);
+            executeContext->TTDExternalObjectFunctions.pfCreateExternalObject(ctx, prototype, &res);
 
-            JsRTActionHandleResultForReplay<JsRTResultOnlyAction, EventKind::AllocateExternalObjectActionTag>(executeContext, evt, res);
+            JsRTActionHandleResultForReplay<JsRTSingleVarArgumentAction, EventKind::AllocateExternalObjectActionTag>(executeContext, evt, res);
         }
 
         void AllocateArrayAction_Execute(const EventLogEntry* evt, ThreadContextTTD* executeContext)
@@ -361,32 +363,24 @@ namespace TTD
         void AllocateFunctionAction_Execute(const EventLogEntry* evt, ThreadContextTTD* executeContext)
         {
             TTD_REPLAY_ACTIVE_CONTEXT(executeContext);
-            const JsRTSingleVarScalarArgumentAction* action = GetInlineEventDataAs<JsRTSingleVarScalarArgumentAction, EventKind::AllocateFunctionActionTag>(evt);
+            const JsRTSingleVarArgumentAction* action = GetInlineEventDataAs<JsRTSingleVarArgumentAction, EventKind::AllocateFunctionActionTag>(evt);
 
-            Js::Var res = nullptr;
-            if(!GetScalarItem_0(action))
+            Js::Var metadata = InflateVarInReplay(executeContext, GetVarItem_0(action));
+
+            Js::JavascriptString* name = nullptr;
+            if(metadata != nullptr)
             {
-                res = ctx->GetLibrary()->CreateStdCallExternalFunction(&Js::JavascriptExternalFunction::TTDReplayDummyExternalMethod, 0, nullptr);
+                TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(metadata, ctx);
+                name = Js::JavascriptConversion::ToString(metadata, ctx);
             }
             else
             {
-                Js::Var nameVar = InflateVarInReplay(executeContext, GetVarItem_0(action));
-                TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(nameVar, ctx);
-
-                Js::JavascriptString* name = nullptr;
-                if(nameVar != nullptr)
-                {
-                    name = Js::JavascriptConversion::ToString(nameVar, ctx);
-                }
-                else
-                {
-                    name = ctx->GetLibrary()->GetEmptyString();
-                }
-
-                res = ctx->GetLibrary()->CreateStdCallExternalFunction(&Js::JavascriptExternalFunction::TTDReplayDummyExternalMethod, name, nullptr);
+                name = ctx->GetLibrary()->GetEmptyString();
             }
 
-            JsRTActionHandleResultForReplay<JsRTSingleVarScalarArgumentAction, EventKind::AllocateFunctionActionTag>(executeContext, evt, res);
+            Js::Var res = ctx->GetLibrary()->CreateStdCallExternalFunction(&Js::JavascriptExternalFunction::TTDReplayDummyExternalMethod, name, nullptr);
+
+            JsRTActionHandleResultForReplay<JsRTSingleVarArgumentAction, EventKind::AllocateFunctionActionTag>(executeContext, evt, res);
         }
 
         void HostProcessExitAction_Execute(const EventLogEntry* evt, ThreadContextTTD* executeContext)
@@ -533,6 +527,26 @@ namespace TTD
             else
             {
                 Js::JavascriptOperators::Equal(object1, object2, ctx);
+            }
+        }
+
+        void LessThanAction_Execute(const EventLogEntry* evt, ThreadContextTTD* executeContext)
+        {
+            TTD_REPLAY_ACTIVE_CONTEXT(executeContext);
+            const JsRTDoubleVarSingleScalarArgumentAction* action = GetInlineEventDataAs<JsRTDoubleVarSingleScalarArgumentAction, EventKind::LessThanActionTag>(evt);
+            Js::Var object1 = InflateVarInReplay(executeContext, GetVarItem_0(action));
+            TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(object1, ctx);
+            Js::Var object2 = InflateVarInReplay(executeContext, GetVarItem_1(action));
+            TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(object2, ctx);
+
+            //Result is not needed but trigger computation for any effects
+            if (GetScalarItem_0(action))
+            {
+                Js::JavascriptOperators::LessEqual(object1, object2, ctx);
+            }
+            else
+            {
+                Js::JavascriptOperators::Less(object1, object2, ctx);
             }
         }
 
@@ -833,12 +847,12 @@ namespace TTD
             TTD_REPLAY_VALIDATE_INCOMING_FUNCTION(jsFunctionVar, ctx);
 
             //remove implicit constructor function as first arg in callInfo and argument loop below
-            for(uint32 i = 1; i < ccAction->ArgCount; ++i)
+            for (uint32 i = 1; i < ccAction->ArgCount; ++i)
             {
-                 Js::Var argi = InflateVarInReplay(executeContext, ccAction->ArgArray[i]);
-                 TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(argi, ctx);
+                Js::Var argi = InflateVarInReplay(executeContext, ccAction->ArgArray[i]);
+                TTD_REPLAY_VALIDATE_INCOMING_REFERENCE(argi, ctx);
 
-                 ccAction->ExecArgs[i - 1] = argi;
+                ccAction->ExecArgs[i - 1] = argi;
             }
 
             Js::JavascriptFunction* jsFunction = Js::JavascriptFunction::FromVar(jsFunctionVar);
@@ -850,7 +864,12 @@ namespace TTD
             //TTDAssert(!Js::ScriptFunction::Is(jsFunction) || execContext->GetThreadContext()->TTDRootNestingCount != 0, "This will cause user code to execute and we need to add support for that as a top-level call source!!!!");
             //
 
-            Js::Var res = Js::JavascriptFunction::CallAsConstructor(jsFunction, /* overridingNewTarget = */nullptr, jsArgs, ctx);
+            Js::Var res = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(ctx->GetThreadContext())
+            {
+                res = Js::JavascriptFunction::CallAsConstructor(jsFunction, /* overridingNewTarget = */nullptr, jsArgs, ctx);
+            }
+            END_SAFE_REENTRANT_CALL
             Assert(res == nullptr || !Js::CrossSite::NeedMarshalVar(res, ctx));
 
             JsRTActionHandleResultForReplay<JsRTConstructCallAction, EventKind::ConstructCallActionTag>(executeContext, evt, res);
@@ -970,7 +989,7 @@ namespace TTD
             }
             END_JS_RUNTIME_CALL(ctx);
 
-            if(ctx->ShouldPerformDebuggerAction())
+            if(ctx->ShouldPerformReplayDebuggerAction())
             {
                 ctx->GetThreadContext()->TTDExecutionInfo->ProcessScriptLoad(ctx, cpAction->BodyCtrId, fb, utf8SourceInfo, &se);
             }
@@ -1048,7 +1067,7 @@ namespace TTD
             if(Js::JavascriptFunction::Is(funcVar))
             {
                 Js::JavascriptString* displayName = Js::JavascriptFunction::FromVar(funcVar)->GetDisplayName();
-                alloc.CopyStringIntoWLength(displayName->GetSz(), displayName->GetLength(), cfAction->FunctionName);
+                alloc.CopyStringIntoWLength(displayName->GetString(), displayName->GetLength(), cfAction->FunctionName);
             }
             else
             {
@@ -1148,7 +1167,7 @@ namespace TTD
                 {
                     TTDAssert(NSLogEvents::EventCompletesWithException(evt), "Why did we get a different exception");
 
-                    if(executeContext->GetActiveScriptContext()->ShouldPerformDebuggerAction())
+                    if(executeContext->GetActiveScriptContext()->ShouldPerformReplayDebuggerAction())
                     {
                         //convert to uncaught debugger exception for host
                         TTDebuggerSourceLocation lastLocation;
@@ -1172,7 +1191,7 @@ namespace TTD
                 {
                     TTDAssert(NSLogEvents::EventCompletesWithException(evt), "Why did we get a different exception");
 
-                    if(executeContext->GetActiveScriptContext()->ShouldPerformDebuggerAction())
+                    if(executeContext->GetActiveScriptContext()->ShouldPerformReplayDebuggerAction())
                     {
                         //convert to uncaught debugger exception for host
                         TTDebuggerSourceLocation lastLocation;
@@ -1188,7 +1207,7 @@ namespace TTD
                 }
                 catch(...)
                 {
-                    if(executeContext->GetActiveScriptContext()->ShouldPerformDebuggerAction())
+                    if(executeContext->GetActiveScriptContext()->ShouldPerformReplayDebuggerAction())
                     {
                         TTDebuggerSourceLocation lastLocation;
                         threadContext->TTDExecutionInfo->GetLastExecutedTimeAndPositionForDebugger(lastLocation);

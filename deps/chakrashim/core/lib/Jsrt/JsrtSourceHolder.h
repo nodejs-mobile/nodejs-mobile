@@ -19,7 +19,7 @@ namespace Js
 
 #ifndef NTBUILD
         Field(JsValueRef) mappedScriptValue;
-        Field(JsValueRef) mappedSerializedScriptValue;
+        Field(DetachedStateBase*) mappedSerializedScriptValue;
 #endif
         Field(utf8char_t const *) mappedSource;
         Field(size_t) mappedSourceByteLength;
@@ -46,13 +46,13 @@ namespace Js
         JsrtSourceHolder(_In_ TLoadCallback scriptLoadCallback,
             _In_ TUnloadCallback scriptUnloadCallback,
             _In_ JsSourceContext sourceContext,
-            JsValueRef serializedScriptValue = nullptr) :
+            Js::ArrayBuffer* serializedScriptValue = nullptr) :
             scriptLoadCallback(scriptLoadCallback),
             scriptUnloadCallback(scriptUnloadCallback),
             sourceContext(sourceContext),
 #ifndef NTBUILD
             mappedScriptValue(nullptr),
-            mappedSerializedScriptValue(serializedScriptValue),
+            mappedSerializedScriptValue(serializedScriptValue == nullptr ? nullptr : serializedScriptValue->DetachAndGetState(false /*queueForDelayFree*/)),
 #endif
             mappedSourceByteLength(0),
             mappedSource(nullptr)
@@ -89,11 +89,22 @@ namespace Js
 
         virtual void Dispose(bool isShutdown) override
         {
+#ifndef NTBUILD
+            if (this->mappedSerializedScriptValue != nullptr)
+            {
+                // We have to extend the buffer data's lifetime until Dispose because
+                // it might be used during finalization of other objects, such as
+                // FunctionEntryPointInfo which wants to log its name.
+                this->mappedSerializedScriptValue->CleanUp();
+            }
+#endif
         }
 
         virtual void Mark(Recycler * recycler) override
         {
         }
+
+        virtual void Unload() override;
 
         virtual bool Equals(ISourceHolder* other) override
         {
@@ -103,12 +114,7 @@ namespace Js
                         || memcmp(this->GetSource(_u("Equal Comparison")), other->GetSource(_u("Equal Comparison")), this->GetByteLength(_u("Equal Comparison"))) == 0));
         }
 
-        virtual ISourceHolder* Clone(ScriptContext *scriptContext) override
-        {
-            return RecyclerNewFinalized(scriptContext->GetRecycler(), JsrtSourceHolder, this->scriptLoadCallback, this->scriptUnloadCallback, this->sourceContext);
-        }
-
-        virtual int GetHashCode() override
+        virtual hash_t GetHashCode() override
         {
             LPCUTF8 source = GetSource(_u("Hash Code Calculation"));
             size_t byteLength = GetByteLength(_u("Hash Code Calculation"));

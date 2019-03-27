@@ -31,7 +31,9 @@ namespace Js
         Field(PropertyDescriptorMap*) propertyMap;
         Field(T) nextPropertyIndex;
 
+#if ENABLE_FIXED_FIELDS
         Field(RecyclerWeakReference<DynamicObject>*) singletonInstance;
+#endif
 
         typedef PropertyIndexRanges<T> PropertyIndexRangesType;
         static const T MaxPropertyIndexSize = PropertyIndexRangesType::MaxValue;
@@ -60,13 +62,10 @@ namespace Js
         // Create a new type handler for a future DynamicObject. This is for public usage. "initialCapacity" indicates desired slotCapacity, subject to alignment round up.
         static DictionaryTypeHandlerBase* New(Recycler * recycler, int initialCapacity, uint16 inlineSlotCapacity, uint16 offsetOfInlineSlots);
 
-        static DictionaryTypeHandlerBase* CreateTypeHandlerForArgumentsInStrictMode(Recycler * recycler, ScriptContext * scriptContext);
-
         BOOL IsBigDictionaryTypeHandler();
 
         virtual BOOL IsLockable() const override { return false; }
-        virtual BOOL IsSharable() const override { return false; }
-        virtual void DoShareTypeHandler(ScriptContext* scriptContext) override { AssertMsg(false, "DictionaryTypeHandlers cannot be shared."); };
+        virtual BOOL IsSharable() const override { return false; }        
         virtual int GetPropertyCount() override;
 
         virtual PropertyId GetPropertyId(ScriptContext* scriptContext, PropertyIndex index) override;
@@ -78,11 +77,13 @@ namespace Js
             PropertyId* propertyId, PropertyAttributes* attributes, Type* type, DynamicType *typeToEnumerate, EnumeratorFlags flags, DynamicObject* instance, PropertyValueInfo* info) override;
 
         virtual PropertyIndex GetPropertyIndex(PropertyRecord const* propertyRecord) override;
+#if ENABLE_NATIVE_CODEGEN
         virtual bool GetPropertyEquivalenceInfo(PropertyRecord const* propertyRecord, PropertyEquivalenceInfo& info) override;
         virtual bool IsObjTypeSpecEquivalent(const Type* type, const TypeEquivalenceRecord& record, uint& failedPropertyIndex) override;
         virtual bool IsObjTypeSpecEquivalent(const Type* type, const EquivalentPropertyEntry* entry) override;
+#endif
 
-        virtual BOOL HasProperty(DynamicObject* instance, PropertyId propertyId, bool *noRedecl = nullptr) override;
+        virtual BOOL HasProperty(DynamicObject* instance, PropertyId propertyId, bool *noRedecl = nullptr, _Inout_opt_ PropertyValueInfo* info = nullptr) override;
         virtual BOOL HasProperty(DynamicObject* instance, JavascriptString* propertyNameString) override;
         virtual BOOL GetProperty(DynamicObject* instance, Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual BOOL GetProperty(DynamicObject* instance, Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
@@ -109,7 +110,6 @@ namespace Js
 #endif
         virtual bool NextLetConstGlobal(int& index, RootObjectBase* instance, const PropertyRecord** propertyRecord, Var* value, bool* isConst) override;
 
-        virtual BOOL IsFixedProperty(const DynamicObject* instance, PropertyId propertyId) override;
         virtual BOOL IsEnumerable(DynamicObject* instance, PropertyId propertyId) override;
         virtual BOOL IsWritable(DynamicObject* instance, PropertyId propertyId) override;
         virtual BOOL IsConfigurable(DynamicObject* instance, PropertyId propertyId) override;
@@ -122,7 +122,7 @@ namespace Js
         virtual BOOL SetItemAccessors(DynamicObject* instance, uint32 index, Var getter, Var setter) override;
         virtual DescriptorFlags GetItemSetter(DynamicObject* instance, uint32 index, Var* setterValue, ScriptContext* requestContext) override;
         virtual BOOL SetAccessors(DynamicObject* instance, PropertyId propertyId, Var getter, Var setter, PropertyOperationFlags flags = PropertyOperation_None) override sealed;
-        virtual BOOL GetAccessors(DynamicObject* instance, PropertyId propertyId, Var* getter, Var* setter) override;
+        _Check_return_ _Success_(return) virtual BOOL GetAccessors(DynamicObject* instance, PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter) override;
         virtual BOOL PreventExtensions(DynamicObject *instance) override;
         virtual BOOL Seal(DynamicObject* instance) override;
         virtual BOOL IsSealed(DynamicObject* instance) override;
@@ -139,14 +139,18 @@ namespace Js
 
 #if DBG
         virtual bool SupportsPrototypeInstances() const { return true; }
+        virtual bool CanStorePropertyValueDirectly(const DynamicObject* instance, PropertyId propertyId, bool allowLetConst) override;
 #endif
+
+#if ENABLE_FIXED_FIELDS
+        virtual void DoShareTypeHandler(ScriptContext* scriptContext) override { AssertMsg(false, "DictionaryTypeHandlers cannot be shared."); };
+        virtual BOOL IsFixedProperty(const DynamicObject* instance, PropertyId propertyId) override;
 
         virtual bool HasSingletonInstance() const override sealed;
         virtual bool TryUseFixedProperty(PropertyRecord const * propertyRecord, Var * pProperty, FixedPropertyKind propertyType, ScriptContext * requestContext) override;
         virtual bool TryUseFixedAccessor(PropertyRecord const * propertyRecord, Var * pAccessor, FixedPropertyKind propertyType, bool getter, ScriptContext * requestContext) override;
 
 #if DBG
-        virtual bool CanStorePropertyValueDirectly(const DynamicObject* instance, PropertyId propertyId, bool allowLetConst) override;
         virtual bool CheckFixedProperty(PropertyRecord const * propertyRecord, Var * pProperty, ScriptContext * requestContext) override;
         virtual bool HasAnyFixedProperties() const override;
 #endif
@@ -167,8 +171,7 @@ namespace Js
 #endif
 
     private:
-        template<bool doLock>
-        bool IsObjTypeSpecEquivalentImpl(const Type* type, const EquivalentPropertyEntry *entry);
+
         template <bool allowNonExistent, bool markAsUsed>
         bool TryGetFixedProperty(PropertyRecord const * propertyRecord, Var * pProperty, FixedPropertyKind propertyType, ScriptContext * requestContext);
         template <bool allowNonExistent, bool markAsUsed>
@@ -202,8 +205,12 @@ namespace Js
 
         template <typename TPropertyKey>
         void InvalidateFixedField(DynamicObject* instance, TPropertyKey propertyKey, DictionaryPropertyDescriptor<T>* descriptor);
-
+#endif
     private:
+#if ENABLE_NATIVE_CODEGEN
+        template<bool doLock>
+        bool IsObjTypeSpecEquivalentImpl(const Type* type, const EquivalentPropertyEntry *entry);
+#endif
         void SetNumDeletedProperties(const byte n) {}
 
         void Add(const PropertyRecord* propertyId, PropertyAttributes attributes, ScriptContext *const scriptContext);
@@ -216,10 +223,11 @@ namespace Js
 
         BigDictionaryTypeHandler* ConvertToBigDictionaryTypeHandler(DynamicObject* instance);
 
-        void SetPropertyValueInfo(PropertyValueInfo* info, RecyclableObject* instance, T propIndex, PropertyAttributes attributes, InlineCacheFlags flags = InlineCacheNoFlags);
+        void SetPropertyValueInfo(PropertyValueInfo* info, RecyclableObject* instance, T propIndex, DictionaryPropertyDescriptor<T>* descriptor);
+        void SetPropertyValueInfoNonFixed(PropertyValueInfo* info, RecyclableObject* instance, T propIndex, PropertyAttributes attributes, InlineCacheFlags flags = InlineCacheNoFlags);
 
         template<bool allowLetConstGlobal>
-        inline BOOL HasProperty_Internal(DynamicObject* instance, PropertyId propertyId, bool *noRedecl, bool *pDeclaredProperty, bool *pNonconfigurableProperty);
+        inline BOOL HasProperty_Internal(DynamicObject* instance, PropertyId propertyId, bool *noRedecl, _Inout_opt_ PropertyValueInfo* info, bool *pDeclaredProperty, bool *pNonconfigurableProperty);
         template<bool allowLetConstGlobal>
         inline PropertyIndex GetPropertyIndex_Internal(PropertyRecord const* propertyRecord);
         template<bool allowLetConstGlobal>
@@ -238,13 +246,17 @@ namespace Js
         template<bool allowLetConstGlobal>
         inline DescriptorFlags GetSetterFromDescriptor(DynamicObject* instance, DictionaryPropertyDescriptor<T> * descriptor, Var* setterValue, PropertyValueInfo* info);
         template <bool allowLetConstGlobal>
-        inline void SetPropertyWithDescriptor(DynamicObject* instance, PropertyId propertyId, DictionaryPropertyDescriptor<T> * descriptor,
-            Var value, PropertyOperationFlags flags, PropertyValueInfo* info);
+        inline void SetPropertyWithDescriptor(
+            _In_ DynamicObject* instance,
+            _In_ PropertyRecord const* propertyRecord,
+            _Inout_ DictionaryPropertyDescriptor<T> ** pdescriptor,
+            _In_ Var value,
+            _In_ PropertyOperationFlags flags,
+            _Inout_opt_ PropertyValueInfo* info);
 
     protected:
         virtual BOOL FreezeImpl(DynamicObject* instance, bool isConvertedType) override;
         virtual BigDictionaryTypeHandler* NewBigDictionaryTypeHandler(Recycler* recycler, int slotCapacity, uint16 inlineSlotCapacity, uint16 offsetOfInlineSlots);
-        static Var CanonicalizeAccessor(Var accessor, /*const*/ JavascriptLibrary* library);
 
 #if ENABLE_TTD
     public:
@@ -253,6 +265,11 @@ namespace Js
         virtual uint32 ExtractSlotInfo_TTD(TTD::NSSnapType::SnapHandlerPropertyEntry* entryInfo, ThreadContext* threadContext, TTD::SlabAllocator& alloc) const override;
 
         virtual Js::BigPropertyIndex GetPropertyIndex_EnumerateTTD(const Js::PropertyRecord* pRecord) override;
+#endif
+
+#if DBG_DUMP
+    public:
+        void Dump(unsigned indent = 0) const override;
 #endif
     };
 

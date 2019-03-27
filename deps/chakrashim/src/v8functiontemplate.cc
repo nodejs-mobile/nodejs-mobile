@@ -58,7 +58,7 @@ class FunctionCallbackData : public ExternalData {
     prototype.Reset();
   }
 
-  static void CHAKRA_CALLBACK FinalizeCallback(void *data) {
+  static void CHAKRA_CALLBACK FinalizeCallback(void* data) {
     if (data != nullptr) {
       FunctionCallbackData* functionCallbackData =
         reinterpret_cast<FunctionCallbackData*>(data);
@@ -70,14 +70,14 @@ class FunctionCallbackData : public ExternalData {
     this->prototype.Reset(nullptr, prototype);
   }
 
-  Local<Object> NewInstance() {
+  Local<Object> NewInstance(Handle<Function> newTarget) {
     Utils::EnsureObjectTemplate(&instanceTemplate);
     return !instanceTemplate.IsEmpty() ?
-      instanceTemplate->NewInstance(prototype) : Local<Object>();
+      instanceTemplate->NewInstance(newTarget) : Local<Object>();
   }
 
   bool CheckSignature(Local<Object> thisPointer,
-                      JsValueRef *arguments,
+                      JsValueRef* arguments,
                       unsigned short argumentCount,  // NOLINT(runtime/int)
                       Local<Object>* holder) {
     if (signature.IsEmpty()) {
@@ -91,17 +91,17 @@ class FunctionCallbackData : public ExternalData {
 
   static JsValueRef CHAKRA_CALLBACK FunctionInvoked(
       JsValueRef callee,
-      bool isConstructCall,
-      JsValueRef *arguments,
+      JsValueRef* arguments,
       unsigned short argumentCount,  // NOLINT(runtime/int)
-      void *callbackState) {
+      JsNativeFunctionInfo* info,
+      void* callbackState) {
     CHAKRA_VERIFY(argumentCount >= 1);
 
     // Script engine could have switched context. Make sure to invoke the
     // CHAKRA_CALLBACK in the current callee context.
     ContextShim* contextShim = IsolateShim::GetContextShimOfObject(callee);
     ContextShim::Scope contextScope(contextShim);
-    HandleScope scope(nullptr);
+    HandleScope scope(Isolate::GetCurrent());
 
     FunctionCallbackData* callbackData = nullptr;
     if (!ExternalData::TryGet(JsValueRef(callbackState), &callbackData)) {
@@ -110,15 +110,16 @@ class FunctionCallbackData : public ExternalData {
     }
 
     Local<Object> thisPointer;
-    ++arguments;  // skip the this argument
+    Local<Function> newTargetPointer = info->newTargetArg;
+    ++arguments;  // skip arguments[0]
 
-    if (isConstructCall) {
-      thisPointer = callbackData->NewInstance();
+    if (info->isConstructCall) {
+      thisPointer = callbackData->NewInstance(newTargetPointer);
       if (thisPointer.IsEmpty()) {
         return JS_INVALID_REFERENCE;
       }
     } else {
-      thisPointer = static_cast<Object*>(arguments[-1]);
+      thisPointer = info->thisArg;
     }
 
     if (callbackData->callback != nullptr) {
@@ -132,8 +133,9 @@ class FunctionCallbackData : public ExternalData {
         reinterpret_cast<Value**>(arguments),
         argumentCount - 1,
         thisPointer,
+        newTargetPointer,
         holder,
-        isConstructCall,
+        info->isConstructCall,
         callbackData->data,
         static_cast<Function*>(callee));
 
@@ -142,7 +144,7 @@ class FunctionCallbackData : public ExternalData {
 
       // if this is a regualr function call return the result, otherwise this is
       // a constructor call return the new instance
-      if (!isConstructCall) {
+      if (!info->isConstructCall) {
         return *result;
       } else if (!result.IsEmpty()) {
         if (!result->IsUndefined() && !result->IsNull()) {
@@ -170,6 +172,7 @@ class FunctionTemplateData : public TemplateData {
   Persistent<ObjectTemplate> instanceTemplate;
   Persistent<FunctionTemplate> parent;
   Persistent<Function> functionInstance;
+  Persistent<String> className;
   bool removePrototype;
 
  public:
@@ -191,9 +194,10 @@ class FunctionTemplateData : public TemplateData {
     instanceTemplate.Reset();
     parent.Reset();
     functionInstance.Reset();
+    className.Reset();
   }
 
-  static void CHAKRA_CALLBACK FinalizeCallback(void *data) {
+  static void CHAKRA_CALLBACK FinalizeCallback(void* data) {
     if (data != nullptr) {
       FunctionTemplateData * functionTemplateData =
         reinterpret_cast<FunctionTemplateData*>(data);
@@ -208,6 +212,10 @@ class FunctionTemplateData : public TemplateData {
 
   void SetRemovePrototype(bool removePrototype) {
     this->removePrototype = removePrototype;
+  }
+
+  void SetClassName(Handle<String> className) {
+    this->className = className;
   }
 
   void Inherit(Local<FunctionTemplate> parent) {
@@ -237,19 +245,13 @@ class FunctionTemplateData : public TemplateData {
         return nullptr;
       }
 
-      Local<String> className = !instanceTemplate.IsEmpty() ?
-        instanceTemplate->GetClassName() : Local<String>();
-
       JsValueRef function = nullptr;
       {
-        if (!className.IsEmpty()) {
-          error = JsCreateNamedFunction(*className,
-                                        FunctionCallbackData::FunctionInvoked,
-                                        funcCallbackObjectRef, &function);
-        } else {
-          error = JsCreateFunction(FunctionCallbackData::FunctionInvoked,
-                                  funcCallbackObjectRef, &function);
-        }
+        error = JsCreateEnhancedFunction(
+          FunctionCallbackData::FunctionInvoked,
+          this->className.IsEmpty() ? JS_INVALID_REFERENCE : *this->className,
+          funcCallbackObjectRef,
+          &function);
 
         if (error != JsNoError) {
           return nullptr;
@@ -334,7 +336,9 @@ Local<FunctionTemplate> FunctionTemplate::New(Isolate* isolate,
                                               FunctionCallback callback,
                                               Local<Value> data,
                                               Local<Signature> signature,
-                                              int length) {
+                                              int length,
+                                              ConstructorBehavior behavior,
+                                              SideEffectType side_effect_type) {
   FunctionTemplateData * templateData =
     new FunctionTemplateData(callback, data, signature);
   JsValueRef functionTemplateRef;
@@ -344,7 +348,11 @@ Local<FunctionTemplate> FunctionTemplate::New(Isolate* isolate,
     delete templateData;
     return Local<FunctionTemplate>();
   }
-  return Local<FunctionTemplate>::New(functionTemplateRef);
+  Local<FunctionTemplate> t = Local<FunctionTemplate>::New(functionTemplateRef);
+  if (behavior == ConstructorBehavior::kThrow) {
+      t->RemovePrototype();
+  }
+  return t;
 }
 
 MaybeLocal<Function> FunctionTemplate::GetFunction(Local<Context> context) {
@@ -368,7 +376,10 @@ Local<ObjectTemplate> FunctionTemplate::InstanceTemplate() {
     return Local<ObjectTemplate>();
   }
 
-  return functionTemplateData->EnsureInstanceTemplate();
+  Local<ObjectTemplate> instanceTemplate =
+      functionTemplateData->EnsureInstanceTemplate();
+  instanceTemplate->SetConstructor(this);
+  return instanceTemplate;
 }
 
 Local<ObjectTemplate> FunctionTemplate::PrototypeTemplate() {
@@ -382,10 +393,13 @@ Local<ObjectTemplate> FunctionTemplate::PrototypeTemplate() {
 }
 
 void FunctionTemplate::SetClassName(Handle<String> name) {
-  Local<ObjectTemplate> instanceTemplate = InstanceTemplate();
-  if (!instanceTemplate.IsEmpty()) {
-    instanceTemplate->SetClassName(name);
+  FunctionTemplateData* functionTemplateData = nullptr;
+  if (!ExternalData::TryGet(this, &functionTemplateData)) {
+    CHAKRA_ASSERT(false);  // This should never happen
+    return;
   }
+
+  return functionTemplateData->SetClassName(name);
 }
 
 void FunctionTemplate::SetHiddenPrototype(bool value) {

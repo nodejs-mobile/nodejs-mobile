@@ -86,13 +86,13 @@ API
 
 .. c:function:: int uv_tcp_getsockname(const uv_tcp_t* handle, struct sockaddr* name, int* namelen)
 
-    Get the current address to which the handle is bound. `addr` must point to
+    Get the current address to which the handle is bound. `name` must point to
     a valid and big enough chunk of memory, ``struct sockaddr_storage`` is
     recommended for IPv4 and IPv6 support.
 
 .. c:function:: int uv_tcp_getpeername(const uv_tcp_t* handle, struct sockaddr* name, int* namelen)
 
-    Get the address of the peer connected to the handle. `addr` must point to
+    Get the address of the peer connected to the handle. `name` must point to
     a valid and big enough chunk of memory, ``struct sockaddr_storage`` is
     recommended for IPv4 and IPv6 support.
 
@@ -102,7 +102,14 @@ API
     and an uninitialized :c:type:`uv_connect_t`. `addr` should point to an
     initialized ``struct sockaddr_in`` or ``struct sockaddr_in6``.
 
+    On Windows if the `addr` is initialized to point to an unspecified address
+    (``0.0.0.0`` or ``::``) it will be changed to point to ``localhost``.
+    This is done to match the behavior of Linux systems.
+
     The callback is made when the connection has been established or when a
     connection error happened.
+
+    .. versionchanged:: 1.19.0 added ``0.0.0.0`` and ``::`` to ``localhost``
+        mapping
 
 .. seealso:: The :c:type:`uv_stream_t` API functions also apply.

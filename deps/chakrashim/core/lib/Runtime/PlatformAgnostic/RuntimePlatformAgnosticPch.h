@@ -5,7 +5,6 @@
 #pragma once
 
 #ifdef _WIN32
-#include "CommonDefines.h"
 #include "CommonMin.h"
 #else
 #include "pal.h"
@@ -14,7 +13,11 @@
 #ifdef _MSC_VER
 #pragma warning(push)
 #if defined(PROFILE_RECYCLER_ALLOC) || defined(HEAP_TRACK_ALLOC) || defined(ENABLE_DEBUG_CONFIG_OPTIONS)
+#ifdef _UCRT
+#include <typeinfo>
+#else
 #include <typeinfo.h>
+#endif
 #endif
 #pragma warning(pop)
 #endif
@@ -35,6 +38,7 @@
 #define FALSE 0
 #endif
 #else
+#define U_USING_ICU_NAMESPACE 0
 #include <unicode/umachine.h>
 #endif
 
@@ -45,20 +49,9 @@ class Throw
 public:
     static bool ReportAssert(const char* fileName, unsigned int lineNumber, const char* error, const char* message);
     static void LogAssert();
+    static void __declspec(noreturn) FatalInternalError();
 };
 }
 
 #include <Core/Assertions.h>
-
-namespace PlatformAgnostic
-{
-    namespace UnicodeText
-    {
-         namespace Internal
-         {
-             template <typename CharType>
-             int LogicalStringCompareImpl(const CharType* str1, const CharType* str2);
-         }
-    }
-}
 #endif

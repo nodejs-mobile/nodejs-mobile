@@ -91,11 +91,10 @@ namespace Js
         , mInfo( mFunction->GetFuncInfo() )
         , mCompiler( compiler )
         , mByteCodeGenerator(mCompiler->GetByteCodeGenerator())
-        , mNestedCallCount(0)
     {
         mWriter.Create();
 
-        const int32 astSize = func->GetFncNode()->sxFnc.astSize/AstBytecodeRatioEstimate;
+        const int32 astSize = func->GetFncNode()->astSize/AstBytecodeRatioEstimate;
         // Use the temp allocator in bytecode write temp buffer.
         mWriter.InitData(&mAllocator, astSize);
 
@@ -108,7 +107,7 @@ namespace Js
     bool AsmJSByteCodeGenerator::BlockHasOwnScope( ParseNode* pnodeBlock )
     {
         Assert( pnodeBlock->nop == knopBlock );
-        return pnodeBlock->sxBlock.scope != nullptr && ( !( pnodeBlock->grfpn & fpnSyntheticNode ) );
+        return pnodeBlock->AsParseNodeBlock()->scope != nullptr && ( !( pnodeBlock->grfpn & fpnSyntheticNode ) );
     }
 
     template<typename T> byte* AsmJSByteCodeGenerator::SetConstsToTable(byte* byteTable, T zeroValue)
@@ -149,6 +148,9 @@ namespace Js
                 case WAsmJs::INT32: byteTable = SetConstsToTable<int>(byteTable, 0); break;
                 case WAsmJs::FLOAT32: byteTable = SetConstsToTable<float>(byteTable, 0); break;
                 case WAsmJs::FLOAT64: byteTable = SetConstsToTable<double>(byteTable, 0); break;
+#if TARGET_64
+                case WAsmJs::INT64: SetConstsToTable<int64>(byteTable, 0); break;
+#endif
                 case WAsmJs::SIMD:
                 {
                     AsmJsSIMDValue zeroValue;
@@ -175,13 +177,6 @@ namespace Js
 
         // add 3 for each of I0, F0, and D0
         RegSlot regCount = mInfo->RegCount() + 3 + AsmJsFunctionMemory::RequiredVarConstants;
-#ifdef ENABLE_SIMDJS
-        if (IsSimdjsEnabled())
-        {
-            // 1 return reg for SIMD
-            regCount++;
-        }
-#endif
         byteCodeFunction->SetFirstTmpReg(regCount);
     }
 
@@ -200,7 +195,7 @@ namespace Js
             MaybeTodo( mInfo->IsFakeGlobalFunction( byteCodeGen->GetFlags() ) );
 
             // Support default arguments ?
-            MaybeTodo( pnode->sxFnc.HasDefaultArguments() );
+            MaybeTodo( pnode->AsParseNodeFnc()->HasDefaultArguments() );
 
             FunctionBody* functionBody = mFunction->GetFuncBody();
             functionBody->SetStackNestedFunc( false );
@@ -244,6 +239,7 @@ namespace Js
             byteCodeGen->MapCacheIdsToPropertyIds( mInfo );
             byteCodeGen->MapReferencedPropertyIds( mInfo );
 
+            mWriter.SetCallSiteCount(mFunction->GetProfileIdCount());
             mWriter.End();
             autoCleanup.FinishCompilation();
 
@@ -269,31 +265,42 @@ namespace Js
             col = 0;
         }
 
-        char16 filename[_MAX_FNAME];
-        char16 ext[_MAX_EXT];
-        _wsplitpath_s( Configuration::Global.flags.Filename, NULL, 0, NULL, 0, filename, _MAX_FNAME, ext, _MAX_EXT );
-
         LPCOLESTR NoneName = _u("None");
         LPCOLESTR moduleName = NoneName;
-        if(mCompiler->GetModuleFunctionName())
+        if (mCompiler->GetModuleFunctionName())
         {
             moduleName = mCompiler->GetModuleFunctionName()->Psz();
         }
 
-        AsmJSCompiler::OutputError(mCompiler->GetScriptContext(),
+        char16 filename[_MAX_FNAME];
+        char16 ext[_MAX_EXT];
+        bool hasURL = mFunction->GetFuncBody()->GetSourceContextInfo()->url != nullptr;
+        Assert(hasURL || mFunction->GetFuncBody()->GetSourceContextInfo()->IsDynamic());
+        if (hasURL)
+        {
+            _wsplitpath_s(mFunction->GetFuncBody()->GetSourceContextInfo()->url, NULL, 0, NULL, 0, filename, _MAX_FNAME, ext, _MAX_EXT);
+        }
+        AsmJSCompiler::OutputError(
+            mCompiler->GetScriptContext(),
             _u("\n%s%s(%d, %d)\n\tAsm.js Compilation Error function : %s::%s\n\t%s\n"),
-            filename, ext, line + 1, col + 1, moduleName, mFunction->GetName()->Psz(), msg);
+            hasURL ? filename : _u("[Dynamic code]"),
+            hasURL ? ext : _u(""),
+            line + 1,
+            col + 1,
+            moduleName,
+            mFunction->GetName()->Psz(),
+            msg);
     }
 
     void AsmJSByteCodeGenerator::DefineLabels()
     {
         mInfo->singleExit=mWriter.DefineLabel();
-        SList<ParseNode *>::Iterator iter(&mInfo->targetStatements);
+        SList<ParseNodeStmt *>::Iterator iter(&mInfo->targetStatements);
         while (iter.Next())
         {
-            ParseNode * node = iter.Data();
-            node->sxStmt.breakLabel=mWriter.DefineLabel();
-            node->sxStmt.continueLabel=mWriter.DefineLabel();
+            ParseNodeStmt * node = iter.Data();
+            node->breakLabel=mWriter.DefineLabel();
+            node->continueLabel=mWriter.DefineLabel();
             node->emitLabels=true;
         }
     }
@@ -338,19 +345,18 @@ namespace Js
                 else
                 {
                     AsmJsVar * initSource = nullptr;
-                    if (decl->sxVar.pnodeInit->nop == knopName)
+                    if (decl->AsParseNodeVar()->pnodeInit->nop == knopName)
                     {
-                        AsmJsSymbol * initSym = mCompiler->LookupIdentifier(decl->sxVar.pnodeInit->name(), mFunction);
-                        if (initSym->GetSymbolType() == AsmJsSymbol::Variable)
+                        AsmJsSymbol * initSym = mCompiler->LookupIdentifier(decl->AsParseNodeVar()->pnodeInit->name(), mFunction);
+                        if (AsmJsVar::Is(initSym))
                         {
                             // in this case we are initializing with value of a constant var
-                            initSource = initSym->Cast<AsmJsVar>();
+                            initSource = AsmJsVar::FromSymbol(initSym);
                         }
                         else
                         {
-                            Assert(initSym->GetSymbolType() == AsmJsSymbol::MathConstant);
                             Assert(initSym->GetType() == AsmJsType::Double);
-                            AsmJsMathConst* initConst = initSym->Cast<AsmJsMathConst>();
+                            AsmJsMathConst* initConst = AsmJsMathConst::FromSymbol(initSym);
                             mWriter.AsmReg2(Js::OpCodeAsmJs::Ld_Db, var->GetLocation(), mFunction->GetConstRegister<double>(*initConst->GetVal()));
                         }
                     }
@@ -370,51 +376,7 @@ namespace Js
                         }
                         else
                         {
-                            // SIMD_JS
-                            Assert(var->GetType().isSIMDType());
-                            Js::OpCodeAsmJs opcode = Js::OpCodeAsmJs::Simd128_Ld_F4;
-                            switch (var->GetType().GetWhich())
-                            {
-                                case AsmJsType::Float32x4:
-                                    break;
-#if 0
-                                case AsmJsType::Float64x2:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_D2;
-                                    break;
-#endif // 0
-
-                                case AsmJsType::Int32x4:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_I4;
-                                    break;
-                                case AsmJsType::Int16x8:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_I8;
-                                    break;
-                                case AsmJsType::Int8x16:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_I16;
-                                    break;
-                                case AsmJsType::Uint32x4:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_U4;
-                                    break;
-                                case AsmJsType::Uint16x8:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_U8;
-                                    break;
-                                case AsmJsType::Uint8x16:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_U16;
-                                    break;
-                                case AsmJsType::Bool32x4:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_B4;
-                                    break;
-                                case AsmJsType::Bool16x8:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_B8;
-                                    break;
-                                case AsmJsType::Bool8x16:
-                                    opcode = Js::OpCodeAsmJs::Simd128_Ld_B16;
-                                    break;
-                                default:
-                                    Assert(UNREACHED);
-
-                            }
-                            mWriter.AsmReg2(opcode, var->GetLocation(), mFunction->GetConstRegister<AsmJsSIMDValue>(var->GetSimdConstInitialiser()));
+                            throw AsmJsCompilationException(_u("Unexpected variable type"));
                         }
                     }
                 }
@@ -448,7 +410,7 @@ namespace Js
 
     void AsmJSByteCodeGenerator::EmitTopLevelStatement( ParseNode *stmt )
     {
-        if( stmt->nop == knopFncDecl && stmt->sxFnc.IsDeclaration() )
+        if( stmt->nop == knopFncDecl && stmt->AsParseNodeFnc()->IsDeclaration() )
         {
             throw AsmJsCompilationException( _u("Cannot declare functions inside asm.js functions") );
         }
@@ -459,6 +421,11 @@ namespace Js
 
     EmitExpressionInfo AsmJSByteCodeGenerator::Emit( ParseNode *pnode )
     {
+        if (!ThreadContext::IsCurrentStackAvailable(Js::Constants::MinStackCompile))
+        {
+            throw AsmJsCompilationException(_u("Out of stack space"));
+        }
+
         if( !pnode )
         {
             return EmitExpressionInfo( AsmJsType::Void );
@@ -483,10 +450,11 @@ namespace Js
         }
         case knopBlock:
         {
-            EmitExpressionInfo info = Emit(pnode->sxBlock.pnodeStmt);
-            if (pnode->emitLabels)
+            ParseNodeBlock * pnodeBlock = pnode->AsParseNodeBlock();
+            EmitExpressionInfo info = Emit(pnodeBlock->pnodeStmt);
+            if (pnodeBlock->emitLabels)
             {
-                mWriter.MarkAsmJsLabel(pnode->sxStmt.breakLabel);
+                mWriter.MarkAsmJsLabel(pnodeBlock->breakLabel);
             }
             return info;
         }
@@ -541,10 +509,6 @@ namespace Js
             return EmitLdArrayBuffer( pnode );
         case knopEndCode:
             StartStatement(pnode);
-            if( mFunction->GetReturnType() == AsmJsRetType::Void )
-            {
-                mWriter.AsmReg1( Js::OpCodeAsmJs::LdUndef, AsmJsFunctionMemory::ReturnRegister );
-            }
             mWriter.MarkAsmJsLabel( mFunction->GetFuncInfo()->singleExit );
             mWriter.EmptyAsm( OpCodeAsmJs::Ret );
             EndStatement(pnode);
@@ -558,70 +522,78 @@ namespace Js
             }
             else if (ParserWrapper::IsUnsigned(pnode))
             {
-                return EmitExpressionInfo(mFunction->GetConstRegister<int>((uint32)pnode->sxFlt.dbl), AsmJsType::Unsigned);
+                return EmitExpressionInfo(mFunction->GetConstRegister<int>((uint32)pnode->AsParseNodeFloat()->dbl), AsmJsType::Unsigned);
             }
-            else if (pnode->sxFlt.maybeInt)
+            else if (pnode->AsParseNodeFloat()->maybeInt)
             {
                 throw AsmJsCompilationException(_u("Int literal must be in the range [-2^31, 2^32)"));
             }
             else
             {
-                return EmitExpressionInfo(mFunction->GetConstRegister<double>(pnode->sxFlt.dbl), AsmJsType::DoubleLit);
+                return EmitExpressionInfo(mFunction->GetConstRegister<double>(pnode->AsParseNodeFloat()->dbl), AsmJsType::DoubleLit);
             }
         case knopInt:
-            if (pnode->sxInt.lw < 0)
+            if (pnode->AsParseNodeInt()->lw < 0)
             {
-                return EmitExpressionInfo(mFunction->GetConstRegister<int>(pnode->sxInt.lw), AsmJsType::Signed);
+                return EmitExpressionInfo(mFunction->GetConstRegister<int>(pnode->AsParseNodeInt()->lw), AsmJsType::Signed);
             }
             else
             {
-                return EmitExpressionInfo(mFunction->GetConstRegister<int>(pnode->sxInt.lw), AsmJsType::Fixnum);
+                return EmitExpressionInfo(mFunction->GetConstRegister<int>(pnode->AsParseNodeInt()->lw), AsmJsType::Fixnum);
             }
         case knopIf:
-            return EmitIf( pnode );
+            return EmitIf( pnode->AsParseNodeIf() );
         case knopQmark:
             return EmitQMark( pnode );
         case knopSwitch:
-            return EmitSwitch( pnode );
+            return EmitSwitch( pnode->AsParseNodeSwitch() );
         case knopFor:
-            MaybeTodo( pnode->sxFor.pnodeInverted != NULL );
+            MaybeTodo( pnode->AsParseNodeFor()->pnodeInverted != NULL );
             {
-                const EmitExpressionInfo& initInfo = Emit( pnode->sxFor.pnodeInit );
+                ParseNodeFor * pnodeFor = pnode->AsParseNodeFor();
+                const EmitExpressionInfo& initInfo = Emit(pnodeFor->pnodeInit );
                 mFunction->ReleaseLocationGeneric( &initInfo );
-                return EmitLoop( pnode,
-                          pnode->sxFor.pnodeCond,
-                          pnode->sxFor.pnodeBody,
-                          pnode->sxFor.pnodeIncr);
+                return EmitLoop( pnodeFor,
+                          pnodeFor->pnodeCond,
+                          pnodeFor->pnodeBody,
+                          pnodeFor->pnodeIncr);
             }
             break;
         case knopWhile:
-            return EmitLoop( pnode,
-                      pnode->sxWhile.pnodeCond,
-                      pnode->sxWhile.pnodeBody,
+        {
+            ParseNodeWhile * pnodeWhile = pnode->AsParseNodeWhile();
+            return EmitLoop( pnodeWhile,
+                      pnodeWhile->pnodeCond,
+                      pnodeWhile->pnodeBody,
                       nullptr);
+        }
         case knopDoWhile:
-            return EmitLoop( pnode,
-                      pnode->sxWhile.pnodeCond,
-                      pnode->sxWhile.pnodeBody,
+        {
+            ParseNodeWhile * pnodeWhile = pnode->AsParseNodeWhile();
+            return EmitLoop( pnodeWhile,
+                      pnodeWhile->pnodeCond,
+                      pnodeWhile->pnodeBody,
                       NULL,
                       true );
+        }
         case knopBreak:
-            Assert( pnode->sxJump.pnodeTarget->emitLabels );
-            StartStatement(pnode);
-            mWriter.AsmBr( pnode->sxJump.pnodeTarget->sxStmt.breakLabel );
-            if( pnode->emitLabels )
+        {
+            ParseNodeJump * pnodeJump = pnode->AsParseNodeJump();
+            Assert(pnodeJump->pnodeTarget->emitLabels);
+            StartStatement(pnodeJump);
+            mWriter.AsmBr(pnodeJump->pnodeTarget->breakLabel);
+            if (pnodeJump->emitLabels)
             {
-                mWriter.MarkAsmJsLabel( pnode->sxStmt.breakLabel );
+                mWriter.MarkAsmJsLabel(pnodeJump->breakLabel);
             }
-            EndStatement(pnode);
+            EndStatement(pnodeJump);
             break;
+        }
         case knopContinue:
-            Assert( pnode->sxJump.pnodeTarget->emitLabels );
+            Assert( pnode->AsParseNodeJump()->pnodeTarget->emitLabels );
             StartStatement(pnode);
-            mWriter.AsmBr( pnode->sxJump.pnodeTarget->sxStmt.continueLabel );
+            mWriter.AsmBr( pnode->AsParseNodeJump()->pnodeTarget->continueLabel );
             EndStatement(pnode);
-            break;
-        case knopLabel:
             break;
         case knopVarDecl:
             throw AsmJsCompilationException( _u("Variable declaration must happen at the top of the function") );
@@ -716,7 +688,7 @@ namespace Js
     {
         ParseNode* lhs = ParserWrapper::GetBinaryLeft( pnode );
         ParseNode* rhs = ParserWrapper::GetBinaryRight( pnode );
-        const bool isRhs0 = rhs->nop == knopInt && rhs->sxInt.lw == 0;
+        const bool isRhs0 = rhs->nop == knopInt && rhs->AsParseNodeInt()->lw == 0;
         const bool isOr0Operation = op == OpCodeAsmJs::Or_Int && isRhs0;
         if( isOr0Operation && lhs->nop == knopCall )
         {
@@ -762,7 +734,7 @@ namespace Js
 
     EmitExpressionInfo AsmJSByteCodeGenerator::EmitReturn( ParseNode * pnode )
     {
-        ParseNode* expr = pnode->sxReturn.pnodeExpr;
+        ParseNode* expr = pnode->AsParseNodeReturn()->pnodeExpr;
         // return is always the beginning of a statement
         AsmJsRetType retType;
         EmitExpressionInfo emitInfo( Constants::NoRegister, AsmJsType::Void );
@@ -773,8 +745,6 @@ namespace Js
                 throw AsmJsCompilationException( _u("Different return type for the function") );
             }
             retType = AsmJsRetType::Void;
-            // Make sure we return something
-            mWriter.AsmReg1(Js::OpCodeAsmJs::LdUndef, AsmJsFunctionMemory::ReturnRegister);
         }
         else
         {
@@ -807,72 +777,6 @@ namespace Js
                 emitInfo.type = AsmJsType::Float;
                 retType = AsmJsRetType::Float;
             }
-            else if (info.type.isSubType(AsmJsType::Float32x4))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_F4, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Float32x4;
-                retType = AsmJsRetType::Float32x4;
-            }
-            else if (info.type.isSubType(AsmJsType::Int32x4))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_I4, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Int32x4;
-                retType = AsmJsRetType::Int32x4;
-            }
-            else if (info.type.isSubType(AsmJsType::Bool32x4))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_B4, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Bool32x4;
-                retType = AsmJsRetType::Bool32x4;
-            }
-            else if (info.type.isSubType(AsmJsType::Bool16x8))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_B8, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Bool16x8;
-                retType = AsmJsRetType::Bool16x8;
-            }
-            else if (info.type.isSubType(AsmJsType::Bool8x16))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_B16, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Bool8x16;
-                retType = AsmJsRetType::Bool8x16;
-            }
-#if 0
-            else if (info.type.isSubType(AsmJsType::Float64x2))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_D2, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Float64x2;
-                retType = AsmJsRetType::Float64x2;
-            }
-#endif // 0
-            else if (info.type.isSubType(AsmJsType::Int16x8))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_I8, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Int16x8;
-                retType = AsmJsRetType::Int16x8;
-            }
-            else if (info.type.isSubType(AsmJsType::Int8x16))
-            {
-                CheckNodeLocation(info, AsmJsSIMDValue);
-                mWriter.Conv(OpCodeAsmJs::Simd128_Return_I16, 0, info.location);
-                mFunction->ReleaseLocation<AsmJsSIMDValue>(&info);
-                emitInfo.type = AsmJsType::Int8x16;
-                retType = AsmJsRetType::Int8x16;
-            }
             else
             {
                 throw AsmJsCompilationException(_u("Expression for return must be subtype of Signed, Double, or Float"));
@@ -888,132 +792,116 @@ namespace Js
         return emitInfo;
     }
 
-    bool AsmJSByteCodeGenerator::IsValidSimdFcnRetType(AsmJsSIMDFunction& simdFunction, const AsmJsRetType& expectedType, const AsmJsRetType& retType)
+    RegSlot AsmJsFunc::AcquireTmpRegisterGeneric(AsmJsRetType retType)
     {
-        // Return types of simd builtins can be coereced to other asmjs types when a valid coercion exists
-        // e.g.
-        //     float    -> double           var d = 0.0; d = +float32x4ExtractLane(...)
-        //     signed   -> double           var d = 0.0; d = +int32x4ExtractLane(...)
-        //     unsigned -> double           var d = 0.0; d = +uint32x4ExtractLane(...)
-
-        // If a simd built-in is used without coercion, then expectedType is Void.
-        // All SIMD ops are allowed without coercion except a few that return bool. E.g. b4anyTrue()
-        // Unsigned and Bools are represented as Signed in AsmJs
-        if (expectedType == AsmJsRetType::Void)
+        switch (retType.which())
         {
-            return true;
+        case AsmJsRetType::Signed:
+            return AcquireTmpRegister<int>();
+        case AsmJsRetType::Double:
+            return AcquireTmpRegister<double>();
+        case AsmJsRetType::Float:
+            return AcquireTmpRegister<float>();
+        case AsmJsRetType::Void:
+            return Js::Constants::NoRegister;
+        default:
+            Assert(UNREACHED);
+            return Js::Constants::NoRegister;
         }
-        else if (expectedType == retType)
-        {
-            Assert(expectedType == AsmJsRetType::Float   ||
-                   expectedType == AsmJsRetType::Signed  ||
-                   expectedType == AsmJsRetType::Unsigned||
-                   expectedType.toType().isSIMDType() );
-            return true;
-        }
-        else if (expectedType == AsmJsRetType::Double)
-        {
-            return (retType == AsmJsRetType::Float  ||
-                    retType == AsmJsRetType::Signed ||
-                    retType == AsmJsRetType::Unsigned);
-        }
-        else if (expectedType == AsmJsRetType::Signed)
-        {
-            //Unsigned and Bools are represented as Signed in AsmJs
-            return (retType == AsmJsRetType::Unsigned ||
-                    simdFunction.ReturnsBool());
-        }
-        return false;
     }
 
-    // First set of opcode are for External calls, second set is for internal calls
-    static const OpCodeAsmJs callOpCode[2][7] =
+    bool AsmJsFunc::IsVarLocationGeneric(const EmitExpressionInfo* pnode)
     {
+        if (pnode->type.isInt())
         {
-            OpCodeAsmJs::StartCall
-            , OpCodeAsmJs::Call
-            , OpCodeAsmJs::ArgOut_Db
-            , OpCodeAsmJs::ArgOut_Int
-            , OpCodeAsmJs::Conv_VTD
-            , OpCodeAsmJs::Conv_VTI
-            , OpCodeAsmJs::Conv_VTF
-        },
-        {
-            OpCodeAsmJs::I_StartCall
-            , OpCodeAsmJs::I_Call
-            , OpCodeAsmJs::I_ArgOut_Db
-            , OpCodeAsmJs::I_ArgOut_Int
-            , OpCodeAsmJs::I_Conv_VTD
-            , OpCodeAsmJs::I_Conv_VTI
-            , OpCodeAsmJs::I_Conv_VTF
+            return IsVarLocation<int>(pnode);
         }
-    };
+        else if (pnode->type.isDouble())
+        {
+            return IsVarLocation<double>(pnode);
+        }
+        else if (pnode->type.isFloat())
+        {
+            return IsVarLocation<float>(pnode);
+        }
+        else
+        {
+            // Vars must have concrete type, so any "-ish" or "maybe" type
+            // cannot be in a var location
+            return false;
+        }
+    }
+
+    RegSlot AsmJSByteCodeGenerator::EmitIndirectCallIndex(ParseNode* identifierNode, ParseNode* indexNode)
+    {
+        // check for table size annotation
+        if (indexNode->nop != knopAnd)
+        {
+            throw AsmJsCompilationException(_u("Function table call must be of format identifier[expr & NumericLiteral](...)"));
+        }
+
+        ParseNode* tableSizeNode = ParserWrapper::GetBinaryRight(indexNode);
+        if (tableSizeNode->nop != knopInt)
+        {
+            throw AsmJsCompilationException(_u("Function table call must be of format identifier[expr & NumericLiteral](...)"));
+        }
+        if (tableSizeNode->AsParseNodeInt()->lw < 0)
+        {
+            throw AsmJsCompilationException(_u("Function table size must be positive"));
+        }
+        const uint tableSize = tableSizeNode->AsParseNodeInt()->lw + 1;
+        if (!::Math::IsPow2(tableSize))
+        {
+            throw AsmJsCompilationException(_u("Function table size must be a power of 2"));
+        }
+
+        // Check for function table identifier
+        if (!ParserWrapper::IsNameDeclaration(identifierNode))
+        {
+            throw AsmJsCompilationException(_u("Function call must be of format identifier(...) or identifier[expr & size](...)"));
+        }
+        PropertyName funcName = identifierNode->name();
+        AsmJsFunctionDeclaration* sym = mCompiler->LookupFunction(funcName);
+        if (!sym)
+        {
+            throw AsmJsCompilationException(_u("Unable to find function table %s"), funcName->Psz());
+        }
+        else
+        {
+            if (!AsmJsFunctionTable::Is(sym))
+            {
+                throw AsmJsCompilationException(_u("Identifier %s is not a function table"), funcName->Psz());
+            }
+            AsmJsFunctionTable* funcTable = AsmJsFunctionTable::FromSymbol(sym);
+            if (funcTable->GetSize() != tableSize)
+            {
+                throw AsmJsCompilationException(_u("Trying to load from Function table %s of size [%d] with size [%d]"), funcName->Psz(), funcTable->GetSize(), tableSize);
+            }
+        }
+
+        const EmitExpressionInfo& indexInfo = Emit(indexNode);
+        if (!indexInfo.type.isInt())
+        {
+            throw AsmJsCompilationException(_u("Array Buffer View index must be type int"));
+        }
+        CheckNodeLocation(indexInfo, int);
+        return indexInfo.location;
+    }
 
     Js::EmitExpressionInfo AsmJSByteCodeGenerator::EmitCall(ParseNode * pnode, AsmJsRetType expectedType /*= AsmJsType::Void*/)
     {
         Assert( pnode->nop == knopCall );
 
-        ParseNode* identifierNode = pnode->sxCall.pnodeTarget;
+        ParseNode* identifierNode = pnode->AsParseNodeCall()->pnodeTarget;
         RegSlot funcTableIndexRegister = Constants::NoRegister;
 
         // Function table
-        if( pnode->sxCall.pnodeTarget->nop == knopIndex )
+        if( pnode->AsParseNodeCall()->pnodeTarget->nop == knopIndex )
         {
-            identifierNode = ParserWrapper::GetBinaryLeft( pnode->sxCall.pnodeTarget );
-            ParseNode* indexNode = ParserWrapper::GetBinaryRight( pnode->sxCall.pnodeTarget );
+            identifierNode = ParserWrapper::GetBinaryLeft( pnode->AsParseNodeCall()->pnodeTarget );
+            ParseNode* indexNode = ParserWrapper::GetBinaryRight( pnode->AsParseNodeCall()->pnodeTarget );
 
-            // check for table size annotation
-            if( indexNode->nop != knopAnd )
-            {
-                throw AsmJsCompilationException( _u("Function table call must be of format identifier[expr & NumericLiteral](...)") );
-            }
-
-            ParseNode* tableSizeNode = ParserWrapper::GetBinaryRight( indexNode );
-            if( tableSizeNode->nop != knopInt )
-            {
-                throw AsmJsCompilationException( _u("Function table call must be of format identifier[expr & NumericLiteral](...)") );
-            }
-            if (tableSizeNode->sxInt.lw < 0)
-            {
-                throw AsmJsCompilationException(_u("Function table size must be positive"));
-            }
-            const uint tableSize = tableSizeNode->sxInt.lw+1;
-            if( !::Math::IsPow2(tableSize) )
-            {
-                throw AsmJsCompilationException( _u("Function table size must be a power of 2") );
-            }
-
-            // Check for function table identifier
-            if( !ParserWrapper::IsNameDeclaration( identifierNode ) )
-            {
-                throw AsmJsCompilationException( _u("Function call must be of format identifier(...) or identifier[expr & size](...)") );
-            }
-            PropertyName funcName = identifierNode->name();
-            AsmJsFunctionDeclaration* sym = mCompiler->LookupFunction( funcName );
-            if( !sym )
-            {
-                throw AsmJsCompilationException( _u("Unable to find function table %s"), funcName->Psz() );
-            }
-            else
-            {
-                if( sym->GetSymbolType() != AsmJsSymbol::FuncPtrTable )
-                {
-                    throw AsmJsCompilationException( _u("Identifier %s is not a function table"), funcName->Psz() );
-                }
-                AsmJsFunctionTable* funcTable = sym->Cast<AsmJsFunctionTable>();
-                if( funcTable->GetSize() != tableSize )
-                {
-                    throw AsmJsCompilationException( _u("Trying to load from Function table %s of size [%d] with size [%d]"), funcName->Psz(), funcTable->GetSize(), tableSize );
-                }
-            }
-
-            const EmitExpressionInfo& indexInfo = Emit( indexNode );
-            if( !indexInfo.type.isInt() )
-            {
-                throw AsmJsCompilationException( _u("Array Buffer View index must be type int") );
-            }
-            CheckNodeLocation( indexInfo, int );
-            funcTableIndexRegister = indexInfo.location;
+            funcTableIndexRegister = EmitIndirectCallIndex(identifierNode, indexNode);
         }
 
         if( !ParserWrapper::IsNameDeclaration( identifierNode ) )
@@ -1024,28 +912,14 @@ namespace Js
         AsmJsFunctionDeclaration* sym = mCompiler->LookupFunction(funcName);
         if( !sym )
         {
-            throw AsmJsCompilationException( _u("Undefined function %s"), funcName );
+            throw AsmJsCompilationException( _u("Undefined function %s"), funcName->Psz() );
         }
 
-
-        if (sym->GetSymbolType() == AsmJsSymbol::SIMDBuiltinFunction)
-        {
-            AsmJsSIMDFunction *simdFun = sym->Cast<AsmJsSIMDFunction>();
-            if (simdFun->IsSimdLoadFunc() || simdFun->IsSimdStoreFunc())
-            {
-                return EmitSimdLoadStoreBuiltin(pnode, sym->Cast<AsmJsSIMDFunction>(), expectedType);
-            }
-            else
-            {
-                return EmitSimdBuiltin(pnode, sym->Cast<AsmJsSIMDFunction>(), expectedType);
-            }
-        }
-
-        const bool isFFI = sym->GetSymbolType() == AsmJsSymbol::ImportFunction;
-        const bool isMathBuiltin = sym->GetSymbolType() == AsmJsSymbol::MathBuiltinFunction;
+        const bool isFFI = AsmJsImportFunction::Is(sym);
+        const bool isMathBuiltin = AsmJsMathFunction::Is(sym);
         if(isMathBuiltin)
         {
-            return EmitMathBuiltin(pnode, sym->Cast<AsmJsMathFunction>());
+            return EmitMathBuiltin(pnode, AsmJsMathFunction::FromSymbol(sym));
         }
 
         // math builtins have different requirements for call-site coercion
@@ -1053,46 +927,101 @@ namespace Js
         {
             throw AsmJsCompilationException(_u("Different return type found for function %s"), funcName->Psz());
         }
-        const int StartCallIndex = 0;
-        const int CallIndex = 1;
-        const int ArgOut_DbIndex = 2;
-        const int ArgOut_IntIndex = 3;
-        const int Conv_VTDIndex = 4;
-        const int Conv_VTIIndex =5;
-        const int Conv_VTFIndex = 6;
-        const int funcOpCode = isFFI ? 0 : 1;
 
-        // StartCall
-        const ArgSlot argCount = pnode->sxCall.argCount;
+        const ArgSlot argCount = pnode->AsParseNodeCall()->argCount;
+
+        EmitExpressionInfo * argArray = nullptr;
+        AsmJsType* types = nullptr;
+
+        // first, evaluate function arguments
+        if (argCount > 0)
+        {
+            ParseNode* argNode = pnode->AsParseNodeCall()->pnodeArgs;
+            argArray = AnewArray(&mAllocator, EmitExpressionInfo, argCount);
+            types = AnewArray(&mAllocator, AsmJsType, argCount);
+            for (ArgSlot i = 0; i < argCount; i++)
+            {
+                ParseNode* arg = argNode;
+                if (argNode->nop == knopList)
+                {
+                    arg = ParserWrapper::GetBinaryLeft(argNode);
+                    argNode = ParserWrapper::GetBinaryRight(argNode);
+                }
+
+                // Emit argument
+                EmitExpressionInfo argInfo = Emit(arg);
+
+                types[i] = argInfo.type;
+                argArray[i].type = argInfo.type;
+
+                if (!mFunction->IsVarLocationGeneric(&argInfo))
+                {
+                    argArray[i].location = argInfo.location;
+                }
+                else
+                {
+                    // If argument is a var, another argument might change its value, so move it to a temp register
+                    mFunction->ReleaseLocationGeneric(&argInfo);
+                    if (argInfo.type.isInt())
+                    {
+                        argArray[i].location = mFunction->AcquireTmpRegister<int>();
+                        mWriter.AsmReg2(OpCodeAsmJs::Ld_Int, argArray[i].location, argInfo.location);
+                    }
+                    else if (argInfo.type.isFloat())
+                    {
+                        argArray[i].location = mFunction->AcquireTmpRegister<float>();
+                        mWriter.AsmReg2(OpCodeAsmJs::Ld_Flt, argArray[i].location, argInfo.location);
+                    }
+                    else if (argInfo.type.isDouble())
+                    {
+                        argArray[i].location = mFunction->AcquireTmpRegister<double>();
+                        mWriter.AsmReg2(OpCodeAsmJs::Ld_Db, argArray[i].location, argInfo.location);
+                    }
+                    else
+                    {
+                        throw AsmJsCompilationException(_u("Function %s doesn't support argument of type %s"), funcName->Psz(), argInfo.type.toChars());
+                    }
+                }
+            }
+        }
+
+        // Check if this function supports the type of these arguments
+        AsmJsRetType retType;
+        const bool supported = sym->SupportsArgCall(argCount, types, retType);
+        if (!supported)
+        {
+            throw AsmJsCompilationException(_u("Function %s doesn't support arguments"), funcName->Psz());
+        }
+        if (types)
+        {
+            AdeleteArray(&mAllocator, argCount, types);
+            types = nullptr;
+        }
+
+        // need to validate return type again because function might support arguments,
+        // but return a different type, i.e.: abs(int) -> int, but expecting double
+        // don't validate the return type for foreign import functions
+        if (!isFFI && retType != expectedType)
+        {
+            throw AsmJsCompilationException(_u("Function %s returns different type"), funcName->Psz());
+        }
+
+        const ArgSlot argByteSize = ArgSlotMath::Add(sym->GetArgByteSize(argCount), sizeof(Var));
+        // +1 is for function object
+        ArgSlot runtimeArg = ArgSlotMath::Add(argCount, 1);
+        if (!isFFI) // for non import functions runtimeArg is calculated from argByteSize
+        {
+            runtimeArg = (ArgSlot)(::ceil((double)(argByteSize / sizeof(Var)))) + 1;
+        }
 
         StartStatement(pnode);
-        ++mNestedCallCount;
 
-        uint startCallOffset = mWriter.GetCurrentOffset();
-        auto startCallChunk = mWriter.GetCurrentChunk();
-        uint startCallChunkOffset = startCallChunk->GetCurrentOffset();
+        mWriter.AsmStartCall(isFFI ? OpCodeAsmJs::StartCall : OpCodeAsmJs::I_StartCall, argByteSize);
 
-        bool patchStartCall = sym->GetArgCount() == Constants::InvalidArgSlot;
-        if (patchStartCall)
-        {
-            // we will not know the types of the arguments for the first call to a deferred function,
-            // so we put a placeholder instr in the bytecode and then patch it with correct arg size
-            // once we evaluate the arguments
-            mWriter.AsmStartCall(callOpCode[funcOpCode][StartCallIndex], Constants::InvalidArgSlot);
-        }
-        else
-        {
-            // args size + 1 pointer
-            const ArgSlot argByteSize = ArgSlotMath::Add(sym->GetArgByteSize(argCount), sizeof(Var));
-            mWriter.AsmStartCall(callOpCode[funcOpCode][StartCallIndex], argByteSize);
-        }
-        AutoArrayPtr<AsmJsType> types(nullptr, 0);
-        int maxDepthForLevel = mFunction->GetArgOutDepth();
         if( argCount > 0 )
         {
-            ParseNode* argNode = pnode->sxCall.pnodeArgs;
+            ParseNode* argNode = pnode->AsParseNodeCall()->pnodeArgs;
             uint16 regSlotLocation = 1;
-            types.Set(HeapNewArray( AsmJsType, argCount ), argCount);
 
             for(ArgSlot i = 0; i < argCount; i++)
             {
@@ -1103,25 +1032,21 @@ namespace Js
                     arg = ParserWrapper::GetBinaryLeft( argNode );
                     argNode = ParserWrapper::GetBinaryRight( argNode );
                 }
-
-                // Emit argument
-                const EmitExpressionInfo& argInfo = Emit( arg );
-                types[i] = argInfo.type;
+                EmitExpressionInfo argInfo = argArray[i];
                 // OutParams i
                 if( argInfo.type.isDouble() )
                 {
                     CheckNodeLocation( argInfo, double );
-                    if (callOpCode[funcOpCode][ArgOut_DbIndex] == OpCodeAsmJs::ArgOut_Db)
+                    if (isFFI)
                     {
-                        mWriter.AsmReg2(callOpCode[funcOpCode][ArgOut_DbIndex], regSlotLocation, argInfo.location);
+                        mWriter.AsmReg2(OpCodeAsmJs::ArgOut_Db, regSlotLocation, argInfo.location);
                         regSlotLocation++; // in case of external calls this is boxed and converted to a Var
                     }
                     else
                     {
-                        mWriter.AsmReg2(callOpCode[funcOpCode][ArgOut_DbIndex], regSlotLocation, argInfo.location);
+                        mWriter.AsmReg2(OpCodeAsmJs::I_ArgOut_Db, regSlotLocation, argInfo.location);
                         regSlotLocation += sizeof(double) / sizeof(Var);// in case of internal calls we will pass this arg as double
                     }
-                    mFunction->ReleaseLocation<double>( &argInfo );
                 }
                 else if (argInfo.type.isFloat())
                 {
@@ -1132,797 +1057,101 @@ namespace Js
                     }
                     mWriter.AsmReg2(OpCodeAsmJs::I_ArgOut_Flt, regSlotLocation, argInfo.location);
                     regSlotLocation++;
-                    mFunction->ReleaseLocation<float>(&argInfo);
                 }
                 else if (argInfo.type.isInt())
                 {
                     CheckNodeLocation( argInfo, int );
-                    mWriter.AsmReg2(callOpCode[funcOpCode][ArgOut_IntIndex], regSlotLocation, argInfo.location);
+                    mWriter.AsmReg2(isFFI ? OpCodeAsmJs::ArgOut_Int : OpCodeAsmJs::I_ArgOut_Int, regSlotLocation, argInfo.location);
                     regSlotLocation++;
-                    mFunction->ReleaseLocation<int>( &argInfo );
-                }
-                else if (argInfo.type.isSIMDType())
-                {
-                    if (isFFI)
-                    {
-                        throw AsmJsCompilationException(_u("FFI function %s doesn't support SIMD arguments"), funcName->Psz());
-                    }
-
-                    CheckNodeLocation(argInfo, AsmJsSIMDValue);
-                    OpCodeAsmJs opcode = OpCodeAsmJs::Simd128_I_ArgOut_I4;
-                    switch (argInfo.type.GetWhich())
-                    {
-                    case AsmJsType::Int32x4:
-                        break;
-                    case    AsmJsType::Float32x4:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_F4;
-                        break;
-#if 0
-                    case    AsmJsType::Float64x2:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_D2;
-                        break;
-#endif // 0
-                    case AsmJsType::Int16x8:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_I8;
-                        break;
-                    case AsmJsType::Int8x16:
-                         opcode = OpCodeAsmJs::Simd128_I_ArgOut_I16;
-                        break;
-                    case AsmJsType::Bool32x4:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_B4;
-                        break;
-                    case AsmJsType::Bool16x8:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_B8;
-                        break;
-                    case AsmJsType::Bool8x16:
-                        opcode = OpCodeAsmJs::Simd128_I_ArgOut_B16;
-                        break;
-                    case AsmJsType::Uint32x4:
-                    case AsmJsType::Uint16x8:
-                    case AsmJsType::Uint8x16:
-                        //In Asm.js unsigned SIMD types are not allowed as function arguments or return values.
-                        throw AsmJsCompilationException(_u("Function %s doesn't support argument of type %s. Argument must be of signed type."), funcName->Psz(), argInfo.type.toChars());
-                    default:
-                        Assert(UNREACHED);
-                    }
-                    mWriter.AsmReg2(opcode, regSlotLocation, argInfo.location);
-                    regSlotLocation += sizeof(AsmJsSIMDValue) / sizeof(Var);
-                    mFunction->ReleaseLocation<AsmJsSIMDValue>(&argInfo);
                 }
                 else
                 {
                     throw AsmJsCompilationException(_u("Function %s doesn't support argument of type %s"), funcName->Psz(), argInfo.type.toChars());
                 }
-                // if there are nested calls, track whichever is the deepest
-                if (maxDepthForLevel < mFunction->GetArgOutDepth())
-                {
-                    maxDepthForLevel = mFunction->GetArgOutDepth();
-                }
             }
-        }
-        // Check if this function supports the type of these arguments
-        AsmJsRetType retType;
-        const bool supported = sym->SupportsArgCall( argCount, types, retType );
-        if( !supported )
-        {
-            throw AsmJsCompilationException( _u("Function %s doesn't support arguments"), funcName->Psz() );
+
+            for (ArgSlot i = argCount; i > 0; --i)
+            {
+                mFunction->ReleaseLocationGeneric(&argArray[i - 1]);
+            }
+            AdeleteArray(&mAllocator, argCount, argArray);
+            argArray = nullptr;
         }
 
-        // need to validate return type again because function might support arguments,
-        // but return a different type, i.e.: abs(int) -> int, but expecting double
-        // don't validate the return type for foreign import functions
-        if( !isFFI && retType != expectedType )
-        {
-            throw AsmJsCompilationException( _u("Function %s returns different type"), funcName->Psz() );
-        }
-
-        const ArgSlot argByteSize = ArgSlotMath::Add(sym->GetArgByteSize(argCount), sizeof(Var));
-        // +1 is for function object
-        ArgSlot runtimeArg = ArgSlotMath::Add(argCount, 1);
-        if (funcOpCode == 1) // for non import functions runtimeArg is calculated from argByteSize
-        {
-            runtimeArg = (ArgSlot)(::ceil((double)(argByteSize / sizeof(Var)))) + 1;
-        }
-
-        // +1 is for return address
-        maxDepthForLevel += ArgSlotMath::Add(runtimeArg, 1);
 
         // Make sure we have enough memory allocated for OutParameters
-        if (mNestedCallCount > 1)
-        {
-            mFunction->SetArgOutDepth(maxDepthForLevel);
-        }
-        else
-        {
-            mFunction->SetArgOutDepth(0);
-        }
-        mFunction->UpdateMaxArgOutDepth(maxDepthForLevel);
-
-        if (patchStartCall)
-        {
-            uint latestOffset = mWriter.GetCurrentOffset();
-            auto latestChunk = mWriter.GetCurrentChunk();
-            uint latestChunkOffset = latestChunk->GetCurrentOffset();
-
-            // now that we know the types, we can patch the StartCall instr
-            startCallChunk->SetCurrentOffset(startCallChunkOffset);
-            mWriter.SetCurrent(startCallOffset, startCallChunk);
-
-            // args size + 1 pointer
-            mWriter.AsmStartCall(callOpCode[funcOpCode][StartCallIndex], argByteSize, true /* isPatching */);
-
-            // ... and return to where we left off in the buffer like nothing ever happened
-            latestChunk->SetCurrentOffset(latestChunkOffset);
-            mWriter.SetCurrent(latestOffset, latestChunk);
-        }
+        // +1 is for return address
+        mFunction->UpdateMaxArgOutDepth(ArgSlotMath::Add(runtimeArg, 1));
 
         // Load function from env
+        ProfileId profileId = Js::Constants::NoProfileId;
+        RegSlot funcReg = Js::Constants::NoRegister;
         switch( sym->GetSymbolType() )
         {
         case AsmJsSymbol::ModuleFunction:
-            LoadModuleFunction( AsmJsFunctionMemory::FunctionRegister, sym->GetFunctionIndex() );
+            funcReg = mFunction->AcquireTmpRegister<intptr_t>();
+            LoadModuleFunction(funcReg, sym->GetFunctionIndex());
+            profileId = mFunction->GetNextProfileId();
             break;
         case AsmJsSymbol::ImportFunction:
-            LoadModuleFFI( AsmJsFunctionMemory::FunctionRegister, sym->GetFunctionIndex() );
+            funcReg = mFunction->AcquireTmpRegister<intptr_t>();
+            LoadModuleFFI(funcReg, sym->GetFunctionIndex());
             break;
         case AsmJsSymbol::FuncPtrTable:
-            LoadModuleFunctionTable( AsmJsFunctionMemory::FunctionRegister, sym->GetFunctionIndex(), funcTableIndexRegister );
-            mFunction->ReleaseTmpRegister<int>( funcTableIndexRegister );
-            break;
-        default:
-            Assert( false );
-        }
-
-        // Call
-        mWriter.AsmCall( callOpCode[funcOpCode][CallIndex], AsmJsFunctionMemory::CallReturnRegister, AsmJsFunctionMemory::FunctionRegister, runtimeArg, expectedType );
-        // use expected type because return type could be invalid if the function is a FFI
-        EmitExpressionInfo info( expectedType.toType() );
-        switch( expectedType.which() )
-        {
-        case AsmJsRetType::Void:
-            // do nothing
-            break;
-        case AsmJsRetType::Signed:
-        {
-            RegSlot intReg = mFunction->AcquireTmpRegister<int>();
-            mWriter.AsmReg2( callOpCode[funcOpCode][Conv_VTIIndex], intReg, AsmJsFunctionMemory::CallReturnRegister );
-            info.location = intReg;
-            break;
-        }
-        case AsmJsRetType::Double:
-        {
-            RegSlot dbReg = mFunction->AcquireTmpRegister<double>();
-            mWriter.AsmReg2( callOpCode[funcOpCode][Conv_VTDIndex], dbReg, AsmJsFunctionMemory::CallReturnRegister );
-            info.location = dbReg;
-            break;
-        }
-        case AsmJsRetType::Float:
-        {
-            Assert(!isFFI); //check spec
-            RegSlot fltReg = mFunction->AcquireTmpRegister<float>();
-            mWriter.AsmReg2(callOpCode[funcOpCode][Conv_VTFIndex], fltReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = fltReg;
-            break;
-        }
-        case AsmJsRetType::Float32x4:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTF4, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Int32x4:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTI4, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-#if 0
-        case AsmJsRetType::Float64x2:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTD2, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-#endif // 0
-
-        case AsmJsRetType::Int16x8:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTI8, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Int8x16:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTI16, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Uint32x4:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTU4, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Uint16x8:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTU8, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Uint8x16:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTU16, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Bool32x4:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTB4, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Bool16x8:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTB8, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        case AsmJsRetType::Bool8x16:
-        {
-            Assert(!isFFI);
-            RegSlot simdReg = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            mWriter.AsmReg2(OpCodeAsmJs::Simd128_I_Conv_VTB16, simdReg, AsmJsFunctionMemory::CallReturnRegister);
-            info.location = simdReg;
-            break;
-        }
-        default:
-            break;
-        }
-        EndStatement(pnode);
-        --mNestedCallCount;
-        Assert(mNestedCallCount >= 0);
-
-        return info;
-    }
-
-    EmitExpressionInfo* AsmJSByteCodeGenerator::EmitSimdBuiltinArguments(ParseNode* pnode, AsmJsFunctionDeclaration* func, __out_ecount(pnode->sxCall.argCount) AsmJsType *argsTypes, EmitExpressionInfo *argsInfo)
-    {
-        const uint16 argCount = pnode->sxCall.argCount;
-        Assert(argsTypes);
-        Assert(argsInfo);
-
-        if (argCount > 0)
-        {
-            ParseNode* argNode = pnode->sxCall.pnodeArgs;
-
-            for (ArgSlot i = 0; i < argCount; i++)
+            // Make sure the user is not trying to call the function table directly
+            if (funcTableIndexRegister == Constants::NoRegister)
             {
-                // Get i arg node
-                ParseNode* arg = argNode;
-
-                if (argNode->nop == knopList)
-                {
-                    arg = ParserWrapper::GetBinaryLeft(argNode);
-                    argNode = ParserWrapper::GetBinaryRight(argNode);
-                }
-                if (func->GetSymbolType() == AsmJsSymbol::SIMDBuiltinFunction)
-                {
-                    AsmJsSIMDFunction *simdFunc = func->Cast<AsmJsSIMDFunction>();
-
-                    if (arg->nop == knopCall)
-                    {
-                        // REVIEW: Is this exactly according to spec ?
-                        // This enforces Asm.js rule that all arg calls to user-functions have to be coerced.
-                        // Generic calls have to be coerced unless used in a SIMD coercion.
-                        // For example, we cannot do f4add(foo(), bar()), but we can do f4add(f4check(foo()), f4check(bar()))
-                        //
-                        // We are only allowed calls as args in similar cases:
-                        //      Float32x4:
-                        //          f4check(foo());                call coercion, any call is allowed
-                        //          f4(fround(), fround(), ...);   constructor, only fround is allowed
-                        //          f4add(f4*(..),f4*(..));        operation, only other SIMD functions are allowed (including coercion)
-                        //
-                        //      Int32x4:
-                        //          i4check(foo());                call coercion, any call is allowed
-                        //          i4add(i4*(), i4*());           operation, only other SIMD functions are allowed (including coercion)
-                        //
-                        //      Float64x2:
-                        //          similar to Int32x4
-                        PropertyName argCallTarget = ParserWrapper::VariableName(arg->sxCall.pnodeTarget);
-                        AsmJsFunctionDeclaration* argCall = mCompiler->LookupFunction(argCallTarget);
-
-                        if (!argCall)
-                        {
-                            throw AsmJsCompilationException(_u("Undefined function %s."), argCallTarget->Psz());
-                        }
-
-                        EmitExpressionInfo argInfo;
-
-                        if (simdFunc->IsTypeCheck())
-                        {
-                            // type check. Any call is allowed as argument.
-                            argInfo = EmitCall(arg, simdFunc->GetReturnType());
-                        }
-                        // special case for fround inside some float32x4 operations
-                        // f4(fround(), ...) , f4splat(fround()), f4.replaceLane(..,..,fround())
-                        else if ((simdFunc->IsConstructor() && simdFunc->GetSimdBuiltInFunction() == AsmJsSIMDBuiltinFunction::AsmJsSIMDBuiltin_Float32x4) ||  /*float32x4 all args*/
-                                  simdFunc->GetSimdBuiltInFunction() == AsmJsSIMDBuiltinFunction::AsmJsSIMDBuiltin_float32x4_splat ||                                /*splat all args*/
-                                 (i == 2 && simdFunc->GetSimdBuiltInFunction() == AsmJsSIMDBuiltinFunction::AsmJsSIMDBuiltin_float32x4_replaceLane))
-                        {
-                            if (AsmJsMathFunction::IsFround(argCall))
-                            {
-                                argInfo = EmitCall(arg, AsmJsRetType::Float);
-                            }
-                            else
-                            {
-                                throw AsmJsCompilationException(_u("Invalid call as SIMD argument. Expecting fround."));
-                            }
-                        }
-                        else if (argCall->GetSymbolType() == AsmJsSymbol::SIMDBuiltinFunction  &&  argCall->Cast<AsmJsSIMDFunction>()->GetReturnType().toType() == simdFunc->GetArgType(i))
-                        {
-                            // any other simd operation. call arguments have to be SIMD operations of expected arg type.
-                            argInfo = EmitCall(arg, simdFunc->GetArgType(i).toRetType());
-                        }
-                        else
-                        {
-                            throw AsmJsCompilationException(_u("Invalid call as SIMD argument"));
-                        }
-
-                        argsTypes[i] = argInfo.type;
-                        argsInfo[i].type = argInfo.type;
-                        argsInfo[i].location = argInfo.location;
-                        // arg already emitted
-                        continue;
-                    }
-                    else if (simdFunc->IsFloat32x4Func() && arg->nop == knopFlt)
-                    {
-                        // Any floating point constant as float32x4 op arg is considered DoubleLit
-                        // For all float32x4 operations, if the arg type is DoubleLit, regSlot should be in Float reg space.
-                        argsTypes[i] = AsmJsType::DoubleLit;
-                        argsInfo[i].type = AsmJsType::DoubleLit;
-                        argsInfo[i].location = mFunction->GetConstRegister<float>((float)arg->sxFlt.dbl);
-                        // no need to emit constant
-                        continue;
-                    }
-                    else if (simdFunc->IsLaneAccessFunc())
-                    {
-                        if (i == 0 && !simdFunc->GetArgType(i).isSIMDType())
-                        {
-                            throw AsmJsCompilationException(_u("Invalid arguments to ExtractLane/ReplaceLane, SIMD type expected for first argument."));
-                        }
-                        if (i == 1)    //lane index
-                        {
-                            Assert(simdFunc->GetArgType(i) == AsmJsType::Int);
-                            int lane = (int)arg->sxInt.lw;
-                            if (arg->nop == knopInt)
-                            {
-                                if (lane < 0 || lane >= (int)simdFunc->LanesCount())
-                                {
-                                    throw AsmJsCompilationException(_u("Invalid arguments to ExtractLane/ReplaceLane, out of range lane indices."));
-                                }
-                            }
-                            else
-                            {
-                                throw AsmJsCompilationException(_u("Invalid arguments to extractLane/replaceLane, expecting literals for lane indices."));
-                            }
-                            Assert(argCount == 2 || argCount == 3);
-                            argsTypes[i] = AsmJsType::Int;
-                            argsInfo[i].type = AsmJsType::Int;
-                            argsInfo[i].location = mFunction->GetConstRegister<int>((int)lane);
-                            continue;
-                        }
-
-                    }
-                    else if ((simdFunc->IsShuffleFunc() || simdFunc->IsSwizzleFunc()) && simdFunc->GetArgType(i) == AsmJsType::Int)
-                    {
-                        /* Int args to shuffle/swizzle should be literals and in-range */
-                        if (arg->nop == knopInt)
-                        {
-                            // E.g.
-                            // f4shuffle(v1, v2, [0-7], [0-7], [0-7], [0-7])
-                            // f4swizzle(v1, [0-3], [0-3], [0-3], [0-3])
-                            bool valid = true;
-                            int32 laneValue = (int) arg->sxInt.lw;
-                            int argPos = i;
-
-                            switch (simdFunc->GetSimdBuiltInFunction())
-                            {
-                            case AsmJsSIMDBuiltin_float32x4_shuffle:
-                            case AsmJsSIMDBuiltin_int32x4_shuffle:
-                            case AsmJsSIMDBuiltin_uint32x4_shuffle:
-                                valid = (argPos >= 2 && argPos <= 5) && (laneValue >= 0 && laneValue <= 7);
-                                break;
-                            case AsmJsSIMDBuiltin_int16x8_shuffle:
-                            case AsmJsSIMDBuiltin_uint16x8_shuffle:
-                                valid = (argPos >= 2 && argPos <= 9) && (laneValue >= 0 && laneValue <= 15);
-                                break;
-                            case AsmJsSIMDBuiltin_int8x16_shuffle:
-                            case AsmJsSIMDBuiltin_uint8x16_shuffle:
-                                valid = (argPos >= 2 && argPos <= 17) && (laneValue >= 0 && laneValue <= 31);
-                                break;
-                            case AsmJsSIMDBuiltin_float64x2_shuffle:
-                                valid = (argPos >= 2 && argPos <= 3) && (laneValue >= 0 && laneValue <= 3);
-                                break;
-
-                            case AsmJsSIMDBuiltin_float32x4_swizzle:
-                            case AsmJsSIMDBuiltin_int32x4_swizzle:
-                            case AsmJsSIMDBuiltin_uint32x4_swizzle:
-                                valid = (argPos >=1 && argPos <= 4) && (laneValue >= 0 && laneValue <= 3);
-                                break;
-                            case AsmJsSIMDBuiltin_int16x8_swizzle:
-                            case AsmJsSIMDBuiltin_uint16x8_swizzle:
-                                valid = (argPos >= 1 && argPos <= 8) && (laneValue >= 0 && laneValue <= 7);
-                                break;
-                            case AsmJsSIMDBuiltin_int8x16_swizzle:
-                            case AsmJsSIMDBuiltin_uint8x16_swizzle:
-                                valid = (argPos >= 1 && argPos <= 16) && (laneValue >= 0 && laneValue <= 15);
-                                break;
-                            case AsmJsSIMDBuiltin_float64x2_swizzle:
-                                valid = (argPos >= 1 && argPos <= 2) && (laneValue >= 0 && laneValue <= 1);
-                                break;
-                            default:
-                                Assert(UNREACHED);
-                            }
-                            if (!valid)
-                            {
-                                throw AsmJsCompilationException(_u("Invalid arguments to shuffle, out of range lane indices."));
-                            }
-
-                            argsTypes[i] = AsmJsType::Int;
-                            argsInfo[i].type = AsmJsType::Int;
-                            argsInfo[i].location = mFunction->GetConstRegister<int>((int)laneValue);
-                            // no need to emit constant
-                            continue;
-                        }
-                        else
-                        {
-                            throw AsmJsCompilationException(_u("Invalid arguments to swizzle/shuffle, expecting literals for lane indices."));
-                        }
-                    }
-
-                }
-                // Emit argument
-                const EmitExpressionInfo& argInfo = Emit(arg);
-                argsTypes[i] = argInfo.type;
-                argsInfo[i].type = argInfo.type;
-                argsInfo[i].location = argInfo.location;
+                throw AsmJsCompilationException(_u("Direct call to function table '%s' is not allowed"), funcName->Psz());
             }
-        }
-        return argsInfo;
-    }
-
-    EmitExpressionInfo AsmJSByteCodeGenerator::EmitSimdBuiltin(ParseNode* pnode, AsmJsSIMDFunction* simdFunction, AsmJsRetType expectedType)
-    {
-        Assert(pnode->nop == knopCall);
-        // StartCall
-        const uint16 argCount = pnode->sxCall.argCount;
-
-        AutoArrayPtr<AsmJsType> types(nullptr, 0);
-        AutoArrayPtr<EmitExpressionInfo> argsInfo(nullptr, 0);
-
-        if (argCount > 0)
-        {
-            types.Set(HeapNewArray(AsmJsType, argCount), argCount);
-            argsInfo.Set(HeapNewArray(EmitExpressionInfo, argCount), argCount);
-
-            EmitSimdBuiltinArguments(pnode, simdFunction, types, argsInfo);
-        }
-
-        AsmJsRetType retType;
-        OpCodeAsmJs op;
-        const bool supported = simdFunction->SupportsSIMDCall(argCount, types, op, retType);
-
-        if (!supported)
-        {
-            throw AsmJsCompilationException(_u("SIMD builtin function doesn't support arguments"));
-        }
-
-        if (!IsValidSimdFcnRetType(*simdFunction, expectedType, retType))
-        {
-            throw AsmJsCompilationException(_u("SIMD builtin function returns wrong type"));
-        }
-
-        // Release all used location before acquiring a new tmp register
-        for (int i = argCount - 1; i >= 0; i--)
-        {
-            mFunction->ReleaseLocationGeneric(&argsInfo[i]);
-        }
-
-        RegSlot dst = Constants::NoRegister;
-        AsmJsType dstType = AsmJsType::Void;
-
-        switch (retType.which())
-        {
-        case AsmJsType::Signed:
-            dst = mFunction->AcquireTmpRegister<int>();
-            dstType = AsmJsType::Signed;
-            break;
-        case AsmJsType::Unsigned:
-            dst = mFunction->AcquireTmpRegister<int>();
-            dstType = AsmJsType::Unsigned;
-            break;
-        case AsmJsType::Float:
-            dst = mFunction->AcquireTmpRegister<float>();
-            dstType = AsmJsType::Float;
+            mFunction->ReleaseTmpRegister<int>(funcTableIndexRegister);
+            funcReg = mFunction->AcquireTmpRegister<intptr_t>();
+            LoadModuleFunctionTable(funcReg, sym->GetFunctionIndex(), funcTableIndexRegister);
             break;
         default:
-            Assert(retType.toVarType().isSIMD());
-            dst = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
+            throw AsmJsCompilationException(_u("Invalid function type"));
         }
-        EmitExpressionInfo emitInfo(dst, retType.toType());
-        if (dstType != AsmJsType::Void)
+
+        // use expected type because return type could be invalid if the function is a FFI
+        EmitExpressionInfo info(expectedType.toType());
+        mFunction->ReleaseTmpRegister<intptr_t>(funcReg);
+        if (isFFI)
         {
-            emitInfo.type = dstType;
-        }
+            RegSlot retReg = mFunction->AcquireTmpRegister<intptr_t>();
+            mWriter.AsmCall(OpCodeAsmJs::Call, retReg, funcReg, runtimeArg, expectedType, profileId);
 
-        switch (argCount){
-        case 1:
-            mWriter.AsmReg2(op, dst, argsInfo[0].location);
-            break;
-        case 2:
-            mWriter.AsmReg3(op, dst, argsInfo[0].location, argsInfo[1].location);
-            break;
-        case 3:
-            mWriter.AsmReg4(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location);
-            break;
-        case 4:
-            mWriter.AsmReg5(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location);
-            break;
-        case 5:
-            mWriter.AsmReg6(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location);
-            break;
-        case 6:
-            mWriter.AsmReg7(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location);
-            break;
-        case 8:
-            mWriter.AsmReg9(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                                     argsInfo[6].location, argsInfo[7].location);
-            break;
-        case 9:
-            mWriter.AsmReg10(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                                      argsInfo[6].location, argsInfo[7].location, argsInfo[8].location);
-            break;
-        case 10:
-            mWriter.AsmReg11(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                                      argsInfo[6].location, argsInfo[7].location, argsInfo[8].location, argsInfo[9].location);
-            break;
-        case 16:
-            mWriter.AsmReg17(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                                      argsInfo[6].location, argsInfo[7].location, argsInfo[8].location, argsInfo[9].location, argsInfo[10].location, argsInfo[11].location,
-                                      argsInfo[12].location, argsInfo[13].location, argsInfo[14].location, argsInfo[15].location);
-            break;
+            mFunction->ReleaseTmpRegister<intptr_t>(retReg);
+            info.location = mFunction->AcquireTmpRegisterGeneric(expectedType);
 
-        case 17:
-            mWriter.AsmReg18(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                             argsInfo[6].location, argsInfo[7].location, argsInfo[8].location, argsInfo[9].location, argsInfo[10].location, argsInfo[11].location,
-                             argsInfo[12].location, argsInfo[13].location, argsInfo[14].location, argsInfo[15].location, argsInfo[16].location);
-            break;
-
-        case 18:
-            mWriter.AsmReg19(op, dst, argsInfo[0].location, argsInfo[1].location, argsInfo[2].location, argsInfo[3].location, argsInfo[4].location, argsInfo[5].location,
-                                       argsInfo[6].location, argsInfo[7].location, argsInfo[8].location, argsInfo[9].location, argsInfo[10].location, argsInfo[11].location,
-                                       argsInfo[12].location, argsInfo[13].location, argsInfo[14].location, argsInfo[15].location, argsInfo[16].location, argsInfo[17].location);
-            break;
-        default:
-            AssertMsg(UNREACHED, "Wrong argument count to SIMD function");
-        }
-
-        return emitInfo;
-
-    }
-
-    EmitExpressionInfo AsmJSByteCodeGenerator::EmitSimdLoadStoreBuiltin(ParseNode* pnode, AsmJsSIMDFunction* simdFunction, AsmJsRetType expectedType)
-    {
-        Assert(pnode->nop == knopCall);
-        Assert(simdFunction->IsSimdLoadFunc() || simdFunction->IsSimdStoreFunc());
-
-        const uint16 argCount = pnode->sxCall.argCount;
-
-        // Check number of arguments
-        if ( argCount != simdFunction->GetArgCount())
-        {
-            throw AsmJsCompilationException(_u("SIMD builtin function doesn't support arguments"));
-        }
-
-        ParseNode *argNode = pnode->sxCall.pnodeArgs;
-
-        // Arg1 - tarray
-        ParseNode* arrayNameNode = ParserWrapper::GetBinaryLeft(argNode);
-        argNode = ParserWrapper::GetBinaryRight(argNode);
-
-        if (!ParserWrapper::IsNameDeclaration(arrayNameNode))
-        {
-            throw AsmJsCompilationException(_u("Invalid symbol "));
-        }
-
-        PropertyName name = arrayNameNode->name();
-
-        AsmJsSymbol* sym = mCompiler->LookupIdentifier(name, mFunction);
-        if (!sym || sym->GetSymbolType() != AsmJsSymbol::ArrayView)
-        {
-            throw AsmJsCompilationException(_u("Invalid identifier %s"), name->Psz());
-        }
-        AsmJsArrayView* arrayView = sym->Cast<AsmJsArrayView>();
-        ArrayBufferView::ViewType viewType = arrayView->GetViewType();
-
-        // Arg2 - index
-        ParseNode* indexNode = argNode;
-        ParseNode* valueNode = nullptr;
-        if (simdFunction->IsSimdStoreFunc())
-        {
-            indexNode = ParserWrapper::GetBinaryLeft(argNode);
-            valueNode = ParserWrapper::GetBinaryRight(argNode);
-        }
-
-        OpCodeAsmJs op;
-        uint32 indexSlot = 0;
-        TypedArrayEmitType emitType = simdFunction->IsSimdLoadFunc() ? TypedArrayEmitType::LoadTypedArray : TypedArrayEmitType::StoreTypedArray;
-
-        EmitExpressionInfo indexInfo = EmitTypedArrayIndex(indexNode, op, indexSlot, viewType, emitType);
-
-        EmitExpressionInfo valueInfo = { 0, AsmJsType::Void };
-        // convert opcode to const if needed
-        OpCodeAsmJs opcode = simdFunction->GetOpcode();
-
-        if (op == OpCodeAsmJs::LdArrConst || op == OpCodeAsmJs::StArrConst)
-        {
-            switch (opcode)
+            switch (expectedType.which())
             {
-            case OpCodeAsmJs::Simd128_LdArr_I4:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_I4;
+            case AsmJsRetType::Void:
                 break;
-            case OpCodeAsmJs::Simd128_LdArr_I8:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_I8;
+            case AsmJsRetType::Signed:
+                mWriter.AsmReg2(OpCodeAsmJs::Conv_VTI, info.location, retReg);
                 break;
-            case OpCodeAsmJs::Simd128_LdArr_I16:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_I16;
+            case AsmJsRetType::Double:
+                mWriter.AsmReg2(OpCodeAsmJs::Conv_VTD, info.location, retReg);
                 break;
-            case OpCodeAsmJs::Simd128_LdArr_U4:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_U4;
-                break;
-            case OpCodeAsmJs::Simd128_LdArr_U8:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_U8;
-                break;
-            case OpCodeAsmJs::Simd128_LdArr_U16:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_U16;
-                break;
-            case OpCodeAsmJs::Simd128_LdArr_F4:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_F4;
-                break;
-#if 0
-            case OpCodeAsmJs::Simd128_LdArr_D2:
-                opcode = OpCodeAsmJs::Simd128_LdArrConst_D2;
-                break;
-#endif // 0
-
-            case OpCodeAsmJs::Simd128_StArr_I4:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_I4;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_I8:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_I8;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_I16:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_I16;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_U4:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_U4;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_U8:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_U8;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_U16:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_U16;
-                break;
-            case OpCodeAsmJs::Simd128_StArr_F4:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_F4;
-                break;
-#if 0
-            case OpCodeAsmJs::Simd128_StArr_D2:
-                opcode = OpCodeAsmJs::Simd128_StArrConst_D2;
-                break;
-#endif // 0
-
             default:
                 Assert(UNREACHED);
             }
         }
-
-
-        // Adjust dataWidth
-        int8 dataWidth = 0;
-        switch (simdFunction->GetSimdBuiltInFunction())
+        else
         {
-        case AsmJsSIMDBuiltin_float32x4_load1:
-        case AsmJsSIMDBuiltin_float32x4_store1:
-        case AsmJsSIMDBuiltin_int32x4_load1:
-        case AsmJsSIMDBuiltin_int32x4_store1:
-        case AsmJsSIMDBuiltin_uint32x4_load1:
-        case AsmJsSIMDBuiltin_uint32x4_store1:
-            dataWidth = 4;
-            break;
-        case AsmJsSIMDBuiltin_float64x2_load1:
-        case AsmJsSIMDBuiltin_float64x2_store1:
-        case AsmJsSIMDBuiltin_float32x4_load2:
-        case AsmJsSIMDBuiltin_float32x4_store2:
-        case AsmJsSIMDBuiltin_int32x4_load2:
-        case AsmJsSIMDBuiltin_int32x4_store2:
-        case AsmJsSIMDBuiltin_uint32x4_load2:
-        case AsmJsSIMDBuiltin_uint32x4_store2:
-            dataWidth = 8;
-            break;
-        case AsmJsSIMDBuiltin_float32x4_load3:
-        case AsmJsSIMDBuiltin_float32x4_store3:
-        case AsmJsSIMDBuiltin_int32x4_load3:
-        case AsmJsSIMDBuiltin_int32x4_store3:
-        case AsmJsSIMDBuiltin_uint32x4_load3:
-        case AsmJsSIMDBuiltin_uint32x4_store3:
-            dataWidth = 12;
-            break;
-        case AsmJsSIMDBuiltin_int32x4_load:
-        case AsmJsSIMDBuiltin_int32x4_store:
-        case AsmJsSIMDBuiltin_float32x4_load:
-        case AsmJsSIMDBuiltin_float32x4_store:
-        case AsmJsSIMDBuiltin_float64x2_load:
-        case AsmJsSIMDBuiltin_float64x2_store:
-        case AsmJsSIMDBuiltin_int16x8_load:
-        case AsmJsSIMDBuiltin_int16x8_store:
-        case AsmJsSIMDBuiltin_int8x16_load:
-        case AsmJsSIMDBuiltin_int8x16_store:
-        case AsmJsSIMDBuiltin_uint32x4_load:
-        case AsmJsSIMDBuiltin_uint32x4_store:
-        case AsmJsSIMDBuiltin_uint16x8_load:
-        case AsmJsSIMDBuiltin_uint16x8_store:
-        case AsmJsSIMDBuiltin_uint8x16_load:
-        case AsmJsSIMDBuiltin_uint8x16_store:
-            dataWidth = 16;
-            break;
-        default:
-            Assert(UNREACHED);
+            info.location = mFunction->AcquireTmpRegisterGeneric(expectedType);
+            mWriter.AsmCall(OpCodeAsmJs::I_Call, info.location, funcReg, runtimeArg, expectedType, profileId);
         }
 
-        EmitExpressionInfo emitInfo;
-        if (simdFunction->IsSimdStoreFunc()) //Store
+        // after foreign function call, we need to make sure that the heap hasn't been detached
+        if (isFFI && mCompiler->UsesHeapBuffer())
         {
-            // Arg3 - Value to Store. Builtin returns the value being stored.
-            Assert(valueNode);
-            emitInfo = Emit(valueNode);
-
-            if (emitInfo.type != simdFunction->GetArgType(2))
-            {
-                throw AsmJsCompilationException(_u("Invalid value to SIMD store "));
-            }
-            // write opcode
-            mWriter.AsmSimdTypedArr(opcode, emitInfo.location, indexSlot, dataWidth, viewType);
-        }
-        else //Load
-        {
-            emitInfo.location = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-            emitInfo.type = simdFunction->GetReturnType().toType();
-            mWriter.AsmSimdTypedArr(opcode, emitInfo.location, indexSlot, dataWidth, viewType);
+            mWriter.EmptyAsm(OpCodeAsmJs::CheckHeap);
+            mCompiler->SetUsesHeapBuffer(true);
         }
 
-        mFunction->ReleaseLocationGeneric(&indexInfo);
-        return emitInfo;
+        EndStatement(pnode);
+
+        return info;
     }
 
     EmitExpressionInfo AsmJSByteCodeGenerator::EmitMathBuiltin(ParseNode* pnode, AsmJsMathFunction* mathFunction)
@@ -1932,10 +1161,8 @@ namespace Js
             return EmitMinMax(pnode, mathFunction);
         }
 
-        ++mNestedCallCount;
-
-        const ArgSlot argCount = pnode->sxCall.argCount;
-        ParseNode* argNode = pnode->sxCall.pnodeArgs;
+        const ArgSlot argCount = pnode->AsParseNodeCall()->argCount;
+        ParseNode* argNode = pnode->AsParseNodeCall()->pnodeArgs;
         const bool isFRound = AsmJsMathFunction::IsFround(mathFunction);
 
         // for fround, if we have a fround(NumericLiteral), we want to just emit Ld_Flt NumericLiteral
@@ -1947,11 +1174,11 @@ namespace Js
             float constValue = -0.0f;
             if (argNode->nop == knopFlt)
             {
-                constValue = (float)argNode->sxFlt.dbl;
+                constValue = (float)argNode->AsParseNodeFloat()->dbl;
             }
             else if (argNode->nop == knopInt)
             {
-                constValue = (float)argNode->sxInt.lw;
+                constValue = (float)argNode->AsParseNodeInt()->lw;
             }
             else
             {
@@ -1964,7 +1191,6 @@ namespace Js
 
         AutoArrayPtr<AsmJsType> types(nullptr, 0);
         AutoArrayPtr<EmitExpressionInfo> argsInfo(nullptr, 0);
-        int maxDepthForLevel = mFunction->GetArgOutDepth();
         if( argCount > 0 )
         {
             types.Set(HeapNewArray(AsmJsType, argCount), argCount);
@@ -1996,11 +1222,6 @@ namespace Js
                     argsInfo[i].type = argInfo.type;
                     argsInfo[i].location = argInfo.location;
                 }
-                // if there are nested calls, track whichever is the deepest
-                if (maxDepthForLevel < mFunction->GetArgOutDepth())
-                {
-                    maxDepthForLevel = mFunction->GetArgOutDepth();
-                }
             }
         }
         StartStatement(pnode);
@@ -2022,19 +1243,10 @@ namespace Js
         const int argByteSize = mathFunction->GetArgByteSize(argCount) + sizeof(Var);
         // + 1 is for function object
         int runtimeArg = (int)(::ceil((double)(argByteSize / sizeof(Var)))) + 1;
-        // + 1 for return address
-        maxDepthForLevel += runtimeArg + 1;
 
         // Make sure we have enough memory allocated for OutParameters
-        if (mNestedCallCount > 1)
-        {
-            mFunction->SetArgOutDepth(maxDepthForLevel);
-        }
-        else
-        {
-            mFunction->SetArgOutDepth(0);
-        }
-        mFunction->UpdateMaxArgOutDepth(maxDepthForLevel);
+        // + 1 for return address
+        mFunction->UpdateMaxArgOutDepth(runtimeArg + 1);
 
         const bool isInt = retType.toType().isInt();
         const bool isFloatish = retType.toType().isFloatish();
@@ -2085,17 +1297,14 @@ namespace Js
         }
 #endif
         EndStatement(pnode);
-        --mNestedCallCount;
         return emitInfo;
     }
 
     EmitExpressionInfo AsmJSByteCodeGenerator::EmitMinMax(ParseNode* pnode, AsmJsMathFunction* mathFunction)
     {
         Assert(mathFunction->GetArgCount() == 2);
-        ++mNestedCallCount;
-
-        uint16 argCount = pnode->sxCall.argCount;
-        ParseNode* argNode = pnode->sxCall.pnodeArgs;
+        uint16 argCount = pnode->AsParseNodeCall()->argCount;
+        ParseNode* argNode = pnode->AsParseNodeCall()->pnodeArgs;
 
         if (argCount < 2)
         {
@@ -2111,7 +1320,6 @@ namespace Js
         argNode = ParserWrapper::GetBinaryRight(argNode);
         // Emit first arg as arg0
         argsInfo[0] = Emit(arg);
-        int maxDepthForLevel = mFunction->GetArgOutDepth();
         types[0] = argsInfo[0].type;
 
         EmitExpressionInfo dstInfo;
@@ -2130,12 +1338,6 @@ namespace Js
             argsInfo[1] = Emit(arg);
             types[1] = argsInfo[1].type;
 
-            // if there are nested calls, track whichever is the deepest
-            if (maxDepthForLevel < mFunction->GetArgOutDepth())
-            {
-                maxDepthForLevel = mFunction->GetArgOutDepth();
-            }
-
             // Check if this function supports the type of these arguments
             AsmJsRetType retType;
             OpCodeAsmJs op;
@@ -2149,19 +1351,9 @@ namespace Js
             // +1 is for function object
             int runtimeArg = (int)(::ceil((double)(argByteSize / sizeof(Var)))) + 1;
             // +1 is for return address
-            maxDepthForLevel += runtimeArg + 1;
 
             // Make sure we have enough memory allocated for OutParameters
-            if (mNestedCallCount > 1)
-            {
-                mFunction->SetArgOutDepth(maxDepthForLevel);
-            }
-            else
-            {
-                mFunction->SetArgOutDepth(0);
-            }
-            mFunction->UpdateMaxArgOutDepth(maxDepthForLevel);
-            maxDepthForLevel = 0;
+            mFunction->UpdateMaxArgOutDepth(runtimeArg + 1);
             mFunction->ReleaseLocationGeneric(&argsInfo[1]);
             mFunction->ReleaseLocationGeneric(&argsInfo[0]);
 
@@ -2197,7 +1389,6 @@ namespace Js
             }
 #endif
         }
-        --mNestedCallCount;
         return dstInfo;
     }
 
@@ -2216,7 +1407,7 @@ namespace Js
         {
         case AsmJsSymbol::Variable:
         {
-            AsmJsVar * var = sym->Cast<AsmJsVar>();
+            AsmJsVar * var = AsmJsVar::FromSymbol(sym);
             if (!var->isMutable())
             {
                 // currently const is only allowed for variables at module scope
@@ -2246,7 +1437,7 @@ namespace Js
         case AsmJsSymbol::Argument:
         case AsmJsSymbol::ConstantImport:
         {
-            AsmJsVarBase* var = sym->Cast<AsmJsVarBase>();
+            AsmJsVarBase* var = AsmJsVarBase::FromSymbol(sym);
             if( source == AsmJsLookupSource::AsmJsFunction )
             {
                 return EmitExpressionInfo( var->GetLocation(), var->GetType() );
@@ -2270,11 +1461,6 @@ namespace Js
                     emitInfo.location = mFunction->AcquireTmpRegister<double>();
                     LoadModuleDouble(emitInfo.location, var->GetLocation());
                 }
-                else if (var->GetVarType().isSIMD())
-                {
-                    emitInfo.location = mFunction->AcquireTmpRegister<AsmJsSIMDValue>();
-                    LoadModuleSimd( emitInfo.location, var->GetLocation(), var->GetVarType());
-                }
                 else
                 {
                     Assert(UNREACHED);
@@ -2285,14 +1471,13 @@ namespace Js
         }
         case AsmJsSymbol::MathConstant:
         {
-            AsmJsMathConst* mathConst = sym->Cast<AsmJsMathConst>();
+            AsmJsMathConst* mathConst = AsmJsMathConst::FromSymbol(sym);
             Assert(mathConst->GetType().isDouble());
             RegSlot loc = mFunction->AcquireTmpRegister<double>();
             mWriter.AsmReg2( OpCodeAsmJs::Ld_Db, loc, mFunction->GetConstRegister<double>(*mathConst->GetVal()) );
             return EmitExpressionInfo(loc, AsmJsType::Double);
         }
 
-        case AsmJsSymbol::SIMDBuiltinFunction:
         case AsmJsSymbol::ImportFunction:
         case AsmJsSymbol::FuncPtrTable:
         case AsmJsSymbol::ModuleFunction:
@@ -2317,9 +1502,9 @@ namespace Js
         if(indexNode->nop == knopName)
         {
             AsmJsSymbol * declSym = mCompiler->LookupIdentifier(indexNode->name(), mFunction);
-            if (declSym && !declSym->isMutable() && declSym->GetSymbolType() == AsmJsSymbol::Variable)
+            if (AsmJsVar::Is(declSym) && !declSym->isMutable())
             {
-                AsmJsVar * definition = declSym->Cast<AsmJsVar>();
+                AsmJsVar * definition = AsmJsVar::FromSymbol(declSym);
                 if(definition->GetVarType().isInt())
                 {
                     slot = (uint32)definition->GetIntInitialiser();
@@ -2334,7 +1519,7 @@ namespace Js
             {
                 if (indexNode->nop == knopInt)
                 {
-                    slot = (uint32)indexNode->sxInt.lw;
+                    slot = (uint32)indexNode->AsParseNodeInt()->lw;
                 }
                 else if (ParserWrapper::IsMinInt(indexNode))
                 {
@@ -2343,7 +1528,7 @@ namespace Js
                 }
                 else if (ParserWrapper::IsUnsigned(indexNode))
                 {
-                    slot = (uint32)indexNode->sxFlt.dbl;
+                    slot = (uint32)indexNode->AsParseNodeFloat()->dbl;
                 }
                 else
                 {
@@ -2403,30 +1588,16 @@ namespace Js
                 }
                 switch (viewType)
                 {
-                case Js::ArrayBufferView::TYPE_INT8:
-                case Js::ArrayBufferView::TYPE_UINT8:
-                    val = 0;
-                    mask = (uint32)~0;
+#define ARRAYBUFFER_VIEW(name, align, RegType, MemType, irSuffix) \
+                case Js::ArrayBufferView::TYPE_##name:\
+                    val = align;\
+                    mask = ARRAYBUFFER_VIEW_MASK(align);\
                     break;
-                case Js::ArrayBufferView::TYPE_INT16:
-                case Js::ArrayBufferView::TYPE_UINT16:
-                    val = 1;
-                    mask = (uint32)~1;
-                    break;
-                case Js::ArrayBufferView::TYPE_INT32:
-                case Js::ArrayBufferView::TYPE_UINT32:
-                case Js::ArrayBufferView::TYPE_FLOAT32:
-                    val = 2;
-                    mask = (uint32)~3;
-                    break;
-                case Js::ArrayBufferView::TYPE_FLOAT64:
-                    val = 3;
-                    mask = (uint32)~7;
-                    break;
+                #include "AsmJsArrayBufferViews.h"
                 default:
                     Assume(UNREACHED);
                 }
-                if (rhsNode->sxInt.lw != val)
+                if (rhsNode->AsParseNodeInt()->lw != val)
                 {
                     throw AsmJsCompilationException(_u("shift amount must be %d"), val);
                 }
@@ -2441,9 +1612,9 @@ namespace Js
             if (index->nop == knopName)
             {
                 AsmJsSymbol * declSym = mCompiler->LookupIdentifier(index->name(), mFunction);
-                if (declSym && !declSym->isMutable() && declSym->GetSymbolType() == AsmJsSymbol::Variable)
+                if (AsmJsVar::Is(declSym) && !declSym->isMutable())
                 {
-                    AsmJsVar * definition = declSym->Cast<AsmJsVar>();
+                    AsmJsVar * definition = AsmJsVar::FromSymbol(declSym);
                     if (definition->GetVarType().isInt())
                     {
                         slot = (uint32)definition->GetIntInitialiser();
@@ -2489,11 +1660,11 @@ namespace Js
 
         PropertyName name = arrayNameNode->name();
         AsmJsSymbol* sym = mCompiler->LookupIdentifier(name, mFunction);
-        if( !sym || sym->GetSymbolType() != AsmJsSymbol::ArrayView )
+        if(!AsmJsArrayView::Is(sym))
         {
             throw AsmJsCompilationException( _u("Invalid identifier %s"), name->Psz() );
         }
-        AsmJsArrayView* arrayView = sym->Cast<AsmJsArrayView>();
+        AsmJsArrayView* arrayView = AsmJsArrayView::FromSymbol(sym);
         ArrayBufferView::ViewType viewType = arrayView->GetViewType();
 
         OpCodeAsmJs op;
@@ -2534,9 +1705,9 @@ namespace Js
             PropertyName name = lhs->name();
             AsmJsLookupSource::Source source;
             AsmJsSymbol* sym = mCompiler->LookupIdentifier( name, mFunction, &source );
-            if( !sym )
+            if(!AsmJsVarBase::Is(sym))
             {
-                throw AsmJsCompilationException( _u("Undefined identifier %s"), name->Psz() );
+                throw AsmJsCompilationException( _u("Identifier %s is not a variable"), name->Psz() );
             }
 
             if( !sym->isMutable() )
@@ -2544,10 +1715,10 @@ namespace Js
                 throw AsmJsCompilationException( _u("Cannot assign to identifier %s"), name->Psz() );
             }
 
-            AsmJsVarBase* var = sym->Cast<AsmJsVarBase>();
+            AsmJsVarBase* var = AsmJsVarBase::FromSymbol(sym);
             if( !var->GetType().isSuperType( rType ) )
             {
-                throw AsmJsCompilationException( _u("Cannot assign this type to identifier %s"), name->Psz() );
+                throw AsmJsCompilationException( _u("Cannot assign type %s to identifier %s"), rType.toChars(), name->Psz() );
             }
 
             switch( source )
@@ -2567,11 +1738,6 @@ namespace Js
                 {
                     CheckNodeLocation( rhsEmit, double );
                     SetModuleDouble( var->GetLocation(), rhsEmit.location );
-                }
-                else if (var->GetVarType().isSIMD())
-                {
-                    CheckNodeLocation(rhsEmit, AsmJsSIMDValue);
-                    SetModuleSimd(var->GetLocation(), rhsEmit.location, var->GetVarType());
                 }
                 else
                 {
@@ -2594,11 +1760,6 @@ namespace Js
                     CheckNodeLocation( rhsEmit, double );
                     mWriter.AsmReg2( Js::OpCodeAsmJs::Ld_Db, var->GetLocation(), rhsEmit.location );
                 }
-                else if (var->GetVarType().isSIMD())
-                {
-                    CheckNodeLocation(rhsEmit, AsmJsSIMDValue);
-                    LoadSimd(var->GetLocation(), rhsEmit.location, var->GetVarType());
-                }
                 else
                 {
                     Assert(UNREACHED);
@@ -2620,12 +1781,12 @@ namespace Js
 
             PropertyName name = arrayNameNode->name();
             AsmJsSymbol* sym = mCompiler->LookupIdentifier(name, mFunction);
-            if( !sym || sym->GetSymbolType() != AsmJsSymbol::ArrayView )
+            if (!AsmJsArrayView::Is(sym))
             {
                 throw AsmJsCompilationException( _u("Invalid identifier %s"), name->Psz() );
             }
             // must emit index expr first in case it has side effects
-            AsmJsArrayView* arrayView = sym->Cast<AsmJsArrayView>();
+            AsmJsArrayView* arrayView = AsmJsArrayView::FromSymbol(sym);
             ArrayBufferView::ViewType viewType = arrayView->GetViewType();
 
             OpCodeAsmJs op;
@@ -2948,7 +2109,7 @@ namespace Js
         switch( expr->nop )
         {
         case knopLogNot:{
-            const EmitExpressionInfo& info = EmitBooleanExpression( expr->sxUni.pnode1, falseLabel, trueLabel );
+            const EmitExpressionInfo& info = EmitBooleanExpression( expr->AsParseNodeUni()->pnode1, falseLabel, trueLabel );
             return info;
             break;
         }
@@ -2959,11 +2120,11 @@ namespace Js
 //         case knopGe:
 //         case knopGt:
 //             byteCodeGenerator->StartStatement( expr );
-//             EmitBinaryOpnds( expr->sxBin.pnode1, expr->sxBin.pnode2, byteCodeGenerator, funcInfo );
-//             funcInfo->ReleaseLoc( expr->sxBin.pnode2 );
-//             funcInfo->ReleaseLoc( expr->sxBin.pnode1 );
-//             mWriter.BrReg2( nopToOp[expr->nop], trueLabel, expr->sxBin.pnode1->location,
-//                                                  expr->sxBin.pnode2->location );
+//             EmitBinaryOpnds( expr->AsParseNodeBin()->pnode1, expr->AsParseNodeBin()->pnode2, byteCodeGenerator, funcInfo );
+//             funcInfo->ReleaseLoc( expr->AsParseNodeBin()->pnode2 );
+//             funcInfo->ReleaseLoc( expr->AsParseNodeBin()->pnode1 );
+//             mWriter.BrReg2( nopToOp[expr->nop], trueLabel, expr->AsParseNodeBin()->pnode1->location,
+//                                                  expr->AsParseNodeBin()->pnode2->location );
 //             mWriter.AsmBr( falseLabel );
 //             byteCodeGenerator->EndStatement( expr );
 //             break;
@@ -2988,20 +2149,20 @@ namespace Js
         }
     }
 
-    EmitExpressionInfo AsmJSByteCodeGenerator::EmitIf( ParseNode * pnode )
+    EmitExpressionInfo AsmJSByteCodeGenerator::EmitIf( ParseNodeIf * pnode )
     {
         Js::ByteCodeLabel trueLabel = mWriter.DefineLabel();
         Js::ByteCodeLabel falseLabel = mWriter.DefineLabel();
-        const EmitExpressionInfo& boolInfo = EmitBooleanExpression( pnode->sxIf.pnodeCond, trueLabel, falseLabel );
+        const EmitExpressionInfo& boolInfo = EmitBooleanExpression( pnode->pnodeCond, trueLabel, falseLabel );
         mFunction->ReleaseLocation<int>( &boolInfo );
 
 
         mWriter.MarkAsmJsLabel( trueLabel );
 
-        const EmitExpressionInfo& trueInfo = Emit( pnode->sxIf.pnodeTrue );
+        const EmitExpressionInfo& trueInfo = Emit( pnode->pnodeTrue );
         mFunction->ReleaseLocationGeneric( &trueInfo );
 
-        if( pnode->sxIf.pnodeFalse != nullptr )
+        if( pnode->pnodeFalse != nullptr )
         {
             // has else clause
             Js::ByteCodeLabel skipLabel = mWriter.DefineLabel();
@@ -3014,7 +2175,7 @@ namespace Js
             // generate code for else clause
             mWriter.MarkAsmJsLabel( falseLabel );
 
-            const EmitExpressionInfo& falseInfo = Emit( pnode->sxIf.pnodeFalse );
+            const EmitExpressionInfo& falseInfo = Emit( pnode->pnodeFalse );
             mFunction->ReleaseLocationGeneric( &falseInfo );
 
             mWriter.MarkAsmJsLabel( skipLabel );
@@ -3026,12 +2187,12 @@ namespace Js
         }
         if( pnode->emitLabels )
         {
-            mWriter.MarkAsmJsLabel( pnode->sxStmt.breakLabel );
+            mWriter.MarkAsmJsLabel( pnode->breakLabel );
         }
         return EmitExpressionInfo( AsmJsType::Void );
     }
 
-    Js::EmitExpressionInfo AsmJSByteCodeGenerator::EmitLoop( ParseNode *loopNode, ParseNode *cond, ParseNode *body, ParseNode *incr, BOOL doWhile /*= false */ )
+    Js::EmitExpressionInfo AsmJSByteCodeGenerator::EmitLoop( ParseNodeLoop *loopNode, ParseNode *cond, ParseNode *body, ParseNode *incr, BOOL doWhile /*= false */ )
     {
         // Need to increment loop count whether we are going to profile or not for HasLoop()
         StartStatement(loopNode);
@@ -3039,7 +2200,7 @@ namespace Js
         Js::ByteCodeLabel continuePastLoop = mWriter.DefineLabel();
 
         uint loopId = mWriter.EnterLoop( loopEntrance );
-        loopNode->sxLoop.loopId = loopId;
+        loopNode->loopId = loopId;
         EndStatement(loopNode);
         if( doWhile )
         {
@@ -3048,7 +2209,7 @@ namespace Js
 
             if( loopNode->emitLabels )
             {
-                mWriter.MarkAsmJsLabel( loopNode->sxStmt.continueLabel );
+                mWriter.MarkAsmJsLabel( loopNode->continueLabel );
             }
             if( !ByteCodeGenerator::IsFalse( cond ) )
             {
@@ -3070,7 +2231,7 @@ namespace Js
 
             if( loopNode->emitLabels )
             {
-                mWriter.MarkAsmJsLabel( loopNode->sxStmt.continueLabel );
+                mWriter.MarkAsmJsLabel( loopNode->continueLabel );
             }
             if( incr != NULL )
             {
@@ -3082,7 +2243,7 @@ namespace Js
         mWriter.MarkAsmJsLabel( continuePastLoop );
         if( loopNode->emitLabels )
         {
-            mWriter.MarkAsmJsLabel( loopNode->sxStmt.breakLabel );
+            mWriter.MarkAsmJsLabel( loopNode->breakLabel );
         }
 
         mWriter.ExitLoop( loopId );
@@ -3094,12 +2255,12 @@ namespace Js
 
     EmitExpressionInfo AsmJSByteCodeGenerator::EmitQMark( ParseNode * pnode )
     {
-        StartStatement(pnode->sxTri.pnode1);
+        StartStatement(pnode->AsParseNodeTri()->pnode1);
         Js::ByteCodeLabel trueLabel = mWriter.DefineLabel();
         Js::ByteCodeLabel falseLabel = mWriter.DefineLabel();
         Js::ByteCodeLabel skipLabel = mWriter.DefineLabel();
-        EndStatement(pnode->sxTri.pnode1);
-        const EmitExpressionInfo& boolInfo = EmitBooleanExpression( pnode->sxTri.pnode1, trueLabel, falseLabel );
+        EndStatement(pnode->AsParseNodeTri()->pnode1);
+        const EmitExpressionInfo& boolInfo = EmitBooleanExpression( pnode->AsParseNodeTri()->pnode1, trueLabel, falseLabel );
         mFunction->ReleaseLocationGeneric( &boolInfo );
 
         RegSlot intReg = mFunction->AcquireTmpRegister<int>();
@@ -3109,8 +2270,8 @@ namespace Js
 
 
         mWriter.MarkAsmJsLabel( trueLabel );
-        const EmitExpressionInfo& trueInfo = Emit( pnode->sxTri.pnode2 );
-        StartStatement(pnode->sxTri.pnode2);
+        const EmitExpressionInfo& trueInfo = Emit( pnode->AsParseNodeTri()->pnode2 );
+        StartStatement(pnode->AsParseNodeTri()->pnode2);
         if( trueInfo.type.isInt() )
         {
             mWriter.AsmReg2( Js::OpCodeAsmJs::Ld_Int, intReg, trueInfo.location );
@@ -3143,10 +2304,10 @@ namespace Js
             throw AsmJsCompilationException(_u("Conditional expressions must be of type int, double, or float"));
         }
         mWriter.AsmBr( skipLabel );
-        EndStatement(pnode->sxTri.pnode2);
+        EndStatement(pnode->AsParseNodeTri()->pnode2);
         mWriter.MarkAsmJsLabel( falseLabel );
-        const EmitExpressionInfo& falseInfo = Emit( pnode->sxTri.pnode3 );
-        StartStatement(pnode->sxTri.pnode3);
+        const EmitExpressionInfo& falseInfo = Emit( pnode->AsParseNodeTri()->pnode3 );
+        StartStatement(pnode->AsParseNodeTri()->pnode3);
         if( falseInfo.type.isInt() )
         {
             if( !trueInfo.type.isInt() )
@@ -3179,15 +2340,15 @@ namespace Js
             throw AsmJsCompilationException(_u("Conditional expressions must be of type int, double, or float"));
         }
         mWriter.MarkAsmJsLabel( skipLabel );
-        EndStatement(pnode->sxTri.pnode3);
+        EndStatement(pnode->AsParseNodeTri()->pnode3);
         return emitInfo;
     }
 
-    EmitExpressionInfo AsmJSByteCodeGenerator::EmitSwitch( ParseNode * pnode )
+    EmitExpressionInfo AsmJSByteCodeGenerator::EmitSwitch( ParseNodeSwitch * pnode )
     {
         BOOL fHasDefault = false;
-        Assert( pnode->sxSwitch.pnodeVal != NULL );
-        const EmitExpressionInfo& valInfo = Emit( pnode->sxSwitch.pnodeVal );
+        Assert( pnode->pnodeVal != NULL );
+        const EmitExpressionInfo& valInfo = Emit( pnode->pnodeVal );
 
         if( !valInfo.type.isSigned() )
         {
@@ -3202,46 +2363,46 @@ namespace Js
         // TODO: if all cases are compile-time constants, emit a switch statement in the byte
         // code so the BE can optimize it.
 
-        ParseNode *pnodeCase;
-        for( pnodeCase = pnode->sxSwitch.pnodeCases; pnodeCase; pnodeCase = pnodeCase->sxCase.pnodeNext )
+        ParseNodeCase *pnodeCase;
+        for( pnodeCase = pnode->pnodeCases; pnodeCase; pnodeCase = pnodeCase->pnodeNext )
         {
             // Jump to the first case body if this one doesn't match. Make sure any side-effects of the case
             // expression take place regardless.
-            pnodeCase->sxCase.labelCase = mWriter.DefineLabel();
-            if( pnodeCase == pnode->sxSwitch.pnodeDefault )
+            pnodeCase->labelCase = mWriter.DefineLabel();
+            if( pnodeCase == pnode->pnodeDefault )
             {
                 fHasDefault = true;
                 continue;
             }
-            ParseNode* caseExpr = pnodeCase->sxCase.pnodeExpr;
-            if ((caseExpr->nop != knopInt || (caseExpr->sxInt.lw >> 31) > 1) && !ParserWrapper::IsMinInt(caseExpr))
+            ParseNode* caseExpr = pnodeCase->pnodeExpr;
+            if ((caseExpr->nop != knopInt || (caseExpr->AsParseNodeInt()->lw >> 31) > 1) && !ParserWrapper::IsMinInt(caseExpr))
             {
                 throw AsmJsCompilationException( _u("Switch case value must be int in the range [-2^31, 2^31)") );
             }
 
-            const EmitExpressionInfo& caseExprInfo = Emit( pnodeCase->sxCase.pnodeExpr );
-            mWriter.AsmBrReg2( OpCodeAsmJs::Case_Int, pnodeCase->sxCase.labelCase, regVal, caseExprInfo.location );
+            const EmitExpressionInfo& caseExprInfo = Emit( pnodeCase->pnodeExpr );
+            mWriter.AsmBrReg2( OpCodeAsmJs::Case_Int, pnodeCase->labelCase, regVal, caseExprInfo.location );
             // do not need to release location because int constants cannot be released
         }
 
         // No explicit case value matches. Jump to the default arm (if any) or break out altogether.
         if( fHasDefault )
         {
-            mWriter.AsmBr( pnode->sxSwitch.pnodeDefault->sxCase.labelCase, OpCodeAsmJs::EndSwitch_Int );
+            mWriter.AsmBr( pnode->pnodeDefault->labelCase, OpCodeAsmJs::EndSwitch_Int );
         }
         else
         {
             if( !pnode->emitLabels )
             {
-                pnode->sxStmt.breakLabel = mWriter.DefineLabel();
+                pnode->breakLabel = mWriter.DefineLabel();
             }
-            mWriter.AsmBr( pnode->sxStmt.breakLabel, OpCodeAsmJs::EndSwitch_Int );
+            mWriter.AsmBr( pnode->breakLabel, OpCodeAsmJs::EndSwitch_Int );
         }
         // Now emit the case arms to which we jump on matching a case value.
-        for( pnodeCase = pnode->sxSwitch.pnodeCases; pnodeCase; pnodeCase = pnodeCase->sxCase.pnodeNext )
+        for( pnodeCase = pnode->pnodeCases; pnodeCase; pnodeCase = pnodeCase->pnodeNext )
         {
-            mWriter.MarkAsmJsLabel( pnodeCase->sxCase.labelCase );
-            const EmitExpressionInfo& caseBodyInfo = Emit( pnodeCase->sxCase.pnodeBody );
+            mWriter.MarkAsmJsLabel( pnodeCase->labelCase );
+            const EmitExpressionInfo& caseBodyInfo = Emit( pnodeCase->pnodeBody );
             mFunction->ReleaseLocationGeneric( &caseBodyInfo );
         }
 
@@ -3249,7 +2410,7 @@ namespace Js
 
         if( !fHasDefault || pnode->emitLabels )
         {
-            mWriter.MarkAsmJsLabel( pnode->sxStmt.breakLabel );
+            mWriter.MarkAsmJsLabel( pnode->breakLabel );
         }
 
         return EmitExpressionInfo( AsmJsType::Void );
@@ -3340,8 +2501,11 @@ namespace Js
 
     void AsmJSByteCodeGenerator::LoadModuleFunctionTable( RegSlot dst, RegSlot FuncTableIndex, RegSlot FuncIndexLocation )
     {
-        mWriter.AsmSlot( OpCodeAsmJs::LdSlotArr, AsmJsFunctionMemory::ModuleSlotRegister, AsmJsFunctionMemory::ModuleEnvRegister, FuncTableIndex+mCompiler->GetFuncPtrOffset() );
-        mWriter.AsmSlot( OpCodeAsmJs::LdArr_Func, dst, AsmJsFunctionMemory::ModuleSlotRegister, FuncIndexLocation );
+        RegSlot slotReg = mFunction->AcquireTmpRegister<intptr_t>();
+        mWriter.AsmSlot( OpCodeAsmJs::LdSlotArr, slotReg, AsmJsFunctionMemory::ModuleEnvRegister, FuncTableIndex+mCompiler->GetFuncPtrOffset() );
+        mWriter.AsmSlot( OpCodeAsmJs::LdArr_Func, dst, slotReg, FuncIndexLocation );
+
+        mFunction->ReleaseTmpRegister<intptr_t>(slotReg);
     }
 
     void AsmJSByteCodeGenerator::SetModuleInt( Js::RegSlot dst, RegSlot src )
@@ -3357,144 +2521,6 @@ namespace Js
     void AsmJSByteCodeGenerator::SetModuleDouble( Js::RegSlot dst, RegSlot src )
     {
         mWriter.AsmSlot(OpCodeAsmJs::StSlot_Db, src, AsmJsFunctionMemory::ModuleEnvRegister, dst + mCompiler->GetDoubleOffset() / WAsmJs::DOUBLE_SLOTS_SPACE);
-    }
-
-    void AsmJSByteCodeGenerator::LoadModuleSimd(RegSlot dst, RegSlot index, AsmJsVarType type)
-    {
-        OpCodeAsmJs opcode = OpCodeAsmJs::Simd128_LdSlot_I4;
-        switch (type.which())
-        {
-            case AsmJsVarType::Int32x4:
-                break;
-            case AsmJsVarType::Bool32x4:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_B4;
-                break;
-            case AsmJsVarType::Bool16x8:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_B8;
-                break;
-            case AsmJsVarType::Bool8x16:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_B16;
-                break;
-            case AsmJsVarType::Float32x4:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_F4;
-                break;
-#if 0
-            case AsmJsVarType::Float64x2:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_D2;
-                break;
-#endif // 0
-
-            case AsmJsVarType::Int16x8:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_I8;
-                break;
-            case AsmJsVarType::Int8x16:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_I16;
-                break;
-            case AsmJsVarType::Uint32x4:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_U4;
-                break;
-            case AsmJsVarType::Uint16x8:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_U8;
-                break;
-            case AsmJsVarType::Uint8x16:
-                opcode = OpCodeAsmJs::Simd128_LdSlot_U16;
-                break;
-            default:
-                Assert(UNREACHED);
-        }
-        mWriter.AsmSlot(opcode, dst, AsmJsFunctionMemory::ModuleEnvRegister, index + mCompiler->GetSimdOffset());
-    }
-
-    void AsmJSByteCodeGenerator::SetModuleSimd(RegSlot index, RegSlot src, AsmJsVarType type)
-    {
-        OpCodeAsmJs opcode = OpCodeAsmJs::Simd128_StSlot_I4;
-        switch (type.which())
-        {
-        case AsmJsVarType::Int32x4:
-            break;
-        case AsmJsVarType::Bool32x4:
-            opcode = OpCodeAsmJs::Simd128_StSlot_B4;
-            break;
-        case AsmJsVarType::Bool16x8:
-            opcode = OpCodeAsmJs::Simd128_StSlot_B8;
-            break;
-        case AsmJsVarType::Bool8x16:
-            opcode = OpCodeAsmJs::Simd128_StSlot_B16;
-            break;
-        case AsmJsVarType::Float32x4:
-            opcode = OpCodeAsmJs::Simd128_StSlot_F4;
-            break;
-#if 0
-        case AsmJsVarType::Float64x2:
-            opcode = OpCodeAsmJs::Simd128_StSlot_D2;
-            break;
-#endif // 0
-
-        case AsmJsVarType::Int16x8:
-            opcode = OpCodeAsmJs::Simd128_StSlot_I8;
-            break;
-        case AsmJsVarType::Int8x16:
-            opcode = OpCodeAsmJs::Simd128_StSlot_I16;
-            break;
-        case AsmJsVarType::Uint32x4:
-            opcode = OpCodeAsmJs::Simd128_StSlot_U4;
-            break;
-        case AsmJsVarType::Uint16x8:
-            opcode = OpCodeAsmJs::Simd128_StSlot_U8;
-            break;
-        case AsmJsVarType::Uint8x16:
-            opcode = OpCodeAsmJs::Simd128_StSlot_U16;
-            break;
-        default:
-            Assert(UNREACHED);
-        }
-        mWriter.AsmSlot(opcode, src, AsmJsFunctionMemory::ModuleEnvRegister, index + mCompiler->GetSimdOffset());
-    }
-
-    void AsmJSByteCodeGenerator::LoadSimd(RegSlot dst, RegSlot src, AsmJsVarType type)
-    {
-        OpCodeAsmJs opcode = OpCodeAsmJs::Simd128_Ld_I4;
-        switch (type.which())
-        {
-        case AsmJsVarType::Int32x4:
-            break;
-        case AsmJsVarType::Bool32x4:
-            opcode = OpCodeAsmJs::Simd128_Ld_B4;
-            break;
-        case AsmJsVarType::Bool16x8:
-            opcode = OpCodeAsmJs::Simd128_Ld_B8;
-            break;
-        case AsmJsVarType::Bool8x16:
-            opcode = OpCodeAsmJs::Simd128_Ld_B16;
-            break;
-        case AsmJsVarType::Float32x4:
-            opcode = OpCodeAsmJs::Simd128_Ld_F4;
-            break;
-#if 0
-        case AsmJsVarType::Float64x2:
-            opcode = OpCodeAsmJs::Simd128_Ld_D2;
-            break;
-#endif // 0
-
-        case AsmJsVarType::Int16x8:
-            opcode = OpCodeAsmJs::Simd128_Ld_I8;
-            break;
-        case AsmJsVarType::Int8x16:
-            opcode = OpCodeAsmJs::Simd128_Ld_I16;
-            break;
-        case AsmJsVarType::Uint32x4:
-            opcode = OpCodeAsmJs::Simd128_Ld_U4;
-            break;
-        case AsmJsVarType::Uint16x8:
-            opcode = OpCodeAsmJs::Simd128_Ld_U8;
-            break;
-        case AsmJsVarType::Uint8x16:
-            opcode = OpCodeAsmJs::Simd128_Ld_U16;
-            break;
-        default:
-            Assert(UNREACHED);
-        }
-        mWriter.AsmReg2(opcode, dst, src);
     }
 
     void AsmJsFunctionCompilation::CleanUp()

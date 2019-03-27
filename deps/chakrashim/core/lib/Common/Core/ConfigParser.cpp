@@ -252,7 +252,7 @@ void ConfigParser::ParseRegistryKey(HKEY hk, CmdLineArgsParser &parser)
     dwSize = sizeof(dwValue);
     if (NOERROR == RegGetValueW(hk, nullptr, _u("EnumerationCompat"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
     {
-        if(dwValue == 1)
+        if (dwValue == 1)
         {
             Js::Configuration::Global.flags.EnumerationCompat = true;
         }
@@ -267,7 +267,7 @@ void ConfigParser::ParseRegistryKey(HKEY hk, CmdLineArgsParser &parser)
     dwSize = sizeof(dwValue);
     if (NOERROR == RegGetValueW(hk, nullptr, _u("FailFastIfDisconnectedDelegate"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
     {
-        if(dwValue == 1)
+        if (dwValue == 1)
         {
             Js::Configuration::Global.flags.FailFastIfDisconnectedDelegate = true;
         }
@@ -290,28 +290,140 @@ void ConfigParser::ParseRegistryKey(HKEY hk, CmdLineArgsParser &parser)
         }
     }
 
-    // Asmjs feature control
-    // This setting allows enabling\disabling asmjs compilation
-    //     0 - Disable Asmjs phase - Also default behavior
-    //     1 - Enable Asmjs phase
+    // WebAssembly experimental feature control
+    //     1 - Enable WebAssembly Experimental features
     dwValue = 0;
     dwSize = sizeof(dwValue);
-    if (NOERROR == RegGetValueW(hk, nullptr, _u("EnableAsmjs"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
+    if (NOERROR == RegGetValueW(hk, nullptr, _u("EnableWasmExperimental"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
     {
         if (dwValue == 1)
         {
-            Js::Configuration::Global.flags.Asmjs = true;
+            Js::ConfigFlagsTable &configFlags = Js::Configuration::Global.flags;
+            configFlags.Enable(Js::WasmExperimentalFlag);
+            configFlags.SetAsBoolean(Js::WasmExperimentalFlag, true);
         }
     }
+
+    // BgParse feature control
+    //     0 - Disable BgParse
+    //     1 - Enable BgParse
+    dwValue = 0;
+    dwSize = sizeof(dwValue);
+    if (NOERROR == RegGetValueW(hk, nullptr, _u("EnableBgParse"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
+    {
+        Js::ConfigFlagsTable &configFlags = Js::Configuration::Global.flags;
+        configFlags.Enable(Js::BgParseFlag);
+        if (dwValue == 0)
+        {
+            configFlags.SetAsBoolean(Js::BgParseFlag, false);
+        }
+        else if (dwValue == 1)
+        {
+            configFlags.SetAsBoolean(Js::BgParseFlag, true);
+        }
+
+#if ENABLE_DEBUG_CONFIG_OPTIONS
+        Output::Print(_u("BgParse controlled by registry: %u\n"), dwValue);
+#endif
+    }
+
+    // Spectre mitigation feature control
+    // This setting allows enabling\disabling spectre mitigations
+    //     0 - Disable Spectre mitigations
+    //     1 - Enable Spectre mitigations - Also default behavior
+    dwValue = 0;
+    dwSize = sizeof(dwValue);
+    if (NOERROR == RegGetValueW(hk, nullptr, _u("MitigateSpectre"), RRF_RT_DWORD, nullptr, (LPBYTE)&dwValue, &dwSize))
+    {
+        Js::ConfigFlagsTable &configFlags = Js::Configuration::Global.flags;
+        configFlags.Enable(Js::MitigateSpectreFlag);
+        if (dwValue == 0)
+        {
+            configFlags.SetAsBoolean(Js::MitigateSpectreFlag, false);
+        }
+        else if (dwValue == 1)
+        {
+            configFlags.SetAsBoolean(Js::MitigateSpectreFlag, true);
+        }
+    }
+
+#ifdef ENABLE_BASIC_TELEMETRY
+    SetConfigStringFromRegistry(hk, _u("Telemetry"), _u("Discriminator1"), Js::Configuration::Global.flags.TelemetryDiscriminator1);
+    SetConfigStringFromRegistry(hk, _u("Telemetry"), _u("Discriminator2"), Js::Configuration::Global.flags.TelemetryDiscriminator2);
+    SetConfigStringFromRegistry(hk, _u("Telemetry"), _u("RunType"), Js::Configuration::Global.flags.TelemetryRunType);
+#endif
+
 #endif // _WIN32
 }
 
+#ifdef _WIN32
 
-void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser)
+void ConfigParser::SetConfigStringFromRegistry(_In_ HKEY hk, _In_z_ const char16* subKeyName, _In_z_ const char16* valName, _Inout_ Js::String& str)
+{
+    const char16* regValue = nullptr;
+    DWORD len = 0;
+    ReadRegistryString(hk, subKeyName, valName, &regValue, &len);
+    if (regValue != nullptr)
+    {
+        str = regValue;
+        // Js::String  makes a copy of buffer so delete here
+        NoCheckHeapDeleteArray(len, regValue);
+    }
+}
+
+/**
+ * Read a string from the registry.  Will return nullptr if string registry entry 
+ * doesn't exist, or if we can't allocate memory.  
+ * Will allocate a char16* buffer on the heap. Caller is responsible for freeing.
+ */
+void ConfigParser::ReadRegistryString(_In_ HKEY hk, _In_z_ const char16* subKeyName, _In_z_ const char16* valName, _Outptr_result_maybenull_z_ const char16** sz, _Out_ DWORD* length)
+{
+    DWORD bufLength = 0;
+    *length = 0;
+    *sz = nullptr;
+
+    // first read to get size of string
+    DWORD result = RegGetValueW(hk, subKeyName, valName, RRF_RT_REG_SZ, nullptr, nullptr, &bufLength);
+    if (NOERROR == result)
+    {
+        if (bufLength > 0)
+        {
+            byte* buf = NoCheckHeapNewArrayZ(byte, bufLength);
+            if (buf != nullptr)
+            {
+                result = RegGetValueW(hk, subKeyName, valName, RRF_RT_REG_SZ, nullptr, buf, &bufLength);
+                if (NOERROR == result)
+                {
+                    // if successful, bufLength won't include null terminator so add 1
+                    *length = (bufLength / sizeof(char16)) + 1;
+                    *sz = reinterpret_cast<char16*>(buf);
+                }
+                else
+                {
+                    NoCheckHeapDeleteArray(bufLength, buf);
+                }
+            }
+        }
+    }
+}
+#endif // _WIN32
+
+void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser, const char16* strCustomConfigFile)
 {
 #if defined(ENABLE_DEBUG_CONFIG_OPTIONS) && CONFIG_PARSE_CONFIG_FILE
-    Assert(!_hasReadConfig);
+    Assert(!_hasReadConfig || strCustomConfigFile != nullptr);
     _hasReadConfig = true;
+
+    const char16* configFileName = strCustomConfigFile;
+    const char16* configFileExt = _u(""); /* in the custom config case,
+                                             ext is expected to be passed
+                                             in as part of the filename */
+
+    if (configFileName == nullptr)
+    {
+        configFileName = _configFileName;
+        configFileExt = _u(".config");
+    }
 
     int err = 0;
     char16 modulename[_MAX_PATH];
@@ -322,7 +434,7 @@ void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser)
     char16 dir[_MAX_DIR];
 
     _wsplitpath_s(modulename, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
-    _wmakepath_s(filename, drive, dir, _configFileName, _u(".config"));
+    _wmakepath_s(filename, drive, dir, configFileName, configFileExt);
 
     FILE* configFile;
 #ifdef _WIN32
@@ -330,7 +442,7 @@ void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser)
     {
         WCHAR configFileFullName[MAX_PATH];
 
-        StringCchPrintf(configFileFullName, MAX_PATH, _u("%s.config"), _configFileName);
+        StringCchPrintf(configFileFullName, MAX_PATH, _u("%s%s"), configFileName, configFileExt);
 
         // try the one in the current working directory (Desktop)
         if (_wfullpath(filename, configFileFullName, _MAX_PATH) == nullptr)
@@ -360,7 +472,7 @@ void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser)
         
         WCHAR configFileFullName[MAX_PATH];
 
-        StringCchPrintf(configFileFullName, MAX_PATH, _u("%s/%s.config"), homeDir, _configFileName);
+        StringCchPrintf(configFileFullName, MAX_PATH, _u("%s/%s%s"), homeDir, configFileName, configFileExt);
         if (_wfopen_s(&configFile, configFileFullName, _u("r")) != 0 || configFile == nullptr)
         {
             return;
@@ -393,15 +505,22 @@ void ConfigParser::ParseConfig(HANDLE hmod, CmdLineArgsParser &parser)
     {
         CharType curChar = ReadChar(configFile);
 
-        if (curChar == EndChar || isspace(curChar))
+        if (this->_flags.rawInputFromConfigFileIndex < sizeof(this->_flags.rawInputFromConfigFile) / sizeof(this->_flags.rawInputFromConfigFile[0]))
+        {
+            this->_flags.rawInputFromConfigFile[this->_flags.rawInputFromConfigFileIndex++] = curChar;
+        }
+
+        if (curChar == EndChar || isspace(curChar) || curChar == 0)
         {
             configBuffer[index] = 0;
-            if ((err = parser.Parse(configBuffer)) != 0)
+
+            // Parse only if there's something in configBuffer
+            if (index > 0 && (err = parser.Parse(configBuffer)) != 0)
             {
                 break;
             }
 
-            while(curChar != EndChar && isspace(curChar))
+            while(curChar != EndChar && (isspace(curChar) || curChar == 0))
             {
                 curChar = ReadChar(configFile);
             }
@@ -594,14 +713,13 @@ HRESULT ConfigParser::SetOutputFile(const WCHAR* outputFile, const WCHAR* openMo
 
     char16 fileName[_MAX_PATH];
     char16 moduleName[_MAX_PATH];
-    GetModuleFileName(0, moduleName, _MAX_PATH);
+    PlatformAgnostic::SystemInfo::GetBinaryLocation(moduleName, _MAX_PATH);
     _wsplitpath_s(moduleName, nullptr, 0, nullptr, 0, fileName, _MAX_PATH, nullptr, 0);
     if (_wcsicmp(fileName, _u("WWAHost")) == 0 ||
         _wcsicmp(fileName, _u("ByteCodeGenerator")) == 0 ||
         _wcsicmp(fileName, _u("spartan")) == 0 ||
         _wcsicmp(fileName, _u("spartan_edge")) == 0 ||
-        _wcsicmp(fileName, _u("MicrosoftEdge")) == 0 ||
-        _wcsicmp(fileName, _u("MicrosoftEdgeCP")) == 0)
+        _wcsnicmp(fileName, _u("MicrosoftEdge"), wcslen(_u("MicrosoftEdge"))) == 0)
     {
 
         // we need to output to %temp% directory in wwa. we don't have permission otherwise.

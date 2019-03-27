@@ -31,6 +31,9 @@ npm will set its own environment variables and Node will prefer
 those lowercase versions over any uppercase ones that you might set.
 For details see [this issue](https://github.com/npm/npm/issues/14528).
 
+Notice that you need to use underscores instead of dashes, so `--allow-same-version`
+would become `npm_config_allow_same_version=true`.
+
 ### npmrc Files
 
 The four relevant files are:
@@ -152,6 +155,23 @@ even for `GET` requests.
 When "dev" or "development" and running local `npm shrinkwrap`,
 `npm outdated`, or `npm update`, is an alias for `--dev`.
 
+### audit
+
+* Default: true
+* Type: Boolean
+
+When "true" submit audit reports alongside `npm install` runs to the default
+registry and all registries configured for scopes.  See the documentation
+for npm-audit(1) for details on what is submitted.
+
+### audit-level
+
+* Default: `"low"`
+* Type: `'low'`, `'moderate'`, `'high'`, `'critical'`
+
+The minimum level of vulnerability for `npm audit` to exit with
+a non-zero exit code.
+
 ### auth-type
 
 * Default: `'legacy'`
@@ -184,7 +204,7 @@ The browser that is called by the `npm docs` command to open websites.
 * Type: String, Array or null
 
 The Certificate Authority signing certificate that is trusted for SSL
-connections to the registry. Values should be in PEM format with newlines
+connections to the registry. Values should be in PEM format (Windows calls it "Base-64 encoded X.509 (.CER)") with newlines
 replaced by the string "\n". For example:
 
     ca="-----BEGIN CERTIFICATE-----\nXXXX\nXXXX\n-----END CERTIFICATE-----"
@@ -260,11 +280,18 @@ Number of ms to wait for cache lock files to expire.
 * Type: String
 
 A client certificate to pass when accessing the registry.  Values should be in
-PEM format with newlines replaced by the string "\n". For example:
+PEM format (Windows calls it "Base-64 encoded X.509 (.CER)") with newlines replaced by the string "\n". For example:
 
     cert="-----BEGIN CERTIFICATE-----\nXXXX\nXXXX\n-----END CERTIFICATE-----"
 
 It is _not_ the path to a certificate file (and there is no "certfile" option).
+
+### cidr
+
+* Default: `null`
+* Type: String, Array, null
+
+This is a list of CIDR address to be used when configuring limited access tokens with the `npm token create` command.
 
 ### color
 
@@ -273,6 +300,9 @@ It is _not_ the path to a certificate file (and there is no "certfile" option).
 
 If false, never shows colors.  If `"always"` then always shows colors.
 If true, then only prints color codes for tty file descriptors.
+
+This option can also be changed using the environment: colors are
+disabled when the environment variable `NO_COLOR` is set to any value.
 
 ### depth
 
@@ -309,8 +339,8 @@ Install `dev-dependencies` along with packages.
 Indicates that you don't want npm to make any changes and that it should
 only report what it would have done.  This can be passed into any of the
 commands that modify your local installation, eg, `install`, `update`,
-`dedupe`, `uninstall`.  This is NOT currently honored by network related
-commands, eg `dist-tags`, `owner`, `publish`, etc.
+`dedupe`, `uninstall`.  This is NOT currently honored by some network related
+commands, eg `dist-tags`, `owner`, etc.
 
 ### editor
 
@@ -388,6 +418,13 @@ the git binary.
 * Type: Boolean
 
 Tag the commit when using the `npm version` command.
+
+### commit-hooks
+
+* Default: `true`
+* Type: Boolean
+
+Run git commit hooks when using the `npm version` command.
 
 ### global
 
@@ -576,15 +613,15 @@ to the npm registry.  Must be IPv4 in versions of Node prior to 0.12.
 
 ### loglevel
 
-* Default: "warn"
+* Default: "notice"
 * Type: String
-* Values: "silent", "error", "warn", "http", "info", "verbose", "silly"
+* Values: "silent", "error", "warn", "notice", "http", "timing", "info",
+  "verbose", "silly"
 
 What level of logs to report.  On failure, *all* logs are written to
 `npm-debug.log` in the current working directory.
 
-Any logs of a higher level than the setting are shown.
-The default is "warn", which shows warn and error output.
+Any logs of a higher level than the setting are shown. The default is "notice".
 
 ### logstream
 
@@ -639,12 +676,28 @@ Any "%s" in the message will be replaced with the version number.
 
 The registry you want to send cli metrics to if `send-metrics` is true.
 
+### node-options
+
+* Default: null
+* Type: String
+
+Options to pass through to Node.js via the `NODE_OPTIONS` environment
+variable.  This does not impact how npm itself is executed but it does
+impact how lifecycle scripts are called.
+
 ### node-version
 
 * Default: process.version
 * Type: semver or false
 
 The node version to use when checking a package's `engines` map.
+
+### noproxy
+
+* Default: null
+* Type: String or Array
+
+A comma-separated string or an array of domain extensions that a proxy should not be used for.
 
 ### offline
 
@@ -689,6 +742,14 @@ Attempt to install packages in the `optionalDependencies` object.  Note
 that if these packages fail to install, the overall installation
 process is not aborted.
 
+### otp
+
+* Default: null
+* Type: Number
+
+This is a one-time password from a two-factor authenticator.  It's needed
+when publishing or changing package permissions with `npm access`.
+
 ### package-lock
 
 * Default: true
@@ -697,7 +758,19 @@ process is not aborted.
 If set to false, then ignore `package-lock.json` files when installing. This
 will also prevent _writing_ `package-lock.json` if `save` is true.
 
+When package package-locks are disabled, automatic pruning of extraneous
+modules will also be disabled.  To remove extraneous modules with
+package-locks disabled use `npm prune`.
+
 This option is an alias for `--shrinkwrap`.
+
+### package-lock-only
+
+* Default: false
+* Type: Boolean
+
+If set to true, it will update only the `package-lock.json`,
+instead of checking `node_modules` and downloading dependencies.
 
 ### parseable
 
@@ -733,6 +806,14 @@ for updates immediately even for fresh package data.
 The location to install global items.  If set on the command line, then
 it forces non-global commands to run in the specified folder.
 
+### preid
+
+* Default: ""
+* Type: String
+
+The "prerelease identifier" to use as a prefix for the "prerelease" part of a
+semver. Like the `rc` in `1.2.0-rc.8`.
+
 ### production
 
 * Default: false
@@ -754,18 +835,6 @@ operations, if `process.stderr` is a TTY.
 
 Set to `false` to suppress the progress bar.
 
-### proprietary-attribs
-
-* Default: true
-* Type: Boolean
-
-Whether or not to include proprietary extended attributes in the
-tarballs created by npm.
-
-Unless you are expecting to unpack package tarballs with something other
-than npm -- particularly a very outdated tar implementation -- leave
-this as true.
-
 ### proxy
 
 * Default: null
@@ -774,6 +843,13 @@ this as true.
 A proxy to use for outgoing http requests. If the `HTTP_PROXY` or
 `http_proxy` environment variables are set, proxy settings will be
 honored by the underlying `request` library.
+
+### read-only
+
+* Default: false
+* Type: Boolean
+
+This is used to mark a token as unable to publish when configuring limited access tokens with the `npm token create` command.
 
 ### rebuild-bundle
 
@@ -798,7 +874,7 @@ Remove failed installs.
 
 ### save
 
-* Default: false
+* Default: true
 * Type: Boolean
 
 Save installed packages to a package.json file as dependencies.
@@ -974,6 +1050,17 @@ will also prevent _writing_ `npm-shrinkwrap.json` if `save` is true.
 
 This option is an alias for `--package-lock`.
 
+### sign-git-commit
+
+* Default: false
+* Type: Boolean
+
+If set to true, then the `npm version` command will commit the new package
+version using `-S` to add a signature.
+
+Note that git requires you to have set up GPG keys in your git configs
+for this to work properly.
+
 ### sign-git-tag
 
 * Default: false
@@ -1069,6 +1156,14 @@ false, it uses ascii characters to draw trees.
 Set to true to suppress the UID/GID switching when running package
 scripts.  If set explicitly to false, then installing as a non-root user
 will fail.
+
+### update-notifier
+
+* Default: true
+* Type: Boolean
+
+Set to false to suppress the update notification when using an older
+version of npm than the latest.
 
 ### usage
 

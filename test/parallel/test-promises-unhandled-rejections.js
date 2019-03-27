@@ -1,7 +1,9 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const domain = require('domain');
+
+common.disableCrashOnUnhandledRejection();
 
 const asyncTest = (function() {
   let asyncTestsEnabled = false;
@@ -182,7 +184,7 @@ asyncTest('When re-throwing new errors in a promise catch, only the' +
   });
 });
 
-asyncTest('Test params of unhandledRejection for a synchronously-rejected' +
+asyncTest('Test params of unhandledRejection for a synchronously-rejected ' +
           'promise', function(done) {
   const e = new Error();
   onUnhandledSucceed(done, function(reason, promise) {
@@ -293,8 +295,8 @@ asyncTest('While inside setImmediate, catching a rejected promise derived ' +
   });
 });
 
-// State adapation tests
-asyncTest('catching a promise which is asynchronously rejected (via' +
+// State adaptation tests
+asyncTest('catching a promise which is asynchronously rejected (via ' +
           'resolution to an asynchronously-rejected promise) prevents' +
           ' unhandledRejection', function(done) {
   const e = new Error();
@@ -378,7 +380,7 @@ asyncTest(
 );
 
 // Combinations with Promise.all
-asyncTest('Catching the Promise.all() of a collection that includes a' +
+asyncTest('Catching the Promise.all() of a collection that includes a ' +
           'rejected promise prevents unhandledRejection', function(done) {
   const e = new Error();
   onUnhandledFail(done);
@@ -634,7 +636,6 @@ asyncTest(
       onUnhandledSucceed(done, function(reason, promise) {
         assert.strictEqual(reason, e);
         assert.strictEqual(domainReceivedError, domainError);
-        d.dispose();
       });
       Promise.reject(e);
       process.nextTick(function() {
@@ -663,7 +664,7 @@ asyncTest('nextTick is immediately scheduled when called inside an event' +
 });
 
 asyncTest('Throwing an error inside a rejectionHandled handler goes to' +
-          ' unhandledException, and does not cause .catch() to throw an' +
+          ' unhandledException, and does not cause .catch() to throw an ' +
           'exception', function(done) {
   clean();
   const e = new Error();
@@ -684,4 +685,17 @@ asyncTest('Throwing an error inside a rejectionHandled handler goes to' +
       done(new Error('fail'));
     }
   }, 1);
+});
+
+asyncTest('Rejected promise inside unhandledRejection allows nextTick loop' +
+          ' to proceed first', function(done) {
+  clean();
+  Promise.reject(0);
+  let didCall = false;
+  process.on('unhandledRejection', () => {
+    assert(!didCall);
+    didCall = true;
+    const promise = Promise.reject(0);
+    process.nextTick(() => promise.catch(() => done()));
+  });
 });

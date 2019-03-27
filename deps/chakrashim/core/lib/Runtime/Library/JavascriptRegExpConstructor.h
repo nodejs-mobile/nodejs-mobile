@@ -24,7 +24,7 @@ namespace Js
     public:
         JavascriptRegExpConstructor(DynamicType * type);
 
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyReferenceQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
@@ -37,7 +37,7 @@ namespace Js
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
         virtual BOOL IsEnumerable(PropertyId propertyId) override;
         virtual BOOL IsConfigurable(PropertyId propertyId) override;
-        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache = nullptr) override;
+        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
         BOOL GetSpecialNonEnumerablePropertyName(uint32 index, Var *propertyName, ScriptContext * requestContext);
         uint GetSpecialNonEnumerablePropertyCount() const;
         PropertyId const * GetSpecialNonEnumerablePropertyIds() const;
@@ -53,12 +53,14 @@ namespace Js
         bool GetPropertyBuiltIns(PropertyId propertyId, Var* value, BOOL* result);
         bool SetPropertyBuiltIns(PropertyId propertyId, Var value, BOOL* result);
         void SetLastMatch(UnifiedRegex::RegexPattern* lastPattern, JavascriptString* lastInput, UnifiedRegex::GroupInfo lastMatch);
+        void InvalidateLastMatch(UnifiedRegex::RegexPattern* lastPattern, JavascriptString* lastInput);
 
         void EnsureValues();
 
         Field(UnifiedRegex::RegexPattern*) lastPattern;
         Field(JavascriptString*) lastInput;
         Field(UnifiedRegex::GroupInfo) lastMatch;
+        Field(bool) invalidatedLastMatch; // true if last match must be recalculated before use
         Field(bool) reset; // true if following fields must be recalculated from above before first use
         Field(Var) lastParen;
         Field(Var) lastIndex;

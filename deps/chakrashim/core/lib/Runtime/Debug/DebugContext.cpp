@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 namespace Js
 {
     DebugContext::DebugContext(Js::ScriptContext * scriptContext) :
@@ -12,8 +13,8 @@ namespace Js
         diagProbesContainer(nullptr),
         isClosed(false),
         debuggerMode(DebuggerMode::NotDebugging),
-        isDebuggerRecording(true),
-        isReparsingSource(false)
+        isReparsingSource(false),
+        isDebuggerRecording(true)
     {
         Assert(scriptContext != nullptr);
     }
@@ -237,8 +238,10 @@ namespace Js
                         {
                             pFuncBody->ReinitializeExecutionModeAndLimits();
                         }
+                        pFuncBody->UpdateEntryPointsOnDebugReparse();
                     });
                 }
+
                 return false;
             }
 
@@ -329,6 +332,7 @@ namespace Js
                     {
                         pFuncBody->ReinitializeExecutionModeAndLimits();
                     }
+                    pFuncBody->UpdateEntryPointsOnDebugReparse();
                 });
             }
 
@@ -407,3 +411,4 @@ namespace Js
         });
     }
 }
+#endif

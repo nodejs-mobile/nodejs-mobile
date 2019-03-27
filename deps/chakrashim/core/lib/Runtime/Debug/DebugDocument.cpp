@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 namespace Js
 {
     DebugDocument::DebugDocument(Utf8SourceInfo* utf8SourceInfo, Js::FunctionBody* functionBody) :
@@ -54,7 +55,7 @@ namespace Js
         }
 
         ArenaAllocator* diagnosticArena = scriptContext->AllocatorForDiagnostics();
-        AssertMem(diagnosticArena);
+        Assert(diagnosticArena);
 
         m_breakpointList = this->NewBreakpointList(diagnosticArena);
         return m_breakpointList;
@@ -351,3 +352,4 @@ namespace Js
         return TRUE;
     }
 }
+#endif

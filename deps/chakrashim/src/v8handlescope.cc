@@ -23,7 +23,7 @@
 
 namespace v8 {
 
-THREAD_LOCAL HandleScope *current = nullptr;
+THREAD_LOCAL HandleScope* current = nullptr;
 
 HandleScope::HandleScope(Isolate* isolate)
     : _prev(current),
@@ -31,6 +31,7 @@ HandleScope::HandleScope(Isolate* isolate)
       _count(0),
       _contextRef(JS_INVALID_REFERENCE),
       _addRefRecordHead(nullptr) {
+  CHAKRA_ASSERT(isolate == Isolate::GetCurrent());
   _locals[0] = JS_INVALID_REFERENCE;
   current = this;
 }
@@ -50,9 +51,14 @@ HandleScope::~HandleScope() {
   }
 }
 
-HandleScope *HandleScope::GetCurrent() {
+HandleScope* HandleScope::GetCurrent() {
   return current;
 }
+
+Isolate* HandleScope::GetIsolate() const {
+  return Isolate::GetCurrent();
+}
+
 
 bool HandleScope::AddLocal(JsValueRef value) {
   // _locals is full, save them in _locals[0]

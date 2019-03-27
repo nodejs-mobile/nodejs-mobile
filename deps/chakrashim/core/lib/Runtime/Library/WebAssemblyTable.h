@@ -23,7 +23,8 @@ namespace Js
             static FunctionInfo Get;
             static FunctionInfo Set;
         };
-        WebAssemblyTable(Var * values, uint32 currentLength, uint32 initialLength, uint32 maxLength, DynamicType * type);
+        WebAssemblyTable(
+            Field(Var) * values, uint32 currentLength, uint32 initialLength, uint32 maxLength, DynamicType * type);
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGetterLength(RecyclableObject* function, CallInfo callInfo, ...);
         static Var EntryGrow(RecyclableObject* function, CallInfo callInfo, ...);
@@ -32,6 +33,7 @@ namespace Js
 
         static bool Is(Var aValue);
         static WebAssemblyTable * FromVar(Var aValue);
+        static WebAssemblyTable * UnsafeFromVar(Var aValue);
 
         static WebAssemblyTable * Create(uint32 initial, uint32 maximum, ScriptContext * scriptContext);
 

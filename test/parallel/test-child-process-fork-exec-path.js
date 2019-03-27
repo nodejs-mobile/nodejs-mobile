@@ -23,22 +23,26 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
+const { COPYFILE_FICLONE } = fs.constants;
 const path = require('path');
+const tmpdir = require('../common/tmpdir');
 const msg = { test: 'this' };
 const nodePath = process.execPath;
-const nodeCopyPath = path.join(common.tmpDir, 'node-copy.exe');
-const chakracoreCopyPath = path.join(common.tmpDir, 'chakracore.dll');
-const exePaths = [{
-  srcPath: nodePath,
-  destPath: nodeCopyPath
-}];
+const nodeCopyPath = path.join(tmpdir.path, 'node-copy.exe');
+const chakracoreCopyPath = path.join(tmpdir.path, 'chakracore.dll');
+const exePaths = [
+  { srcPath: nodePath,
+    destPath: nodeCopyPath }];
 if (common.isChakraEngine) {
   // chakra needs chakracore.dll as well
-  exePaths.push({
-    srcPath: process.execPath.replace('node.exe', 'chakracore.dll'),
-    destPath: chakracoreCopyPath
-  });
+  exePaths.push(
+    { srcPath: process.execPath.replace('node.exe', 'chakracore.dll'),
+      destPath: chakracoreCopyPath });
 }
+
+const { addLibraryPath } = require('../common/shared-lib-util');
+
+addLibraryPath(process.env);
 
 if (process.env.FORK) {
   assert(process.send);
@@ -46,7 +50,7 @@ if (process.env.FORK) {
   process.send(msg);
   process.exit();
 } else {
-  common.refreshTmpDir();
+  tmpdir.refresh();
   try {
     exePaths.forEach(function(value) {
       fs.unlinkSync(value.destPath);
@@ -56,7 +60,7 @@ if (process.env.FORK) {
   }
 
   exePaths.forEach(function(value) {
-    fs.writeFileSync(value.destPath, fs.readFileSync(value.srcPath));
+    fs.copyFileSync(value.srcPath, value.destPath, COPYFILE_FICLONE);
     fs.chmodSync(value.destPath, '0755');
   });
 

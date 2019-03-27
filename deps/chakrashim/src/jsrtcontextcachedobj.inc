@@ -43,19 +43,23 @@ DEFTYPE(Uint32Array)
 DEFTYPE(Int32Array)
 DEFTYPE(Float32Array)
 DEFTYPE(Float64Array)
+DEFTYPE(BigUint64Array)
 DEFTYPE(RegExp)
 DEFTYPE(Map)
 DEFTYPE(Symbol)
+DEFTYPE(Set)
 
 
 // These prototype functions will be cached/shimmed
 DEFMETHOD(Object,         toString)
 DEFMETHOD(Object,         valueOf)
 DEFMETHOD(String,         concat)
+DEFMETHOD(Array,          from)
 DEFMETHOD(Array,          push)
 DEFMETHOD(Map,            get)
 DEFMETHOD(Map,            set)
 DEFMETHOD(Map,            has)
+DEFMETHOD(Set,            add)
 
 
 #undef DEFTYPE

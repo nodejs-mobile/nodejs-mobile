@@ -62,9 +62,9 @@ namespace TTD
             writer->WriteRecordEnd();
         }
 
-        EventKind EventLogEntry_ParseHeader(bool readSeperator, FileReader* reader)
+        EventKind EventLogEntry_ParseHeader(bool readSeparator, FileReader* reader)
         {
-            reader->ReadRecordStart(readSeperator);
+            reader->ReadRecordStart(readSeparator);
 
             return reader->ReadTag<EventKind>(NSTokens::Key::eventKind);
         }
@@ -433,7 +433,7 @@ namespace TTD
             ExternalCallEventLogEntry* callEvt = GetInlineEventDataAs<ExternalCallEventLogEntry, EventKind::ExternalCallTag>(evt);
 
             Js::JavascriptString* displayName = function->GetDisplayName();
-            alloc.CopyStringIntoWLength(displayName->GetSz(), displayName->GetLength(), callEvt->FunctionName);
+            alloc.CopyStringIntoWLength(displayName->GetString(), displayName->GetLength(), callEvt->FunctionName);
         }
 #endif
 
@@ -444,18 +444,27 @@ namespace TTD
             return callEvt->LastNestedEventTime;
         }
 
-        void ExternalCallEventLogEntry_ProcessArgs(EventLogEntry* evt, int32 rootDepth, Js::JavascriptFunction* function, uint32 argc, Js::Var* argv, bool checkExceptions, UnlinkableSlabAllocator& alloc)
+        void ExternalCallEventLogEntry_ProcessArgs(EventLogEntry* evt, int32 rootDepth, Js::JavascriptFunction* function, const Js::Arguments& args, bool checkExceptions, UnlinkableSlabAllocator& alloc)
         {
             ExternalCallEventLogEntry* callEvt = GetInlineEventDataAs<ExternalCallEventLogEntry, EventKind::ExternalCallTag>(evt);
 
             callEvt->RootNestingDepth = rootDepth;
-            callEvt->ArgCount = argc + 1;
+            callEvt->ArgCount = args.Info.Count + 1;
 
             static_assert(sizeof(TTDVar) == sizeof(Js::Var), "These need to be the same size (and have same bit layout) for this to work!");
 
             callEvt->ArgArray = alloc.SlabAllocateArray<TTDVar>(callEvt->ArgCount);
             callEvt->ArgArray[0] = static_cast<TTDVar>(function);
-            js_memcpy_s(callEvt->ArgArray + 1, (callEvt->ArgCount - 1) * sizeof(TTDVar), argv, argc * sizeof(Js::Var));
+            js_memcpy_s(callEvt->ArgArray + 1, args.Info.Count * sizeof(TTDVar), args.Values, args.Info.Count * sizeof(Js::Var));
+
+            if (args.HasNewTarget())
+            {
+                callEvt->NewTarget = static_cast<TTDVar>(args.GetNewTarget());
+            }
+            else
+            {
+                callEvt->NewTarget = nullptr;
+            }
 
             callEvt->ReturnValue = nullptr;
             callEvt->LastNestedEventTime = TTD_EVENT_MAXTIME;
@@ -501,6 +510,9 @@ namespace TTD
             }
             writer->WriteSequenceEnd();
 
+            writer->WriteKey(NSTokens::Key::newTargetVal, NSTokens::Separator::CommaSeparator);
+            NSSnapValues::EmitTTDVar(callEvt->NewTarget, writer, NSTokens::Separator::NoSeparator);
+
             writer->WriteKey(NSTokens::Key::argRetVal, NSTokens::Separator::CommaSeparator);
             NSSnapValues::EmitTTDVar(callEvt->ReturnValue, writer, NSTokens::Separator::NoSeparator);
 
@@ -529,6 +541,9 @@ namespace TTD
             }
             reader->ReadSequenceEnd();
 
+            reader->ReadKey(NSTokens::Key::newTargetVal, true);
+            callEvt->NewTarget = NSSnapValues::ParseTTDVar(false, reader);
+
             reader->ReadKey(NSTokens::Key::argRetVal, true);
             callEvt->ReturnValue = NSSnapValues::ParseTTDVar(false, reader);
 
@@ -547,6 +562,54 @@ namespace TTD
         void ExplicitLogWriteEntry_Parse(EventLogEntry* evt, ThreadContext* threadContext, FileReader* reader, UnlinkableSlabAllocator& alloc)
         {
             ; //We don't track any extra data with this
+        }
+
+        void TTDInnerLoopLogWriteEventLogEntry_Emit(const EventLogEntry* evt, FileWriter* writer, ThreadContext* threadContext)
+        {
+            const TTDInnerLoopLogWriteEventLogEntry* ilevt = GetInlineEventDataAs<TTDInnerLoopLogWriteEventLogEntry, EventKind::TTDInnerLoopLogWriteTag>(evt);
+
+            writer->WriteLogTag(NSTokens::Key::sourceContextId, ilevt->SourceScriptLogId, NSTokens::Separator::CommaSeparator);
+            writer->WriteInt64(NSTokens::Key::eventTime, ilevt->EventTime, NSTokens::Separator::CommaSeparator);
+            writer->WriteInt64(NSTokens::Key::functionTime, ilevt->FunctionTime, NSTokens::Separator::CommaSeparator);
+            writer->WriteInt64(NSTokens::Key::loopTime, ilevt->LoopTime, NSTokens::Separator::CommaSeparator);
+
+            writer->WriteUInt32(NSTokens::Key::functionBodyId, ilevt->TopLevelBodyId, NSTokens::Separator::CommaSeparator);
+            writer->WriteUInt32(NSTokens::Key::functionColumn, ilevt->FunctionLine, NSTokens::Separator::CommaSeparator);
+            writer->WriteUInt32(NSTokens::Key::functionLine, ilevt->FunctionColumn, NSTokens::Separator::CommaSeparator);
+
+            writer->WriteUInt32(NSTokens::Key::line, ilevt->Line, NSTokens::Separator::CommaSeparator);
+            writer->WriteUInt32(NSTokens::Key::column, ilevt->Column, NSTokens::Separator::CommaSeparator);
+        }
+
+        void TTDInnerLoopLogWriteEventLogEntry_Parse(EventLogEntry* evt, ThreadContext* threadContext, FileReader* reader, UnlinkableSlabAllocator& alloc)
+        {
+            TTDInnerLoopLogWriteEventLogEntry* ilevt = GetInlineEventDataAs<TTDInnerLoopLogWriteEventLogEntry, EventKind::TTDInnerLoopLogWriteTag>(evt);
+
+            ilevt->SourceScriptLogId = reader->ReadLogTag(NSTokens::Key::sourceContextId, true);
+            ilevt->EventTime = reader->ReadInt64(NSTokens::Key::eventTime, true);
+            ilevt->FunctionTime = reader->ReadInt64(NSTokens::Key::functionTime, true);
+            ilevt->LoopTime = reader->ReadInt64(NSTokens::Key::loopTime, true);
+
+            ilevt->TopLevelBodyId = reader->ReadUInt32(NSTokens::Key::functionBodyId, true);
+            ilevt->FunctionLine = reader->ReadUInt32(NSTokens::Key::functionColumn, true);
+            ilevt->FunctionColumn = reader->ReadUInt32(NSTokens::Key::functionLine, true);
+
+            ilevt->Line = reader->ReadUInt32(NSTokens::Key::line, true);
+            ilevt->Column = reader->ReadUInt32(NSTokens::Key::column, true);
+        }
+
+        void TTDFetchAutoTraceStatusEventLogEntry_Emit(const EventLogEntry* evt, FileWriter* writer, ThreadContext* threadContext)
+        {
+            const TTDFetchAutoTraceStatusEventLogEntry* atfevt = GetInlineEventDataAs<TTDFetchAutoTraceStatusEventLogEntry, EventKind::TTDFetchAutoTraceStatusTag>(evt);
+
+            writer->WriteLogTag(NSTokens::Key::boolVal, atfevt->IsEnabled, NSTokens::Separator::CommaSeparator);
+        }
+
+        void TTDFetchAutoTraceStatusEventLogEntry_Parse(EventLogEntry* evt, ThreadContext* threadContext, FileReader* reader, UnlinkableSlabAllocator& alloc)
+        {
+            TTDFetchAutoTraceStatusEventLogEntry* atfevt = GetInlineEventDataAs<TTDFetchAutoTraceStatusEventLogEntry, EventKind::TTDFetchAutoTraceStatusTag>(evt);
+
+            atfevt->IsEnabled = reader->ReadLogTag(NSTokens::Key::boolVal, true);
         }
     }
 }

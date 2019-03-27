@@ -45,11 +45,11 @@ static bool IsOfType(const Value* ref, JsValueType type) {
 }
 
 bool Value::IsUndefined() const {
-  return IsOfType(this, JsValueType::JsUndefined);
+  return this == jsrt::GetUndefined();
 }
 
 bool Value::IsNull() const {
-  return IsOfType(this, JsValueType::JsNull);
+  return this == jsrt::GetNull();
 }
 
 bool Value::IsNullOrUndefined() const {
@@ -57,38 +57,27 @@ bool Value::IsNullOrUndefined() const {
 }
 
 bool Value::IsTrue() const {
-  bool isTrue;
-  if (JsEquals(jsrt::GetTrue(), (JsValueRef)this, &isTrue) != JsNoError) {
-    return false;
-  }
-
-  return isTrue;
+  return this == jsrt::GetTrue();
 }
 
 bool Value::IsFalse() const {
-  bool isFalse;
-  if (JsEquals(jsrt::GetFalse(), (JsValueRef)this, &isFalse) != JsNoError) {
-    return false;
-  }
-
-  return isFalse;
+  return this == jsrt::GetFalse();
 }
 
-bool Value::IsString() const {
-  return IsOfType(this, JsValueType::JsString);
+#define ISJSVALUETYPE(Type) \
+bool Value::Is##Type() const { \
+  return IsOfType(this, JsValueType::Js##Type); \
 }
 
-bool Value::IsSymbol() const {
-  return IsOfType(this, JsValueType::JsSymbol);
-}
-
-bool Value::IsFunction() const {
-  return IsOfType(this, JsValueType::JsFunction);
-}
-
-bool Value::IsArray() const {
-  return IsOfType(this, JsValueType::JsArray);
-}
+ISJSVALUETYPE(String)
+ISJSVALUETYPE(Symbol)
+ISJSVALUETYPE(Function)
+ISJSVALUETYPE(Array)
+ISJSVALUETYPE(ArrayBuffer)
+ISJSVALUETYPE(TypedArray)
+ISJSVALUETYPE(DataView)
+ISJSVALUETYPE(Boolean)
+ISJSVALUETYPE(Number)
 
 bool Value::IsObject() const {
   JsValueType type;
@@ -101,14 +90,6 @@ bool Value::IsObject() const {
 
 bool Value::IsExternal() const {
   return External::IsExternal(this);
-}
-
-bool Value::IsArrayBuffer() const {
-  return IsOfType(this, JsValueType::JsArrayBuffer);
-}
-
-bool Value::IsTypedArray() const {
-  return IsOfType(this, JsValueType::JsTypedArray);
 }
 
 #define DEFINE_TYPEDARRAY_CHECK(ArrayType) \
@@ -130,21 +111,8 @@ DEFINE_TYPEDARRAY_CHECK(Int32)
 DEFINE_TYPEDARRAY_CHECK(Float32)
 DEFINE_TYPEDARRAY_CHECK(Float64)
 
-
 bool Value::IsArrayBufferView() const {
   return IsTypedArray() || IsDataView();
-}
-
-bool Value::IsDataView() const {
-  return IsOfType(this, JsValueType::JsDataView);
-}
-
-bool Value::IsBoolean() const {
-  return IsOfType(this, JsValueType::JsBoolean);
-}
-
-bool Value::IsNumber() const {
-  return IsOfType(this, JsValueType::JsNumber);
 }
 
 bool Value::IsInt32() const {
@@ -176,6 +144,23 @@ bool Value::IsUint32() const {
   return trunc(value) == value;
 }
 
+bool Value::IsProxy() const {
+  bool isProxy = false;
+  if (JsGetProxyProperties((JsValueRef)this, &isProxy, nullptr,
+                           nullptr) == JsNoError) {
+    return isProxy;
+  }
+
+  return false;
+}
+
+bool Value::IsPromise() const {
+  // If the call to JsGetPromiseState returns successfully, then we must have
+  // a valid Promise object.
+  JsPromiseState state = JsPromiseStatePending;
+  return (JsGetPromiseState((JsValueRef)this, &state) == JsNoError);
+}
+
 #define IS_TYPE_FUNCTION(v8ValueFunc, chakrashimFunc) \
 bool Value::v8ValueFunc() const { \
 JsValueRef resultRef = JS_INVALID_REFERENCE; \
@@ -185,14 +170,14 @@ if (errorCode != JsNoError) { \
   return false; \
 } \
 return Local<Value>(resultRef)->BooleanValue(); \
-} \
+}
 
+// Refer to jsrtcachedpropertyidref.inc for the full list
+// DEF_IS_TYPE is not structured correctly in order to be used here
 IS_TYPE_FUNCTION(IsBooleanObject, isBooleanObject)
 IS_TYPE_FUNCTION(IsDate, isDate)
 IS_TYPE_FUNCTION(IsMap, isMap)
 IS_TYPE_FUNCTION(IsNativeError, isNativeError)
-IS_TYPE_FUNCTION(IsPromise, isPromise)
-IS_TYPE_FUNCTION(IsProxy, isProxy)
 IS_TYPE_FUNCTION(IsRegExp, isRegExp)
 IS_TYPE_FUNCTION(IsAsyncFunction, isAsyncFunction)
 IS_TYPE_FUNCTION(IsSet, isSet)
@@ -202,10 +187,25 @@ IS_TYPE_FUNCTION(IsMapIterator, isMapIterator)
 IS_TYPE_FUNCTION(IsSetIterator, isSetIterator)
 IS_TYPE_FUNCTION(IsArgumentsObject, isArgumentsObject)
 IS_TYPE_FUNCTION(IsGeneratorObject, isGeneratorObject)
+IS_TYPE_FUNCTION(IsGeneratorFunction, isGeneratorFunction)
+IS_TYPE_FUNCTION(IsWebAssemblyCompiledModule, isWebAssemblyCompiledModule)
 IS_TYPE_FUNCTION(IsWeakMap, isWeakMap)
 IS_TYPE_FUNCTION(IsWeakSet, isWeakSet)
 IS_TYPE_FUNCTION(IsSymbolObject, isSymbolObject)
 IS_TYPE_FUNCTION(IsName, isName)
+IS_TYPE_FUNCTION(IsSharedArrayBuffer, isSharedArrayBuffer)
+IS_TYPE_FUNCTION(IsModuleNamespaceObject, isModuleNamespaceObject)
+#undef IS_TYPE_FUNCTION
+
+bool Value::IsBigIntObject() const {
+  // CHAKRA-TODO: BigInt support needed in ChakraCore
+  return false;
+}
+
+bool Value::IsBigUint64Array() const {
+  // CHAKRA-TODO: BigInt support needed in ChakraCore
+  return false;
+}
 
 MaybeLocal<Boolean> Value::ToBoolean(Local<Context> context) const {
   JsValueRef value;
@@ -351,8 +351,16 @@ Maybe<double> Value::NumberValue(Local<Context> context) const {
 
 Maybe<int64_t> Value::IntegerValue(Local<Context> context) const {
   Maybe<double> maybe = NumberValue(context);
-  return maybe.IsNothing() ?
-    Nothing<int64_t>() : Just(static_cast<int64_t>(maybe.FromJust()));
+  if (maybe.IsNothing()) {
+      return Nothing<int64_t>();
+  }
+
+  double value = maybe.FromJust();
+  if (isnan(value)) {
+      return Just<int64_t>(0);
+  }
+
+  return Just(static_cast<int64_t>(value));
 }
 
 Maybe<uint32_t> Value::Uint32Value(Local<Context> context) const {
@@ -409,6 +417,11 @@ bool Value::StrictEquals(Handle<Value> that) const {
   }
 
   return strictEquals;
+}
+
+bool Value::SameValue(Local<Value> that) const {
+  CHAKRA_UNIMPLEMENTED();
+  return false;
 }
 
 }  // namespace v8

@@ -40,6 +40,7 @@ public:
     }
 
     static LoweredBasicBlock* New(JitArenaAllocator * allocator);
+    void Delete(JitArenaAllocator* allocator);
     void Copy(LoweredBasicBlock* block);
     LoweredBasicBlock* Clone(JitArenaAllocator * allocator);
     bool HasData();
@@ -119,7 +120,7 @@ public:
 private:
     void                Init();
     bool                SkipNumberedInstr(IR::Instr *instr);
-    void                EndDeadLifetimes(IR::Instr *instr);
+    void                EndDeadLifetimes(IR::Instr *instr, bool isLoopBackEdge);
     void                EndDeadOpHelperLifetimes(IR::Instr *instr);
     void                AllocateNewLifetimes(IR::Instr *instr);
     RegNum              Spill(Lifetime *newLifetime, IR::RegOpnd *regOpnd, bool dontSpillCurrent, bool force);
@@ -177,6 +178,7 @@ private:
 
     GlobalBailOutRecordDataTable * EnsureGlobalBailOutRecordTable(Func *func);
 
+    static void         SetBitVectorIfTypeSpec(StackSym * sym, Js::RegSlot regSlot, BVFixed * intSyms, BVFixed * floatSyms);
     void                FillBailOutRecord(IR::Instr * instr);
     void                FillBailOutOffset(int * offset, StackSym * stackSym, FillBailOutState * state, IR::Instr * instr);
     void                FillStackLiteralBailOutRecord(IR::Instr * instr, BailOutInfo * bailOutInfo, struct FuncBailOutData * funcBailOutData, uint funcCount);

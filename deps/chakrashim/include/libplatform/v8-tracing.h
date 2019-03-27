@@ -7,7 +7,9 @@
 
 #include <fstream>
 #include <memory>
+#include <unordered_set>
 #include <vector>
+
 #include "v8-platform.h"
 
 namespace v8 {
@@ -29,11 +31,13 @@ class TraceObject {
 
   TraceObject() {}
   ~TraceObject();
-  void Initialize(char phase, const uint8_t* category_enabled_flag,
-                  const char* name, const char* scope, uint64_t id,
-                  uint64_t bind_id, int num_args, const char** arg_names,
-                  const uint8_t* arg_types, const uint64_t* arg_values,
-                  unsigned int flags);
+  void Initialize(
+      char phase, const uint8_t* category_enabled_flag, const char* name,
+      const char* scope, uint64_t id, uint64_t bind_id, int num_args,
+      const char** arg_names, const uint8_t* arg_types,
+      const uint64_t* arg_values,
+      std::unique_ptr<v8::ConvertableToTraceFormat>* arg_convertables,
+      unsigned int flags, int64_t timestamp, int64_t cpu_timestamp);
   void UpdateDuration();
   void InitializeForTesting(char phase, const uint8_t* category_enabled_flag,
                             const char* name, const char* scope, uint64_t id,
@@ -96,6 +100,8 @@ class TraceWriter {
   virtual void Flush() = 0;
 
   static TraceWriter* CreateJSONTraceWriter(std::ostream& stream);
+  static TraceWriter* CreateJSONTraceWriter(std::ostream& stream,
+                                            const std::string& tag);
 
  private:
   // Disallow copy and assign
@@ -221,18 +227,23 @@ class TracingController
 
   TracingController() {}
   void Initialize(TraceBuffer* trace_buffer);
-  const uint8_t* GetCategoryGroupEnabled(const char* category_group);
+  const uint8_t* GetCategoryGroupEnabled(const char* category_group) override;
   static const char* GetCategoryGroupName(const uint8_t* category_enabled_flag);
-  uint64_t AddTraceEvent(char phase, const uint8_t* category_enabled_flag,
-                         const char* name, const char* scope, uint64_t id,
-                         uint64_t bind_id, int32_t num_args,
-                         const char** arg_names, const uint8_t* arg_types,
-                         const uint64_t* arg_values, unsigned int flags);
+  uint64_t AddTraceEvent(
+      char phase, const uint8_t* category_enabled_flag, const char* name,
+      const char* scope, uint64_t id, uint64_t bind_id, int32_t num_args,
+      const char** arg_names, const uint8_t* arg_types,
+      const uint64_t* arg_values,
+      std::unique_ptr<v8::ConvertableToTraceFormat>* arg_convertables,
+      unsigned int flags) override;
   void UpdateTraceEventDuration(const uint8_t* category_enabled_flag,
-                                const char* name, uint64_t handle);
+                                const char* name, uint64_t handle) override;
 
   void StartTracing(TraceConfig* trace_config);
   void StopTracing();
+
+  virtual int64_t CurrentTimestampMicroseconds();
+  virtual int64_t CurrentCpuTimestampMicroseconds();
 
  private:
   const uint8_t* GetCategoryGroupEnabledInternal(const char* category_group);

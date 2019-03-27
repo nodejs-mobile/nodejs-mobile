@@ -13,8 +13,7 @@ V8TimeTravelAgentImpl::V8TimeTravelAgentImpl(
     V8InspectorSessionImpl* session, protocol::FrontendChannel* frontendChannel,
     protocol::DictionaryValue* state)
     : m_session(session),
-      m_frontend(frontendChannel),
-      m_state(state) {}
+      m_frontend(frontendChannel) {}
 
 V8TimeTravelAgentImpl::~V8TimeTravelAgentImpl() {}
 
@@ -28,7 +27,16 @@ bool V8TimeTravelAgentImpl::checkEnabled(ErrorString* errorString) {
 }
 
 bool V8TimeTravelAgentImpl::enabled() {
-  return jsrt::Inspector::IsReplayDebugEnabled();
+  return jsrt::Inspector::IsTTDebugEnabled();
+}
+
+void V8TimeTravelAgentImpl::writeTTDLog(
+    ErrorString* errorString, const String16& uri) {
+  if (!checkEnabled(errorString)) {
+    return;
+  }
+
+  m_session->debuggerAgent()->writeTTDLog(errorString, uri);
 }
 
 void V8TimeTravelAgentImpl::reverse(ErrorString* errorString) {

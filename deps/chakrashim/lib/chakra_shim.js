@@ -21,28 +21,33 @@
 /* eslint-disable strict */
 (function(keepAlive) {
   // Save original builtIns
-  var
-    Function_prototype_toString = Function.prototype.toString,
-    Object_defineProperty = Object.defineProperty,
-    Object_getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-    Object_getOwnPropertyNames = Object.getOwnPropertyNames,
-    Object_keys = Object.keys,
-    Object_prototype_toString = Object.prototype.toString,
-    Object_setPrototypeOf = Object.setPrototypeOf,
-    Reflect_apply = Reflect.apply,
-    Reflect_construct = Reflect.construct,
-    Map_keys = Map.prototype.keys,
-    Map_values = Map.prototype.values,
-    Map_entries = Map.prototype.entries,
-    Set_entries = Set.prototype.entries,
-    Set_values = Set.prototype.values,
-    Symbol_keyFor = Symbol.keyFor,
-    Symbol_for = Symbol.for,
-    Global_ParseInt = parseInt,
-    JSON_parse = JSON.parse,
-    JSON_stringify = JSON.stringify;
-  var BuiltInError = Error;
-  var global = this;
+  const Function_prototype_toString = Function.prototype.toString;
+  const Object_defineProperty = Object.defineProperty;
+  const Object_getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  const Object_getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+  const Object_getOwnPropertyNames = Object.getOwnPropertyNames;
+  const Object_getOwnPropertySymbols = Object.getOwnPropertySymbols;
+  const Object_keys = Object.keys;
+  const Object_prototype_toString = Object.prototype.toString;
+  const Object_setPrototypeOf = Object.setPrototypeOf;
+  const Reflect_apply = Reflect.apply;
+  const Reflect_construct = Reflect.construct;
+  const Symbol_keyFor = Symbol.keyFor;
+  const Symbol_for = Symbol.for;
+  const Global_ParseInt = parseInt;
+  const JSON_parse = JSON.parse;
+  const JSON_stringify = JSON.stringify;
+  const BuiltInError = Error;
+  const global = this;
+
+  // TODO: Remove this shim when BigUint64Array is supported in chakra
+  Object_defineProperty(global, 'BigUint64Array',
+                        {
+                          value: Uint32Array,
+                          configurable: true,
+                          writable: true,
+                          enumerable: false
+                        });
 
   // Simulate V8 JavaScript stack trace API
   function StackFrame(func, funcName, fileName, lineNumber, columnNumber) {
@@ -60,7 +65,7 @@
   };
 
   StackFrame.prototype.getTypeName = function() {
-    //TODO : Fix this
+    // TODO : Fix this
     return this.functionName;
   };
 
@@ -111,7 +116,7 @@
 
   // default StackTrace stringify function
   function prepareStackTrace(error, stack) {
-    var stackString = (error.name || 'Error') + ': ' + (error.message || '');
+    let stackString = (error.name || 'Error') + ': ' + (error.message || '');
 
     for (var i = 0; i < stack.length; i++) {
       stackString += '\n   at ' + stack[i].toString();
@@ -123,13 +128,13 @@
   // Parse 'stack' string into StackTrace frames. Skip top 'skipDepth' frames,
   // and optionally skip top to 'startName' function frames.
   function parseStack(stack, skipDepth, startName) {
-    var stackSplitter = /\)\s*at/;
-    var reStackDetails = /\s(?:at\s)?(.*)\s\((.*)/;
-    var fileDetailsSplitter = /:(\d+)/;
+    const stackSplitter = /\)\s*at/;
+    const reStackDetails = /\s(?:at\s)?(.*)\s\((.*)/;
+    const fileDetailsSplitter = /:(\d+)/;
 
-    var curr = parseStack;
-    var splittedStack = stack.split(stackSplitter);
-    var errstack = [];
+    let curr = parseStack;
+    const splittedStack = stack.split(stackSplitter);
+    const errstack = [];
 
     for (var i = 0; i < splittedStack.length; i++) {
       // parseStack has 1 frame lesser than skipDepth. So skip calling .caller
@@ -146,9 +151,9 @@
         continue;
       }
 
-      var func = curr;
-      var stackDetails = reStackDetails.exec(splittedStack[i]);
-      var funcName = stackDetails[1];
+      const func = curr;
+      const stackDetails = reStackDetails.exec(splittedStack[i]);
+      let funcName = stackDetails[1];
 
       if (startName) {
         if (funcName === startName) {
@@ -160,15 +165,16 @@
         funcName = null;
       }
 
-      var fileDetails = stackDetails[2].split(fileDetailsSplitter);
+      const fileDetails = stackDetails[2].split(fileDetailsSplitter);
 
-      var fileName = fileDetails[0];
-      var lineNumber = fileDetails[1] ? fileDetails[1] : 0;
-      var columnNumber = fileDetails[3] ? fileDetails[3] : 0;
+      const fileName = fileDetails[0];
+      const lineNumber = fileDetails[1] ? parseInt(fileDetails[1]) : 0;
+      const columnNumber = fileDetails[3] ? parseInt(fileDetails[3]) : 0;
 
       errstack.push(new StackFrame(func, funcName, fileName, lineNumber,
                                    columnNumber));
     }
+
     return errstack;
   }
 
@@ -178,9 +184,9 @@
     }
 
     try {
-      var curr = privateCaptureStackTrace.caller;
-      var limit = Error.stackTraceLimit;
-      var skipDepth = 0;
+      let curr = privateCaptureStackTrace.caller;
+      const limit = Error.stackTraceLimit;
+      let skipDepth = 0;
       while (curr) {
         skipDepth++;
         if (curr === func) {
@@ -200,10 +206,11 @@
   }
 
   function withStackTraceLimitOffset(offset, f) {
-    var oldLimit = BuiltInError.stackTraceLimit;
+    const oldLimit = BuiltInError.stackTraceLimit;
     if (typeof oldLimit === 'number') {
       BuiltInError.stackTraceLimit = oldLimit + offset;
     }
+
     try {
       return f();
     } finally {
@@ -224,31 +231,49 @@
   //  e -- a new Error object which already captured stack
   //  skipDepth -- known number of top frames to be skipped
   function privateCaptureStackTrace(err, func, e, skipDepth) {
-    var currentStack = e;
-    var isPrepared = false;
-    var oldStackDesc = Object_getOwnPropertyDescriptor(e, 'stack');
+    let currentStack = e;
+    let isPrepared = false;
+    const oldStackDesc = Object_getOwnPropertyDescriptor(e, 'stack');
 
-    var funcSkipDepth = findFuncDepth(func);
-    var startFuncName = (func && funcSkipDepth < 0) ? func.name : undefined;
+    const funcSkipDepth = findFuncDepth(func);
+    const startFuncName = (func && funcSkipDepth < 0) ? func.name : undefined;
     skipDepth += Math.max(funcSkipDepth - 1, 0);
 
-    var currentStackTrace;
+    let currentStackTrace;
     function ensureStackTrace() {
       if (!currentStackTrace) {
         currentStackTrace = parseStack(
           Reflect_apply(oldStackDesc.get, e, []) || '', // Call saved old getter
           skipDepth, startFuncName);
       }
+
       return currentStackTrace;
     }
 
     function stackGetter() {
       if (!isPrepared) {
-        var prep = Error.prepareStackTrace || prepareStackTrace;
-        stackSetter(prep(err, ensureStackTrace()));
+        const prep = Error.prepareStackTrace || prepareStackTrace;
+
+        // Prep can be re-entrant, of sorts, with regards to setting err.stack
+        // vs returning what err.stack should be.
+        // We are trying to emulate the following behavior:
+        // * Error.prepareStackTrace = function (err, frames)
+        //   { err.stack = 1 } -> err.stack should be 1
+        // * Error.prepareStackTrace = function (err, frames)
+        //   { console.log("Called prepare") } -> err.stack should be undefined
+        // * Error.prepareStackTrace = function (err, frames)
+        //   { return 2 } -> err.stack should be 2
+        // * Error.prepareStackTrace = function (err, frames)
+        //   { err.stack = 1; return 2; } -> err.stack should be *1*
+        const preparedStack = prep(err, ensureStackTrace());
+        if (!isPrepared) {
+          stackSetter(preparedStack);
+        }
       }
+
       return currentStack;
     }
+
     function stackSetter(value) {
       currentStack = value;
       isPrepared = true;
@@ -273,7 +298,7 @@
   // patch Error types to hook with Error.captureStackTrace/prepareStackTrace
   function patchErrorTypes() {
     // save a map from wrapper to builtin native types
-    var typeToNative = new Map();
+    const typeToNative = new Map();
 
     // patch all these builtin Error types
     [
@@ -281,7 +306,7 @@
       URIError
     ].forEach(function(type) {
       function newType() {
-        var e = withStackTraceLimitOffset(
+        const e = withStackTraceLimitOffset(
           3, () => Reflect_construct(type, arguments, new.target || newType));
         // skip 3 frames: lambda, withStackTraceLimitOffset, this frame
         privateCaptureStackTrace(e, undefined, e, 3);
@@ -320,41 +345,6 @@
     Error.captureStackTrace = captureStackTrace;
   }
 
-  var mapIteratorProperty = 'MapIteratorIndicator';
-  function patchMapIterator() {
-    var originalMapMethods = [];
-    originalMapMethods.push(['entries', Map_entries]);
-    originalMapMethods.push(['values', Map_values]);
-    originalMapMethods.push(['keys', Map_keys]);
-
-    originalMapMethods.forEach(function(pair) {
-      Map.prototype[pair[0]] = function() {
-        var result = pair[1].apply(this);
-        Object_defineProperty(
-          result, mapIteratorProperty,
-          { value: true, enumerable: false, writable: false });
-        return result;
-      };
-    });
-  }
-
-  var setIteratorProperty = 'SetIteratorIndicator';
-  function patchSetIterator() {
-    var originalSetMethods = [];
-    originalSetMethods.push(['entries', Set_entries]);
-    originalSetMethods.push(['values', Set_values]);
-
-    originalSetMethods.forEach(function(pair) {
-      Set.prototype[pair[0]] = function() {
-        var result = pair[1].apply(this);
-        Object_defineProperty(
-          result, setIteratorProperty,
-          { value: true, enumerable: false, writable: false });
-        return result;
-      };
-    });
-  }
-
   // Ensure global Debug object if not already exists, and patch it.
   function ensureDebug(otherGlobal) {
     if (!global.Debug) {
@@ -367,7 +357,7 @@
     patchDebug(global.Debug);
   }
 
-  var otherProcess;
+  let otherProcess;
 
   function patchDebug(Debug) {
     if (!Debug || Debug.MakeMirror) {
@@ -430,21 +420,22 @@
     };
   }
 
-  // Simulate v8 micro tasks queue
-  var microTasks = [];
-
   function patchUtils(utils) {
-    var isUintRegex = /^(0|[1-9]\d*)$/;
+    const isUintRegex = /^(0|[1-9]\d*)$/;
 
-    function isUint(value) {
-      var result = isUintRegex.test(value);
+    function isArrayIndex(value) {
+      if (typeof value == 'symbol') {
+        return false;
+      }
+      const result = isUintRegex.test(value);
       isUintRegex.lastIndex = 0;
-      return result;
+      return result && value < 2 ** 32 - 1;
     }
+
     utils.cloneObject = function(source, target) {
       Object_getOwnPropertyNames(source).forEach(function(key) {
         try {
-          var desc = Object_getOwnPropertyDescriptor(source, key);
+          const desc = Object_getOwnPropertyDescriptor(source, key);
           if (desc.value === source) desc.value = target;
           Object_defineProperty(target, key, desc);
         } catch (e) {
@@ -452,45 +443,110 @@
         }
       });
     };
-    utils.getPropertyNames = function(a) {
-      var names = [];
-      for (var propertyName in a) {
-        if (isUint(propertyName)) {
-          names.push(Global_ParseInt(propertyName));
-        } else {
-          names.push(propertyName);
+
+    /*
+    enum PropertyFilter {
+      ALL_PROPERTIES = 0,
+      ONLY_WRITABLE = 1,
+      ONLY_ENUMERABLE = 2,
+      ONLY_CONFIGURABLE = 4,
+      SKIP_STRINGS = 8,
+      SKIP_SYMBOLS = 16
+    }
+    */
+    utils.getPropertyNames = function(obj, includePrototype, propertyFilter,
+                                      skipIndexes, keepNumbers) {
+      const names = [];
+      if (includePrototype && propertyFilter & 2) {
+        // CHAKRA-TODO: handle filtering of properties in this case
+        for (const propertyName in obj) {
+          if (isArrayIndex(propertyName)) {
+            if (skipIndexes) {
+              continue;
+            }
+            if (keepNumbers) {
+              names.push(Global_ParseInt(propertyName));
+            } else {
+              names.push(propertyName);
+            }
+          } else {
+            names.push(propertyName);
+          }
         }
+      } else if (!includePrototype) {
+        const descriptors = Object_getOwnPropertyDescriptors(obj);
+        let keys = [];
+        if (!(propertyFilter & 8)) {
+          keys = keys.concat(Object_getOwnPropertyNames(descriptors));
+        }
+        if (!(propertyFilter & 16)) {
+          keys = keys.concat(Object_getOwnPropertySymbols(descriptors));
+        }
+
+        for (const propertyName of keys) {
+          let name = propertyName;
+          if (isArrayIndex(propertyName)) {
+            if (skipIndexes) {
+              continue;
+            }
+            if (keepNumbers) {
+              name = Global_ParseInt(propertyName);
+            }
+          }
+
+          const descriptor = descriptors[propertyName];
+          if (propertyFilter & 1 && !descriptor.writable) {
+            continue;
+          }
+          if (propertyFilter & 2 && !descriptor.enumerable) {
+            continue;
+          }
+          if (propertyFilter & 4 && !descriptor.configurable) {
+            continue;
+          }
+
+          names.push(name);
+        }
+      } else {
+        // CHAKRA-TODO: handle non-enumerable prototype chain walk
       }
+
+
       return names;
     };
+
     utils.getEnumerableNamedProperties = function(obj) {
-      var props = [];
-      for (var key in obj) {
-        if (!isUint(key))
+      const props = [];
+      for (const key in obj) {
+        if (!isArrayIndex(key))
           props.push(key);
       }
+
       return props;
     };
+
     utils.getEnumerableIndexedProperties = function(obj) {
-      var props = [];
-      for (var key in obj) {
-        if (isUint(key))
+      const props = [];
+      for (const key in obj) {
+        if (isArrayIndex(key))
           props.push(key);
       }
+
       return props;
     };
+
     utils.createEnumerationIterator = function(props) {
-      var i = 0;
+      let i = 0;
       return {
         next: function() {
-          if (i === props.length)
-            return { done: true };
+          if (i === props.length) return { done: true };
           return { value: props[i++] };
         }
       };
     };
+
     utils.createPropertyDescriptorsEnumerationIterator = function(props) {
-      var i = 0;
+      let i = 0;
       return {
         next: function() {
           if (i === props.length) return { done: true };
@@ -498,44 +554,56 @@
         }
       };
     };
+
     utils.getNamedOwnKeys = function(obj) {
-      var props = [];
+      const props = [];
       Object_keys(obj).forEach(function(item) {
-        if (!isUint(item))
+        if (!isArrayIndex(item))
           props.push(item);
       });
+
       return props;
     };
+
     utils.getIndexedOwnKeys = function(obj) {
-      var props = [];
+      const props = [];
       Object_keys(obj).forEach(function(item) {
-        if (isUint(item))
+        if (isArrayIndex(item))
           props.push(item);
       });
+
       return props;
     };
+
     utils.getStackTrace = function() {
       return captureStackTrace({}, undefined)();
     };
-    utils.isMapIterator = function(value) {
-      return value[mapIteratorProperty] === true;
-    };
-    utils.isSetIterator = function(value) {
-      return value[setIteratorProperty] === true;
-    };
+
     function compareType(o, expectedType) {
       return Object_prototype_toString.call(o) === '[object ' +
             expectedType + ']';
     }
+
+    utils.isMapIterator = function(obj) {
+      return compareType(obj, 'Map Iterator');
+    };
+
+    utils.isSetIterator = function(obj) {
+      return compareType(obj, 'Set Iterator');
+    };
+
     utils.isBooleanObject = function(obj) {
       return compareType(obj, 'Boolean');
     };
+
     utils.isDate = function(obj) {
       return compareType(obj, 'Date');
     };
+
     utils.isMap = function(obj) {
       return compareType(obj, 'Map');
     };
+
     utils.isNativeError = function(obj) {
       return compareType(obj, 'Error') ||
         obj instanceof Error ||
@@ -546,111 +614,215 @@
         obj instanceof TypeError ||
         obj instanceof URIError;
     };
+
     utils.isPromise = function(obj) {
-      return compareType(obj, 'Object') && obj instanceof Promise;
+      // This won't correctly detect Promise objects from other contexts.
+      return compareType(obj, 'Promise') && obj instanceof Promise;
     };
+
     utils.isRegExp = function(obj) {
       return compareType(obj, 'RegExp');
     };
+
     utils.isAsyncFunction = function(obj) {
-      // CHAKRA-TODO
-      return false;
+      return compareType(obj, 'AsyncFunction');
     };
+
     utils.isSet = function(obj) {
       return compareType(obj, 'Set');
     };
+
     utils.isStringObject = function(obj) {
       return compareType(obj, 'String');
     };
+
     utils.isNumberObject = function(obj) {
       return compareType(obj, 'Number');
     };
+
     utils.isArgumentsObject = function(obj) {
       return compareType(obj, 'Arguments');
     };
+
     utils.isGeneratorObject = function(obj) {
       return compareType(obj, 'Generator');
     };
+
+    utils.isGeneratorFunction = function(obj) {
+      return compareType(obj, 'GeneratorFunction');
+    };
+
+    utils.isWebAssemblyCompiledModule = function(obj) {
+      return compareType(obj, 'WebAssembly.Module');
+    };
+
     utils.isWeakMap = function(obj) {
       return compareType(obj, 'WeakMap');
     };
+
     utils.isWeakSet = function(obj) {
       return compareType(obj, 'WeakSet');
     };
+
     utils.isSymbolObject = function(obj) {
       return compareType(obj, 'Symbol');
     };
+
     utils.isName = function(obj) {
       return compareType(obj, 'String') || compareType(obj, 'Symbol');
     };
+
+    utils.isSharedArrayBuffer = function(obj) {
+      return compareType(obj, 'SharedArrayBuffer');
+    };
+
+    utils.isModuleNamespaceObject = function(obj) {
+      return compareType(obj, 'Module');
+    };
+
     utils.getSymbolKeyFor = function(symbol) {
       return Symbol_keyFor(symbol);
     };
+
     utils.getSymbolFor = function(key) {
       return Symbol_for(key);
     };
+
     utils.jsonParse = function(text, reviver) {
       return JSON_parse(text, reviver);
     };
+
     utils.jsonStringify = function(value, replacer, space) {
       return JSON_stringify(value, replacer, space);
     };
+
     utils.ensureDebug = ensureDebug;
-    utils.enqueueMicrotask = function(task) {
-      microTasks.push(task);
-    };
-    utils.dequeueMicrotask = function(task) {
-      return microTasks.shift();
-    };
-    utils.isProxy = function(value) {
-      // CHAKRA-TODO: Need to add JSRT API to detect this
-      return false;
-    };
+
     utils.getPropertyAttributes = function(object, value) {
-      var descriptor = Object_getOwnPropertyDescriptor(object, value);
+      const descriptor = Object_getOwnPropertyDescriptor(object, value);
       if (descriptor === undefined) {
         return -1;
       }
 
-      var attributes = 0;
+      let attributes = 0;
       // taken from v8.h. Update if this changes in future
-      const ReadOnly = 1,
-        DontEnum = 2,
-        DontDelete = 4;
+      const ReadOnly = 1;
+      const DontEnum = 2;
+      const DontDelete = 4;
 
       if (!descriptor.writable) {
         attributes |= ReadOnly;
       }
+
       if (!descriptor.enumerable) {
         attributes |= DontEnum;
       }
+
       if (!descriptor.configurable) {
         attributes |= DontDelete;
       }
+
       return attributes;
     };
+
     utils.getOwnPropertyNames = function(obj) {
-      var ownPropertyNames = Object_getOwnPropertyNames(obj);
-      var i = 0;
+      const ownPropertyNames = Object_getOwnPropertyNames(obj);
+      let i = 0;
       while (i < ownPropertyNames.length) {
-        var item = ownPropertyNames[i];
-        if (isUint(item)) {
+        const item = ownPropertyNames[i];
+        if (isArrayIndex(item)) {
           ownPropertyNames[i] = Global_ParseInt(item);
           i++;
           continue;
         }
+
         // As per spec, getOwnPropertyNames() first include
         // numeric properties followed by non-numeric
         break;
       }
+
       return ownPropertyNames;
+    };
+
+    utils.beforeContext = function(contextGlobal) {
+      return Object_getOwnPropertyDescriptors(contextGlobal);
+    };
+
+    function descriptorDiff(a, b) {
+      if (!a || !b) {
+        return true;
+      }
+
+      // eslint-disable-next-line no-self-compare
+      if (a.value !== b.value && a.value === a.value && b.value === b.value) {
+        // allow for NaN in value
+        return true;
+      }
+      if (a.enumerable !== b.enumerable ||
+          a.configurable !== b.configurable ||
+          a.writable !== b.writable) {
+        return true;
+      }
+      if (a.get !== b.get || a.set !== b.set) {
+        return true;
+      }
+      return false;
+    }
+    utils.afterContext = function(beforeDescriptors, contextGlobal, sandbox) {
+      try {
+        const afterDescriptors =
+            Object_getOwnPropertyDescriptors(contextGlobal);
+        const beforeKeys = Object_keys(beforeDescriptors);
+        const afterKeys = Object_keys(afterDescriptors);
+
+        for (const beforeKey of beforeKeys) {
+          const beforeDescriptor = beforeDescriptors[beforeKey];
+          const afterDescriptor = afterDescriptors[beforeKey];
+          const sandboxDescriptor =
+              Object_getOwnPropertyDescriptor(sandbox, beforeKey);
+          if (!afterDescriptor) {
+            // The descriptor was removed
+            if (sandboxDescriptor) {
+              if (sandboxDescriptor.configurable) {
+                delete sandbox[beforeKey];
+              } else {
+                // TODO: How to handle this?
+              }
+            }
+          } else if (descriptorDiff(beforeDescriptor, afterDescriptor)) {
+            // Before and after differ; apply an update if possible
+            if (!sandboxDescriptor || sandboxDescriptor.configurable) {
+              Object_defineProperty(sandbox, beforeKey, afterDescriptor);
+            } else {
+              // TODO: How can we handle this case? Node tries to avoid it, but
+              //       we don't always
+            }
+          }
+        }
+
+        for (const afterKey of afterKeys) {
+          if (afterKey in beforeDescriptors) {
+            continue; // Handled above
+          }
+
+          // This property is freshly added
+          const afterDescriptor = afterDescriptors[afterKey];
+          const sandboxDescriptor =
+              Object_getOwnPropertyDescriptor(sandbox, afterKey);
+          if (!sandboxDescriptor || sandboxDescriptor.configurable) {
+            Object_defineProperty(sandbox, afterKey, afterDescriptor);
+          } else {
+            // TODO: How can we handle this?
+          }
+        }
+      } catch (e) {
+        // ignored;
+      }
     };
   }
 
   patchErrorTypes();
   patchErrorStack();
-  patchMapIterator();
-  patchSetIterator();
 
   patchUtils(keepAlive);
 });

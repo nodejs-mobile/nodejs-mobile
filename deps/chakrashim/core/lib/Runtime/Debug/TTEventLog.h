@@ -226,6 +226,7 @@ namespace TTD
         //The current mode the system is running in (and a stack of mode push/pops that we use to generate it)
         TTModeStack m_modeStack;
         TTDMode m_currentMode;
+        bool m_autoTracesEnabled;
 
         //The snapshot extractor that this log uses
         SnapshotExtractor m_snapExtractor;
@@ -276,7 +277,7 @@ namespace TTD
         template <typename T, NSLogEvents::EventKind tag>
         NSLogEvents::EventLogEntry* RecordGetInitializedEvent(T** extraData)
         {
-            AssertMsg(TTD_EVENT_PLUS_DATA_SIZE_DIRECT(sizeof(T)) == this->m_eventListVTable[(uint32)tag].DataSize, "Computed and extracted data sizes dont' match!!!");
+            AssertMsg(TTD_EVENT_PLUS_DATA_SIZE_DIRECT(sizeof(T)) == this->m_eventListVTable[(uint32)tag].DataSize, "Computed and extracted data sizes don't match!!!");
 
             NSLogEvents::EventLogEntry* res = this->m_eventList.GetNextAvailableEntry<T>();
             NSLogEvents::EventLogEntry_Initialize<tag>(res, this->GetCurrentEventTimeAndAdvance());
@@ -288,7 +289,7 @@ namespace TTD
         template <typename T, NSLogEvents::EventKind tag>
         T* RecordGetInitializedEvent_DataOnly()
         {
-            AssertMsg(TTD_EVENT_PLUS_DATA_SIZE_DIRECT(sizeof(T)) == this->m_eventListVTable[(uint32)tag].DataSize, "Computed and extracted data sizes dont' match!!!");
+            AssertMsg(TTD_EVENT_PLUS_DATA_SIZE_DIRECT(sizeof(T)) == this->m_eventListVTable[(uint32)tag].DataSize, "Computed and extracted data sizes don't match!!!");
 
             NSLogEvents::EventLogEntry* res = this->m_eventList.GetNextAvailableEntry<T>();
             NSLogEvents::EventLogEntry_Initialize<tag>(res, this->GetCurrentEventTimeAndAdvance());
@@ -335,8 +336,11 @@ namespace TTD
         void UnloadAllLogData();
 
         //Initialize the log so that it is ready to perform TTD (record or replay) and set into the correct global mode
-        void InitForTTDRecord();
+        void InitForTTDRecord(bool debug);
         void InitForTTDReplay(TTDataIOInfo& iofp, const char* parseUri, size_t parseUriLength, bool debug);
+
+        //If the last statement of this log is an inner loop emit event put the data in lsi otherwise leave it as the default value
+        void LoadLastSourceLineInfo(TTInnerLoopLastStatementInfo& lsi, TTD::TTDebuggerSourceLocation& dsl) const;
 
         //reset the bottom (global) mode with the specific value
         void SetGlobalMode(TTDMode m);
@@ -361,9 +365,6 @@ namespace TTD
 
         //Just check if the debug mode flag has been set (don't check any active or suppressed properties)
         bool IsDebugModeFlagSet() const;
-
-        //A special check for to see if we want to push the supression flag for getter exection
-        bool ShouldDoGetterInvocationSupression() const;
 
         //Add a property record to our pin set
         void AddPropertyRecord(const Js::PropertyRecord* record);
@@ -392,6 +393,12 @@ namespace TTD
 
         //Replay a event that writes the log to a given uri
         void ReplayEmitLogEvent();
+
+        //Record that we are accessing the TTDFetchAutoTraceStatus and what the value is
+        void RecordTTDFetchAutoTraceStatusEvent(bool status);
+
+        //Replay that we are accessing the TTDFetchAutoTraceStatus
+        bool ReplayTTDFetchAutoTraceStatusLogEvent();
 
         //Log a time that is fetched during date operations
         void RecordDateTimeEvent(double time);
@@ -430,11 +437,11 @@ namespace TTD
         bool ReplayWeakCollectionContainsEvent();
 
         //Log a value event for return from an external call
-        NSLogEvents::EventLogEntry* RecordExternalCallEvent(Js::JavascriptFunction* func, int32 rootDepth, uint32 argc, Js::Var* argv, bool checkExceptions);
+        NSLogEvents::EventLogEntry* RecordExternalCallEvent(Js::JavascriptFunction* func, int32 rootDepth, const Js::Arguments& args, bool checkExceptions);
         void RecordExternalCallEvent_Complete(Js::JavascriptFunction* efunction, NSLogEvents::EventLogEntry* evt, Js::Var result);
 
         //replay an external return event (which should be the current event)
-        void ReplayExternalCallEvent(Js::JavascriptFunction* function, uint32 argc, Js::Var* argv, Js::Var* result);
+        void ReplayExternalCallEvent(Js::JavascriptFunction* function, const Js::Arguments& args, Js::Var* result);
 
         NSLogEvents::EventLogEntry* RecordEnqueueTaskEvent(Js::Var taskVar);
         void RecordEnqueueTaskEvent_Complete(NSLogEvents::EventLogEntry* evt);
@@ -543,11 +550,11 @@ namespace TTD
 
         //Record object allocate operations
         void RecordJsRTAllocateBasicObject(TTDJsRTActionResultAutoRecorder& actionPopper);
-        void RecordJsRTAllocateExternalObject(TTDJsRTActionResultAutoRecorder& actionPopper);
+        void RecordJsRTAllocateExternalObject(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var prototype);
         void RecordJsRTAllocateBasicArray(TTDJsRTActionResultAutoRecorder& actionPopper, uint32 length);
         void RecordJsRTAllocateArrayBuffer(TTDJsRTActionResultAutoRecorder& actionPopper, uint32 size);
         void RecordJsRTAllocateExternalArrayBuffer(TTDJsRTActionResultAutoRecorder& actionPopper, byte* buff, uint32 size);
-        void RecordJsRTAllocateFunction(TTDJsRTActionResultAutoRecorder& actionPopper, bool isNamed, Js::Var optName);
+        void RecordJsRTAllocateFunction(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var optMetadata);
 
         //Record GetAndClearException
         void RecordJsRTHostExitProcess(TTDJsRTActionResultAutoRecorder& actionPopper, int32 exitCode);
@@ -560,6 +567,7 @@ namespace TTD
         void RecordJsRTHasOwnProperty(TTDJsRTActionResultAutoRecorder& actionPopper, const Js::PropertyRecord* pRecord, Js::Var var);
         void RecordJsRTInstanceOf(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var object, Js::Var constructor);
         void RecordJsRTEquals(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var var1, Js::Var var2, bool doStrict);
+        void RecordJsRTLessThan(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var var1, Js::Var var2, bool allowsEqual);
 
         //Record getters with native results
         void RecordJsRTGetPropertyIdFromSymbol(TTDJsRTActionResultAutoRecorder& actionPopper, Js::Var sym);
@@ -601,7 +609,13 @@ namespace TTD
         ////////////////////////////////
         //Emit code and support
 
-        void EmitLog(const char* emitUri, size_t emitUriLength);
+        void InnerLoopEmitLog(const TTDebuggerSourceLocation& writeLocation, const char* emitUri, size_t emitUriLength);
+
+        bool CanWriteInnerLoopTrace() const;
+        void SetAutoTraceEnabled(bool enabled);
+        bool GetAutoTraceEnabled() const;
+
+        void EmitLog(const char* emitUri, size_t emitUriLength, NSLogEvents::EventLogEntry* optInnerLoopEvent = nullptr);
         void ParseLogInto(TTDataIOInfo& iofp, const char* parseUri, size_t parseUriLength);
     };
 

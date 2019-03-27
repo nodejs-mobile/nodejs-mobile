@@ -28,7 +28,8 @@ struct Cloner
         lowerer(lowerer),
         instrFirst(nullptr),
         instrLast(nullptr),
-        fRetargetClonedBranch(FALSE)
+        fRetargetClonedBranch(FALSE),
+        clonedInstrGetOrigArgSlotSym(false)
     {
     }
 
@@ -48,13 +49,13 @@ struct Cloner
     void Finish();
     void RetargetClonedBranches();
 
+    JitArenaAllocator *alloc;
     HashTable<StackSym*> *symMap;
     HashTable<IR::LabelInstr*> *labelMap;
     Lowerer * lowerer;
     IR::Instr * instrFirst;
     IR::Instr * instrLast;
     BOOL fRetargetClonedBranch;
-    JitArenaAllocator *alloc;
     bool clonedInstrGetOrigArgSlotSym;
 };
 
@@ -186,6 +187,7 @@ public:
     bool HasArgumentSlot() const { return this->GetInParamsCount() != 0 && !this->IsLoopBody(); }
     bool IsLoopBody() const { return m_workItem->IsLoopBody(); }
     bool IsLoopBodyInTry() const;
+    bool IsLoopBodyInTryFinally() const;
     bool CanAllocInPreReservedHeapPageSegment();
     void SetDoFastPaths();
     bool DoFastPaths() const { Assert(this->hasCalledSetDoFastPaths); return this->m_doFastPaths; }
@@ -208,7 +210,11 @@ public:
 
     bool DoInline() const
     {
+#ifdef _M_IX86
         return DoGlobOpt() && !GetTopFunc()->HasTry();
+#else
+        return DoGlobOpt();
+#endif
     }
 
     bool DoOptimizeTry() const
@@ -340,23 +346,15 @@ public:
 static const uint32 c_debugFillPattern4 = 0xcececece;
 static const unsigned __int64 c_debugFillPattern8 = 0xcececececececece;
 
-#if defined(_M_IX86) || defined (_M_ARM)
+#if defined(TARGET_32)
     static const uint32 c_debugFillPattern = c_debugFillPattern4;
-#elif defined(_M_X64) || defined(_M_ARM64)
+#elif defined(TARGET_64)
     static const unsigned __int64 c_debugFillPattern = c_debugFillPattern8;
 #else
 #error unsupported platform
 #endif
 
 #endif
-
-#ifdef ENABLE_SIMDJS
-    bool IsSIMDEnabled() const
-    {
-        return GetScriptContextInfo()->IsSIMDEnabled();
-    }
-#endif
-
     uint32 GetInstrCount();
     inline Js::ScriptContext* GetScriptContext() const
     {
@@ -366,8 +364,8 @@ static const unsigned __int64 c_debugFillPattern8 = 0xcececececececece;
     }
     void NumberInstrs();
     bool IsTopFunc() const { return this->parentFunc == nullptr; }
-    Func const * GetTopFunc() const;
-    Func * GetTopFunc();
+    Func const * GetTopFunc() const { return this->topFunc; }
+    Func * GetTopFunc() { return this->topFunc; }
 
     void SetFirstArgOffset(IR::Instr* inlineeStart);
 
@@ -451,8 +449,10 @@ static const unsigned __int64 c_debugFillPattern8 = 0xcececececececece;
     void EnsureSingleTypeGuards();
     Js::JitTypePropertyGuard* GetOrCreateSingleTypeGuard(intptr_t typeAddr);
 
-    void  EnsureEquivalentTypeGuards();
+    void EnsureEquivalentTypeGuards();
+    void InitializeEquivalentTypeGuard(Js::JitEquivalentTypeGuard * guard);
     Js::JitEquivalentTypeGuard * CreateEquivalentTypeGuard(JITTypeHolder type, uint32 objTypeSpecFldId);
+    Js::JitPolyEquivalentTypeGuard * CreatePolyEquivalentTypeGuard(uint32 objTypeSpecFldId);
 
     void ThrowIfScriptClosed();
     void EnsurePropertyGuardsByPropertyId();
@@ -687,6 +687,7 @@ public:
     uint32              inlineDepth;
     uint32              postCallByteCodeOffset;
     Js::RegSlot         returnValueRegSlot;
+    Js::RegSlot         firstIRTemp;
     Js::ArgSlot         actualCount;
     int32               firstActualStackOffset;
     uint32              tryCatchNestingLevel;
@@ -714,7 +715,6 @@ public:
     StackSym *          tempSymBool;
     uint32              loopCount;
     Js::ProfileId       callSiteIdInParentFunc;
-    bool                m_isLeaf: 1;  // This is set in the IRBuilder and might be inaccurate after inlining
     bool                m_hasCalls: 1; // This is more accurate compared to m_isLeaf
     bool                m_hasInlineArgsOpt : 1;
     bool                m_doFastPaths : 1;
@@ -725,13 +725,14 @@ public:
     bool                hasThrow : 1;
     bool                hasUnoptimizedArgumentsAccess : 1; // True if there are any arguments access beyond the simple case of this.apply pattern
     bool                m_canDoInlineArgsOpt : 1;
-    bool                applyTargetInliningRemovedArgumentsAccess :1;
+    bool                applyTargetInliningRemovedArgumentsAccess : 1;
     bool                isGetterSetter : 1;
     const bool          isInlinedConstructor: 1;
     bool                hasImplicitCalls: 1;
     bool                hasTempObjectProducingInstr:1; // At least one instruction which can produce temp object
     bool                isTJLoopBody : 1;
     bool                isFlowGraphValid : 1;
+    bool                legalizePostRegAlloc : 1;
 #if DBG
     bool                hasCalledSetDoFastPaths:1;
     bool                isPostLower:1;
@@ -739,6 +740,15 @@ public:
     bool                isPostPeeps:1;
     bool                isPostLayout:1;
     bool                isPostFinalLower:1;
+
+    struct InstrByteCodeRegisterUses
+    {
+        Js::OpCode capturingOpCode;
+        BVSparse<JitArenaAllocator>* bv;
+    };
+    typedef JsUtil::BaseDictionary<uint32, InstrByteCodeRegisterUses, JitArenaAllocator> ByteCodeRegisterUses;
+    ByteCodeRegisterUses* byteCodeRegisterUses = nullptr;
+    BVSparse<JitArenaAllocator>* GetByteCodeOffsetUses(uint offset) const;
 
     typedef JsUtil::Stack<Js::Phase> CurrentPhasesStack;
     CurrentPhasesStack  currentPhases;
@@ -760,19 +770,18 @@ public:
     bool                DoMaintainByteCodeOffset() const { return this->HasByteCodeOffset() && this->GetTopFunc()->maintainByteCodeOffset; }
     void                StopMaintainByteCodeOffset() { this->GetTopFunc()->maintainByteCodeOffset = false; }
     Func *              GetParentFunc() const { return parentFunc; }
-    uint                GetMaxInlineeArgOutCount() const { return maxInlineeArgOutCount; }
-    void                UpdateMaxInlineeArgOutCount(uint inlineeArgOutCount);
+    uint                GetMaxInlineeArgOutSize() const { return this->maxInlineeArgOutSize; }
+    void                UpdateMaxInlineeArgOutSize(uint inlineeArgOutSize);
 #if DBG_DUMP
     ptrdiff_t           m_codeSize;
 #endif
     bool                GetHasCalls() const { return this->m_hasCalls; }
-    void                SetHasCalls() { this->m_hasCalls = true; }
     void                SetHasCallsOnSelfAndParents()
     {
                         Func *curFunc = this;
                         while (curFunc)
                         {
-                            curFunc->SetHasCalls();
+                            curFunc->m_hasCalls = true;
                             curFunc = curFunc->GetParentFunc();
                         }
     }
@@ -837,6 +846,8 @@ public:
                         }
     }
 
+    bool                ShouldLegalizePostRegAlloc() const { return topFunc->legalizePostRegAlloc; }
+
     bool                GetApplyTargetInliningRemovedArgumentsAccess() const { return this->applyTargetInliningRemovedArgumentsAccess;}
     void                SetApplyTargetInliningRemovedArgumentsAccess() { this->applyTargetInliningRemovedArgumentsAccess = true;}
 
@@ -869,6 +880,19 @@ public:
         const auto top = this->GetTopFunc();
         return this->HasProfileInfo() && this->GetWeakFuncRef() && !(top->HasTry() && !top->DoOptimizeTry()) &&
             top->DoGlobOpt() && !PHASE_OFF(Js::LoopFastPathPhase, top);
+    }
+
+    static Js::OpCode GetLoadOpForType(IRType type)
+    {
+        if (type == TyVar || IRType_IsFloat(type))
+        {
+            return Js::OpCode::Ld_A;
+        }
+        else
+        {
+            Assert(IRType_IsNativeInt(type));
+            return Js::OpCode::Ld_I4;
+        }
     }
 
     static Js::BuiltinFunction GetBuiltInIndex(IR::Opnd* opnd)
@@ -983,10 +1007,10 @@ public:
 #if defined(_M_ARM32_OR_ARM64)
     int32               GetInlineeArgumentStackSize()
     {
-        int32 count = this->GetMaxInlineeArgOutCount();
-        if (count)
+        int32 size = this->GetMaxInlineeArgOutSize();
+        if (size)
         {
-            return ((count + 1) * MachPtr); // +1 for the dedicated zero out argc slot
+            return size + MachPtr; // +1 for the dedicated zero out argc slot
         }
         return 0;
     }
@@ -1012,9 +1036,10 @@ private:
 #ifdef PROFILE_EXEC
     Js::ScriptContextProfiler *const m_codeGenProfiler;
 #endif
+    Func * const        topFunc;
     Func * const        parentFunc;
     StackSym *          m_inlineeFrameStartSym;
-    uint                maxInlineeArgOutCount;
+    uint                maxInlineeArgOutSize;
     const bool          m_isBackgroundJIT;
     bool                hasInstrNumber;
     bool                maintainByteCodeOffset;
@@ -1094,6 +1119,26 @@ private:
     bool dump;
     bool isPhaseComplete;
 };
+
+class AutoRestoreLegalize
+{
+public:
+    AutoRestoreLegalize(Func * func, bool val) : 
+        m_func(func->GetTopFunc()), 
+        m_originalValue(m_func->legalizePostRegAlloc)
+    {
+        m_func->legalizePostRegAlloc = val;
+    }
+
+    ~AutoRestoreLegalize()
+    {
+        m_func->legalizePostRegAlloc = m_originalValue;
+    }
+private:
+    Func * m_func;
+    bool m_originalValue;
+};
+
 #define BEGIN_CODEGEN_PHASE(func, phase) { AutoCodeGenPhase __autoCodeGen(func, phase);
 #define END_CODEGEN_PHASE(func, phase) __autoCodeGen.EndPhase(func, phase, true, true); }
 #define END_CODEGEN_PHASE_NO_DUMP(func, phase) __autoCodeGen.EndPhase(func, phase, false, true); }

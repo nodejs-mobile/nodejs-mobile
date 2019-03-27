@@ -1,4 +1,3 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
@@ -6,10 +5,6 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const http2 = require('http2');
 const assert = require('assert');
-
-const {
-  HTTP2_HEADER_CONTENT_TYPE
-} = http2.constants;
 
 let pathToTest = process.cwd();
 if (common.isAndroid) {
@@ -20,13 +15,13 @@ if (common.isAndroid) {
 const server = http2.createServer();
 server.on('stream', (stream) => {
   stream.respondWithFile(pathToTest, {
-    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+    'content-type': 'text/plain'
   }, {
     onError(err) {
       common.expectsError({
         code: 'ERR_HTTP2_SEND_FILE',
         type: Error,
-        message: 'Only regular files can be sent'
+        message: 'Directories cannot be sent'
       })(err);
 
       stream.respond({ ':status': 404 });
@@ -45,7 +40,7 @@ server.listen(0, () => {
   }));
   req.on('data', common.mustNotCall());
   req.on('end', common.mustCall(() => {
-    client.destroy();
+    client.close();
     server.close();
   }));
   req.end();

@@ -28,20 +28,29 @@
         PAIR(EventWriteJSCRIPT_ ## e, args);    \
     }
 
+#define IS_GCETW_Enabled(e) \
+    (IsMemProtectMode() ? EventEnabledMEMPROTECT_##e() : EventEnabledJSCRIPT_##e())
+
 #define JS_ETW_INTERNAL(s) s
 #define EDGE_ETW_INTERNAL(s) s
-#else
+#else  // !NTBUILD
 #define GCETW(e, args)                          \
     PAIR(EventWriteJSCRIPT_ ## e, args);
+
+#define IS_GCETW_Enabled(e)  EventEnabledJSCRIPT_##e()
 
 #define GCETW_INTERNAL(e, args)
 #define JS_ETW_INTERNAL(s)
 #define EDGE_ETW_INTERNAL(s)
-#endif
+#endif  // !NTBUILD
 
 #define JS_ETW(s) s
 #define IS_JS_ETW(s) s
 
+#ifdef ENABLE_JS_LTTNG
+#include "jscriptEtw.h"
+
+#else
 // C-style callback
 extern "C" {
     void EtwCallback(
@@ -65,11 +74,17 @@ CompileAssert(false)
 #define MCGEN_PRIVATE_ENABLE_CALLBACK_V2(SourceId, ControlCode, Level, MatchAnyKeyword, MatchAllKeyword, FilterData, CallbackContext) \
        EtwCallback(ControlCode, CallbackContext)
 
+// Work-around for a bug in the instrumentationevents generator
+#pragma prefast(push)
+#pragma prefast(disable:__WARNING_USING_UNINIT_VAR, "The ETW data generated from the manifest includes a default null function which uses unintialized memory.")
+
 #include <microsoft-scripting-chakra-instrumentationevents.h>
 #ifdef NTBUILD
 #include <ieresp_mshtml.h>
 #include <microsoft-scripting-jscript9.internalevents.h>
 #endif
+
+#pragma prefast(pop)
 
 //
 // Encapsulates base routines to initialize ETW tracing in the module
@@ -82,9 +97,11 @@ public:
 
     static bool s_registered;
 };
+#endif // ENABLE_JS_LTTNG
 
 #else
 #define GCETW(e, ...)
+#define IS_GCETW_Enabled(e)  false
 #define JS_ETW(s)
 #define IS_JS_ETW(s) (false)
 #define GCETW_INTERNAL(e, args)

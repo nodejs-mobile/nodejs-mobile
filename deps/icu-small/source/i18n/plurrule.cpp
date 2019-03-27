@@ -22,7 +22,6 @@
 #include "charstr.h"
 #include "cmemory.h"
 #include "cstring.h"
-#include "digitlst.h"
 #include "hash.h"
 #include "locutil.h"
 #include "mutex.h"
@@ -35,12 +34,14 @@
 #include "uvectr32.h"
 #include "sharedpluralrules.h"
 #include "unifiedcache.h"
-#include "digitinterval.h"
-#include "visibledigits.h"
+#include "number_decimalquantity.h"
 
 #if !UCONFIG_NO_FORMATTING
 
 U_NAMESPACE_BEGIN
+
+using namespace icu::pluralimpl;
+using icu::number::impl::DecimalQuantity;
 
 static const UChar PLURAL_KEYWORD_OTHER[]={LOW_O,LOW_T,LOW_H,LOW_E,LOW_R,0};
 static const UChar PLURAL_DEFAULT_RULE[]={LOW_O,LOW_T,LOW_H,LOW_E,LOW_R,COLON,SPACE,LOW_N,0};
@@ -248,41 +249,13 @@ PluralRules::select(double number) const {
 }
 
 UnicodeString
-PluralRules::select(const Formattable& obj, const NumberFormat& fmt, UErrorCode& status) const {
-    if (U_SUCCESS(status)) {
-        const DecimalFormat *decFmt = dynamic_cast<const DecimalFormat *>(&fmt);
-        if (decFmt != NULL) {
-            VisibleDigitsWithExponent digits;
-            decFmt->initVisibleDigitsWithExponent(obj, digits, status);
-            if (U_SUCCESS(status)) {
-                return select(digits);
-            }
-        } else {
-            double number = obj.getDouble(status);
-            if (U_SUCCESS(status)) {
-                return select(number);
-            }
-        }
-    }
-    return UnicodeString();
-}
-
-UnicodeString
-PluralRules::select(const FixedDecimal &number) const {
+PluralRules::select(const IFixedDecimal &number) const {
     if (mRules == NULL) {
         return UnicodeString(TRUE, PLURAL_DEFAULT_RULE, -1);
     }
     else {
         return mRules->select(number);
     }
-}
-
-UnicodeString
-PluralRules::select(const VisibleDigitsWithExponent &number) const {
-    if (number.getExponent() != NULL) {
-        return UnicodeString(TRUE, PLURAL_DEFAULT_RULE, -1);
-    }
-    return select(FixedDecimal(number.getMantissa()));
 }
 
 
@@ -783,15 +756,17 @@ AndConstraint::~AndConstraint() {
 
 
 UBool
-AndConstraint::isFulfilled(const FixedDecimal &number) {
+AndConstraint::isFulfilled(const IFixedDecimal &number) {
     UBool result = TRUE;
     if (digitsType == none) {
         // An empty AndConstraint, created by a rule with a keyword but no following expression.
         return TRUE;
     }
-    double n = number.get(digitsType);  // pulls n | i | v | f value for the number.
-                                        // Will always be positive.
-                                        // May be non-integer (n option only)
+
+    PluralOperand operand = tokenTypeToPluralOperand(digitsType);
+    double n = number.getPluralOperand(operand);     // pulls n | i | v | f value for the number.
+                                                     // Will always be positive.
+                                                     // May be non-integer (n option only)
     do {
         if (integerOnly && n != uprv_floor(n)) {
             result = FALSE;
@@ -873,7 +848,7 @@ OrConstraint::add()
 }
 
 UBool
-OrConstraint::isFulfilled(const FixedDecimal &number) {
+OrConstraint::isFulfilled(const IFixedDecimal &number) {
     OrConstraint* orRule=this;
     UBool result=FALSE;
 
@@ -914,8 +889,8 @@ RuleChain::~RuleChain() {
 
 
 UnicodeString
-RuleChain::select(const FixedDecimal &number) const {
-    if (!number.isNanOrInfinity) {
+RuleChain::select(const IFixedDecimal &number) const {
+    if (!number.isNaN() && !number.isInfinite()) {
         for (const RuleChain *rules = this; rules != NULL; rules = rules->fNext) {
              if (rules->ruleHeader->isFulfilled(number)) {
                  return rules->fKeyword;
@@ -1405,13 +1380,22 @@ PluralKeywordEnumeration::count(UErrorCode& /*status*/) const {
 PluralKeywordEnumeration::~PluralKeywordEnumeration() {
 }
 
-FixedDecimal::FixedDecimal(const VisibleDigits &digits) {
-    digits.getFixedDecimal(
-            source, intValue, decimalDigits,
-            decimalDigitsWithoutTrailingZeros,
-            visibleDecimalDigitCount, hasIntegerValue);
-    isNegative = digits.isNegative();
-    isNanOrInfinity = digits.isNaNOrInfinity();
+PluralOperand tokenTypeToPluralOperand(tokenType tt) {
+    switch(tt) {
+    case tVariableN:
+        return PLURAL_OPERAND_N;
+    case tVariableI:
+        return PLURAL_OPERAND_I;
+    case tVariableF:
+        return PLURAL_OPERAND_F;
+    case tVariableV:
+        return PLURAL_OPERAND_V;
+    case tVariableT:
+        return PLURAL_OPERAND_T;
+    default:
+        U_ASSERT(FALSE);  // unexpected.
+        return PLURAL_OPERAND_N;
+    }
 }
 
 FixedDecimal::FixedDecimal(double n, int32_t v, int64_t f) {
@@ -1451,14 +1435,14 @@ FixedDecimal::FixedDecimal() {
 FixedDecimal::FixedDecimal(const UnicodeString &num, UErrorCode &status) {
     CharString cs;
     cs.appendInvariantChars(num, status);
-    DigitList dl;
-    dl.set(cs.toStringPiece(), status);
+    DecimalQuantity dl;
+    dl.setToDecNumber(cs.toStringPiece(), status);
     if (U_FAILURE(status)) {
         init(0, 0, 0);
         return;
     }
     int32_t decimalPoint = num.indexOf(DOT);
-    double n = dl.getDouble();
+    double n = dl.toDouble();
     if (decimalPoint == -1) {
         init(n, 0, 0);
     } else {
@@ -1474,10 +1458,13 @@ FixedDecimal::FixedDecimal(const FixedDecimal &other) {
     decimalDigits = other.decimalDigits;
     decimalDigitsWithoutTrailingZeros = other.decimalDigitsWithoutTrailingZeros;
     intValue = other.intValue;
-    hasIntegerValue = other.hasIntegerValue;
+    _hasIntegerValue = other._hasIntegerValue;
     isNegative = other.isNegative;
-    isNanOrInfinity = other.isNanOrInfinity;
+    _isNaN = other._isNaN;
+    _isInfinite = other._isInfinite;
 }
+
+FixedDecimal::~FixedDecimal() = default;
 
 
 void FixedDecimal::init(double n) {
@@ -1489,15 +1476,16 @@ void FixedDecimal::init(double n) {
 void FixedDecimal::init(double n, int32_t v, int64_t f) {
     isNegative = n < 0.0;
     source = fabs(n);
-    isNanOrInfinity = uprv_isNaN(source) || uprv_isPositiveInfinity(source);
-    if (isNanOrInfinity) {
+    _isNaN = uprv_isNaN(source);
+    _isInfinite = uprv_isInfinite(source);
+    if (_isNaN || _isInfinite) {
         v = 0;
         f = 0;
         intValue = 0;
-        hasIntegerValue = FALSE;
+        _hasIntegerValue = FALSE;
     } else {
         intValue = (int64_t)source;
-        hasIntegerValue = (source == intValue);
+        _hasIntegerValue = (source == intValue);
     }
 
     visibleDecimalDigitCount = v;
@@ -1610,17 +1598,33 @@ void FixedDecimal::adjustForMinFractionDigits(int32_t minFractionDigits) {
 }
 
 
-double FixedDecimal::get(tokenType operand) const {
+double FixedDecimal::getPluralOperand(PluralOperand operand) const {
     switch(operand) {
-        case tVariableN: return source;
-        case tVariableI: return (double)intValue;
-        case tVariableF: return (double)decimalDigits;
-        case tVariableT: return (double)decimalDigitsWithoutTrailingZeros;
-        case tVariableV: return visibleDecimalDigitCount;
+        case PLURAL_OPERAND_N: return source;
+        case PLURAL_OPERAND_I: return static_cast<double>(intValue);
+        case PLURAL_OPERAND_F: return static_cast<double>(decimalDigits);
+        case PLURAL_OPERAND_T: return static_cast<double>(decimalDigitsWithoutTrailingZeros);
+        case PLURAL_OPERAND_V: return visibleDecimalDigitCount;
         default:
              U_ASSERT(FALSE);  // unexpected.
              return source;
     }
+}
+
+bool FixedDecimal::isNaN() const {
+    return _isNaN;
+}
+
+bool FixedDecimal::isInfinite() const {
+    return _isInfinite;
+}
+
+bool FixedDecimal::hasIntegerValue() const {
+    return _hasIntegerValue;
+}
+
+bool FixedDecimal::isNanOrInfinity() const {
+    return _isNaN || _isInfinite;
 }
 
 int32_t FixedDecimal::getVisibleFractionDigitCount() const {
@@ -1665,7 +1669,7 @@ const char *PluralAvailableLocalesEnumeration::next(int32_t *resultLength, UErro
     }
     const char *result = ures_getKey(fRes);
     if (resultLength != NULL) {
-        *resultLength = uprv_strlen(result);
+        *resultLength = static_cast<int32_t>(uprv_strlen(result));
     }
     return result;
 }

@@ -1,25 +1,25 @@
 'use strict';
-const common = require('../common');
+require('../common');
 
 const assert = require('assert');
 const symbol = Symbol('sym');
-const errRegExp = common.engineSpecificMessage({
-  v8: /^TypeError: Cannot convert a Symbol value to a string$/,
-  chakra: /^TypeError: Object doesn't support property or method 'ToString'$/
-});
 
 // Verify that getting via a symbol key returns undefined.
 assert.strictEqual(process.env[symbol], undefined);
 
 // Verify that assigning via a symbol key throws.
+// The message depends on the JavaScript engine and so will be different between
+// different JavaScript engines. Confirm that the `Error` is a `TypeError` only.
 assert.throws(() => {
   process.env[symbol] = 42;
-}, errRegExp);
+}, TypeError);
 
 // Verify that assigning a symbol value throws.
+// The message depends on the JavaScript engine and so will be different between
+// different JavaScript engines. Confirm that the `Error` is a `TypeError` only.
 assert.throws(() => {
   process.env.foo = symbol;
-}, errRegExp);
+}, TypeError);
 
 // Verify that using a symbol with the in operator returns false.
 assert.strictEqual(symbol in process.env, false);
@@ -28,4 +28,4 @@ assert.strictEqual(symbol in process.env, false);
 assert.strictEqual(delete process.env[symbol], true);
 
 // Checks that well-known symbols like `Symbol.toStringTag` won’t throw.
-assert.doesNotThrow(() => Object.prototype.toString.call(process.env));
+Object.prototype.toString.call(process.env);

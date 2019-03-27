@@ -29,6 +29,7 @@ public:
     virtual intptr_t GetNegativeZeroAddr() const override;
     virtual intptr_t GetNumberTypeStaticAddr() const override;
     virtual intptr_t GetStringTypeStaticAddr() const override;
+    virtual intptr_t GetSymbolTypeStaticAddr() const override;
     virtual intptr_t GetObjectTypeAddr() const override;
     virtual intptr_t GetObjectHeaderInlinedTypeAddr() const override;
     virtual intptr_t GetRegexTypeAddr() const override;
@@ -47,17 +48,18 @@ public:
     virtual intptr_t GetNumberAllocatorAddr() const override;
     virtual intptr_t GetRecyclerAddr() const override;
     virtual bool GetRecyclerAllowNativeCodeBumpAllocation() const override;
-#ifdef ENABLE_SIMDJS
-    virtual bool IsSIMDEnabled() const override;
-#endif
     virtual bool IsPRNGSeeded() const override;
     virtual bool IsClosed() const override;
     virtual intptr_t GetBuiltinFunctionsBaseAddr() const override;
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
     virtual intptr_t GetDebuggingFlagsAddr() const override;
     virtual intptr_t GetDebugStepTypeAddr() const override;
     virtual intptr_t GetDebugFrameAddressAddr() const override;
     virtual intptr_t GetDebugScriptIdWhenSetAddr() const override;
+#endif
+
+    virtual intptr_t GetChakraLibAddr() const override;
 
     virtual intptr_t GetAddr() const override;
 
@@ -80,9 +82,13 @@ public:
     void UpdateGlobalObjectThisAddr(intptr_t globalThis);
     OOPEmitBufferManager * GetEmitBufferManager(bool asmJsManager);
     void DecommitEmitBufferManager(bool asmJsManager);
-    Js::ScriptContextProfiler *  GetCodeGenProfiler() const;
+#ifdef PROFILE_EXEC
+    Js::ScriptContextProfiler*  GetCodeGenProfiler(_In_ PageAllocator* pageAllocator);
+    Js::ScriptContextProfiler* GetFirstCodeGenProfiler() const;
+#endif
     ServerThreadContext* GetThreadContext() { return threadContextHolder.threadContextInfo; }
 
+    OOPCodeGenAllocators * GetCodeGenAllocators();
     ArenaAllocator * GetSourceCodeArena();
     void Close();
     void AddRef();
@@ -91,7 +97,8 @@ public:
 private:
     JITDOMFastPathHelperMap * m_domFastPathHelperMap;
 #ifdef PROFILE_EXEC
-    Js::ScriptContextProfiler * m_codeGenProfiler;
+    Js::ScriptContextProfiler * codeGenProfiler;
+    CriticalSection profilerCS;
 #endif
     ArenaAllocator m_sourceCodeArena;
 
@@ -102,6 +109,8 @@ private:
     intptr_t m_globalThisAddr;
 
     uint m_refCount;
+
+    OOPCodeGenAllocators m_codeGenAlloc;
 
     bool m_isPRNGSeeded;
     bool m_isClosed;

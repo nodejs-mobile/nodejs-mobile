@@ -31,19 +31,6 @@ enum
     fidKwdRsvd      = 0x0001,     // the keyword is a reserved word
     fidKwdFutRsvd   = 0x0002,     // a future reserved word, but only in strict mode
 
-    // Flags to identify tracked aliases of "eval"
-    fidEval         = 0x0008,
-    // Flags to identify tracked aliases of "let"
-    fidLetOrConst   = 0x0010,     // ID has previously been used in a block-scoped declaration
-
-    // This flag is used by the Parser CountDcls and FillDcls methods.
-    // CountDcls sets the bit as it walks through the var decls so that
-    // it can skip duplicates. FillDcls clears the bit as it walks through
-    // again to skip duplicates.
-    fidGlobalDcl    = 0x2000,
-
-    fidUsed         = 0x4000,  // name referenced by source code
-
     fidModuleExport = 0x8000    // name is module export
 };
 
@@ -185,13 +172,7 @@ public:
         this->isUsedInLdElem = is;
     }
 
-    static void TrySetIsUsedInLdElem(ParseNode * pnode)
-    {
-        if (pnode && pnode->nop == knopStr)
-        {
-            pnode->sxPid.pid->SetIsUsedInLdElem(true);
-        }
-    }
+    static void TrySetIsUsedInLdElem(ParseNode * pnode);
 
     bool IsSingleAssignment()
     {
@@ -305,7 +286,6 @@ public:
                 return newRef;
             }
 
-            Assert(ref->prev->id <= ref->id);
             prevRef = ref;
             ref = ref->prev;
         }
@@ -314,14 +294,14 @@ public:
     Js::PropertyId GetPropertyId() const { return m_propertyId; }
     void SetPropertyId(Js::PropertyId id) { m_propertyId = id; }
 
-    void SetIsEval() { m_grfid |= fidEval; }
-    BOOL GetIsEval() const { return m_grfid & fidEval; }
-
-    void SetIsLetOrConst() { m_grfid |= fidLetOrConst; }
-    BOOL GetIsLetOrConst() const { return m_grfid & fidLetOrConst; }
-
     void SetIsModuleExport() { m_grfid |= fidModuleExport; }
     BOOL GetIsModuleExport() const { return m_grfid & fidModuleExport; }
+
+    static tokens TkFromNameLen(uint32 luHash, _In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode, ushort * pgrfid, ushort * ptk);
+
+#if DBG
+    static tokens TkFromNameLen(_In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode);
+#endif
 };
 
 
@@ -330,13 +310,17 @@ public:
 class HashTbl
 {
 public:
-    static HashTbl * Create(uint cidHash);
-
-    void Release(void)
+    HashTbl(uint cidHash = DEFAULT_HASH_TABLE_SIZE)
     {
-        delete this;  // invokes overrided operator delete
+        AssertCanHandleOutOfMemory();
+        m_prgpidName = nullptr;
+        memset(&m_rpid, 0, sizeof(m_rpid));
+        if (!Init(cidHash))
+        {
+            Js::Throw::OutOfMemory();
+        }
     }
-
+    ~HashTbl(void) {}
 
     BOOL TokIsBinop(tokens tk, int *popl, OpCode *pnop)
     {
@@ -389,7 +373,6 @@ public:
 #endif
         );
 
-    tokens TkFromNameLen(_In_reads_(cch) LPCOLESTR prgch, uint32 cch, bool isStrictMode);
     NoReleaseAllocator* GetAllocator() {return &m_noReleaseAllocator;}
 
     bool Contains(_In_reads_(cch) LPCOLESTR prgch, int32 cch);
@@ -407,24 +390,14 @@ public:
     }
 
 private:
+    static const uint DEFAULT_HASH_TABLE_SIZE = 256;
+
     NoReleaseAllocator m_noReleaseAllocator;            // to allocate identifiers
     Ident ** m_prgpidName;        // hash table for names
 
     uint32 m_luMask;                // hash mask
     uint32 m_luCount;              // count of the number of entires in the hash table    
     IdentPtr m_rpid[tkLimKwd];
-
-    HashTbl()
-    {
-        m_prgpidName = nullptr;
-        memset(&m_rpid, 0, sizeof(m_rpid));
-    }
-    ~HashTbl(void) {}
-
-    void operator delete(void* p, size_t size)
-    {
-        HeapFree(p, size);
-    }
 
     // Called to grow the number of buckets in the table to reduce the table density.
     void Grow();

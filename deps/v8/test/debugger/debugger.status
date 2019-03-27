@@ -24,21 +24,33 @@
   # Slow tests
   'debug/debug-scopes': [PASS, SLOW],
   'debug/debug-stepout-scope-part*': [PASS, SLOW],
-  'debug/ignition/debug-step-prefix-bytecodes': [PASS, SLOW],
+  'debug/ignition/debug-step-prefix-bytecodes': [PASS, SLOW, ['mode == debug', SKIP]],
 
   # Too slow in debug mode and on slow platforms.
   'regress/regress-2318': [PASS, SLOW, ['mode == debug or (arch != ia32 and arch != x64) or asan == True or msan == True', SKIP]],
+
+  # forcing weak callback in asan build change break order
+  'debug/debug-stepin-builtin-callback': [['asan == True or msan == True', SKIP]],
 }],  # ALWAYS
 
 ##############################################################################
-['variant == stress or variant == noturbofan_stress', {
+['variant == stress', {
   # TODO(jarin/mstarzinger): Functions with eval or debugger now get optimized
   # with Turbofan, which has issues with the debugger issues.
   'debug/debug-evaluate-locals': [FAIL],
 
   # Very slow in stress mode.
   'regress/regress-2318': [SKIP],
-}],  # variant == stress or variant == noturbofan_stress
+
+  # https://crbug.com/v8/7626
+  'debug/debug-stepout-scope-part*': [PASS, ['tsan', SKIP]],
+}],  # variant == stress
+
+##############################################################################
+['variant == stress_incremental_marking', {
+  # BUG(chromium:772010).
+  'debug/debug-*': [PASS, ['system == windows', SKIP]],
+}],  # variant == stress_incremental_marking
 
 ##############################################################################
 ['gc_stress == True', {
@@ -63,27 +75,15 @@
 }],  # 'gc_stress == True'
 
 ##############################################################################
-['variant == turbofan_opt', {
-  # TODO(jarin/mstarzinger): Investigate debugger issues with TurboFan.
-  'debug/debug-evaluate-locals': [FAIL],
-}],  # variant == turbofan_opt
-
-##############################################################################
-['variant == wasm_traps', {
+['variant == no_wasm_traps', {
   '*': [SKIP],
-}],  # variant == wasm_traps
+}],  # variant == no_wasm_traps
 
 ##############################################################################
 ['arch == arm and not simulator_run', {
   # Too slow on chromebooks.
   'debug/ignition/debug-step-prefix-bytecodes': [SKIP],
 }],  # 'arch == arm and not simulator_run'
-
-##############################################################################
-['variant in [noturbofan, noturbofan_stress] and system == macos and asan', {
-  # Too slow for old pipeline and mac asan.
-  'debug/*': [SKIP],
-}],  # variant in [noturbofan, noturbofan_stress] and system == macos and asan
 
 ##############################################################################
 ['arch == s390 or arch == s390x', {
@@ -94,4 +94,5 @@
   'debug/debug-liveedit-stack-padding': [SKIP],
   'debug/debug-liveedit-restart-frame': [SKIP],
 }],  # 'arch == s390 or arch == s390x'
+
 ]

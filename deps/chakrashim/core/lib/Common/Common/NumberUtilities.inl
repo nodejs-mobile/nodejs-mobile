@@ -25,7 +25,7 @@
 #define X_BYTE_ORDER BYTE_ORDER
 #define X_LITTLE_ENDIAN LITTLE_ENDIAN
 #else // BYTE_ORDER not defined
-#error "Endiannes of this platform is undefined"
+#error "Endianness of this platform is undefined"
 #endif // __BYTE_ORDER
 
 #if X_BYTE_ORDER == X_LITTLE_ENDIAN
@@ -136,7 +136,7 @@ namespace Js
 
     NUMBER_UTIL_INLINE bool NumberUtilities::IsNan(double value)
     {
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
         // NaN is a range of values; all bits on the exponent are 1's and some nonzero significant.
         // no distinction on signed NaN's
         uint64 nCompare = ToSpecial(value);

@@ -42,6 +42,7 @@ namespace Js
     private:
         static ScriptFunction * Box(StackScriptFunction * stackScriptFunction, void * returnAddress);
         static StackScriptFunction * FromVar(Var var);
+        static StackScriptFunction * UnsafeFromVar(Var var);
         struct BoxState
         {
         public:
@@ -55,7 +56,7 @@ namespace Js
             ScriptContext * scriptContext;
             void * returnAddress;
 
-            Var * BoxScopeSlots(Var * scopeSlots, uint count);
+            Field(Var) * BoxScopeSlots(Field(Var) * scopeSlots, uint count);
             bool NeedBoxFrame(FunctionBody * functionBody);
             bool NeedBoxScriptFunction(ScriptFunction * scriptFunction);
             ScriptFunction * BoxStackFunction(ScriptFunction * scriptFunction);

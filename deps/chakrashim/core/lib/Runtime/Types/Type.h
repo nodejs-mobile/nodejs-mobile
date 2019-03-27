@@ -10,9 +10,11 @@ enum TypeFlagMask : uint8
     TypeFlagMask_AreThisAndPrototypesEnsuredToHaveOnlyWritableDataProperties       = 0x01,
     TypeFlagMask_IsFalsy                                                           = 0x02,
     TypeFlagMask_HasSpecialPrototype                                               = 0x04,
-    TypeFlagMask_External                                                          = 0x08,
+    TypeFlagMask_EngineExternal                                                    = 0x08,
     TypeFlagMask_SkipsPrototype                                                    = 0x10,
-    TypeFlagMask_CanHaveInterceptors                                               = 0x20,
+    // Indicates that no @@toStringTag, @@toPrimitive, toString, or valueOf properties are set
+    // (except for the default values on Object.prototype)
+    TypeFlagMask_ThisAndPrototypesHaveNoSpecialProperties                          = 0x20,
     TypeFlagMask_JsrtExternal                                                      = 0x40,
     TypeFlagMask_HasBeenCached                                                     = 0x80
 };
@@ -60,10 +62,20 @@ namespace Js
         BOOL AreThisAndPrototypesEnsuredToHaveOnlyWritableDataProperties() const;
         void SetAreThisAndPrototypesEnsuredToHaveOnlyWritableDataProperties(const bool truth);
 
-        inline BOOL IsExternal() const { return (this->flags & TypeFlagMask_External) != 0; }
+        BOOL ThisAndPrototypesHaveNoSpecialProperties() const;
+        void SetThisAndPrototypesHaveNoSpecialProperties(const bool truth);
+
+        inline BOOL IsExternal() const
+        {
+#ifdef NTBUILD
+            return (this->flags & TypeFlagMask_EngineExternal) != 0;
+#else
+            AssertMsg((this->flags & TypeFlagMask_EngineExternal) == 0, "Not expected.");
+            return false;
+#endif
+        }
         inline BOOL IsJsrtExternal() const { return (this->flags & TypeFlagMask_JsrtExternal) != 0; }
         inline BOOL SkipsPrototype() const { return (this->flags & TypeFlagMask_SkipsPrototype) != 0 ; }
-        inline BOOL CanHaveInterceptors() const { return (this->flags & TypeFlagMask_CanHaveInterceptors) != 0; }
         inline BOOL IsFalsy() const { return flags & TypeFlagMask_IsFalsy; }
         inline BOOL HasBeenCached() const { return flags & TypeFlagMask_HasBeenCached; }
         inline void SetHasBeenCached()

@@ -74,8 +74,8 @@ class Binary extends Array {
     // Emit section length.
     this.emit_u32v(section.length);
     // Copy the temporary buffer.
-    for (let i = 0; i < section.length; ++i) {
-      this.push(section[i]);
+    for (const b of section) {
+      this.push(b);
     }
   }
 }
@@ -225,9 +225,9 @@ class WasmModuleBuilder {
     return this.num_imported_funcs++;
   }
 
-  addImportedGlobal(module = "", name, type) {
+  addImportedGlobal(module = "", name, type, mutable = false) {
     let o = {module: module, name: name, kind: kExternalGlobal, type: type,
-             mutable: false}
+             mutable: mutable}
     this.imports.push(o);
     return this.num_imported_globals++;
   }

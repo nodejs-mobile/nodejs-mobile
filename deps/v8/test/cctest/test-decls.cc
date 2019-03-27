@@ -33,7 +33,7 @@
 #include "src/heap/heap.h"
 #include "test/cctest/cctest.h"
 
-using namespace v8;
+namespace v8 {
 
 namespace {
 
@@ -595,15 +595,17 @@ TEST(CrossScriptReferencesHarmony) {
   HandleScope scope(isolate);
 
   // Check that simple cross-script global scope access works.
-  const char* decs[] = {
-    "'use strict'; var x = 1; x", "x",
-    "'use strict'; function x() { return 1 }; x()", "x()",
-    "'use strict'; let x = 1; x", "x",
-    "'use strict'; const x = 1; x", "x",
-    NULL
-  };
+  const char* decs[] = {"'use strict'; var x = 1; x",
+                        "x",
+                        "'use strict'; function x() { return 1 }; x()",
+                        "x()",
+                        "'use strict'; let x = 1; x",
+                        "x",
+                        "'use strict'; const x = 1; x",
+                        "x",
+                        nullptr};
 
-  for (int i = 0; decs[i] != NULL; i += 2) {
+  for (int i = 0; decs[i] != nullptr; i += 2) {
     SimpleContext context;
     context.Check(decs[i], EXPECT_RESULT, Number::New(isolate, 1));
     context.Check(decs[i+1], EXPECT_RESULT, Number::New(isolate, 1));
@@ -779,23 +781,13 @@ TEST(CrossScriptConflicts) {
 
   HandleScope scope(CcTest::isolate());
 
-  const char* firsts[] = {
-    "var x = 1; x",
-    "function x() { return 1 }; x()",
-    "let x = 1; x",
-    "const x = 1; x",
-    NULL
-  };
-  const char* seconds[] = {
-    "var x = 2; x",
-    "function x() { return 2 }; x()",
-    "let x = 2; x",
-    "const x = 2; x",
-    NULL
-  };
+  const char* firsts[] = {"var x = 1; x", "function x() { return 1 }; x()",
+                          "let x = 1; x", "const x = 1; x", nullptr};
+  const char* seconds[] = {"var x = 2; x", "function x() { return 2 }; x()",
+                           "let x = 2; x", "const x = 2; x", nullptr};
 
-  for (int i = 0; firsts[i] != NULL; ++i) {
-    for (int j = 0; seconds[j] != NULL; ++j) {
+  for (int i = 0; firsts[i] != nullptr; ++i) {
+    for (int j = 0; seconds[j] != nullptr; ++j) {
       SimpleContext context;
       context.Check(firsts[i], EXPECT_RESULT,
                     Number::New(CcTest::isolate(), 1));
@@ -1174,3 +1166,5 @@ TEST(Regress3941_Reads) {
     context.Check("'use strict'; f(); let x = 2; x", EXPECT_EXCEPTION);
   }
 }
+
+}  // namespace v8

@@ -24,17 +24,11 @@
 #define IfFalseGo(expr) do { if(!(expr)) { hr = E_FAIL; goto Error; } } while(0)
 #define IfFalseGoLabel(expr, label) do { if(!(expr)) { hr = E_FAIL; goto label; } } while(0)
 
-#define WIN32_LEAN_AND_MEAN 1
-
 #include "CommonDefines.h"
 #include <map>
 #include <string>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
 #include <CommonPal.h>
-#endif // _WIN32
 
 #include <stdarg.h>
 #ifdef _MSC_VER
@@ -94,6 +88,9 @@ using utf8::WideStringToNarrowDynamic;
 #include "Helpers.h"
 
 #include "PlatformAgnostic/SystemInfo.h"
+#ifdef HAS_ICU
+#include "PlatformAgnostic/ChakraICU.h"
+#endif
 
 #define IfJsErrorFailLog(expr) \
 do { \
@@ -187,6 +184,13 @@ public:
         data_wide(nullptr), errorCode(JsNoError), dontFree(false)
     { }
 
+    AutoString(AutoString &autoString):length(autoString.length),
+        data(autoString.data), data_wide(autoString.data_wide),
+        errorCode(JsNoError), dontFree(false)
+    {
+        autoString.dontFree = true; // take over the ownership
+    }
+
     AutoString(JsValueRef value):length(0), data(nullptr),
         data_wide(nullptr), errorCode(JsNoError), dontFree(false)
     {
@@ -224,6 +228,7 @@ public:
         if (errorCode == JsNoError)
         {
             *(data + length) = char(0);
+            this->length = length;
         }
         return errorCode;
     }
@@ -238,13 +243,19 @@ public:
         return data;
     }
 
-    LPWSTR GetWideString()
+    LPWSTR GetWideString(charcount_t* destCount = nullptr)
     {
         if(data_wide || !data)
         {
             return data_wide;
         }
-        NarrowStringToWideDynamic(data, &data_wide);
+        charcount_t tempDestCount;
+        utf8::NarrowStringToWide<utf8::malloc_allocator>(data, length, &data_wide, &tempDestCount);
+
+        if (destCount)
+        {
+            *destCount = tempDestCount;
+        }
         return data_wide;
     }
 
@@ -284,7 +295,54 @@ public:
     }
 
     char* operator*() { return data; }
-    char** operator&()  { return &data; }
+};
+
+struct FileNode
+{
+    AutoString data;
+    AutoString path;
+    FileNode * next;
+    FileNode(AutoString &path_, AutoString &data_):
+        path(path_), data(data_), next(nullptr) {
+        path_.MakePersistent();
+        data_.MakePersistent();
+    }
+};
+
+class SourceMap
+{
+    static FileNode * root;
+public:
+    static void Add(AutoString &path, AutoString &data)
+    {
+        // SourceMap lifetime == process lifetime
+        FileNode * node = new FileNode(path, data);
+        if (root != nullptr)
+        {
+            node->next = root;
+        }
+        root = node;
+    }
+
+    static bool Find(AutoString &path, AutoString ** out)
+    {
+        return Find(path.GetString(), path.GetLength(), out);
+    }
+
+    static bool Find(LPCSTR path, size_t pathLength, AutoString ** out)
+    {
+        FileNode * node = root;
+        while(node != nullptr)
+        {
+            if (strncmp(node->path.GetString(), path, pathLength) == 0)
+            {
+                *out = &(node->data);
+                return true;
+            }
+            node = node->next;
+        }
+        return false;
+    }
 };
 
 inline JsErrorCode CreatePropertyIdFromString(const char* str, JsPropertyIdRef *Id)

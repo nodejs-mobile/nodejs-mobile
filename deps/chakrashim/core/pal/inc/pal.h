@@ -5517,6 +5517,18 @@ InterlockedAnd(
 EXTERN_C
 PALIMPORT
 inline
+LONGLONG
+PALAPI
+InterlockedAnd64(
+    IN OUT LONGLONG volatile *Destination,
+    IN LONGLONG Value)
+{
+    return __sync_fetch_and_and(Destination, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
 char
 PALAPI
 InterlockedOr8(
@@ -5553,6 +5565,18 @@ InterlockedOr(
 EXTERN_C
 PALIMPORT
 inline
+LONGLONG
+PALAPI
+InterlockedOr64(
+    IN OUT LONGLONG volatile *Destination,
+    IN LONGLONG Value)
+{
+    return __sync_fetch_and_or(Destination, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
 char
 PALAPI
 InterlockedXor8(
@@ -5582,6 +5606,18 @@ PALAPI
 InterlockedXor(
     IN OUT LONG volatile *Destination,
     IN LONG Value)
+{
+    return __sync_fetch_and_xor(Destination, Value);
+}
+
+EXTERN_C
+PALIMPORT
+inline
+LONGLONG
+PALAPI
+InterlockedXor64(
+    IN OUT LONGLONG volatile *Destination,
+    IN LONGLONG Value)
 {
     return __sync_fetch_and_xor(Destination, Value);
 }
@@ -6360,7 +6396,9 @@ PALIMPORT double __cdecl tanh(double);
 PALIMPORT double __cdecl fmod(double, double);
 PALIMPORT float __cdecl fmodf(float, float);
 PALIMPORT double __cdecl floor(double);
+PALIMPORT float __cdecl floorf(float);
 PALIMPORT double __cdecl ceil(double);
+PALIMPORT float __cdecl ceilf(float);
 PALIMPORT float __cdecl fabsf(float);
 PALIMPORT double __cdecl modf(double, double *);
 PALIMPORT float __cdecl modff(float, float *);
@@ -6407,11 +6445,6 @@ PALIMPORT char * __cdecl _strdup(const char *);
 
 #define alloca  __builtin_alloca
 #endif // __GNUC__
-
-#ifndef NO_PAL_MINMAX
-#define max(a, b) (((a) > (b)) ? (a) : (b))
-#define min(a, b) (((a) < (b)) ? (a) : (b))
-#endif
 
 #endif // !PAL_STDCPP_COMPAT
 
@@ -6897,7 +6930,7 @@ ULONG_PTR __stdcall GetCurrentSP();
 #ifdef  __cplusplus
 }
 
-#include "CCSpinLock.hpp"
+#include "cclock.hpp"
 #endif
 
 #endif // __PAL_H__

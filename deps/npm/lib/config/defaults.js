@@ -82,7 +82,7 @@ if (home) process.env.HOME = home
 else home = path.resolve(temp, 'npm-' + uidOrPid)
 
 var cacheExtra = process.platform === 'win32' ? 'npm-cache' : '.npm'
-var cacheRoot = process.platform === 'win32' && process.env.APPDATA || home
+var cacheRoot = (process.platform === 'win32' && process.env.APPDATA) || home
 var cache = path.resolve(cacheRoot, cacheExtra)
 
 var globalPrefix
@@ -109,6 +109,8 @@ Object.defineProperty(exports, 'defaults', {get: function () {
     'allow-same-version': false,
     'always-auth': false,
     also: null,
+    audit: true,
+    'audit-level': 'low',
     'auth-type': 'legacy',
 
     'bin-links': true,
@@ -128,7 +130,9 @@ Object.defineProperty(exports, 'defaults', {get: function () {
 
     cert: null,
 
-    color: true,
+    cidr: null,
+
+    color: process.env.NO_COLOR == null,
     depth: Infinity,
     description: true,
     dev: false,
@@ -144,12 +148,13 @@ Object.defineProperty(exports, 'defaults', {get: function () {
 
     git: 'git',
     'git-tag-version': true,
+    'commit-hooks': true,
 
     global: false,
     globalconfig: path.resolve(globalPrefix, 'etc', 'npmrc'),
     'global-style': false,
     group: process.platform === 'win32' ? 0
-            : process.env.SUDO_GID || (process.getgid && process.getgid()),
+      : process.env.SUDO_GID || (process.getgid && process.getgid()),
     'ham-it-up': false,
     heading: 'npm',
     'if-present': false,
@@ -173,25 +178,30 @@ Object.defineProperty(exports, 'defaults', {get: function () {
     maxsockets: 50,
     message: '%s',
     'metrics-registry': null,
+    'node-options': null,
     'node-version': process.version,
     'offline': false,
     'onload-script': false,
     only: null,
     optional: true,
+    otp: null,
     'package-lock': true,
+    'package-lock-only': false,
     parseable: false,
     'prefer-offline': false,
     'prefer-online': false,
     prefix: globalPrefix,
+    preid: '',
     production: process.env.NODE_ENV === 'production',
     'progress': !process.env.TRAVIS && !process.env.CI,
-    'proprietary-attribs': true,
     proxy: null,
     'https-proxy': null,
+    'noproxy': null,
     'user-agent': 'npm/{npm-version} ' +
                     'node/{node-version} ' +
                     '{platform} ' +
                     '{arch}',
+    'read-only': false,
     'rebuild-bundle': true,
     registry: 'https://registry.npmjs.org/',
     rollback: true,
@@ -212,6 +222,7 @@ Object.defineProperty(exports, 'defaults', {get: function () {
     'send-metrics': false,
     shell: osenv.shell(),
     shrinkwrap: true,
+    'sign-git-commit': false,
     'sign-git-tag': false,
     'sso-poll-frequency': 500,
     'sso-type': 'oauth',
@@ -226,6 +237,7 @@ Object.defineProperty(exports, 'defaults', {get: function () {
                      !(process.getuid && process.setuid &&
                        process.getgid && process.setgid) ||
                      process.getuid() !== 0,
+    'update-notifier': true,
     usage: false,
     user: process.platform === 'win32' ? 0 : 'nobody',
     userconfig: path.resolve(home, '.npmrc'),
@@ -245,6 +257,8 @@ exports.types = {
   'allow-same-version': Boolean,
   'always-auth': Boolean,
   also: [null, 'dev', 'development'],
+  audit: Boolean,
+  'audit-level': ['low', 'moderate', 'high', 'critical'],
   'auth-type': ['legacy', 'sso', 'saml', 'oauth'],
   'bin-links': Boolean,
   browser: [null, String],
@@ -257,6 +271,7 @@ exports.types = {
   'cache-max': Number,
   'cache-min': Number,
   cert: [null, String],
+  cidr: [null, String, Array],
   color: ['always', Boolean],
   depth: Number,
   description: Boolean,
@@ -271,6 +286,7 @@ exports.types = {
   'fetch-retry-maxtimeout': Number,
   git: String,
   'git-tag-version': Boolean,
+  'commit-hooks': Boolean,
   global: Boolean,
   globalconfig: path,
   'global-style': Boolean,
@@ -292,8 +308,6 @@ exports.types = {
   key: [null, String],
   'legacy-bundling': Boolean,
   link: Boolean,
-  // local-address must be listed as an IP for a local network interface
-  // must be IPv4 due to node bug
   'local-address': getLocalAddresses(),
   loglevel: ['silent', 'error', 'warn', 'notice', 'http', 'timing', 'info', 'verbose', 'silly'],
   logstream: Stream,
@@ -302,20 +316,25 @@ exports.types = {
   maxsockets: Number,
   message: String,
   'metrics-registry': [null, String],
+  'node-options': [null, String],
   'node-version': [null, semver],
+  'noproxy': [null, String, Array],
   offline: Boolean,
   'onload-script': [null, String],
   only: [null, 'dev', 'development', 'prod', 'production'],
   optional: Boolean,
   'package-lock': Boolean,
+  otp: [null, String],
+  'package-lock-only': Boolean,
   parseable: Boolean,
   'prefer-offline': Boolean,
   'prefer-online': Boolean,
   prefix: path,
+  preid: String,
   production: Boolean,
   progress: Boolean,
-  'proprietary-attribs': Boolean,
   proxy: [null, false, url], // allow proxy to be disabled explicitly
+  'read-only': Boolean,
   'rebuild-bundle': Boolean,
   registry: [null, url],
   rollback: Boolean,
@@ -336,6 +355,7 @@ exports.types = {
   'send-metrics': Boolean,
   shell: String,
   shrinkwrap: Boolean,
+  'sign-git-commit': Boolean,
   'sign-git-tag': Boolean,
   'sso-poll-frequency': Number,
   'sso-type': [null, 'oauth', 'saml'],
@@ -345,6 +365,7 @@ exports.types = {
   tmp: path,
   unicode: Boolean,
   'unsafe-perm': Boolean,
+  'update-notifier': Boolean,
   usage: Boolean,
   user: [Number, String],
   userconfig: path,
@@ -367,16 +388,9 @@ function getLocalAddresses () {
     interfaces = {}
   }
 
-  return Object.keys(interfaces).map(function (nic) {
-    return interfaces[nic].filter(function (addr) {
-      return addr.family === 'IPv4'
-    })
-    .map(function (addr) {
-      return addr.address
-    })
-  }).reduce(function (curr, next) {
-    return curr.concat(next)
-  }, []).concat(undefined)
+  return Object.keys(interfaces).map(
+    nic => interfaces[nic].map(({address}) => address)
+  ).reduce((curr, next) => curr.concat(next), []).concat(undefined)
 }
 
 exports.shorthands = {
@@ -405,6 +419,7 @@ exports.shorthands = {
   m: ['--message'],
   p: ['--parseable'],
   porcelain: ['--parseable'],
+  readonly: ['--read-only'],
   g: ['--global'],
   S: ['--save'],
   D: ['--save-dev'],

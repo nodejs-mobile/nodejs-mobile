@@ -37,6 +37,33 @@
 #define DECLSPEC_GUARD_OVERFLOW __declspec(guard(overflow))
 #endif
 
+#ifndef THREAD_LOCAL
+#ifndef __APPLE__
+#if defined(_MSC_VER) && _MSC_VER <= 1800 // VS2013?
+#define THREAD_LOCAL __declspec(thread)
+#else // VS2015+, linux Clang etc.
+#define THREAD_LOCAL thread_local
+#endif // VS2013?
+#else // __APPLE__
+#ifndef __IOS__
+#define THREAD_LOCAL _Thread_local
+#else
+#define THREAD_LOCAL
+#endif
+#endif // __APPLE__
+#endif // THREAD_LOCAL
+
+// VS2015 RTM has bugs with constexpr, so require min of VS2015 Update 3 (known good version)
+#if !defined(_MSC_VER) || _MSC_FULL_VER >= 190024210
+#define HAS_CONSTEXPR 1
+#endif
+
+#ifdef HAS_CONSTEXPR
+#define OPT_CONSTEXPR constexpr
+#else
+#define OPT_CONSTEXPR
+#endif
+
 #ifdef __clang__
 #define CLANG_WNO_BEGIN_(x) \
     _Pragma("clang diagnostic push")\
@@ -59,6 +86,7 @@
 #pragma warning(disable: 4995) /* 'function': name was marked as #pragma deprecated */
 
 // === Windows Header Files ===
+#define WIN32_LEAN_AND_MEAN 1
 #define INC_OLE2                 /* for windows.h */
 #define CONST_VTABLE             /* for objbase.h */
 #include <windows.h>
@@ -304,11 +332,11 @@ typedef struct _SINGLE_LIST_ENTRY {
   struct _SINGLE_LIST_ENTRY *Next;
 } SINGLE_LIST_ENTRY, *PSINGLE_LIST_ENTRY;
 
-#if defined(_WIN64)
+#if defined(TARGET_64)
 
 //
 // The type SINGLE_LIST_ENTRY is not suitable for use with SLISTs.  For
-// WIN64, an entry on an SLIST is required to be 16-byte aligned, while a
+// TARGET_64, an entry on an SLIST is required to be 16-byte aligned, while a
 // SINGLE_LIST_ENTRY structure has only 8 byte alignment.
 //
 // Therefore, all SLIST code should use the SLIST_ENTRY type instead of the
@@ -324,11 +352,11 @@ typedef struct DECLSPEC_ALIGN(16) _SLIST_ENTRY {
 
 #pragma warning(pop)
 
-#else
+#else // defined(TARGET_64)
 
 typedef struct _SINGLE_LIST_ENTRY SLIST_ENTRY, *PSLIST_ENTRY;
 
-#endif // _WIN64
+#endif // defined(TARGET_64)
 
 #if defined(_AMD64_)
 
@@ -471,15 +499,10 @@ DWORD __cdecl CharUpperBuffW(const char16* lpsz, DWORD  cchLength);
 #include <stdint.h>
 #endif
 
-
-#if defined(_MSC_VER) && !defined(__clang__)
-// ms-specific keywords
-#define _ABSTRACT abstract
-// MSVC2015 does not support C++11 semantics for `typename QualifiedName` declarations
-// outside of template code.
+// `typename QualifiedName` declarations outside of template code not supported before MSVC 2015 update 1
+#if defined(_MSC_VER) && _MSC_VER < 1910
 #define _TYPENAME
 #else
-#define _ABSTRACT
 #define _TYPENAME typename
 #endif
 
@@ -736,6 +759,7 @@ namespace PlatformAgnostic
 
 #include "PlatformAgnostic/DateTime.h"
 #include "PlatformAgnostic/Numbers.h"
+#include "PlatformAgnostic/Arrays.h"
 #include "PlatformAgnostic/SystemInfo.h"
 #include "PlatformAgnostic/Thread.h"
 #include "PlatformAgnostic/AssemblyCommon.h"

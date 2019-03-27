@@ -4,12 +4,21 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 
-
 namespace Js
 {
-    BOOL JavascriptProxy::Is(Var obj)
+    BOOL JavascriptProxy::Is(_In_ RecyclableObject* obj)
     {
         return JavascriptOperators::GetTypeId(obj) == TypeIds_Proxy;
+    }
+
+    BOOL JavascriptProxy::Is(_In_ Var obj)
+    {
+        return JavascriptOperators::GetTypeId(obj) == TypeIds_Proxy;
+    }
+
+    bool JavascriptProxy::IsRevoked() const
+    {
+        return (target == nullptr);
     }
 
     RecyclableObject* JavascriptProxy::GetTarget()
@@ -39,7 +48,7 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
-        CHAKRATEL_LANGSTATS_INC_DATACOUNT(ES6_Proxy);
+        CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(ES6, Proxy, scriptContext);
 
         if (!(args.Info.Flags & CallFlags_New))
         {
@@ -55,11 +64,8 @@ namespace Js
         // SkipDefaultNewObject function flag should have prevented the default object from
         // being created, except when call true a host dispatch.
 
-        Var newTarget = args.Info.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-
-        bool isCtorSuperCall = (args.Info.Flags & CallFlags_New) && newTarget != nullptr && !JavascriptOperators::IsUndefined(newTarget);
-        Assert(isCtorSuperCall || !(args.Info.Flags & CallFlags_New) || args[0] == nullptr
-            || JavascriptOperators::GetTypeId(args[0]) == TypeIds_HostDispatch);
+        Var newTarget = args.GetNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::IsConstructorSuperCall(args);
 
         RecyclableObject* target, *handler;
 
@@ -124,12 +130,12 @@ namespace Js
 
         JavascriptProxy* proxy = JavascriptProxy::Create(scriptContext, args);
         JavascriptLibrary* library = scriptContext->GetLibrary();
-        DynamicType* type = library->CreateFunctionWithLengthType(&EntryInfo::Revoke);
+        DynamicType* type = library->CreateFunctionWithConfigurableLengthType(&EntryInfo::Revoke);
         RuntimeFunction* revoker = RecyclerNewEnumClass(scriptContext->GetRecycler(),
             JavascriptLibrary::EnumFunctionClass, RuntimeFunction,
             type, &EntryInfo::Revoke);
 
-        revoker->SetPropertyWithAttributes(Js::PropertyIds::length, Js::TaggedInt::ToVarUnchecked(0), PropertyNone, NULL);
+        revoker->SetPropertyWithAttributes(Js::PropertyIds::length, Js::TaggedInt::ToVarUnchecked(2), PropertyConfigurable, NULL);
         revoker->SetInternalProperty(Js::InternalPropertyIds::RevocableProxy, proxy, PropertyOperationFlags::PropertyOperation_Force, nullptr);
 
         DynamicObject* obj = scriptContext->GetLibrary()->CreateObject(true, 2);
@@ -189,8 +195,7 @@ namespace Js
         target = nullptr;
     }
 
-    template <class Fn, class GetPropertyIdFunc>
-    BOOL JavascriptProxy::GetPropertyDescriptorTrap(Var originalInstance, Fn fn, GetPropertyIdFunc getPropertyId, PropertyDescriptor* resultDescriptor, ScriptContext* requestContext)
+    BOOL JavascriptProxy::GetPropertyDescriptorTrap(PropertyId propertyId, PropertyDescriptor* resultDescriptor, ScriptContext* requestContext)
     {
         PROBE_STACK(GetScriptContext(), Js::Constants::MinStackDefault);
 
@@ -217,32 +222,28 @@ namespace Js
 
         Assert((static_cast<DynamicType*>(GetType()))->GetTypeHandler()->GetPropertyCount() == 0 ||
             (static_cast<DynamicType*>(GetType()))->GetTypeHandler()->GetPropertyId(GetScriptContext(), 0) == InternalPropertyIds::WeakMapKeyMap);
+
         JavascriptFunction* gOPDMethod = GetMethodHelper(PropertyIds::getOwnPropertyDescriptor, requestContext);
-        Var getResult;
+
         //7. If trap is undefined, then
         //    a.Return the result of calling the[[GetOwnProperty]] internal method of target with argument P.
         if (nullptr == gOPDMethod || GetScriptContext()->IsHeapEnumInProgress())
         {
             resultDescriptor->SetFromProxy(false);
-            return fn(targetObj);
+            return JavascriptOperators::GetOwnPropertyDescriptor(targetObj, propertyId, requestContext, resultDescriptor);
         }
 
-        PropertyId propertyId = getPropertyId();
-        CallInfo callInfo(CallFlags_Value, 3);
-        Var varArgs[3];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propertyId);
+        Var propertyName = GetName(requestContext, propertyId);
 
-        Assert(JavascriptString::Is(varArgs[2]) || JavascriptSymbol::Is(varArgs[2]));
+        Assert(JavascriptString::Is(propertyName) || JavascriptSymbol::Is(propertyName));
         //8. Let trapResultObj be the result of calling the[[Call]] internal method of trap with handler as the this value and a new List containing target and P.
         //9. ReturnIfAbrupt(trapResultObj).
         //10. If Type(trapResultObj) is neither Object nor Undefined, then throw a TypeError exception.
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        getResult = JavascriptFunction::FromVar(gOPDMethod)->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var getResult = threadContext->ExecuteImplicitCall(gOPDMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, gOPDMethod, CallInfo(CallFlags_Value, 3), handlerObj, targetObj, propertyName);
+        });
 
         TypeId getResultTypeId = JavascriptOperators::GetTypeId(getResult);
         if (StaticType::Is(getResultTypeId) && getResultTypeId != TypeIds_Undefined)
@@ -252,9 +253,8 @@ namespace Js
         //11. Let targetDesc be the result of calling the[[GetOwnProperty]] internal method of target with argument P.
         //12. ReturnIfAbrupt(targetDesc).
         PropertyDescriptor targetDescriptor;
-        BOOL hasProperty;
+        BOOL hasProperty = JavascriptOperators::GetOwnPropertyDescriptor(targetObj, propertyId, requestContext, &targetDescriptor);
 
-        hasProperty = JavascriptOperators::GetOwnPropertyDescriptor(targetObj, getPropertyId(), requestContext, &targetDescriptor);
         //13. If trapResultObj is undefined, then
         //a.If targetDesc is undefined, then return undefined.
         //b.If targetDesc.[[Configurable]] is false, then throw a TypeError exception.
@@ -272,10 +272,13 @@ namespace Js
             {
                 JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("getOwnPropertyDescriptor"));
             }
-            if (!target->IsExtensible())
+
+            // do not use "target" here, the trap may have caused it to change
+            if (!targetObj->IsExtensible())
             {
                 JavascriptError::ThrowTypeError(requestContext, JSERR_InconsistentTrapResult, _u("getOwnPropertyDescriptor"));
             }
+
             return FALSE;
         }
 
@@ -291,7 +294,8 @@ namespace Js
         //i.Throw a TypeError exception.
         //22. Return resultDesc.
 
-        BOOL isTargetExtensible = target->IsExtensible();
+        // do not use "target" here, the trap may have caused it to change
+        BOOL isTargetExtensible = targetObj->IsExtensible();
         BOOL toProperty = JavascriptOperators::ToPropertyDescriptor(getResult, resultDescriptor, requestContext);
         if (!toProperty && isTargetExtensible)
         {
@@ -340,7 +344,7 @@ namespace Js
         RecyclableObject *targetObj = this->MarshalTarget(requestContext);
 
         JavascriptFunction* getGetMethod = GetMethodHelper(PropertyIds::get, requestContext);
-        Var getGetResult;
+
         if (nullptr == getGetMethod || requestContext->IsHeapEnumInProgress())
         {
             propertyDescriptor->SetFromProxy(false);
@@ -349,17 +353,12 @@ namespace Js
 
         PropertyId propertyId = getPropertyId();
         propertyDescriptor->SetFromProxy(true);
-        CallInfo callInfo(CallFlags_Value, 4);
-        Var varArgs[4];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propertyId);
-        varArgs[3] = instance;
+        Var propertyName = GetName(requestContext, propertyId);
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        getGetResult = getGetMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var getGetResult = threadContext->ExecuteImplicitCall(getGetMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, getGetMethod, CallInfo(CallFlags_Value, 4), handlerObj, targetObj, propertyName, instance);
+        });
 
         //    9. Let targetDesc be the result of calling the[[GetOwnProperty]] internal method of target with argument P.
         //    10. ReturnIfAbrupt(targetDesc).
@@ -426,23 +425,19 @@ namespace Js
         Js::RecyclableObject *targetObj = this->MarshalTarget(requestContext);
 
         JavascriptFunction* hasMethod = GetMethodHelper(PropertyIds::has, requestContext);
-        Var getHasResult;
+
         if (nullptr == hasMethod || requestContext->IsHeapEnumInProgress())
         {
             return fn(targetObj);
         }
 
         PropertyId propertyId = getPropertyId();
-        CallInfo callInfo(CallFlags_Value, 3);
-        Var varArgs[3];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propertyId);
+        Var propertyName = GetName(requestContext, propertyId);
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        getHasResult = hasMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var getHasResult = threadContext->ExecuteImplicitCall(hasMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, hasMethod, CallInfo(CallFlags_Value, 3), handlerObj, targetObj, propertyName);
+        });
 
         //9. Let booleanTrapResult be ToBoolean(trapResult).
         //10. ReturnIfAbrupt(booleanTrapResult).
@@ -470,8 +465,14 @@ namespace Js
         return hasProperty;
     }
 
-    PropertyQueryFlags JavascriptProxy::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags JavascriptProxy::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
+        if (info)
+        {
+            // Prevent caching. See comment in GetPropertyQuery for more detail.
+            PropertyValueInfo::SetNoCache(info, this);
+            PropertyValueInfo::DisablePrototypeCache(info, this);
+        }
         auto fn = [&](RecyclableObject* object)->BOOL {
             return JavascriptOperators::HasProperty(object, propertyId);
         };
@@ -534,6 +535,7 @@ namespace Js
     {
         // We can't cache the property at this time. both target and handler can be changed outside of the proxy, so the inline cache needs to be
         // invalidate when target, handler, or handler prototype has changed. We don't have a way to achieve this yet.
+        // Also, Get and Has operations share a cache, so a trap on either should prevent caching on both.
         PropertyValueInfo::SetNoCache(info, this);
         PropertyValueInfo::DisablePrototypeCache(info, this); // We can't cache prototype property either
         auto fn = [&](RecyclableObject* object)-> BOOL {
@@ -560,11 +562,11 @@ namespace Js
         PropertyValueInfo::SetNoCache(info, this);
         PropertyValueInfo::DisablePrototypeCache(info, this); // We can't cache prototype property either
         auto fn = [&](RecyclableObject* object)-> BOOL {
-            return JavascriptOperators::GetPropertyWPCache(originalInstance, object, propertyNameString, value, requestContext, info);
+            return JavascriptOperators::GetPropertyWPCache<false /* OutputExistence */>(originalInstance, object, propertyNameString, value, requestContext, info);
         };
         auto getPropertyId = [&]()->PropertyId{
             const PropertyRecord* propertyRecord;
-            requestContext->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+            requestContext->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
             return propertyRecord->GetPropertyId();
         };
         PropertyDescriptor result;
@@ -589,7 +591,7 @@ namespace Js
         return FALSE;
     }
   
-    BOOL JavascriptProxy::GetAccessors(PropertyId propertyId, __out Var* getter, __out Var* setter, ScriptContext * requestContext)
+    _Check_return_ _Success_(return) BOOL JavascriptProxy::GetAccessors(PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter, ScriptContext* requestContext)
     {
         PropertyDescriptor result;
         if (getter != nullptr)
@@ -681,7 +683,7 @@ namespace Js
         }
         else
         {
-            // ES2017 Spec'ed (9.1.9.1): 
+            // ES2017 Spec'd (9.1.9.1): 
             // If existingDescriptor is not undefined, then
             //    If IsAccessorDescriptor(existingDescriptor) is true, return false.
             //    If existingDescriptor.[[Writable]] is false, return false.
@@ -705,7 +707,7 @@ namespace Js
     BOOL JavascriptProxy::SetProperty(JavascriptString* propertyNameString, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
         const PropertyRecord* propertyRecord;
-        GetScriptContext()->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+        GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
         return SetProperty(propertyRecord->GetPropertyId(), value, flags, info);
     }
 
@@ -794,7 +796,7 @@ namespace Js
 
         //5. Let trap be the result of GetMethod(handler, "deleteProperty").
         JavascriptFunction* deleteMethod = GetMethodHelper(PropertyIds::deleteProperty, requestContext);
-        Var deletePropertyResult;
+
         //7. If trap is undefined, then
         //a.Return the result of calling the[[Delete]] internal method of target with argument P.
         Assert(!GetScriptContext()->IsHeapEnumInProgress());
@@ -814,20 +816,21 @@ namespace Js
         //9. Let booleanTrapResult be ToBoolean(trapResult).
         //10. ReturnIfAbrupt(booleanTrapResult).
         //11. If booleanTrapResult is false, then return false.
-        CallInfo callInfo(CallFlags_Value, 3);
-        Var varArgs[3];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propertyId);
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        deletePropertyResult = deleteMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var propertyName = GetName(requestContext, propertyId);
+
+        Var deletePropertyResult = threadContext->ExecuteImplicitCall(deleteMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, deleteMethod, CallInfo(CallFlags_Value, 3), handlerObj, targetObj, propertyName);
+        });
 
         BOOL trapResult = JavascriptConversion::ToBoolean(deletePropertyResult, requestContext);
         if (!trapResult)
         {
+            if (flags & PropertyOperation_StrictMode)
+            {
+                JavascriptError::ThrowTypeError(requestContext, JSERR_ProxyHandlerReturnedFalse, _u("deleteProperty"));
+            }
             return trapResult;
         }
 
@@ -860,11 +863,13 @@ namespace Js
         return TRUE;
     }
 
+#if ENABLE_FIXED_FIELDS
     BOOL JavascriptProxy::IsFixedProperty(PropertyId propertyId)
     {
         // TODO: can we add support for fixed property? don't see a clear way to invalidate...
         return false;
     }
+#endif
 
     PropertyQueryFlags JavascriptProxy::HasItemQuery(uint32 index)
     {
@@ -959,7 +964,7 @@ namespace Js
     }
 
     // No change to foreign enumerator, just forward
-    BOOL JavascriptProxy::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL JavascriptProxy::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
         // Reject implicit call
         ThreadContext* threadContext = requestContext->GetThreadContext();
@@ -1031,7 +1036,8 @@ namespace Js
                                 // if (desc.enumerable) yield key;
                                 if (desc.IsEnumerable())
                                 {
-                                    return JavascriptString::FromVar(CrossSite::MarshalVar(scriptContext, propertyName));
+                                    return JavascriptString::FromVar(CrossSite::MarshalVar(
+                                      scriptContext, propertyName, propertyName->GetScriptContext()));
                                 }
                             }
                         }
@@ -1044,7 +1050,7 @@ namespace Js
         JavascriptArray* trapResult = JavascriptOperators::GetOwnPropertyNames(this, requestContext);
         ProxyOwnkeysEnumerator* ownKeysEnum = RecyclerNew(requestContext->GetRecycler(), ProxyOwnkeysEnumerator, requestContext, this, trapResult);
 
-        return enumerator->Initialize(ownKeysEnum, nullptr, nullptr, flags, requestContext, forInCache);
+        return enumerator->Initialize(ownKeysEnum, nullptr, nullptr, flags, requestContext, enumeratorCache);
     }
 
     BOOL JavascriptProxy::SetAccessors(PropertyId propertyId, Var getter, Var setter, PropertyOperationFlags flags)
@@ -1166,16 +1172,12 @@ namespace Js
         {
             return targetObj->IsExtensible();
         }
-        CallInfo callInfo(CallFlags_Value, 2);
-        Var varArgs[2];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        Var isExtensibleResult = isExtensibleMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
-
+        
+        Var isExtensibleResult = threadContext->ExecuteImplicitCall(isExtensibleMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, isExtensibleMethod, CallInfo(CallFlags_Value, 2), handlerObj, targetObj);
+        });
+        
         BOOL trapResult = JavascriptConversion::ToBoolean(isExtensibleResult, requestContext);
         BOOL targetIsExtensible = targetObj->IsExtensible();
         if (trapResult != targetIsExtensible)
@@ -1226,21 +1228,17 @@ namespace Js
         {
             return targetObj->PreventExtensions();
         }
-        CallInfo callInfo(CallFlags_Value, 2);
-        Var varArgs[2];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-
+        
         //8. Let booleanTrapResult be ToBoolean(trapResult)
         //9. ReturnIfAbrupt(booleanTrapResult).
         //10. Let targetIsExtensible be the result of calling the[[IsExtensible]] internal method of target.
         //11. ReturnIfAbrupt(targetIsExtensible).
         //12. If booleanTrapResult is true and targetIsExtensible is true, then throw a TypeError exception.
         //13. Return booleanTrapResult.
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        Var preventExtensionsResult = preventExtensionsMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var preventExtensionsResult = threadContext->ExecuteImplicitCall(preventExtensionsMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, preventExtensionsMethod, CallInfo(CallFlags_Value, 2), handlerObj, targetObj);
+        });
 
         BOOL trapResult = JavascriptConversion::ToBoolean(preventExtensionsResult, requestContext);
         if (trapResult)
@@ -1252,16 +1250,6 @@ namespace Js
             }
         }
         return trapResult;
-    }
-
-    BOOL JavascriptProxy::GetDefaultPropertyDescriptor(PropertyDescriptor& descriptor)
-    {
-        if (target == nullptr)
-        {
-            JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_ErrorOnRevokedProxy, _u(""));
-        }
-
-        return target->GetDefaultPropertyDescriptor(descriptor);
     }
 
     // 7.3.12 in ES 2015. While this should have been no observable behavior change. Till there is obvious change warrant this
@@ -1303,7 +1291,7 @@ namespace Js
         {
             itemVar = resultArray->DirectGetItem(i);
             AssertMsg(JavascriptSymbol::Is(itemVar) || JavascriptString::Is(itemVar), "Invariant check during ownKeys proxy trap should make sure we only get property key here. (symbol or string primitives)");
-            JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord);
+            JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord, nullptr);
             PropertyId propertyId = propertyRecord->GetPropertyId();
             if (JavascriptObject::GetOwnPropertyDescriptorHelper(obj, propertyId, scriptContext, propertyDescriptor))
             {
@@ -1356,7 +1344,7 @@ namespace Js
             {
                 itemVar = resultArray->DirectGetItem(i);
                 AssertMsg(JavascriptSymbol::Is(itemVar) || JavascriptString::Is(itemVar), "Invariant check during ownKeys proxy trap should make sure we only get property key here. (symbol or string primitives)");
-                JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord);
+                JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord, nullptr);
                 PropertyId propertyId = propertyRecord->GetPropertyId();
                 JavascriptObject::DefineOwnPropertyHelper(obj, propertyId, propertyDescriptor, scriptContext);
             }
@@ -1384,7 +1372,7 @@ namespace Js
             {
                 itemVar = resultArray->DirectGetItem(i);
                 AssertMsg(JavascriptSymbol::Is(itemVar) || JavascriptString::Is(itemVar), "Invariant check during ownKeys proxy trap should make sure we only get property key here. (symbol or string primitives)");
-                JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord);
+                JavascriptConversion::ToPropertyKey(itemVar, scriptContext, &propertyRecord, nullptr);
                 PropertyId propertyId = propertyRecord->GetPropertyId();
                 PropertyDescriptor propertyDescriptor;
                 if (JavascriptObject::GetOwnPropertyDescriptorHelper(obj, propertyId, scriptContext, propertyDescriptor))
@@ -1489,21 +1477,17 @@ namespace Js
         Js::RecyclableObject *targetObj = this->MarshalTarget(requestContext);
 
         JavascriptFunction* getPrototypeOfMethod = GetMethodHelper(PropertyIds::getPrototypeOf, requestContext);
-        Var getPrototypeOfResult;
+
         if (nullptr == getPrototypeOfMethod || GetScriptContext()->IsHeapEnumInProgress())
         {
             return RecyclableObject::FromVar(JavascriptObject::GetPrototypeOf(targetObj, requestContext));
         }
-        CallInfo callInfo(CallFlags_Value, 2);
-        Var varArgs[2];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        getPrototypeOfResult = getPrototypeOfMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
-
+        
+        Var getPrototypeOfResult = threadContext->ExecuteImplicitCall(getPrototypeOfMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, getPrototypeOfMethod, CallInfo(CallFlags_Value, 2), handlerObj, targetObj);
+        });
+        
         TypeId prototypeTypeId = JavascriptOperators::GetTypeId(getPrototypeOfResult);
         if (!JavascriptOperators::IsObjectType(prototypeTypeId) && prototypeTypeId != TypeIds_Null)
         {
@@ -1523,12 +1507,12 @@ namespace Js
         return nullptr;
     }
 
-    void JavascriptProxy::RemoveFromPrototype(ScriptContext * requestContext)
+    void JavascriptProxy::RemoveFromPrototype(ScriptContext * requestContext, bool * allProtoCachesInvalidated)
     {
         Assert(FALSE);
     }
 
-    void JavascriptProxy::AddToPrototype(ScriptContext * requestContext)
+    void JavascriptProxy::AddToPrototype(ScriptContext * requestContext, bool * allProtoCachesInvalidated)
     {
         Assert(FALSE);
     }
@@ -1583,16 +1567,11 @@ namespace Js
             return TRUE;
         }
         //8. Let trapResult be the result of calling the[[Call]] internal method of trap with handler as the this value and a new List containing target and V.
-        CallInfo callInfo(CallFlags_Value, 3);
-        Var varArgs[3];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = newPrototype;
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        Var setPrototypeResult = setPrototypeOfMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var setPrototypeResult = threadContext->ExecuteImplicitCall(setPrototypeOfMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, setPrototypeOfMethod, CallInfo(CallFlags_Value, 3), handlerObj, targetObj, newPrototype);
+        });
 
         //9. Let booleanTrapResult be ToBoolean(trapResult).
         //10. ReturnIfAbrupt(booleanTrapResult).
@@ -1689,12 +1668,7 @@ namespace Js
     BOOL JavascriptProxy::GetOwnPropertyDescriptor(RecyclableObject* obj, PropertyId propertyId, ScriptContext* requestContext, PropertyDescriptor* propertyDescriptor)
     {
         JavascriptProxy* proxy = JavascriptProxy::FromVar(obj);
-        auto fn = [&](RecyclableObject *targetObj)-> BOOL {
-            return JavascriptOperators::GetOwnPropertyDescriptor(targetObj, propertyId, requestContext, propertyDescriptor);
-        };
-        auto getPropertyId = [&]() -> PropertyId {return propertyId; };
-        BOOL foundProperty = proxy->GetPropertyDescriptorTrap(obj, fn, getPropertyId, propertyDescriptor, requestContext);
-        return foundProperty;
+        return proxy->GetPropertyDescriptorTrap(propertyId, propertyDescriptor, requestContext);
     }
 
 
@@ -1733,7 +1707,7 @@ namespace Js
         //7. If trap is undefined, then
         //a.Return the result of calling the[[DefineOwnProperty]] internal method of target with arguments P and Desc.
         JavascriptFunction* defineOwnPropertyMethod = proxy->GetMethodHelper(PropertyIds::defineProperty, requestContext);
-        Var definePropertyResult;
+
         Assert(!requestContext->IsHeapEnumInProgress());
         if (nullptr == defineOwnPropertyMethod)
         {
@@ -1754,17 +1728,12 @@ namespace Js
             descVar = JavascriptOperators::FromPropertyDescriptor(descriptor, requestContext);
         }
 
-        CallInfo callInfo(CallFlags_Value, 4);
-        Var varArgs[4];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propId);
-        varArgs[3] = descVar;
+        Var propertyName = GetName(requestContext, propId);
 
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        definePropertyResult = defineOwnPropertyMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        Var definePropertyResult = threadContext->ExecuteImplicitCall(defineOwnPropertyMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, defineOwnPropertyMethod, CallInfo(CallFlags_Value, 4), handlerObj, targetObj, propertyName, descVar);
+        });
 
         BOOL defineResult = JavascriptConversion::ToBoolean(definePropertyResult, requestContext);
         if (!defineResult)
@@ -1810,15 +1779,15 @@ namespace Js
     }
 
 
-    BOOL JavascriptProxy::SetPropertyTrap(Var receiver, SetPropertyTrapKind setPropertyTrapKind, Js::JavascriptString * propertyNameString, Var newValue, ScriptContext* requestContext)
+    BOOL JavascriptProxy::SetPropertyTrap(Var receiver, SetPropertyTrapKind setPropertyTrapKind, Js::JavascriptString * propertyNameString, Var newValue, ScriptContext* requestContext, PropertyOperationFlags propertyOperationFlags)
     {
         const PropertyRecord* propertyRecord;
-        requestContext->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
-        return SetPropertyTrap(receiver, setPropertyTrapKind, propertyRecord->GetPropertyId(), newValue, requestContext);
+        requestContext->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
+        return SetPropertyTrap(receiver, setPropertyTrapKind, propertyRecord->GetPropertyId(), newValue, requestContext, propertyOperationFlags);
 
     }
 
-    BOOL JavascriptProxy::SetPropertyTrap(Var receiver, SetPropertyTrapKind setPropertyTrapKind, PropertyId propertyId, Var newValue, ScriptContext* requestContext, BOOL skipPrototypeCheck)
+    BOOL JavascriptProxy::SetPropertyTrap(Var receiver, SetPropertyTrapKind setPropertyTrapKind, PropertyId propertyId, Var newValue, ScriptContext* requestContext, PropertyOperationFlags propertyOperationFlags, BOOL skipPrototypeCheck)
     {
         PROBE_STACK(GetScriptContext(), Js::Constants::MinStackDefault);
 
@@ -1851,7 +1820,7 @@ namespace Js
         //7. If trap is undefined, then
         //a.Return the result of calling the[[Set]] internal method of target with arguments P, V, and Receiver.
         JavascriptFunction* setMethod = GetMethodHelper(PropertyIds::set, requestContext);
-        Var setPropertyResult;
+
         Assert(!GetScriptContext()->IsHeapEnumInProgress());
         if (nullptr == setMethod)
         {
@@ -1882,7 +1851,7 @@ namespace Js
                 return JavascriptOperators::SetPropertyWPCache(receiver, targetObj, propertyId, newValue, requestContext, PropertyOperationFlags::PropertyOperation_None, &propertyValueInfo);
             }
             default:
-                Assert(FALSE);
+                AnalysisAssert(FALSE);
             }
         }
         //8. Let trapResult be the result of calling the[[Call]] internal method of trap with handler as the this value and a new List containing target, P, V, and Receiver.
@@ -1890,22 +1859,21 @@ namespace Js
         //10. ReturnIfAbrupt(booleanTrapResult).
         //11. If booleanTrapResult is false, then return false.
 
-        CallInfo callInfo(CallFlags_Value, 5);
-        Var varArgs[5];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-        varArgs[2] = GetName(requestContext, propertyId);
-        varArgs[3] = newValue;
-        varArgs[4] = receiver;
-
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        setPropertyResult = setMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
-
+        Var propertyName = GetName(requestContext, propertyId);
+        
+        Var setPropertyResult = threadContext->ExecuteImplicitCall(setMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, setMethod, CallInfo(CallFlags_Value, 5), handlerObj, targetObj, propertyName, newValue, receiver);
+        });
+        
         BOOL setResult = JavascriptConversion::ToBoolean(setPropertyResult, requestContext);
         if (!setResult)
         {
+            if (propertyOperationFlags & PropertyOperation_StrictMode)
+            {
+                JavascriptError::ThrowTypeError(requestContext, JSERR_ProxyHandlerReturnedFalse, _u("set"));
+            }
+
             return setResult;
         }
 
@@ -1975,9 +1943,10 @@ namespace Js
             JavascriptError::ThrowTypeError(requestContext, JSERR_NeedFunction, requestContext->GetPropertyName(methodId)->GetBuffer());
         }
 
-        varMethod = CrossSite::MarshalVar(requestContext, varMethod);
+        JavascriptFunction* function = JavascriptFunction::FromVar(varMethod);
 
-        return JavascriptFunction::FromVar(varMethod);
+        return JavascriptFunction::FromVar(CrossSite::MarshalVar(requestContext,
+          function, function->GetScriptContext()));
     }
 
     Var JavascriptProxy::GetValueFromDescriptor(Var instance, PropertyDescriptor propertyDescriptor, ScriptContext* requestContext)
@@ -1996,11 +1965,10 @@ namespace Js
 
     void JavascriptProxy::PropertyIdFromInt(uint32 index, PropertyRecord const** propertyRecord)
     {
-        char16 buffer[20];
+        char16 buffer[22];
+        int pos = TaggedInt::ToBuffer(index, buffer, _countof(buffer));
 
-        ::_i64tow_s(index, buffer, sizeof(buffer) / sizeof(char16), 10);
-
-        GetScriptContext()->GetOrAddPropertyRecord((LPCWSTR)buffer, static_cast<int>(wcslen(buffer)), propertyRecord);
+        GetScriptContext()->GetOrAddPropertyRecord((LPCWSTR)buffer + pos, (_countof(buffer) - 1) - pos, propertyRecord);
     }
 
     Var JavascriptProxy::GetName(ScriptContext* requestContext, PropertyId propertyId)
@@ -2009,11 +1977,11 @@ namespace Js
         Var name;
         if (propertyRecord->IsSymbol())
         {
-            name = requestContext->GetLibrary()->CreateSymbol(propertyRecord);
+            name = requestContext->GetSymbol(propertyRecord);
         }
         else
         {
-            name = requestContext->GetLibrary()->CreatePropertyString(propertyRecord);
+            name = requestContext->GetPropertyString(propertyRecord);
         }
         return name;
     }
@@ -2099,8 +2067,9 @@ namespace Js
         ARGUMENTS(args, callInfo);
         ScriptContext* scriptContext = function->GetScriptContext();
 
-        BOOL hasOverridingNewTarget = callInfo.Flags & CallFlags_NewTarget;
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && args[0] != nullptr && RecyclableObject::Is(args[0]);
+        BOOL hasOverridingNewTarget = args.HasNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
+        bool isNewCall = args.IsNewCall() || hasOverridingNewTarget;
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
         if (!JavascriptProxy::Is(function))
@@ -2163,11 +2132,30 @@ namespace Js
                 {
                     JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedFunction, _u("construct"));
                 }
-                newThisObject = JavascriptOperators::NewScObjectNoCtor(targetObj, scriptContext);
-                args.Values[0] = newThisObject;
+
+                // args.Values[0] will be null in the case where NewTarget is initially provided by proxy.
+                if (!isCtorSuperCall || !args.Values[0])
+                {
+                    newThisObject = JavascriptOperators::NewScObjectNoCtor(targetObj, scriptContext);
+                    args.Values[0] = newThisObject;
+                }
+                else
+                {
+                    newThisObject = args.Values[0];
+                }
             }
 
-            ushort newCount = (ushort)(args.Info.Count + 1);
+            ushort newCount = (ushort)args.Info.Count;
+            if (isNewCall)
+            {
+                newCount++;
+                if (!newCount)
+                {
+                    ::Math::DefaultOverflowPolicy();
+                }
+            }
+            AnalysisAssert(newCount >= (ushort)args.Info.Count);
+
             Var* newValues;
             const unsigned STACK_ARGS_ALLOCA_THRESHOLD = 8; // Number of stack args we allow before using _alloca
             Var stackArgs[STACK_ARGS_ALLOCA_THRESHOLD];
@@ -2180,17 +2168,46 @@ namespace Js
             {
                 newValues = stackArgs;
             }
-            CallInfo calleeInfo((CallFlags)(args.Info.Flags | CallFlags_ExtraArg | CallFlags_NewTarget), newCount);
 
-            for (uint argCount = 0; argCount < args.Info.Count; argCount++)
+            CallInfo calleeInfo((CallFlags)(args.Info.Flags), args.Info.Count);
+            if (isNewCall)
             {
+                calleeInfo.Flags = (CallFlags)(calleeInfo.Flags | CallFlags_ExtraArg | CallFlags_NewTarget);
+            }
+
+            for (ushort argCount = 0; argCount < (ushort)args.Info.Count; argCount++)
+            {
+                AnalysisAssert(newCount >= ((ushort)args.Info.Count));
+                AnalysisAssert(argCount < newCount);
+                AnalysisAssert(argCount < (ushort)args.Info.Count);
+                AnalysisAssert(sizeof(Var*) == sizeof(void*));
+                AnalysisAssert(sizeof(Var*) * argCount < sizeof(void*) * newCount);
+#pragma prefast(suppress:__WARNING_WRITE_OVERRUN, "This is a false positive, and all of the above analysis asserts still didn't convince prefast of that.")
                 newValues[argCount] = args.Values[argCount];
             }
-#pragma prefast(suppress:6386)
-            newValues[args.Info.Count] = newTarget;
+            if (isNewCall)
+            {
+                AnalysisAssert(newCount == ((ushort)args.Info.Count) + 1);
+                newValues[args.Info.Count] = newTarget;
+
+                // If the function we're calling is a class constructor, it expects newTarget
+                // as the first arg so it knows how to construct "this". (We can leave the
+                // extra copy of newTarget at the end of the arguments; it's harmless so
+                // there's no need to introduce additional complexity here.)
+                FunctionInfo* functionInfo = JavascriptOperators::GetConstructorFunctionInfo(targetObj, scriptContext);
+                if (functionInfo && functionInfo->IsClassConstructor())
+                {
+                    newValues[0] = newTarget;
+                }
+            }
 
             Js::Arguments arguments(calleeInfo, newValues);
-            Var aReturnValue = JavascriptFunction::CallFunction<true>(targetObj, targetObj->GetEntryPoint(), arguments);
+            Var aReturnValue = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                aReturnValue = JavascriptFunction::CallFunction<true>(targetObj, targetObj->GetEntryPoint(), arguments);
+            }
+            END_SAFE_REENTRANT_CALL
             // If this is constructor call, return the actual object instead of function result
             if ((callInfo.Flags & CallFlags_New) && !JavascriptOperators::IsObject(aReturnValue))
             {
@@ -2213,6 +2230,11 @@ namespace Js
         varArgs[1] = targetObj;
         if (args.Info.Flags & CallFlags_New)
         {
+            if (!JavascriptOperators::IsConstructor(targetObj))
+            {
+                JavascriptError::ThrowTypeError(scriptContext, JSERR_NotAConstructor);
+            }
+
             varArgs[2] = argList;
             // 1st preference - overridden newTarget
             // 2nd preference - 'this' in case of super() call
@@ -2226,7 +2248,12 @@ namespace Js
             varArgs[3] = argList;
         }
 
-        Var trapResult = callMethod->CallFunction(arguments);
+        Var trapResult = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            trapResult = callMethod->CallFunction(arguments);
+        }
+        END_SAFE_REENTRANT_CALL
         if (args.Info.Flags & CallFlags_New)
         {
             if (!Js::JavascriptOperators::IsObject(trapResult))
@@ -2302,15 +2329,11 @@ namespace Js
         //12. ReturnIfAbrupt(extensibleTarget).
         //13. Let targetKeys be target.[[OwnPropertyKeys]]().
         //14. ReturnIfAbrupt(targetKeys).
-        CallInfo callInfo(CallFlags_Value, 2);
-        Var varArgs[2];
-        Js::Arguments arguments(callInfo, varArgs);
-        varArgs[0] = handlerObj;
-        varArgs[1] = targetObj;
-
-        Js::ImplicitCallFlags saveImplicitCallFlags = threadContext->GetImplicitCallFlags();
-        Var ownKeysResult = ownKeysMethod->CallFunction(arguments);
-        threadContext->SetImplicitCallFlags((Js::ImplicitCallFlags)(saveImplicitCallFlags | ImplicitCall_Accessor));
+        
+        Var ownKeysResult = threadContext->ExecuteImplicitCall(ownKeysMethod, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, ownKeysMethod, CallInfo(CallFlags_Value, 2), handlerObj, targetObj);
+        });
 
         if (!JavascriptOperators::IsObject(ownKeysResult))
         {
@@ -2445,7 +2468,7 @@ namespace Js
             {
                 element = targetKeys->DirectGetItem(i);
                 AssertMsg(JavascriptSymbol::Is(element) || JavascriptString::Is(element), "Invariant check during ownKeys proxy trap should make sure we only get property key here. (symbol or string primitives)");
-                JavascriptConversion::ToPropertyKey(element, requestContext, &propertyRecord);
+                JavascriptConversion::ToPropertyKey(element, requestContext, &propertyRecord, nullptr);
                 propertyId = propertyRecord->GetPropertyId();
 
                 if (propertyId == Constants::NoProperty)

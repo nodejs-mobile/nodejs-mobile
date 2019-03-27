@@ -7,8 +7,6 @@ prefix known_issues
 [true] # This section applies to all platforms
 
 [$system==win32]
-test-stdout-buffer-flush-on-exit: SKIP
-test-cluster-disconnect-handles: SKIP
 
 [$system==linux]
 
@@ -19,9 +17,3 @@ test-cluster-disconnect-handles: SKIP
 [$system==freebsd]
 
 [$system==aix]
-
-[$jsEngine==chakracore]
-test-vm-attributes-property-not-on-sandbox : SKIP
-test-vm-data-property-writable : SKIP
-test-vm-inherited_properties : SKIP
-test-vm-strict-mode : SKIP

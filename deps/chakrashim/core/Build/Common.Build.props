@@ -29,7 +29,6 @@
       <!-- ======== sources.inc ======== -->
       <!-- generates SAL annotations for our interface -->
       <AdditionalOptions>%(AdditionalOptions) -sal_local</AdditionalOptions>
-      
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WINVER=$(Win32_WinNTVersion)</PreprocessorDefinitions>
     </Midl>
     <ClCompile>
@@ -54,11 +53,11 @@
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <!-- /Zi -->
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <DebugInformationFormat Condition="'$(MultiProcessorCompilation)' == 'true'">OldStyle</DebugInformationFormat>
+      <DebugInformationFormat Condition="'%(MultiProcessorCompilation)' == 'true'">OldStyle</DebugInformationFormat>
       <!-- /EHsc- -->
       <ExceptionHandling>SyncCThrow</ExceptionHandling>
       <!-- /Gz -->
-      <CallingConvention Condition="'$(Platform)'=='Win32'">StdCall</CallingConvention>
+      <CallingConvention Condition="'$(Platform)'=='Win32' or '$(Platform)'=='chpe'">StdCall</CallingConvention>
       <!-- /Zp8 -->
       <StructMemberAlignment>8Bytes</StructMemberAlignment>
       <!-- /GS -->
@@ -79,15 +78,25 @@
       <!-- Separate global variable for linker -->
       <AdditionalOptions>%(AdditionalOptions) /Gw</AdditionalOptions>
 
+      <!-- Enable warnings not included in W4 by default -->
+      <AdditionalOptions>%(AdditionalOptions) /w44242 /w44254</AdditionalOptions>
+
       <ProgramDataBaseFileName Condition="'$(ConfigurationType)'=='StaticLibrary'">$(IntDir)$(TargetName).pdb</ProgramDataBaseFileName>
       <ProgramDataBaseFileName Condition="'$(ConfigurationType)'!='StaticLibrary'">$(IntDir)</ProgramDataBaseFileName>
 
-      <!-- ======== For Code Covearge ======== -->
+      <!-- ======== For Code Coverage ======== -->
       <PreprocessorDefinitions Condition="'$(ENABLE_CODECOVERAGE)'=='true'">
         %(PreprocessorDefinitions);
         BYTECODE_TESTING=1
       </PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(BuildWabt)'=='true'">%(PreprocessorDefinitions);CAN_BUILD_WABT=1</PreprocessorDefinitions>
+
+      <PreprocessorDefinitions Condition="'$(ChakraVersionBuildNumber)'!=''">%(PreprocessorDefinitions);CHAKRA_VERSION_BUILD_NUMBER=$(ChakraVersionBuildNumber)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(ChakraVersionBuildQFENumber)'!=''">%(PreprocessorDefinitions);CHAKRA_VERSION_BUILD_QFE=$(ChakraVersionBuildQFENumber)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(ChakraVersionBuildCommit)'!=''">%(PreprocessorDefinitions);CHAKRA_VERSION_BUILD_COMMIT=$(ChakraVersionBuildCommit)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(ChakraVersionBuildDate)'!=''">%(PreprocessorDefinitions);CHAKRA_VERSION_BUILD_DATE=$(ChakraVersionBuildDate)</PreprocessorDefinitions>
+
+
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions Condition="'$(ChakraVersionBuildNumber)'!=''">%(PreprocessorDefinitions);CHAKRA_VERSION_BUILD_NUMBER=$(ChakraVersionBuildNumber)</PreprocessorDefinitions>
@@ -114,7 +123,7 @@
       <AdditionalOptions>%(AdditionalOptions) /release</AdditionalOptions>
       <!-- Ignore Linker warning: This object file does not define any previously undefined public symbols -->
       <AdditionalOptions>%(AdditionalOptions) /ignore:4221</AdditionalOptions>
-      <!-- ======== For Code Covearge ======== -->
+      <!-- ======== For Code Coverage ======== -->
       <AdditionalOptions Condition="'$(ENABLE_CODECOVERAGE)'=='true'">%(AdditionalOptions) /DEBUGTYPE:CV,FIXUP</AdditionalOptions>
     </Link>
     <Lib>
@@ -132,7 +141,8 @@
   <ItemDefinitionGroup Condition="'$(OptimizedBuild)'=='true' AND '$(ENABLE_CODECOVERAGE)'!='true'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
-      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <!-- HYB-TODO: When a CHPE toolchain arrives that supports LTCG, remove this condition. -->
+      <WholeProgramOptimization Condition="'$(Platform)' != 'chpe'">true</WholeProgramOptimization>
     </ClCompile>
   </ItemDefinitionGroup>
   
@@ -162,7 +172,7 @@
       <LinkTimeCodeGeneration Condition="'$(PlatformToolset)'!='v120' AND '$(TF_BUILD)'==''">UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <Lib>
-      <LinkTimeCodeGeneration>true</LinkTimeCodeGeneration>
+      <LinkTimeCodeGeneration Condition="'$(Platform)' != 'chpe'">true</LinkTimeCodeGeneration>
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup Condition="'$(ConfigurationType)'=='DynamicLibrary' OR '$(ConfigurationType)'=='Application'">

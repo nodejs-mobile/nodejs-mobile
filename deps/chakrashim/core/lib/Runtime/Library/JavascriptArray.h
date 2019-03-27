@@ -84,6 +84,13 @@ namespace Js
         Field(SparseArraySegmentBase *) lastUsedSegment;
     };
 
+    enum ConcatSpreadableState
+    {
+        ConcatSpreadableState_NotChecked,
+        ConcatSpreadableState_CheckedAndFalse,
+        ConcatSpreadableState_CheckedAndTrue
+    };
+
     class JavascriptArray : public ArrayObject
     {
         template <class TPropertyIndex>
@@ -98,8 +105,6 @@ namespace Js
     protected:
         DEFINE_VTABLE_CTOR(JavascriptArray, ArrayObject);
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptArray);
-    private:
-        Field(bool) isInitialized;
     protected:
         Field(SparseArraySegmentBase*) head;
         union SegmentUnionType
@@ -128,13 +133,14 @@ namespace Js
         static const uint8 MissingElementsCountIndex = 1;
         // 2nd column in allocationBuckets that stores allocation size for given bucket
         static const uint8 AllocationSizeIndex = 2;
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
         static const uint8 AllocationBucketsCount = 3;
 #else
         static const uint8 AllocationBucketsCount = 2;
 #endif
         static uint allocationBuckets[AllocationBucketsCount][AllocationBucketsInfoSize];
         static const Var MissingItem;
+        static const Var IntMissingItemVar;
         template<typename T> static T GetMissingItem();
 
         SparseArraySegmentBase * GetHead() const { return head; }
@@ -208,11 +214,13 @@ namespace Js
         static bool Is(Var aValue);
         static bool Is(TypeId typeId);
         static JavascriptArray* FromVar(Var aValue);
+        static JavascriptArray* UnsafeFromVar(Var aValue);
 
         static bool IsVarArray(Var aValue);
         static bool IsVarArray(TypeId typeId);
 
         static JavascriptArray* FromAnyArray(Var aValue);
+        static JavascriptArray* UnsafeFromAnyArray(Var aValue);
         static bool IsDirectAccessArray(Var aValue);
         static bool IsInlineSegment(SparseArraySegmentBase *seg, JavascriptArray *pArr);
 
@@ -323,7 +331,10 @@ namespace Js
         void CheckForceES5Array();
 #endif
 
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+#if DBG
+        void DoTypeMutation();
+#endif
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual BOOL DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags) override;
         virtual BOOL DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags flags) override;
         virtual BOOL IsEnumerable(PropertyId propertyId) override;
@@ -351,7 +362,7 @@ namespace Js
         virtual BOOL Seal() override;
         virtual BOOL Freeze() override;
 
-        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache = nullptr) override;
+        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
         virtual BOOL GetDiagValueString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
         virtual BOOL GetDiagTypeString(StringBuilder<ArenaAllocator>* stringBuilder, ScriptContext* requestContext) override;
         virtual BOOL GetSpecialPropertyName(uint32 index, JavascriptString ** propertyName, ScriptContext * requestContext) override;
@@ -415,7 +426,7 @@ namespace Js
         JavascriptArray(uint32 length, DynamicType * type);
 
         // For BoxStackInstance
-        JavascriptArray(JavascriptArray * instance, bool boxHead);
+        JavascriptArray(JavascriptArray * instance, bool boxHead, bool deepCopy);
 
         template<typename T> inline void LinkSegments(SparseArraySegment<T>* prev, SparseArraySegment<T>* current);
         template<typename T> inline SparseArraySegment<T>* ReallocNonLeafSegment(SparseArraySegment<T>* seg, SparseArraySegmentBase* nextSeg, bool forceNonLeaf = false);
@@ -428,7 +439,9 @@ namespace Js
         void LinkSegmentsCommon(SparseArraySegmentBase* prev, SparseArraySegmentBase* current);
 
     public:
-        static JavascriptArray *GetArrayForArrayOrObjectWithArray(const Var var);
+        static JavascriptArray *Jit_GetArrayForArrayOrObjectWithArray(const Var var);
+        static JavascriptArray *Jit_GetArrayForArrayOrObjectWithArray(const Var var, bool *const isObjectWithArrayRef);
+        static bool Jit_TryGetArrayForObjectWithArray(const Var var, bool *const isObjectWithArrayRef, INT_PTR* vtable, JavascriptArray ** array);
         static JavascriptArray *GetArrayForArrayOrObjectWithArray(const Var var, bool *const isObjectWithArrayRef, TypeId *const arrayTypeIdRef);
         static const SparseArraySegmentBase *Jit_GetArrayHeadSegmentForArrayOrObjectWithArray(const Var var);
         static uint32 Jit_GetArrayHeadSegmentLength(const SparseArraySegmentBase *const headSegment);
@@ -539,6 +552,8 @@ namespace Js
         void SetHeadAndLastUsedSegment(SparseArraySegmentBase * segment);
         void SetLastUsedSegment(SparseArraySegmentBase * segment);
         bool HasSegmentMap() const;
+        template<typename T>
+        static void CopyHeadIfInlinedHeadSegment(JavascriptArray *array, Recycler *recycler);
 
     private:
         void SetSegmentMap(SegmentBTreeRoot * segmentMap);
@@ -558,6 +573,7 @@ namespace Js
 
         template<typename T>
         static void UnshiftHelper(JavascriptArray* pArr, uint32 unshiftElements, Js::Var * elements);
+        static Var UnshiftObjectHelper(Js::Arguments& args, ScriptContext * scriptContext);
 
         template<typename T>
         static void GrowArrayHeadHelperForUnshift(JavascriptArray* pArr, uint32 unshiftElements, ScriptContext * scriptContext);
@@ -575,16 +591,15 @@ namespace Js
         virtual int32 HeadSegmentIndexOfHelper(Var search, uint32 &fromIndex, uint32 toIndex, bool includesAlgorithm, ScriptContext * scriptContext);
 
         template<typename T>
-        static void CopyHeadIfInlinedHeadSegment(JavascriptArray *array, Recycler *recycler);
-        template<typename T>
         static void ReallocateNonLeafLastSegmentIfLeaf(JavascriptArray * arr, Recycler * recycler);
 
         template<typename T>
         static void ArraySpliceHelper(JavascriptArray* pNewArr, JavascriptArray* pArr, uint32 start, uint32 deleteLen,
                                                     Var* insertArgs, uint32 insertLen, ScriptContext *scriptContext);
         template<typename T>
-        static void ArraySegmentSpliceHelper(JavascriptArray *pnewArr, SparseArraySegment<T> *seg, SparseArraySegment<T> **prev, uint32 start, uint32 deleteLen,
-                                                    Var* insertArgs, uint32 insertLen, Recycler *recycler);
+        static void ArraySegmentSpliceHelper(
+            JavascriptArray *pnewArr, SparseArraySegment<T> *seg, Field(SparseArraySegment<T>*) *prev,
+            uint32 start, uint32 deleteLen, Var* insertArgs, uint32 insertLen, Recycler *recycler);
         template<typename T>
         static RecyclableObject* ObjectSpliceHelper(RecyclableObject* pObj, T len, T start, T deleteLen,
                                                     Var* insertArgs, uint32 insertLen, ScriptContext *scriptContext, RecyclableObject* pNewObj = nullptr);
@@ -814,7 +829,7 @@ namespace Js
         };
 
         void GenericDirectSetItemAt(const BigIndex& index, Var newValue) { index.SetItem(this, newValue); }
-        void GenericDirectSetItemAt(const uint32 index, Var newValue) { this->DirectSetItemAt(index, newValue); }
+        void GenericDirectSetItemAt(const uint32 index, Var newValue);
         void DirectSetItemIfNotExist(const BigIndex& index, Var newValue) { index.SetItemIfNotExist(this, newValue); }
         void DirectAppendItem(Var newValue) { BigIndex(this->GetLength()).SetItem(this, newValue); }
         void TruncateToProperties(const BigIndex& index, uint32 start);
@@ -839,16 +854,22 @@ namespace Js
         static void SetConcatItem(Var aItem, uint idxArg, JavascriptArray* pDestArray, RecyclableObject* pDestObj, T idxDest, ScriptContext *scriptContext);
 
         template<typename T>
-        static void ConcatArgs(RecyclableObject* pDestObj, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext, uint start, BigIndex startIdxDest, BOOL firstPromotedItemIsSpreadable, BigIndex firstPromotedItemLength, bool spreadableCheckedAndTrue = false);
+        static void ConcatArgs(RecyclableObject* pDestObj, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext, uint start, 
+            BigIndex startIdxDest, ConcatSpreadableState previousItemSpreadableState = ConcatSpreadableState_NotChecked, BigIndex *firstPromotedItemLength = nullptr);
+
         template<typename T>
-        static void ConcatArgs(RecyclableObject* pDestObj, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext, uint start = 0, uint startIdxDest = 0u, BOOL FirstPromotedItemIsSpreadable = false, BigIndex FirstPromotedItemLength = 0u, bool spreadableCheckedAndTrue = false);
+        static void ConcatArgs(RecyclableObject* pDestObj, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext, uint start = 0, uint startIdxDest = 0u, 
+            ConcatSpreadableState previousItemSpreadableState = ConcatSpreadableState_NotChecked, BigIndex *firstPromotedItemLength = nullptr);
+
         static JavascriptArray* ConcatIntArgs(JavascriptNativeIntArray* pDestArray, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext);
         static bool PromoteToBigIndex(BigIndex lhs, BigIndex rhs);
         static bool PromoteToBigIndex(BigIndex lhs, uint32 rhs);
         static JavascriptArray* ConcatFloatArgs(JavascriptNativeFloatArray* pDestArray, TypeId* remoteTypeIds, Js::Arguments& args, ScriptContext* scriptContext);
-    private:
+
         template<typename T=uint32>
         static RecyclableObject* ArraySpeciesCreate(Var pThisArray, T length, ScriptContext* scriptContext, bool *pIsIntArray = nullptr, bool *pIsFloatArray = nullptr, bool *pIsBuiltinArrayCtor = nullptr);
+        static void CreateDataPropertyOrThrow(RecyclableObject * obj, BigIndex index, Var item, ScriptContext * scriptContext);
+    private:
         template <typename T, typename R> static R ConvertToIndex(T idxDest, ScriptContext* scriptContext) { Throw::InternalError(); return 0; }
         static BOOL SetArrayLikeObjects(RecyclableObject* pDestObj, uint32 idxDest, Var aItem);
         static BOOL SetArrayLikeObjects(RecyclableObject* pDestObj, BigIndex idxDest, Var aItem);
@@ -874,7 +895,6 @@ namespace Js
 
         template <typename T>
         static JavascriptString* ToLocaleString(T* obj, ScriptContext* scriptContext);
-        static JavascriptString* GetLocaleSeparator(ScriptContext* scriptContext);
 
     public:
         static uint32 GetOffsetOfArrayFlags() { return offsetof(JavascriptArray, arrayFlags); }
@@ -883,11 +903,12 @@ namespace Js
         static Var SpreadArrayArgs(Var arrayToSpread, const Js::AuxArray<uint32> *spreadIndices, ScriptContext *scriptContext);
         static uint32 GetSpreadArgLen(Var spreadArg, ScriptContext *scriptContext);
 
-        static JavascriptArray * BoxStackInstance(JavascriptArray * instance);
+        static JavascriptArray * BoxStackInstance(JavascriptArray * instance, bool deepCopy);
+        static ArrayObject * DeepCopyInstance(ArrayObject * instance);
     protected:
-        template <typename T> void InitBoxedInlineHeadSegment(SparseArraySegment<T> * dst, SparseArraySegment<T> * src);
-
-        template <typename T> static T * BoxStackInstance(T * instance);
+        template <typename T> void InitBoxedInlineSegments(T * instance, bool deepCopy);
+        template <typename T> static T * BoxStackInstance(T * instance, bool deepCopy);
+        template <typename T> static T * DeepCopyInstance(T * instance);
 
     public:
         template<class T, uint InlinePropertySlots> static size_t DetermineAllocationSize(const uint inlineElementSlots, size_t *const allocationPlusSizeRef = nullptr, uint *const alignedInlineElementSlotsRef = nullptr);
@@ -945,7 +966,7 @@ namespace Js
             JavascriptArray(length, type), weakRefToFuncBody(nullptr) {}
 
         // For BoxStackInstance
-        JavascriptNativeArray(JavascriptNativeArray * instance);
+        JavascriptNativeArray(JavascriptNativeArray * instance, bool deepCopy);
 
         Field(RecyclerWeakReference<FunctionBody> *) weakRefToFuncBody;
 
@@ -953,6 +974,7 @@ namespace Js
         static bool Is(Var aValue);
         static bool Is(TypeId typeId);
         static JavascriptNativeArray* FromVar(Var aValue);
+        static JavascriptNativeArray* UnsafeFromVar(Var aValue);
 
         void SetArrayCallSite(ProfileId index, RecyclerWeakReference<FunctionBody> *weakRef)
         {
@@ -1005,7 +1027,7 @@ namespace Js
             JavascriptNativeArray(length, type) {}
 
         // For BoxStackInstance
-        JavascriptNativeIntArray(JavascriptNativeIntArray * instance, bool boxHead);
+        JavascriptNativeIntArray(JavascriptNativeIntArray * instance, bool boxHead, bool deepCopy);
     public:
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
         static Var NewInstance(RecyclableObject* function, Arguments args);
@@ -1013,6 +1035,7 @@ namespace Js
         static bool Is(Var aValue);
         static bool Is(TypeId typeId);
         static JavascriptNativeIntArray* FromVar(Var aValue);
+        static JavascriptNativeIntArray* UnsafeFromVar(Var aValue);
         static bool IsNonCrossSite(Var aValue);
 
         typedef int32 TElement;
@@ -1063,7 +1086,7 @@ namespace Js
             return LibraryValue::ValueNativeIntArrayType;
         }
         static DynamicType * GetInitialType(ScriptContext * scriptContext);
-        static JavascriptNativeIntArray * BoxStackInstance(JavascriptNativeIntArray * instance);
+        static JavascriptNativeIntArray * BoxStackInstance(JavascriptNativeIntArray * instance, bool deepCopy);
     private:
         virtual int32 HeadSegmentIndexOfHelper(Var search, uint32 &fromIndex, uint32 toIndex, bool includesAlgorithm, ScriptContext * scriptContext) override;
 
@@ -1111,6 +1134,7 @@ namespace Js
         static bool Is(Var aValue);
         static bool Is(TypeId typeId);
         static JavascriptCopyOnAccessNativeIntArray* FromVar(Var aValue);
+        static JavascriptCopyOnAccessNativeIntArray* UnsafeFromVar(Var aValue);
 
         static DynamicType * GetInitialType(ScriptContext * scriptContext);
         void ConvertCopyOnAccessSegment();
@@ -1168,7 +1192,7 @@ namespace Js
             JavascriptNativeArray(length, type) {}
 
         // For BoxStackInstance
-        JavascriptNativeFloatArray(JavascriptNativeFloatArray * instance, bool boxHead);
+        JavascriptNativeFloatArray(JavascriptNativeFloatArray * instance, bool boxHead, bool deepCopy);
 
     public:
         static Var NewInstance(RecyclableObject* function, CallInfo callInfo, ...);
@@ -1177,6 +1201,7 @@ namespace Js
         static bool Is(Var aValue);
         static bool Is(TypeId typeId);
         static JavascriptNativeFloatArray* FromVar(Var aValue);
+        static JavascriptNativeFloatArray* UnsafeFromVar(Var aValue);
         static bool IsNonCrossSite(Var aValue);
 
         typedef double TElement;
@@ -1230,7 +1255,7 @@ namespace Js
         static DynamicType * GetInitialType(ScriptContext * scriptContext);
 
         static Var Push(ScriptContext * scriptContext, Var * nativeFloatArray, double value);
-        static JavascriptNativeFloatArray * BoxStackInstance(JavascriptNativeFloatArray * instance);
+        static JavascriptNativeFloatArray * BoxStackInstance(JavascriptNativeFloatArray * instance, bool deepCopy);
         static double Pop(ScriptContext * scriptContext, Var nativeFloatArray);
     private:
         virtual int32 HeadSegmentIndexOfHelper(Var search, uint32 &fromIndex, uint32 toIndex, bool includesAlgorithm, ScriptContext * scriptContext) override;

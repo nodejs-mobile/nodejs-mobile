@@ -40,18 +40,24 @@ PRINT_USAGE() {
     echo "     --cxx=PATH        Path to Clang++ (see example below)"
     echo "     --create-deb[=V]  Create .deb package with given V version."
     echo " -d, --debug           Debug build. Default: Release"
-    echo "     --embed-icu       Download and embed ICU-57 statically."
     echo "     --extra-defines=DEF=VAR,DEFINE,..."
     echo "                       Compile with additional defines"
     echo " -h, --help            Show help"
-    echo "     --icu=PATH        Path to ICU include folder (see example below)"
+    echo "     --custom-icu=PATH The path to ICUUC headers"
+    echo "                       If --libs-only --static is not specified,"
+    echo "                       PATH/../lib must be the location of ICU libraries"
+    echo "                       Example: /usr/local/opt/icu4c/include when using ICU from homebrew"
+    echo "     --system-icu      Use the ICU that you installed globally on your machine"
+    echo "                       (where ICU headers and libraries are in your system's search path)"
+    echo "     --embed-icu       Download ICU 57.1 and link statically with it" 
+    echo "     --no-icu          Compile without ICU (disables Unicode and Intl features)"
     echo " -j[=N], --jobs[=N]    Multicore build, allow N jobs at once."
     echo " -n, --ninja           Build with ninja instead of make."
-    echo "     --no-icu          Compile without unicode/icu support."
     echo "     --no-jit          Disable JIT"
     echo "     --libs-only       Do not build CH and GCStress"
     echo "     --lto             Enables LLVM Full LTO"
     echo "     --lto-thin        Enables LLVM Thin LTO - xcode 8+ or clang 3.9+"
+    echo "     --lttng           Enables LTTng support for ETW events"
     echo "     --static          Build as static library. Default: shared library"
     echo "     --sanitize=CHECKS Build with clang -fsanitize checks,"
     echo "                       e.g. undefined,signed-integer-overflow."
@@ -60,11 +66,13 @@ PRINT_USAGE() {
     echo "     --target-path[=S] Output path for compiled binaries. Default: out/"
     echo "     --trace           Enables experimental built-in trace."
     echo "     --xcode           Generate XCode project."
-    echo "     --with-intl       Include the Intl object (requires ICU)."
+    echo "     --without-intl    Disable Intl (ECMA 402) support"
     echo "     --without=FEATURE,FEATURE,..."
     echo "                       Disable FEATUREs from JSRT experimental features."
     echo "     --valgrind        Enable Valgrind support"
     echo "                       !!! Disables Concurrent GC (lower performance)"
+    echo "     --ccache[=NAME]   Enable ccache, optionally with a custom binary name."
+    echo "                       Default: ccache"
     echo " -v, --verbose         Display verbose output including all options"
     echo "     --wb-check CPPFILE"
     echo "                       Write-barrier check given CPPFILE (git path)"
@@ -72,13 +80,13 @@ PRINT_USAGE() {
     echo "                       Write-barrier analyze given CPPFILE (git path)"
     echo "     --wb-args=PLUGIN_ARGS"
     echo "                       Write-barrier clang plugin args"
-    echo " -y                    Automatically answer Yes to questions asked by \
-script (at your own risk)"
+    echo " -y                    Automatically answer Yes to questions asked by"
+    echo "                       this script (use at your own risk)"
     echo ""
     echo "example:"
     echo "  ./build.sh --cxx=/path/to/clang++ --cc=/path/to/clang -j"
     echo "with icu:"
-    echo "  ./build.sh --icu=/usr/local/opt/icu4c/include"
+    echo "  ./build.sh --custom-icu=/usr/local/opt/icu4c"
     echo ""
 }
 
@@ -87,14 +95,16 @@ CHAKRACORE_DIR=`pwd -P`
 popd > /dev/null
 _CXX=""
 _CC=""
-_VERBOSE=""
+VERBOSE="0"
 BUILD_TYPE="Release"
 CMAKE_GEN=
 EXTRA_DEFINES=""
 MAKE=make
 MULTICORE_BUILD=""
 NO_JIT=
-ICU_PATH="-DICU_SETTINGS_RESET=1"
+CMAKE_ICU="-DICU_SETTINGS_RESET=1"
+CMAKE_INTL="-DINTL_ICU_SH=1" # default to enabling intl
+USE_LOCAL_ICU=0 # default to using system version of ICU
 STATIC_LIBRARY="-DSHARED_LIBRARY_SH=1"
 SANITIZE=
 WITHOUT_FEATURES=""
@@ -104,6 +114,7 @@ OS_LINUX=0
 OS_APT_GET=0
 OS_UNIX=0
 LTO=""
+LTTNG=""
 TARGET_OS=""
 ENABLE_CC_XPLAT_TRACE=""
 WB_CHECK=
@@ -114,22 +125,39 @@ VALGRIND=0
 # -DCMAKE_EXPORT_COMPILE_COMMANDS=ON useful for clang-query tool
 CMAKE_EXPORT_COMPILE_COMMANDS="-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
 LIBS_ONLY_BUILD=
-SHOULD_EMBED_ICU=0
-ALWAYS_YES=0
+ALWAYS_YES=
+CCACHE_NAME=
+PYTHON2_BINARY=$(which python2.7 || which python2 || which python 2> /dev/null)
 CMAKE_ADD_IOS_TOOLCHAIN=""
 
-if [ -f "/proc/version" ]; then
+UNAME_S=`uname -s`
+if [[ $UNAME_S =~ 'Linux' ]]; then
     OS_LINUX=1
-    PROC_INFO=$(cat /proc/version)
-    if [[ $PROC_INFO =~ 'Ubuntu' || $PROC_INFO =~ 'Debian'
-       || $PROC_INFO =~ 'Linaro' ]]; then
+    PROC_INFO=$(which apt-get)
+    if [[ ${#PROC_INFO} > 0 && -f "$PROC_INFO" ]]; then
         OS_APT_GET=1
     fi
-elif [[ $(uname -s) =~ "Darwin" ]]; then
+elif [[ $UNAME_S =~ "Darwin" ]]; then
     OS_UNIX=1
 else
     echo -e "Warning: Installation script couldn't detect host OS..\n" # exit ?
 fi
+
+SET_CUSTOM_ICU() {
+    ICU_PATH=$1
+    if [[ ! -d "$ICU_PATH" || ! -d "$ICU_PATH/unicode" ]]; then
+        ICU_PATH_LOCAL="$CHAKRACORE_DIR/$ICU_PATH"
+        if [[ ! -d "$ICU_PATH_LOCAL" || ! -d "$ICU_PATH_LOCAL/unicode" ]]; then
+            # if a path was explicitly provided, do not fallback to no-icu
+            echo "!!! couldn't find ICU at either $ICU_PATH or $ICU_PATH_LOCAL"
+            exit 1
+        else
+            ICU_PATH="$ICU_PATH_LOCAL"
+        fi
+    fi
+    CMAKE_ICU="-DICU_INCLUDE_PATH_SH=$ICU_PATH"
+    USE_LOCAL_ICU=0
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -154,15 +182,11 @@ while [[ $# -gt 0 ]]; do
         ;;
 
     -v | --verbose)
-        _VERBOSE="V=1"
+        VERBOSE="1"
         ;;
 
     -d | --debug)
         BUILD_TYPE="Debug"
-        ;;
-
-    --embed-icu)
-        SHOULD_EMBED_ICU=1
         ;;
 
     --extra-defines=*)
@@ -201,20 +225,33 @@ while [[ $# -gt 0 ]]; do
         fi
         ;;
 
+    --custom-icu=*)
+        ICU_PATH=$1
+        # `eval` used to resolve tilde in the path
+        eval ICU_PATH="${ICU_PATH:13}"
+        SET_CUSTOM_ICU $ICU_PATH
+        ;;
+
+    # allow legacy --icu flag for compatability
     --icu=*)
         ICU_PATH=$1
-        # resolve tilde on path
+        # `eval` used to resolve tilde in the path
         eval ICU_PATH="${ICU_PATH:6}"
-        if [[ ! -d ${ICU_PATH} ]]; then
-            if [[ -d "${CHAKRACORE_DIR}/${ICU_PATH}" ]]; then
-                ICU_PATH="${CHAKRACORE_DIR}/${ICU_PATH}"
-            else
-                # if ICU_PATH is given, do not fallback to no-icu
-                echo "!!! couldn't find ICU at $ICU_PATH"
-                exit 1
-            fi
-        fi
-        ICU_PATH="-DICU_INCLUDE_PATH_SH=${ICU_PATH}"
+        SET_CUSTOM_ICU $ICU_PATH
+        ;;
+
+    --embed-icu)
+        USE_LOCAL_ICU=1
+        ;;
+
+    --system-icu)
+        CMAKE_ICU="-DSYSTEM_ICU_SH=1"
+        USE_LOCAL_ICU=0
+        ;;
+
+    --no-icu)
+        CMAKE_ICU="-DNO_ICU_SH=1"
+        USE_LOCAL_ICU=0
         ;;
 
     --libs-only)
@@ -231,21 +268,22 @@ while [[ $# -gt 0 ]]; do
         HAS_LTO=1
         ;;
 
+    --lttng)
+        LTTNG="-DENABLE_JS_LTTNG_SH=1"
+        HAS_LTTNG=1
+        ;;
+    
     -n | --ninja)
         CMAKE_GEN="-G Ninja"
         MAKE=ninja
-        ;;
-
-    --no-icu)
-        ICU_PATH="-DNO_ICU_PATH_GIVEN_SH=1"
         ;;
 
     --no-jit)
         NO_JIT="-DNO_JIT_SH=1"
         ;;
 
-    --with-intl)
-        INTL_ICU="-DINTL_ICU_SH=1"
+    --without-intl)
+        CMAKE_INTL="-DINTL_ICU_SH=0"
         ;;
 
     --xcode)
@@ -273,18 +311,23 @@ while [[ $# -gt 0 ]]; do
         _TARGET_OS=$1
         _TARGET_OS="${_TARGET_OS:9}"
         if [[ $_TARGET_OS =~ "android" ]]; then
-            OLD_PATH=$PATH
-            export TOOLCHAIN=$PWD/android-toolchain-arm
+            if [[ -z "$TOOLCHAIN" ]]; then
+                OLD_PATH=$PATH
+                export TOOLCHAIN=$PWD/android-toolchain-arm
+                export PATH=$TOOLCHAIN/bin:$OLD_PATH
+                export AR=arm-linux-androideabi-ar
+                export CC=arm-linux-androideabi-clang
+                export CXX=arm-linux-androideabi-clang++
+                export LINK=arm-linux-androideabi-clang++
+                export STRIP=arm-linux-androideabi-strip
+                # override CXX and CC
+                _CXX="${TOOLCHAIN}/bin/${CXX}"
+                _CC="${TOOLCHAIN}/bin/${CC}"
+            fi
             TARGET_OS="-DCC_TARGET_OS_ANDROID_SH=1 -DANDROID_TOOLCHAIN_DIR=${TOOLCHAIN}/arm-linux-androideabi"
-            export PATH=$TOOLCHAIN/bin:$OLD_PATH
-            export AR=arm-linux-androideabi-ar
-            export CC=arm-linux-androideabi-clang
-            export CXX=arm-linux-androideabi-clang++
-            export LINK=arm-linux-androideabi-clang++
-            export STRIP=arm-linux-androideabi-strip
-            # override CXX and CC
-            _CXX="${TOOLCHAIN}/bin/${CXX}"
-            _CC="${TOOLCHAIN}/bin/${CC}"
+            # inherit CXX and CC
+            _CXX="${CXX}"
+            _CC="${CC}"
         fi
         if [[ $_TARGET_OS =~ "ios" ]]; then
           TARGET_OS="-DCC_TARGET_OS_IOS_SH=1"
@@ -301,6 +344,16 @@ while [[ $# -gt 0 ]]; do
     --target-path=*)
         TARGET_PATH=$1
         TARGET_PATH=${TARGET_PATH:14}
+        ;;
+
+    --ccache=*)
+        CCACHE_NAME="$1"
+        CCACHE_NAME=${CCACHE_NAME:9}
+        CCACHE_NAME="-DCCACHE_PROGRAM_NAME_SH=${CCACHE_NAME}"
+        ;;
+
+    --ccache)
+        CCACHE_NAME="-DCCACHE_PROGRAM_NAME_SH=ccache"
         ;;
 
     --without=*)
@@ -346,7 +399,7 @@ while [[ $# -gt 0 ]]; do
         ;;
 
     -y | -Y)
-        ALWAYS_YES=1
+        ALWAYS_YES=-y
         ;;
 
     *)
@@ -359,64 +412,69 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-if [[ $SHOULD_EMBED_ICU == 1 ]]; then
-    if [ ! -d "${CHAKRACORE_DIR}/deps/icu/source/output" ]; then
-        ICU_URL="http://source.icu-project.org/repos/icu/icu/tags/release-57-1"
-        echo -e "\n----------------------------------------------------------------"
-        echo -e "\nThis script will download ICU-LIB from\n${ICU_URL}\n"
-        echo "It is licensed to you by its publisher, not Microsoft."
-        echo "Microsoft is not responsible for the software."
-        echo "Your installation and use of ICU-LIB is subject to the publisher's terms available here:"
-        echo -e "http://www.unicode.org/copyright.html#License\n"
-        echo -e "----------------------------------------------------------------\n"
-        echo "If you don't agree, press Ctrl+C to terminate"
-        WAIT_QUESTION="Hit ENTER to continue (or wait 10 seconds)"
-        if [[ $ALWAYS_YES == 1 ]]; then
-            echo "$WAIT_QUESTION : Y"
-        else
-            read -t 10 -p "$WAIT_QUESTION"
-        fi
-
-        SAFE_RUN `mkdir -p ${CHAKRACORE_DIR}/deps/`
-        cd "${CHAKRACORE_DIR}/deps/";
-        ABS_DIR=`pwd`
-        if [ ! -d "${ABS_DIR}/icu/" ]; then
-            echo "Downloading ICU ${ICU_URL}"
-            if [ ! -f "/usr/bin/svn" ]; then
-                echo -e "\nYou should install 'svn' client in order to use this feature"
-                if [ $OS_APT_GET == 1 ]; then
-                    echo "tip: Try 'sudo apt-get install subversion'"
-                fi
-                exit 1
-            fi
-            svn export -q $ICU_URL icu
-            ERROR_EXIT "rm -rf ${ABS_DIR}/icu/"
-        fi
-
-        cd "${ABS_DIR}/icu/source";./configure --with-data-packaging=static\
-                --prefix="${ABS_DIR}/icu/source/output/"\
-                --enable-static --disable-shared --with-library-bits=64\
-                --disable-icuio --disable-layout\
-                CXXFLAGS="-fPIC" CFLAGS="-fPIC"
-
-        ERROR_EXIT "rm -rf ${ABS_DIR}/icu/source/output/"
-        make STATICCFLAGS="-fPIC" STATICCXXFLAGS="-fPIC" STATICCPPFLAGS="-DPIC" install
-        ERROR_EXIT "rm -rf ${ABS_DIR}/icu/source/output/"
-        cd "${ABS_DIR}/../"
+if [[ $USE_LOCAL_ICU == 1 ]]; then
+    LOCAL_ICU_DIR="$CHAKRACORE_DIR/deps/Chakra.ICU/icu"
+    if [[ ! -d $LOCAL_ICU_DIR ]]; then
+        "$PYTHON2_BINARY" "$CHAKRACORE_DIR/tools/icu/configure.py" 57.1 $ALWAYS_YES
     fi
-    ICU_PATH="-DCC_EMBED_ICU_SH=1"
+
+    # if there is still no directory, then the user declined the license agreement
+    if [[ ! -d $LOCAL_ICU_DIR ]]; then
+        echo "You must accept the ICU license agreement in order to use this configuration"
+        exit 1
+    fi
+
+    LOCAL_ICU_DIST="$LOCAL_ICU_DIR/output"
+
+    if [ ! -d "$LOCAL_ICU_DIST" ]; then
+        set -e
+
+        pushd "$LOCAL_ICU_DIR/source"
+
+        ./configure --with-data-packaging=static\
+                    --prefix="$LOCAL_ICU_DIST"\
+                    --enable-static\
+                    --disable-shared\
+                    --with-library-bits=64\
+                    --disable-icuio\
+                    --disable-layout\
+                    --disable-tests\
+                    --disable-samples\
+                    CXXFLAGS="-fPIC"\
+                    CFLAGS="-fPIC"
+
+        ERROR_EXIT "rm -rf $LOCAL_ICU_DIST"
+        make STATICCFLAGS="-fPIC" STATICCXXFLAGS="-fPIC" STATICCPPFLAGS="-DPIC" install
+        ERROR_EXIT "rm -rf $LOCAL_ICU_DIST"
+        popd
+    fi
+    CMAKE_ICU="-DICU_INCLUDE_PATH_SH=$LOCAL_ICU_DIST/include"
 fi
 
-if [[ ${#_VERBOSE} > 0 ]]; then
+if [[ "$MAKE" == "ninja" ]]; then
+    if [[ "$VERBOSE" == "1" ]]; then
+        VERBOSE="-v"
+    else
+        VERBOSE=""
+    fi
+else
+    if [[ "$VERBOSE" == "1" ]]; then
+        VERBOSE="VERBOSE=1"
+    else
+        VERBOSE=""
+    fi
+fi
+
+if [[ "$VERBOSE" != "" ]]; then
     # echo options back to the user
     echo "Printing command line options back to the user:"
     echo "_CXX=${_CXX}"
     echo "_CC=${_CC}"
     echo "BUILD_TYPE=${BUILD_TYPE}"
     echo "MULTICORE_BUILD=${MULTICORE_BUILD}"
-    echo "ICU_PATH=${ICU_PATH}"
+    echo "CMAKE_ICU=${CMAKE_ICU}"
     echo "CMAKE_GEN=${CMAKE_GEN}"
-    echo "MAKE=${MAKE} $_VERBOSE"
+    echo "MAKE=${MAKE} $VERBOSE"
     echo ""
 fi
 
@@ -518,16 +576,26 @@ else
         exit 1
     fi
 fi
+export TARGET_PATH
+
+if [[ $HAS_LTTNG == 1 ]]; then
+    CHAKRACORE_ROOT=`dirname $0`
+    "$PYTHON2_BINARY" $CHAKRACORE_ROOT/tools/lttng.py --man $CHAKRACORE_ROOT/manifests/Microsoft-Scripting-Chakra-Instrumentation.man --intermediate $TARGET_PATH/intermediate
+    mkdir -p $TARGET_PATH/lttng
+    (diff -q $TARGET_PATH/intermediate/lttng/jscriptEtw.h $TARGET_PATH/lttng/jscriptEtw.h && echo "jscriptEtw.h up to date; skipping") || cp $TARGET_PATH/intermediate/lttng/* $TARGET_PATH/lttng/
+fi
+
 
 BUILD_DIRECTORY="${TARGET_PATH}/${BUILD_TYPE:0}"
 echo "Build path: ${BUILD_DIRECTORY}"
 
-BUILD_RELATIVE_DIRECTORY=$(python -c "import os.path;print \
+BUILD_RELATIVE_DIRECTORY=$("$PYTHON2_BINARY" -c "import os.path;print \
     os.path.relpath('${CHAKRACORE_DIR}', '$BUILD_DIRECTORY')")
 
 ################# Write-barrier check/analyze run #################
 WB_FLAG=
 WB_TARGET=
+
 if [[ $WB_CHECK || $WB_ANALYZE ]]; then
     # build software write barrier checker clang plugin
     $CHAKRACORE_DIR/tools/RecyclerChecker/build.sh --cxx=$_CXX || exit 1
@@ -609,15 +677,16 @@ elif [[ $ARCH =~ "amd64" ]]; then
         CMAKE_ADD_IOS_TOOLCHAIN="$CMAKE_ADD_IOS_TOOLCHAIN -DIOS_PLATFORM=SIMULATOR64"
     fi
 else
+    ARCH="-DCC_USES_SYSTEM_ARCH_SH=1"
     echo "Compile Target : System Default"
 fi
 
 echo Generating $BUILD_TYPE makefiles
 echo $EXTRA_DEFINES
-cmake $CMAKE_GEN $CC_PREFIX $ICU_PATH $LTO $STATIC_LIBRARY $ARCH $TARGET_OS \
-    $ENABLE_CC_XPLAT_TRACE $EXTRA_DEFINES -DCMAKE_BUILD_TYPE=$BUILD_TYPE $SANITIZE $NO_JIT $INTL_ICU \
+cmake $CMAKE_GEN $CC_PREFIX $CMAKE_ICU $LTO $LTTNG $STATIC_LIBRARY $ARCH $TARGET_OS \
+    $ENABLE_CC_XPLAT_TRACE $EXTRA_DEFINES -DCMAKE_BUILD_TYPE=$BUILD_TYPE $SANITIZE $NO_JIT $CMAKE_INTL \
     $WITHOUT_FEATURES $WB_FLAG $WB_ARGS $CMAKE_EXPORT_COMPILE_COMMANDS $LIBS_ONLY_BUILD\
-    $CMAKE_ADD_IOS_TOOLCHAIN $VALGRIND $BUILD_RELATIVE_DIRECTORY
+    $CMAKE_ADD_IOS_TOOLCHAIN $VALGRIND $BUILD_RELATIVE_DIRECTORY $CCACHE_NAME
 
 _RET=$?
 if [[ $? == 0 ]]; then
@@ -629,9 +698,9 @@ if [[ $? == 0 ]]; then
                 # Get -j flag from the host
                 MULTICORE_BUILD=""
             fi
-            $MAKE $MFLAGS $MULTICORE_BUILD $_VERBOSE $WB_TARGET 2>&1 | tee build.log
+            $MAKE $MFLAGS $MULTICORE_BUILD $VERBOSE $WB_TARGET 2>&1 | tee build.log
         else
-            $MAKE $MULTICORE_BUILD $_VERBOSE $WB_TARGET 2>&1 | tee build.log
+            $MAKE $MULTICORE_BUILD $VERBOSE $WB_TARGET 2>&1 | tee build.log
         fi
         _RET=${PIPESTATUS[0]}
     else

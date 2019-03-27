@@ -33,6 +33,7 @@ Local<Value> SymbolObject::New(Isolate* isolate, Local<Symbol> value) {
   JsValueRef newSymbolObjectRef;
   if (jsrt::ConstructObject(objectConstructor, *value,
                             &newSymbolObjectRef) != JsNoError) {
+    CHAKRA_ASSERT(false);
     return Local<Value>();
   }
 
@@ -44,15 +45,17 @@ Local<Symbol> SymbolObject::ValueOf() const {
     ContextShim::GetCurrent()->GetValueOfFunction();
 
   JsValueRef symbolObjectValue;
-  if (jsrt::CallFunction(valueOfFunction, (JsValueRef)this,
-                         &symbolObjectValue) != JsNoError) {
+  JsValueRef args[] = { (JsValueRef)this };
+  if (JsCallFunction(valueOfFunction, args, _countof(args),
+                     &symbolObjectValue) != JsNoError) {
+    CHAKRA_ASSERT(false);
     return Local<Symbol>();
   }
 
   return Local<Symbol>::New(symbolObjectValue);
 }
 
-SymbolObject *SymbolObject::Cast(v8::Value *obj) {
+SymbolObject* SymbolObject::Cast(v8::Value* obj) {
   CHAKRA_ASSERT(obj->IsSymbolObject());
   return static_cast<SymbolObject*>(obj);
 }

@@ -27,11 +27,12 @@ namespace Js
         virtual ExportedNames* GetExportedNames(ExportModuleRecordList* exportStarSet) override;
         virtual bool IsSourceTextModuleRecord() override { return true; } // we don't really have other kind of modulerecord at this time.
 
-        // return false when "ambiguous". 
+        // return false when "ambiguous".
         // otherwise nullptr means "null" where we have circular reference/cannot resolve.
         bool ResolveExport(PropertyId exportName, ResolveSet* resolveSet, ModuleNameRecord** exportRecord) override;
         bool ResolveImport(PropertyId localName, ModuleNameRecord** importRecord);
-        void ModuleDeclarationInstantiation() override;
+        bool ModuleDeclarationInstantiation() override;
+        void GenerateRootFunction();
         Var ModuleEvaluation() override;
         virtual ModuleNamespace* GetNamespace();
         virtual void SetNamespace(ModuleNamespace* moduleNamespace);
@@ -42,6 +43,7 @@ namespace Js
 
         HRESULT ResolveExternalModuleDependencies();
         void EnsureChildModuleSet(ScriptContext *scriptContext);
+        bool ConfirmChildrenParsed();
 
         void* GetHostDefined() const { return hostDefined; }
         void SetHostDefined(void* hostObj) { hostDefined = hostObj; }
@@ -49,6 +51,10 @@ namespace Js
         void SetSpecifier(Var specifier) { this->normalizedSpecifier = specifier; }
         Var GetSpecifier() const { return normalizedSpecifier; }
         const char16 *GetSpecifierSz() const { return JavascriptString::FromVar(this->normalizedSpecifier)->GetSz(); }
+
+        void SetModuleUrl(Var moduleUrl) { this->moduleUrl = moduleUrl; }
+        Var GetModuleUrl() const { return moduleUrl;}
+        const char16 *GetModuleUrlSz() const { return JavascriptString::FromVar(this->moduleUrl)->GetSz(); }
 
         Var GetErrorObject() const { return errorObject; }
 
@@ -110,13 +116,15 @@ namespace Js
         const static uint InvalidSlotCount = 0xffffffff;
         const static uint InvalidSlotIndex = 0xffffffff;
         // TODO: move non-GC fields out to avoid false reference?
-        // This is the parsed tree resulted from compilation. 
+        // This is the parsed tree resulted from compilation.
+        Field(bool) confirmedReady = false;
+        Field(bool) notifying = false;
         Field(bool) wasParsed;
         Field(bool) wasDeclarationInitialized;
         Field(bool) parentsNotified;
         Field(bool) isRootModule;
         Field(bool) hadNotifyHostReady;
-        Field(ParseNodePtr) parseTree;
+        Field(ParseNodeProg *) parseTree;
         Field(Utf8SourceInfo*) pSourceInfo;
         Field(uint) sourceIndex;
         FieldNoBarrier(Parser*) parser;  // we'll need to keep the parser around till we are done with bytecode gen.
@@ -131,12 +139,12 @@ namespace Js
         Field(LocalExportMap*) localExportMapByExportName;  // from propertyId to index map: for bytecode gen.
         Field(LocalExportMap*) localExportMapByLocalName;  // from propertyId to index map: for bytecode gen.
         Field(LocalExportIndexList*) localExportIndexList; // from index to propertyId: for typehandler.
-        Field(uint) numPendingChildrenModule;
         Field(ExportedNames*) exportedNames;
         Field(ResolvedExportMap*) resolvedExportMap;
 
         Field(Js::JavascriptFunction*) rootFunction;
         Field(void*) hostDefined;
+        Field(Var) moduleUrl;
         Field(Var) normalizedSpecifier;
         Field(Var) errorObject;
         Field(Field(Var)*) localExportSlots;
@@ -151,6 +159,7 @@ namespace Js
 
         HRESULT PostParseProcess();
         HRESULT PrepareForModuleDeclarationInitialization();
+        void ReleaseParserResources();
         void ImportModuleListsFromParser();
         HRESULT OnChildModuleReady(SourceTextModuleRecord* childModule, Var errorObj);
         void NotifyParentsAsNeeded();

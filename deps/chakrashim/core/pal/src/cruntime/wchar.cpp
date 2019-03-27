@@ -885,51 +885,67 @@ char16_t
 __cdecl
 PAL_towlower( char16_t c )
 {
-#if HAVE_COREFOUNDATION
     PERF_ENTRY(towlower);
     ENTRY("towlower (c=%d)\n", c);
-    if (!PAL_iswlower(c))
-    {
-        CFMutableStringRef cfString = CFStringCreateMutable(
-                                            kCFAllocatorDefault, 1);
-        if (cfString != NULL)
+    if(c < 128)
+    {//fast path for ascii characters
+        if(c >= 'A' && c <= 'Z')
         {
-            CFStringAppendCharacters(cfString, (const UniChar*)&c, 1);
-            CFStringLowercase(cfString, NULL);
-            c = CFStringGetCharacterAtIndex(cfString, 0);
-            CFRelease(cfString);
+            c += ('a' - 'A');
+            PERF_EXIT(towlower);
+            LOGEXIT("towlower returns int %d\n", c );
+            return c;
         }
-    }
-    LOGEXIT("towlower returns int %d\n", c );
-    PERF_EXIT(towlower);
-    return c;
-#else   /* HAVE_COREFOUNDATION */
-    UnicodeDataRec dataRec;
-
-    PERF_ENTRY(towlower);
-    ENTRY("towlower (c=%d)\n", c);
-
-    if (!GetUnicodeData(c, &dataRec))
-    {
-        TRACE( "Unable to retrieve unicode data for the character %c.\n", c );
-        LOGEXIT("towlower returns int %d\n", c );
-        PERF_EXIT(towlower);
-        return c;
-    }
-
-    if ( (dataRec.C1_TYPE_FLAGS & C1_LOWER) || (dataRec.nOpposingCase ==  0 ))
-    {
-        LOGEXIT("towlower returns int %d\n", c );
-        PERF_EXIT(towlower);
-        return c;
+        else
+        {
+            PERF_EXIT(towlower);
+            LOGEXIT("towlower returns int %d\n", c );
+            return c;
+        }
     }
     else
     {
-        LOGEXIT("towlower returns int %d\n", dataRec.nOpposingCase );
+    #if HAVE_COREFOUNDATION
+        if (!PAL_iswlower(c))
+        {
+            CFMutableStringRef cfString = CFStringCreateMutable(
+                                                kCFAllocatorDefault, 1);
+            if (cfString != NULL)
+            {
+                CFStringAppendCharacters(cfString, (const UniChar*)&c, 1);
+                CFStringLowercase(cfString, NULL);
+                c = CFStringGetCharacterAtIndex(cfString, 0);
+                CFRelease(cfString);
+            }
+        }
+        LOGEXIT("towlower returns int %d\n", c );
         PERF_EXIT(towlower);
-        return dataRec.nOpposingCase;
+        return c;
+    #else   /* HAVE_COREFOUNDATION */
+        UnicodeDataRec dataRec;
+
+        if (!GetUnicodeData(c, &dataRec))
+        {
+            TRACE( "Unable to retrieve unicode data for the character %c.\n", c );
+            LOGEXIT("towlower returns int %d\n", c );
+            PERF_EXIT(towlower);
+            return c;
+        }
+
+        if ( (dataRec.C1_TYPE_FLAGS & C1_LOWER) || (dataRec.nOpposingCase ==  0 ))
+        {
+            LOGEXIT("towlower returns int %d\n", c );
+            PERF_EXIT(towlower);
+            return c;
+        }
+        else
+        {
+            LOGEXIT("towlower returns int %d\n", dataRec.nOpposingCase );
+            PERF_EXIT(towlower);
+            return dataRec.nOpposingCase;
+        }
+    #endif  /* HAVE_COREFOUNDATION */
     }
-#endif  /* HAVE_COREFOUNDATION */
 }
 
 
@@ -1131,7 +1147,7 @@ PAL_wcscat(
 
     ret = PAL_wcsncat( strDestination, strSource, PAL_wcslen( strSource ) );
 
-    LOGEXIT("wcscat returnng char16_t %p (%S)\n", ret, ret);
+    LOGEXIT("wcscat returning char16_t %p (%S)\n", ret, ret);
     PERF_EXIT(wcscat);
     return ret;
 }
@@ -1493,16 +1509,22 @@ PAL_wcsstr(
         i = 0;
         while (1)
         {
-            if (*(string + i) == 0 || *(strCharSet + i) == 0)
+            if (*(strCharSet + i) == 0)
             {
                 ret = (char16_t *) string;
+                goto leave;
+            }
+            else if (*(string + i) == 0)
+            {
+                ret = NULL;
                 goto leave;
             }
             if (*(string + i) != *(strCharSet + i))
             {
                 break;
             }
-        i++;
+
+            i++;
         }
         string++;
     }
@@ -1829,7 +1851,7 @@ PAL_iswdigit( char16_t c )
     }
     else
     {
-        TRACE( "No corresonding unicode record for character %d.\n", c );
+        TRACE( "No corresponding unicode record for character %d.\n", c );
     }
 #endif  /* HAVE_COREFOUNDATION */
     LOGEXIT("PAL_iswdigit returning %d\n", nRetVal);

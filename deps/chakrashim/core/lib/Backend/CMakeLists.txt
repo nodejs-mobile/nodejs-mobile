@@ -15,6 +15,7 @@ add_library (Chakra.Backend OBJECT
     EhFrame.cpp
     EmitBuffer.cpp
     Encoder.cpp
+    EquivalentTypeSet.cpp
     FixedFieldInfo.cpp
     FlowGraph.cpp
     Func.cpp
@@ -22,12 +23,12 @@ add_library (Chakra.Backend OBJECT
     FunctionJITRuntimeInfo.cpp
     FunctionJITTimeInfo.cpp
     GlobOpt.cpp
+    GlobOptArrays.cpp
     GlobOptBailOut.cpp
     GlobOptBlockData.cpp
     GlobOptExpr.cpp
     GlobOptFields.cpp
     GlobOptIntBounds.cpp
-    GlobOptSimd128.cpp
     IR.cpp
     IRBuilder.cpp
     IRBuilderAsmJs.cpp
@@ -39,7 +40,9 @@ add_library (Chakra.Backend OBJECT
     InliningDecider.cpp
     InliningHeuristics.cpp
     IntBounds.cpp
+    IntConstMath.cpp
     InterpreterThunkEmitter.cpp
+    JavascriptNativeOperators.cpp
     JITThunkEmitter.cpp
     JITOutput.cpp
     JITTimeConstructorCache.cpp
@@ -48,6 +51,7 @@ add_library (Chakra.Backend OBJECT
     JITTimePolymorphicInlineCacheInfo.cpp
     JITTimeProfileInfo.cpp
     JITTimeWorkItem.cpp
+    JitTransferData.cpp
     JITType.cpp
     JITTypeHandler.cpp
     JnHelperMethod.cpp
@@ -57,6 +61,7 @@ add_library (Chakra.Backend OBJECT
     LowerMDSharedSimd128.cpp
     NativeCodeData.cpp
     NativeCodeGenerator.cpp
+    NativeEntryPointData.cpp
     ObjTypeSpecFldInfo.cpp
     Opnd.cpp
     PDataManager.cpp

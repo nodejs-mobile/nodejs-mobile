@@ -24,9 +24,9 @@ public:
         MemoryFailure = 2,
         MemoryMax = 2,
     };
-typedef bool (__stdcall * PageAllocatorMemoryAllocationCallback)(__in LPVOID context,
-    __in AllocationPolicyManager::MemoryAllocateEvent allocationEvent,
-    __in size_t allocationSize);
+    typedef bool (__stdcall * PageAllocatorMemoryAllocationCallback)(__in LPVOID context,
+        __in AllocationPolicyManager::MemoryAllocateEvent allocationEvent,
+        __in size_t allocationSize);
 
 
 private:
@@ -59,6 +59,11 @@ public:
         context(NULL),
         memoryAllocationCallback(NULL)
     {
+        Js::Number limitMB = Js::Configuration::Global.flags.AllocPolicyLimit;
+        if (limitMB > 0)
+        {
+            memoryLimit = (size_t)limitMB * 1024 * 1024;
+        }
     }
 
     ~AllocationPolicyManager()
@@ -179,15 +184,16 @@ private:
 #endif
             (memoryAllocationCallback != NULL && !memoryAllocationCallback(context, MemoryAllocateEvent::MemoryAllocate, byteCount)))
         {
-            if (memoryAllocationCallback != NULL)
-            {
-                memoryAllocationCallback(context, MemoryAllocateEvent::MemoryFailure, byteCount);
-            }
-            
             // oopjit number allocator allocated pages, we can't stop it from allocating so just increase the usage number
             if (externalAlloc)
             {
                 currentMemory = newCurrentMemory;
+                return true;
+            }
+
+            if (memoryAllocationCallback != NULL)
+            {
+                memoryAllocationCallback(context, MemoryAllocateEvent::MemoryFailure, byteCount);
             }
 
             return false;
@@ -202,6 +208,7 @@ private:
     inline void ReportFreeImpl(MemoryAllocateEvent allocationEvent, size_t byteCount)
     {
         Assert(currentMemory >= byteCount);
+        byteCount = min(byteCount, currentMemory);
 
         currentMemory = currentMemory - byteCount;
 

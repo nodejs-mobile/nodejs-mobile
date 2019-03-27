@@ -3,7 +3,9 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "Backend.h"
-#include "CRC.h"
+#include "Core/CRC.h"
+#include "NativeEntryPointData.h"
+#include "JitTransferData.h"
 
 ///----------------------------------------------------------------------------
 ///
@@ -74,8 +76,8 @@ Encoder::Encode()
 #endif
 
     m_pc = m_encodeBuffer;
-    m_inlineeFrameMap = Anew(m_tempAlloc, InlineeFrameMap, m_tempAlloc);
-    m_bailoutRecordMap = Anew(m_tempAlloc, BailoutRecordMap, m_tempAlloc);
+    m_inlineeFrameMap = Anew(m_tempAlloc, ArenaInlineeFrameMap, m_tempAlloc);
+    m_bailoutRecordMap = Anew(m_tempAlloc, ArenaBailoutRecordMap, m_tempAlloc);
 
     IR::PragmaInstr* pragmaInstr = nullptr;
     uint32 pragmaOffsetInBuffer = 0;
@@ -329,7 +331,10 @@ Encoder::Encode()
 #ifdef _M_X64
     pdataCount = 1;
     xdataSize = (ushort)m_func->m_prologEncoder.SizeOfUnwindInfo();
-#elif _M_ARM
+#elif defined(_M_ARM64)
+    pdataCount = 1;
+    xdataSize = XDATA_SIZE;
+#elif defined(_M_ARM)
     pdataCount = (ushort)m_func->m_unwindInfo.GetPDataCount(codeSize);
     xdataSize = (UnwindInfoManager::MaxXdataBytes + 3) * pdataCount;
 #else
@@ -390,9 +395,14 @@ Encoder::Encode()
     }
 #endif
 
+#ifdef TARGET_64
 #ifdef _M_X64
-    m_func->m_prologEncoder.FinalizeUnwindInfo(
-        (BYTE*)m_func->GetJITOutput()->GetCodeAddress(), (DWORD)codeSize);
+    PrologEncoder &unwindInfo = m_func->m_prologEncoder;
+    unwindInfo.FinalizeUnwindInfo((BYTE*)m_func->GetJITOutput()->GetCodeAddress(), (DWORD)codeSize);
+#else
+    UnwindInfoManager &unwindInfo = m_func->m_unwindInfo;
+    unwindInfo.FinalizeUnwindInfo((BYTE*)localAddress, (DWORD)codeSize);
+#endif
 
     char * localXdataAddr = nullptr;
 #if ENABLE_OOP_NATIVE_CODEGEN
@@ -411,8 +421,8 @@ Encoder::Encode()
         localXdataAddr = (char*)allocation->xdata.address;
     }
     m_func->GetJITOutput()->RecordUnwindInfo(
-        m_func->m_prologEncoder.GetUnwindInfo(),
-        m_func->m_prologEncoder.SizeOfUnwindInfo(),
+        unwindInfo.GetUnwindInfo(),
+        unwindInfo.SizeOfUnwindInfo(),
         allocation->xdata.address,
         (BYTE*)localXdataAddr);
 #elif _M_ARM
@@ -426,10 +436,9 @@ Encoder::Encode()
     }
     else
     {
-        XDataAllocator::Register(&allocation->xdata, m_func->GetJITOutput()->GetCodeAddress(), m_func->GetJITOutput()->GetCodeSize());
-        m_func->GetInProcJITEntryPointInfo()->SetXDataInfo(&allocation->xdata);
+        XDataAllocator::Register(&allocation->xdata, m_func->GetJITOutput()->GetCodeAddress(), (DWORD)m_func->GetJITOutput()->GetCodeSize());
+        m_func->GetInProcJITEntryPointInfo()->GetNativeEntryPointData()->SetXDataInfo(&allocation->xdata);
     }
-
     m_func->GetJITOutput()->SetCodeAddress(m_func->GetJITOutput()->GetCodeAddress() | 0x1); // Set thumb mode
 #endif
 
@@ -440,7 +449,7 @@ Encoder::Encode()
     {
         if (!m_func->IsOOPJIT()) // in-proc JIT
         {
-            m_func->GetInProcJITEntryPointInfo()->RecordInlineeFrameMap(m_inlineeFrameMap);
+            m_func->GetInProcJITEntryPointInfo()->GetInProcNativeEntryPointData()->RecordInlineeFrameMap(m_inlineeFrameMap);
         }
         else // OOP JIT
         {
@@ -465,7 +474,7 @@ Encoder::Encode()
 
     if (this->m_bailoutRecordMap->Count() > 0)
     {
-        m_func->GetInProcJITEntryPointInfo()->RecordBailOutMap(m_bailoutRecordMap);
+        m_func->GetInProcJITEntryPointInfo()->GetInProcNativeEntryPointData()->RecordBailOutMap(m_bailoutRecordMap);
     }
 
     if (this->m_func->pinnedTypeRefs != nullptr)
@@ -485,7 +494,6 @@ Encoder::Encode()
 
             pinnedTypeRefs->count = pinnedTypeRefCount;
             pinnedTypeRefs->isOOPJIT = true;
-            this->m_func->GetJITOutput()->GetOutputData()->pinnedTypeRefs = pinnedTypeRefs;
         }
         else
         {
@@ -508,10 +516,7 @@ Encoder::Encode()
             Output::Flush();
         }
 
-        if (!this->m_func->IsOOPJIT())
-        {
-            m_func->GetInProcJITEntryPointInfo()->GetJitTransferData()->SetRuntimeTypeRefs(pinnedTypeRefs);
-        }
+        this->m_func->GetJITOutput()->GetOutputData()->pinnedTypeRefs = pinnedTypeRefs;
     }
 
     // Save all equivalent type guards in a fixed size array on the JIT transfer data
@@ -635,7 +640,7 @@ Encoder::Encode()
 
             Assert(reinterpret_cast<char*>(dstEntry) <= reinterpret_cast<char*>(typeGuardTransferRecord) + typeGuardTransferSize + sizeof(Js::TypeGuardTransferEntry));
 
-            m_func->GetInProcJITEntryPointInfo()->RecordTypeGuards(this->m_func->indexedPropertyGuardCount, typeGuardTransferRecord, typeGuardTransferSize);
+            m_func->GetInProcJITEntryPointInfo()->GetJitTransferData()->RecordTypeGuards(this->m_func->indexedPropertyGuardCount, typeGuardTransferRecord, typeGuardTransferSize);
         }
         else
         {
@@ -723,7 +728,7 @@ Encoder::Encode()
         }
         else
         {
-            Assert(m_func->GetInProcJITEntryPointInfo()->GetConstructorCacheCount() > 0);
+            Assert(m_func->GetInProcJITEntryPointInfo()->GetNativeEntryPointData()->GetConstructorCacheCount() > 0);
 
             size_t ctorCachesTransferSize =                                // Reserve enough room for:
                 propertyCount * sizeof(Js::CtorCacheGuardTransferEntry) +  //   each propertyId,
@@ -756,7 +761,7 @@ Encoder::Encode()
 
             Assert(reinterpret_cast<char*>(dstEntry) <= reinterpret_cast<char*>(ctorCachesTransferRecord) + ctorCachesTransferSize + sizeof(Js::CtorCacheGuardTransferEntry));
 
-            m_func->GetInProcJITEntryPointInfo()->RecordCtorCacheGuards(ctorCachesTransferRecord, ctorCachesTransferSize);
+            m_func->GetInProcJITEntryPointInfo()->GetJitTransferData()->RecordCtorCacheGuards(ctorCachesTransferRecord, ctorCachesTransferSize);
         }
     }
     m_func->GetJITOutput()->FinalizeNativeCode();
@@ -778,7 +783,7 @@ Encoder::Encode()
         {
             __analysis_assume(m_instrNumber < instrCount);
             instr->DumpGlobOptInstrString();
-#ifdef _WIN64
+#ifdef TARGET_64
             Output::Print(_u("%12IX  "), m_offsetBuffer[m_instrNumber++] + (BYTE *)m_func->GetJITOutput()->GetCodeAddress());
 #else
             Output::Print(_u("%8IX  "), m_offsetBuffer[m_instrNumber++] + (BYTE *)m_func->GetJITOutput()->GetCodeAddress());
@@ -792,8 +797,6 @@ Encoder::Encode()
 
     if (PHASE_DUMP(Js::EncoderPhase, m_func) && Js::Configuration::Global.flags.Verbose && !m_func->IsOOPJIT())
     {
-        m_func->GetInProcJITEntryPointInfo()->DumpNativeOffsetMaps();
-        m_func->GetInProcJITEntryPointInfo()->DumpNativeThrowSpanSequence();
         this->DumpInlineeFrameMap(m_func->GetJITOutput()->GetCodeAddress());
         Output::Flush();
     }
@@ -992,34 +995,6 @@ void Encoder::EnsureRelocEntryIntegrity(size_t newBufferStartAddress, size_t cod
         Assert(false);
         Fatal();
     }
-}
-
-uint Encoder::CalculateCRC(uint bufferCRC, size_t data)
-{
-#if defined(_WIN32) || defined(__SSE4_2__)
-#if defined(_M_IX86)
-    if (AutoSystemInfo::Data.SSE4_2Available())
-    {
-        return _mm_crc32_u32(bufferCRC, data);
-    }
-#elif defined(_M_X64)
-    if (AutoSystemInfo::Data.SSE4_2Available())
-    {
-        //CRC32 always returns a 32-bit result
-        return (uint)_mm_crc32_u64(bufferCRC, data);
-    }
-#endif
-#endif
-    return CalculateCRC32(bufferCRC, data);
-}
-
-uint Encoder::CalculateCRC(uint bufferCRC, size_t count, _In_reads_bytes_(count) void * buffer)
-{
-    for (uint index = 0; index < count; index++)
-    {
-        bufferCRC = CalculateCRC(bufferCRC, *((BYTE*)buffer + index));
-    }
-    return bufferCRC;
 }
 
 void Encoder::ValidateCRC(uint bufferCRC, uint initialCRCSeed, _In_reads_bytes_(count) void* buffer, size_t count)
@@ -1406,7 +1381,7 @@ void Encoder::CopyMaps(OffsetList **m_origInlineeFrameRecords
     )
 {
     InlineeFrameRecords *recList = m_inlineeFrameRecords;
-    InlineeFrameMap *mapList = m_inlineeFrameMap;
+    ArenaInlineeFrameMap *mapList = m_inlineeFrameMap;
     PragmaInstrList *pInstrList = m_pragmaInstrToRecordOffset;
 
     OffsetList *origRecList, *origMapList, *origPInstrList;

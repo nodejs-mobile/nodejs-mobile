@@ -5,16 +5,27 @@
 #include "CommonMemoryPch.h"
 
 #if _WIN32
+#if ENABLE_OOP_NATIVE_CODEGEN
 #include "../Core/DelayLoadLibrary.h"
 
 #ifdef NTDDI_WIN10_RS2
 #if (NTDDI_VERSION >= NTDDI_WIN10_RS2)
 #define USEFILEMAP2 1
+#define USEVIRTUALUNLOCKEX 1
 #endif
 #endif
 
 namespace Memory
 {
+    
+void UnlockMemory(HANDLE process, LPVOID address, SIZE_T size)
+{
+#if USEVIRTUALUNLOCKEX
+    VirtualUnlockEx(process, address, size);
+#else
+    NtdllLibrary::Instance->UnlockVirtualMemory(process, &address, &size, NtdllLibrary::MAP_PROCESS);
+#endif
+}
 
 void CloseSectionHandle(HANDLE handle)
 {
@@ -85,7 +96,7 @@ PVOID MapView(HANDLE process, HANDLE sectionHandle, size_t size, size_t offset, 
         {
             return nullptr;
         }
-        flags = AutoSystemInfo::Data.IsCFGEnabled() ? PAGE_EXECUTE_RO_TARGETS_INVALID : PAGE_EXECUTE;
+        flags = AutoSystemInfo::Data.IsCFGEnabled() ? PAGE_EXECUTE_RO_TARGETS_INVALID : PAGE_EXECUTE_READ;
     }
 
 #if USEFILEMAP2
@@ -113,7 +124,7 @@ PVOID MapView(HANDLE process, HANDLE sectionHandle, size_t size, size_t offset, 
     return address;
 }
 
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
 SectionMap32::SectionMap32(__in char * startAddress) :
     startAddress(startAddress),
 #else
@@ -123,7 +134,7 @@ SectionMap32::SectionMap32() :
 {
     memset(map, 0, sizeof(map));
 
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
     Assert(((size_t)startAddress) % TotalSize == 0);
 #endif
 }
@@ -541,8 +552,14 @@ SectionAllocWrapper::SectionAllocWrapper(HANDLE process) :
 }
 
 LPVOID
-SectionAllocWrapper::Alloc(LPVOID requestAddress, size_t dwSize, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
+SectionAllocWrapper::AllocPages(LPVOID requestAddress, size_t pageCount, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
 {
+    if (pageCount > AutoSystemInfo::MaxPageCount)
+    {
+        return nullptr;
+    }
+    size_t dwSize = pageCount * AutoSystemInfo::PageSize;
+
     Assert(isCustomHeapAllocation);
 
     LPVOID address = nullptr;
@@ -587,12 +604,6 @@ SectionAllocWrapper::Alloc(LPVOID requestAddress, size_t dwSize, DWORD allocatio
             return nullptr;
         }
         address = requestAddress;
-
-        if ((allocationType & MEM_COMMIT) == MEM_COMMIT)
-        {
-            const DWORD allocProtectFlags = AutoSystemInfo::Data.IsCFGEnabled() ? PAGE_EXECUTE_RO_TARGETS_INVALID : PAGE_EXECUTE;
-            address = VirtualAllocEx(this->process, address, dwSize, MEM_COMMIT, allocProtectFlags);
-        }
     }
 
     return address;
@@ -612,6 +623,20 @@ FailureCleanup:
         HeapDelete(section);
     }
     return nullptr;
+}
+
+bool
+SectionAllocWrapper::GetFileInfo(LPVOID address, HANDLE* fileHandle, PVOID* baseAddress)
+{
+    SectionInfo* sectionInfo = sections.GetSection(address);
+    if (!sectionInfo)
+    {
+        return false;
+    }
+
+    *fileHandle = sectionInfo->handle;
+    *baseAddress = sectionInfo->runtimeBaseAddress;
+    return true;
 }
 
 LPVOID
@@ -655,11 +680,7 @@ BOOL SectionAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFreeType
             ZeroMemory(localAddr, AutoSystemInfo::PageSize);
             FreeLocal(localAddr);
         }
-        DWORD oldFlags = NULL;
-        if (!VirtualProtectEx(this->process, lpAddress, dwSize, PAGE_NOACCESS, &oldFlags))
-        {
-            return FALSE;
-        }
+        UnlockMemory(this->process, lpAddress, dwSize);
     }
 
     return TRUE;
@@ -668,7 +689,7 @@ BOOL SectionAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFreeType
 /*
 * class PreReservedVirtualAllocWrapper
 */
-#if !_M_X64_OR_ARM64 && _CONTROL_FLOW_GUARD
+#if !TARGET_64 && _CONTROL_FLOW_GUARD
 // TODO: this should be on runtime process
 uint PreReservedSectionAllocWrapper::numPreReservedSegment = 0;
 #endif
@@ -691,7 +712,7 @@ PreReservedSectionAllocWrapper::~PreReservedSectionAllocWrapper()
         CloseSectionHandle(this->section);
         PreReservedHeapTrace(_u("MEM_RELEASE the PreReservedSegment. Start Address: 0x%p, Size: 0x%x * 0x%x bytes"), this->preReservedStartAddress, PreReservedAllocationSegmentCount,
             AutoSystemInfo::Data.GetAllocationGranularityPageSize());
-#if !_M_X64_OR_ARM64 && _CONTROL_FLOW_GUARD
+#if !TARGET_64 && _CONTROL_FLOW_GUARD
         Assert(numPreReservedSegment > 0);
         InterlockedDecrement(&PreReservedSectionAllocWrapper::numPreReservedSegment);
 #endif
@@ -717,7 +738,7 @@ PreReservedSectionAllocWrapper::IsInRange(void * address)
     {
         MEMORY_BASIC_INFORMATION memBasicInfo;
         size_t bytes = VirtualQueryEx(this->process, address, &memBasicInfo, sizeof(memBasicInfo));
-        Assert(bytes == 0 || (memBasicInfo.State == MEM_COMMIT && memBasicInfo.AllocationProtect == PAGE_EXECUTE));
+        Assert(bytes == 0 || (memBasicInfo.State == MEM_COMMIT && memBasicInfo.AllocationProtect == PAGE_EXECUTE_READ));
     }
 #endif
     return isInRange;
@@ -853,10 +874,16 @@ LPVOID PreReservedSectionAllocWrapper::EnsurePreReservedRegionInternal()
     return startAddress;
 }
 
-LPVOID PreReservedSectionAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
+LPVOID PreReservedSectionAllocWrapper::AllocPages(LPVOID lpAddress, DECLSPEC_GUARD_OVERFLOW size_t pageCount, DWORD allocationType, DWORD protectFlags, bool isCustomHeapAllocation)
 {
+    if (pageCount > AutoSystemInfo::MaxPageCount)
+    {
+        return nullptr;
+    }
+    size_t dwSize = pageCount * AutoSystemInfo::PageSize;
+    
     AssertMsg(isCustomHeapAllocation, "PreReservation used for allocations other than CustomHeap?");
-    AssertMsg(AutoSystemInfo::Data.IsCFGEnabled() || PHASE_FORCE1(Js::PreReservedHeapAllocPhase), "PreReservation without CFG ?");
+
     Assert(dwSize != 0);
 
     {
@@ -912,37 +939,15 @@ LPVOID PreReservedSectionAllocWrapper::Alloc(LPVOID lpAddress, size_t dwSize, DW
         AssertMsg(freeSegmentsBVIndex < PreReservedAllocationSegmentCount, "Invalid BitVector index calculation?");
         AssertMsg(dwSize % AutoSystemInfo::PageSize == 0, "COMMIT is managed at AutoSystemInfo::PageSize granularity");
 
-        char * allocatedAddress = nullptr;
-
-        if ((allocationType & MEM_COMMIT) != 0)
-        {
-#if defined(ENABLE_JIT_CLAMP)
-            AutoEnableDynamicCodeGen enableCodeGen;
-#endif
-
-            const DWORD allocProtectFlags = AutoSystemInfo::Data.IsCFGEnabled() ? PAGE_EXECUTE_RO_TARGETS_INVALID : PAGE_EXECUTE;
-            allocatedAddress = (char *)VirtualAllocEx(this->process, addressToReserve, dwSize, MEM_COMMIT, allocProtectFlags);
-            if (allocatedAddress == nullptr)
-            {
-                MemoryOperationLastError::RecordLastError();
-            }
-        }
-        else
-        {
-            // Just return the uncommitted address if we didn't ask to commit it.
-            allocatedAddress = addressToReserve;
-        }
-
         // Keep track of the committed pages within the preReserved Memory Region
-        if (lpAddress == nullptr && allocatedAddress != nullptr)
+        if (lpAddress == nullptr)
         {
-            Assert(allocatedAddress == addressToReserve);
             Assert(requestedNumOfSegments != 0);
             freeSegments.ClearRange(freeSegmentsBVIndex, static_cast<uint>(requestedNumOfSegments));
-        }
+    }
 
-        PreReservedHeapTrace(_u("MEM_COMMIT: StartAddress: 0x%p of size: 0x%x * 0x%x bytes \n"), allocatedAddress, requestedNumOfSegments, AutoSystemInfo::Data.GetAllocationGranularityPageSize());
-        return allocatedAddress;
+        PreReservedHeapTrace(_u("MEM_COMMIT: StartAddress: 0x%p of size: 0x%x * 0x%x bytes \n"), addressToReserve, requestedNumOfSegments, AutoSystemInfo::Data.GetAllocationGranularityPageSize());
+        return addressToReserve;
     }
 }
 
@@ -977,11 +982,7 @@ PreReservedSectionAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFr
         FreeLocal(localAddr);
     }
 
-    DWORD oldFlags = NULL;
-    if(!VirtualProtectEx(this->process, lpAddress, dwSize, PAGE_NOACCESS, &oldFlags))
-    {
-        return FALSE;
-    }
+    UnlockMemory(this->process, lpAddress, dwSize);
 
     size_t requestedNumOfSegments = dwSize / AutoSystemInfo::Data.GetAllocationGranularityPageSize();
     Assert(requestedNumOfSegments <= MAXUINT32);
@@ -1004,6 +1005,18 @@ PreReservedSectionAllocWrapper::Free(LPVOID lpAddress, size_t dwSize, DWORD dwFr
     return TRUE;
 }
 
+bool
+PreReservedSectionAllocWrapper::GetFileInfo(LPVOID address, HANDLE* fileHandle, PVOID* baseAddress)
+{
+    if (!this->IsPreReservedRegionPresent())
+    {
+        return false;
+    }
+
+    *fileHandle = this->section;
+    *baseAddress = this->preReservedStartAddress;
+    return true;
+}
 
 LPVOID
 PreReservedSectionAllocWrapper::AllocLocal(LPVOID requestAddress, size_t dwSize)
@@ -1019,4 +1032,4 @@ PreReservedSectionAllocWrapper::FreeLocal(LPVOID lpAddress)
 
 } // namespace Memory
 #endif
-
+#endif

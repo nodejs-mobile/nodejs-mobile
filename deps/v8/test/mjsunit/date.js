@@ -155,6 +155,11 @@ assertDoesNotThrow("new Date(0x40000000, 0x40000000, 0x40000000," +
 assertDoesNotThrow("new Date(-0x40000001, -0x40000001, -0x40000001," +
                    "-0x40000001, -0x40000001, -0x40000001, -0x40000001)")
 
+// Test that date as double type is treated as integer type in MakeDay
+// so that the hour should't be changed.
+d = new Date(2018, 0);
+assertEquals(Date.parse(new Date(2018, 0, 11)), d.setDate(11.2));
+assertEquals(0, d.getHours());
 
 // Modified test from WebKit
 // LayoutTests/fast/js/script-tests/date-utc-timeclip.js:
@@ -313,6 +318,15 @@ for (var i = 0; i < 24; i++) {
     assertEquals(70674603500 - ms, Date.parse(string), string);
   }
 }
+
+// Test padding with 0 rather than spaces
+assertEquals('Wed, 01 Jan 0020 00:00:00 GMT', new Date('0020-01-01T00:00:00Z').toUTCString());
+let dateRegExp = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{2} [0-9]{4}$/
+match = dateRegExp.exec(new Date('0020-01-01T00:00:00Z').toDateString());
+assertNotNull(match);
+let stringRegExp = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{2} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT[+-][0-9]{4}( \(.+\))?$/
+match = stringRegExp.exec(new Date('0020-01-01T00:00:00Z').toString());
+assertNotNull(match);
 
 assertThrows('Date.prototype.setTime.call("", 1);', TypeError);
 assertThrows('Date.prototype.setYear.call("", 1);', TypeError);

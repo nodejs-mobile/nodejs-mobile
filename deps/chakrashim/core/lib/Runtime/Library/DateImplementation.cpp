@@ -402,14 +402,15 @@ namespace Js {
         bs->AppendChars(_u(' '));
 
         // Add the year.
-        if (pymd->year > 0)
+        if ((pymd->year) > 0)
         {
-            bs->AppendChars(pymd->year, 10, ConvertLongToString);
+            bs->AppendChars(pymd->year, 10, ConvertUInt32ToString_ZeroPad_4);
         }
         else
         {
-            bs->AppendChars(1 - pymd->year, 10, ConvertLongToString);
-            bs->AppendChars(_u(" B.C."));
+            int positiveYear = -(pymd->year); // pymd->year is negative
+            bs->AppendChars(_u('-'));
+            bs->AppendChars(positiveYear, 10, ConvertUInt32ToString_ZeroPad_4);
         }
 
         // Add the time.
@@ -1032,6 +1033,7 @@ Error:
             ssNil,
             ssMinutes,
             ssSeconds,
+            ssMillisecond,
             ssAddOffset,
             ssSubOffset,
             ssDate,
@@ -1052,6 +1054,7 @@ Error:
         int32 lwMonth = lwNil;
         int32 lwDate = lwNil;
         int32 lwTime = lwNil;
+        int32 lwMillisecond = lwNil;
         int32 lwZone = lwNil;
         int32 lwOffset = lwNil;
 
@@ -1063,6 +1066,7 @@ Error:
         int tAmPm = 0;
         int tBcAd = 0;
 
+        size_t numOfDigits = 0;
         double tv = JavascriptNumber::NaN; // Initialized for error handling.
 
         //Create a copy to analyze
@@ -1076,6 +1080,7 @@ Error:
         _wcslwr_s(pszSrc,ulength+1);
         bool isDateNegativeVersion5 = false;
         bool isNextFieldDateNegativeVersion5 = false;
+        bool isZeroPaddedYear = false;
         const Js::CharClassifier *classifier = scriptContext->GetCharClassifier();
         #pragma prefast(suppress: __WARNING_INCORRECT_VALIDATION, "pch is guaranteed to be null terminated by __in_z on psz and js_memcpy_s copying the null byte")
         for (pch = pszSrc; 0 != (ch = classifier->SkipBiDirectionalChars(pch));)
@@ -1159,8 +1164,8 @@ Error:
                     // military version of time zone
                     // z = GMT
                     // j isn't used
-                    // a to m are -1 to -12
-                    // n to y are 1 to 12
+                    // a to m are 1 to 12
+                    // n to y are -1 to -12
                     if (lwNil != lwZone)
                     {
                         goto LError;
@@ -1171,11 +1176,11 @@ Error:
                         {
                             goto LError;
                         }
-                        lwZone = -(int32)(ch - 'a' + (ch < 'j')) * 60;
+                        lwZone = (int32)(ch - 'a' + (ch < 'j')) * 60;
                     }
                     else if (ch <= 'y')
                     {
-                        lwZone = (int32)(ch - 'm') * 60;
+                        lwZone = -(int32)(ch - 'm') * 60;
                     }
                     else if (ch == 'z')
                     {
@@ -1231,6 +1236,12 @@ Error:
                             goto LError;
                         }
                         lwMonth = pszs->lwVal;
+                        if ('-' == *pch)
+                        {
+                            // handle the case date is negative for "Thu, 23 Sep -0007 00:00:00 GMT"
+                            isDateNegativeVersion5 = true;
+                            pch++;
+                        }
                         break;
                     }
                     case ParseStringTokenType::Zone:
@@ -1257,15 +1268,15 @@ Error:
 
             for (lwT = ch - '0'; !FBig(*pch) && isdigit(*pch); pch++)
             {
+                // to avoid overflow
+                if (pch - pchBase > 6)
+                {
+                    goto LError;
+                }
                 lwT = lwT * 10 + *pch - '0';
             }
 
-            // to avoid overflow
-            if (pch - pchBase > 6)
-            {
-                goto LError;
-            }
-
+            numOfDigits = pch - pchBase;
             // skip to the next real character
             while (0 != (ch = *pch) && (ch <= ' ' || classifier->IsBiDirectionalChar(ch)))
             {
@@ -1306,6 +1317,34 @@ Error:
                     if (lwT >= 60)
                         goto LError;
                     lwTime += lwT;
+                    ss = (ch == '.') ? (pch++, ssMillisecond) : ssNil;
+                    break;
+                }
+                case ssMillisecond:
+                {
+                    AssertMsg(isNextFieldDateNegativeVersion5 == false, "isNextFieldDateNegativeVersion5 == false");
+
+                    if (numOfDigits <= 1)
+                    {
+                        // 1 digit only, treat it as hundreds
+                        lwMillisecond = lwT * 100;
+                    }
+                    else if (numOfDigits <= 2)
+                    {
+                        // 2 digit only, treat it as tens
+                        lwMillisecond = lwT * 10;
+                    }
+                    else if (numOfDigits <= 3)
+                    {
+                        // canonical 3 digit, per EcmaScript spec
+                        lwMillisecond = lwT;
+                    }
+                    else
+                    {
+                        // ignore any digits beyond the third
+                        lwMillisecond = (pchBase[0] - '0') * 100 + (pchBase[1] - '0') * 10 + (pchBase[2] - '0');
+                    }
+
                     ss = ssNil;
                     break;
                 }
@@ -1362,6 +1401,10 @@ Error:
                     AssertMsg(isDateNegativeVersion5 == false, "lwYear should be positive as pre-version:5 parsing");
                     lwYear = lwT;
                     ss = ssNil;
+                    if (lwT < 1000 && numOfDigits >= 4)
+                    {
+                        isZeroPaddedYear = true;
+                    }
                     break;
                 }
                 default:
@@ -1369,7 +1412,8 @@ Error:
                     // assumptions for getting a YEAR:
                     //    - an absolute value greater or equal than 70 (thus not hour!)
                     //    - wasn't preceded by negative sign for -version:5 year format
-                    if (lwT >= 70 || isNextFieldDateNegativeVersion5)
+                    //    - lwT has at least 4 digits (e.g. 0017 is year 17 AD)
+                    if (lwT >= 70 || isNextFieldDateNegativeVersion5 || numOfDigits >= 4)
                     {
                         // assume it's a year - this is used particularly as version:5 year parsing
                         if (lwNil != lwYear)
@@ -1378,6 +1422,11 @@ Error:
                         // handle the case date is negative for "Tue Feb 02 -2012 01:02:03 GMT-0800"
                         lwYear = isDateNegativeVersion5 ? -lwT : lwT;
                         isNextFieldDateNegativeVersion5 = false;
+
+                        if (lwT < 1000 && numOfDigits >= 4)
+                        {
+                            isZeroPaddedYear = true;
+                        }
 
                         if (FDateDelimiter(ch))
                         {
@@ -1451,7 +1500,9 @@ Error:
             continue;
         }
 
-        if (lwNil == lwYear || lwNil == lwMonth || lwNil == lwDate)
+        if (lwNil == lwYear ||
+            lwNil == lwMonth || lwMonth > 11 ||
+            lwNil == lwDate || lwDate > 31)
         {
             goto LError;
         }
@@ -1464,7 +1515,11 @@ Error:
                 lwYear = -lwYear + 1;
             }
         }
-        else if (lwYear < 100 && isDateNegativeVersion5 == false)
+        else if (lwYear < 50 && isDateNegativeVersion5 == false && isZeroPaddedYear == false)
+        {
+            lwYear += 2000;
+        }
+        else if (lwYear < 100 && isDateNegativeVersion5 == false && isZeroPaddedYear == false)
         {
             lwYear += 1900;
         }
@@ -1504,6 +1559,11 @@ Error:
             lwTime = 0;
         }
 
+        if (lwNil == lwMillisecond)
+        {
+            lwMillisecond = 0;
+        }
+
         if (lwNil != lwZone)
         {
             lwTime -= lwZone * 60;
@@ -1519,7 +1579,7 @@ Error:
         }
 
         // Rebuild time.
-        tv = TvFromDate(lwYear, lwMonth, lwDate - 1, (double)lwTime * 1000);
+        tv = TvFromDate(lwYear, lwMonth, lwDate - 1, (double)lwTime * 1000 + lwMillisecond);
         if (!fUtc)
         {
             tv = GetTvUtc(tv, scriptContext);
@@ -1582,7 +1642,7 @@ LError:
         double dblT;
         uint ivar;
 
-        // See: https://github.com/Microsoft/ChakraCore/issues/1318
+        // See: https://github.com/Microsoft/ChakraCore/issues/1665
         // Date.UTC should return NaN with 0 arguments.
         // args.Info.Count includes an implicit first parameter, so we check for Count <= 1.
         if (args.Info.Count <= 1)
@@ -1619,13 +1679,18 @@ LError:
             rgdbl[0] += 1900;
         }
 
-        // REVIEW : do we need to explicitly handle overflow or will the compiler
-        // do the right thing (produce Infinity or NaN).
-        // Get the local time value.
+        // Get the UTC time value.
         tv = TvFromDate(rgdbl[0], rgdbl[1], rgdbl[2] - 1,
             rgdbl[3] * 3600000 + rgdbl[4] * 60000 + rgdbl[5] * 1000 + rgdbl[6]);
 
-        return tv;
+        if (tv < ktvMin || tv > ktvMax)
+        {
+            return JavascriptNumber::NaN;
+        }
+        else
+        {
+            return tv;
+        }
     }
 
     // Maximum number of arguments used by this set operation.

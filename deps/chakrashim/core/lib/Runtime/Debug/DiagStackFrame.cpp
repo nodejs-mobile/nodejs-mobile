@@ -3,6 +3,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
+
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Language/JavascriptFunctionArgIndex.h"
 #include "Language/InterpreterStackFrame.h"
 #include "Language/JavascriptStackWalker.h"
@@ -132,7 +134,7 @@ namespace Js
                 }
 
                 bool unused = false;
-                Js::IDiagObjectAddress* address = localsWalker->FindPropertyAddress(Js::PropertyIds::_lexicalThisSlotSymbol, unused);
+                Js::IDiagObjectAddress* address = localsWalker->FindPropertyAddress(Js::PropertyIds::_this, unused);
 
                 if (ppOutAddress != nullptr)
                 {
@@ -165,37 +167,21 @@ namespace Js
         Assert(pOutResolvedObj);
 
         Js::ScriptContext* scriptContext = this->GetScriptContext();
-        Js::JavascriptFunction* scopeFunction = this->GetJavascriptFunction();
 
-        // Do fast path for 'this', fields on slot, TODO : literals (integer,string)
-
-        if (sourceLength == 4 && wcsncmp(source, _u("this"), 4) == 0)
+        Js::PropertyRecord const * propRecord;
+        scriptContext->FindPropertyRecord(source, sourceLength, &propRecord);
+        if (propRecord != nullptr)
         {
-            pOutResolvedObj->obj = this->GetThisFromFrame(&pOutResolvedObj->address);
-            if (pOutResolvedObj->obj == nullptr)
-            {
-                // TODO: Throw exception; this was not captured by the lambda
-                Assert(scopeFunction->IsLambda());
-                Assert(!scopeFunction->GetParseableFunctionInfo()->GetCapturesThis());
-            }
-        }
-        else
-        {
-            Js::PropertyRecord const * propRecord;
-            scriptContext->FindPropertyRecord(source, sourceLength, &propRecord);
-            if (propRecord != nullptr)
-            {
-                ArenaAllocator *arena = scriptContext->GetThreadContext()->GetDebugManager()->GetDiagnosticArena()->Arena();
+            ArenaAllocator *arena = scriptContext->GetThreadContext()->GetDebugManager()->GetDiagnosticArena()->Arena();
 
-                Js::IDiagObjectModelWalkerBase * localsWalker = Anew(arena, Js::LocalsWalker, this, Js::FrameWalkerFlags::FW_EnumWithScopeAlso);
+            Js::IDiagObjectModelWalkerBase * localsWalker = Anew(arena, Js::LocalsWalker, this, Js::FrameWalkerFlags::FW_EnumWithScopeAlso);
 
-                bool isConst = false;
-                pOutResolvedObj->address = localsWalker->FindPropertyAddress(propRecord->GetPropertyId(), isConst);
-                if (pOutResolvedObj->address != nullptr)
-                {
-                    pOutResolvedObj->obj = pOutResolvedObj->address->GetValue(FALSE);
-                    pOutResolvedObj->isConst = isConst;
-                }
+            bool isConst = false;
+            pOutResolvedObj->address = localsWalker->FindPropertyAddress(propRecord->GetPropertyId(), isConst);
+            if (pOutResolvedObj->address != nullptr)
+            {
+                pOutResolvedObj->obj = pOutResolvedObj->address->GetValue(FALSE);
+                pOutResolvedObj->isConst = isConst;
             }
         }
 
@@ -357,8 +343,27 @@ namespace Js
             varThis = scriptContext->GetLibrary()->GetNull();
         }
 
-        Js::Arguments args(1, (Js::Var*) &varThis);
-        varResult = pfuncScript->CallFunction(args);
+        // If there was no 'this' binding found by the LocalsWalker, let's add the 'this' value we
+        // collected from the frame to the scope. Eval loads 'this' by walking the scope chain so
+        // it has to have some value in the chain or we'll be stuck with the global 'this' binding value.
+        if (!activeScopeObject->HasProperty(Js::PropertyIds::_this))
+        {
+            activeScopeObject->SetPropertyWithAttributes(
+                Js::PropertyIds::_this,
+                JavascriptOperators::BoxStackInstance(varThis, scriptContext, /* allowStackFunction */ false, /* deepCopy */ false), //The value escapes, box if necessary.
+                PropertyConstDefaults,
+                nullptr);
+#if DBG
+            countForVerification++;
+#endif
+        }
+
+        ThreadContext * threadContext = pfuncScript->GetScriptContext()->GetThreadContext();
+        BEGIN_SAFE_REENTRANT_CALL(threadContext)
+        {
+            varResult = CALL_FUNCTION(threadContext, pfuncScript, CallInfo(1), varThis);
+        }
+        END_SAFE_REENTRANT_CALL
 
         debugManager->UpdateConsoleScope(dummyObject, scriptContext);
 
@@ -653,3 +658,4 @@ namespace Js
     }
 
 }  // namespace Js
+#endif

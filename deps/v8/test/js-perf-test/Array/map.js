@@ -1,37 +1,7 @@
 // Copyright 2017 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-function benchy(name, test, testSetup) {
-  new BenchmarkSuite(name, [1000],
-      [
-        new Benchmark(name, false, false, 0, test, testSetup, ()=>{})
-      ]);
-}
-
-benchy('NaiveMapReplacement', NaiveMap, NaiveMapSetup);
-benchy('DoubleMap', DoubleMap, DoubleMapSetup);
-benchy('SmiMap', SmiMap, SmiMapSetup);
-benchy('FastMap', FastMap, FastMapSetup);
-benchy('ObjectMap', GenericMap, ObjectMapSetup);
-
-var array;
-var func;
-var this_arg;
-var result;
-var array_size = 100;
-
-// Although these functions have the same code, they are separated for
-// clean IC feedback.
-function DoubleMap() {
-  result = array.map(func, this_arg);
-}
-function SmiMap() {
-  result = array.map(func, this_arg);
-}
-function FastMap() {
-  result = array.map(func, this_arg);
-}
+(() => {
 
 function NaiveMap() {
   let index = -1
@@ -44,45 +14,50 @@ function NaiveMap() {
   return result
 }
 
-
-function GenericMap() {
-  result = Array.prototype.map.call(array, func, this_arg);
-}
-
 function NaiveMapSetup() {
   // Prime NaiveMap with polymorphic cases.
   array = [1, 2, 3];
-  func = (v, i, a) => v;
   NaiveMap();
   NaiveMap();
   array = [3.4]; NaiveMap();
   array = new Array(10); array[0] = 'hello'; NaiveMap();
-  SmiMapSetup();
+  SmiSetup();
   delete array[1];
 }
 
-function SmiMapSetup() {
-  array = new Array();
-  for (var i = 0; i < array_size; i++) array[i] = i;
-  func = (value, index, object) => { return value; };
+// Make sure we inline the callback, pick up all possible TurboFan
+// optimizations.
+function RunOptFastMap(multiple) {
+  // Use of variable multiple in the callback function forces
+  // context creation without escape analysis.
+  //
+  // Also, the arrow function requires inlining based on
+  // SharedFunctionInfo.
+  result = array.map((v, i, a) =>  v + ' ' + multiple);
 }
 
-function DoubleMapSetup() {
-  array = new Array();
-  for (var i = 0; i < array_size; i++) array[i] = (i + 0.5);
-  func = (value, index, object) => { return value; };
+// Don't optimize because I want to optimize RunOptFastMap with a parameter
+// to be used in the callback.
+%NeverOptimizeFunction(OptFastMap);
+function OptFastMap() { RunOptFastMap(3); }
+
+function side_effect(a) { return a; }
+%NeverOptimizeFunction(side_effect);
+function OptUnreliableMap() {
+  result = array.map(func, side_effect(array));
 }
 
-function FastMapSetup() {
-  array = new Array();
-  for (var i = 0; i < array_size; i++) array[i] = 'value ' + i;
-  func = (value, index, object) => { return value; };
-}
+DefineHigherOrderTests([
+  // name, test function, setup function, user callback
+  "NaiveMapReplacement", NaiveMap, NaiveMapSetup, v => v,
+  "SmiMap", mc("map"), SmiSetup, v => v,
+  "DoubleMap", mc("map"), DoubleSetup, v => v,
+  "FastMap", mc("map"), FastSetup, v => v,
+  "SmallSmiToDoubleMap", mc("map"), SmiSetup, v => v + 0.5,
+  "SmallSmiToFastMap", mc("map"), SmiSetup, v => "hi" + v,
+  "GenericMap", mc("map", true), ObjectSetup, v => v,
+  "OptFastMap", OptFastMap, FastSetup, undefined,
+  "OptUnreliableMap", OptUnreliableMap, FastSetup, v => v
+]);
 
-function ObjectMapSetup() {
-  array = { length: array_size };
-  for (var i = 0; i < array_size; i++) {
-    array[i] = i;
-  }
-  func = (value, index, object) => { return value; };
-}
+})();

@@ -78,6 +78,7 @@ void GlobOpt::ArrayLowerBoundCheckHoistInfo::SetLoop(
 void GlobOpt::ArrayLowerBoundCheckHoistInfo::SetLoop(
     ::Loop *const loop,
     StackSym *const indexSym,
+    const int indexOffset,
     const int offset,
     Value *const indexValue,
     const IntConstantBounds &indexConstantBounds,
@@ -91,6 +92,7 @@ void GlobOpt::ArrayLowerBoundCheckHoistInfo::SetLoop(
 
     this->loop = loop;
     this->indexSym = indexSym;
+    this->indexOffset = indexOffset;
     this->offset = offset;
     this->indexValueNumber = indexValue->GetValueNumber();
     this->indexValue = indexValue;
@@ -142,6 +144,7 @@ void GlobOpt::ArrayUpperBoundCheckHoistInfo::SetLoop(
 void GlobOpt::ArrayUpperBoundCheckHoistInfo::SetLoop(
     ::Loop *const loop,
     StackSym *const indexSym,
+    const int indexOffset,
     const int offset,
     Value *const indexValue,
     const IntConstantBounds &indexConstantBounds,
@@ -151,7 +154,7 @@ void GlobOpt::ArrayUpperBoundCheckHoistInfo::SetLoop(
 {
     Assert(headSegmentLengthValue);
 
-    SetLoop(loop, indexSym, offset, indexValue, indexConstantBounds, isLoopCountBasedBound);
+    SetLoop(loop, indexSym, indexOffset, offset, indexValue, indexConstantBounds, isLoopCountBasedBound);
     this->headSegmentLengthValue = headSegmentLengthValue;
     this->headSegmentLengthConstantBounds = headSegmentLengthConstantBounds;
 }
@@ -840,7 +843,7 @@ void GlobOpt::TrackIntSpecializedAddSubConstant(
             }
         } while(false);
 
-        if(updateSourceBounds && addSubConstantInfo->Offset() != IntConstMin)
+        if(!this->IsLoopPrePass() && updateSourceBounds && addSubConstantInfo->Offset() != IntConstMin)
         {
             // Track bounds for add or sub with a constant. For instance, consider (b = a + 2). The value of 'b' should track
             // that it is equal to (the value of 'a') + 2. That part has been done above. Similarly, the value of 'a' should
@@ -1258,6 +1261,30 @@ void GlobOpt::FinalizeInductionVariables(Loop *const loop, GlobOptBlockData *con
             ValueInfo *const newValueInfo =
                 UpdateIntBoundsForLessThanOrEqual(value, constantBounds, landingPadValue, landingPadConstantBounds, true);
             ChangeValueInfo(nullptr, value, newValueInfo);
+        }
+    }
+}
+
+void
+GlobOpt::InvalidateInductionVariables(IR::Instr * instr)
+{
+    Assert(instr->GetDst() != nullptr && instr->GetDst()->IsRegOpnd());
+
+    // Induction variables are always var syms.
+    StackSym * dstSym = instr->GetDst()->AsRegOpnd()->m_sym;
+    if (!dstSym->IsVar())
+    {
+        dstSym = dstSym->GetVarEquivSym(this->func);
+    }
+
+    // If this is an induction variable, then treat it the way the prepass would have if it had seen
+    // the assignment and the resulting change to the value number, and mark it as indeterminate.
+    for (Loop * loop = this->currentBlock->loop; loop; loop = loop->parent)
+    {
+        InductionVariable *iv = nullptr;
+        if (loop->inductionVariables && loop->inductionVariables->TryGetReference(dstSym->m_id, &iv))
+        {
+            iv->SetChangeIsIndeterminate();
         }
     }
 }
@@ -1807,8 +1834,9 @@ void GlobOpt::GenerateLoopCountPlusOne(Loop *const loop, LoopCount *const loopCo
 void GlobOpt::GenerateSecondaryInductionVariableBound(
     Loop *const loop,
     StackSym *const inductionVariableSym,
-    const LoopCount *const loopCount,
+    LoopCount *const loopCount,
     const int maxMagnitudeChange,
+    const bool needsMagnitudeAdjustment,
     StackSym *const boundSym)
 {
     Assert(loop);
@@ -1833,18 +1861,33 @@ void GlobOpt::GenerateSecondaryInductionVariableBound(
     Assert(insertBeforeInstr);
     Func *const func = bailOutInfo->bailOutFunc;
 
+    StackSym* loopCountSym = nullptr;
+
+    // If indexOffset < maxMagnitudeChange, we need to account for the difference between them in the bound check
+    // i.e. BoundCheck: inductionVariable + loopCountMinusOne * maxMagnitudeChange + maxMagnitudeChange - indexOffset <= length - offset
+    // Since the BoundCheck instruction already deals with offset, we can simplify this to
+    // BoundCheck: inductionVariable + loopCount * maxMagnitudeChange <= length + indexOffset - offset
+    if (needsMagnitudeAdjustment)
+    {
+        GenerateLoopCountPlusOne(loop, loopCount);
+        loopCountSym = loopCount->LoopCountSym();
+    }
+    else
+    {
+        loopCountSym = loopCount->LoopCountMinusOneSym();
+    }
     // intermediateValue = loopCount * maxMagnitudeChange
     StackSym *intermediateValueSym;
     if(maxMagnitudeChange == 1 || maxMagnitudeChange == -1)
     {
-        intermediateValueSym = loopCount->LoopCountMinusOneSym();
+        intermediateValueSym = loopCountSym;
     }
     else
     {
         IR::BailOutInstr *const instr = IR::BailOutInstr::New(Js::OpCode::Mul_I4, bailOutKind, bailOutInfo, func);
 
         instr->SetSrc1(
-            IR::RegOpnd::New(loopCount->LoopCountMinusOneSym(), loopCount->LoopCountMinusOneSym()->GetType(), func));
+            IR::RegOpnd::New(loopCountSym, loopCountSym->GetType(), func));
         instr->GetSrc1()->SetIsJITOptimizedReg(true);
 
         instr->SetSrc2(IR::IntConstOpnd::New(maxMagnitudeChange, TyInt32, func, true));
@@ -2394,6 +2437,7 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
                     loop,
                     indexSym,
                     lowerOffset,
+                    lowerOffset,
                     landingPadIndexValue,
                     landingPadIndexConstantBounds);
             }
@@ -2445,11 +2489,13 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
         // Normalize the offset such that:
         //     boundBase <= headSegmentLength + offset
         // Where (offset = -1 - boundOffset), and -1 is to simulate < instead of <=.
+        int indexOffset = upperOffset;
         upperOffset = -1 - upperOffset;
 
         upperHoistInfo.SetLoop(
             loop,
             indexSym,
+            indexOffset,
             upperOffset,
             landingPadIndexValue,
             landingPadIndexConstantBounds,
@@ -2595,6 +2641,7 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
                             loop,
                             indexBoundBaseSym,
                             offset,
+                            offset,
                             landingPadIndexBoundBaseValue,
                             landingPadIndexBoundBaseConstantBounds);
                         break;
@@ -2619,11 +2666,13 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
                     // Normalize the offset such that:
                     //     boundBase <= headSegmentLength + offset
                     // Where (offset = -1 - boundOffset), and -1 is to simulate < instead of <=.
+                    int indexOffset = offset;
                     offset = -1 - offset;
 
                     upperHoistInfo.SetLoop(
                         loop,
                         indexBoundBaseSym,
+                        indexOffset,
                         offset,
                         landingPadIndexBoundBaseValue,
                         landingPadIndexBoundBaseConstantBounds,
@@ -3115,6 +3164,7 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
         lowerHoistInfo.SetLoop(
             currentLoop,
             indexLoopCountBasedBoundBaseSym,
+            indexOffset,
             offset,
             indexLoopCountBasedBoundBaseValue,
             indexLoopCountBasedBoundBaseConstantBounds,
@@ -3129,6 +3179,7 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
     upperHoistInfo.SetLoop(
         currentLoop,
         indexLoopCountBasedBoundBaseSym,
+        indexOffset,
         offset,
         indexLoopCountBasedBoundBaseValue,
         indexLoopCountBasedBoundBaseConstantBounds,
@@ -3140,3 +3191,82 @@ void GlobOpt::DetermineArrayBoundCheckHoistability(
         upperHoistInfo.SetLoopCount(loopCount, maxMagnitudeChange);
     }
 }
+
+#if DBG
+void
+GlobOpt::EmitIntRangeChecks(IR::Instr* instr, IR::Opnd* opnd)
+{
+    if (!opnd || 
+        (!opnd->IsRegOpnd() && !opnd->IsIndirOpnd()) ||
+        (opnd->IsIndirOpnd() && !opnd->AsIndirOpnd()->GetIndexOpnd()))
+    {
+        return;
+    }
+
+    IR::RegOpnd * regOpnd = opnd->IsRegOpnd() ? opnd->AsRegOpnd() : opnd->AsIndirOpnd()->GetIndexOpnd();
+    if (!(regOpnd->IsInt32() || regOpnd->IsUInt32()))
+    {
+        return;
+    }
+    
+    StackSym * sym = regOpnd->GetStackSym();
+    if (sym->IsTypeSpec())
+    {
+        sym = sym->GetVarEquivSym_NoCreate();
+    }
+    
+    Value * value = CurrentBlockData()->FindValue(sym);
+
+    if (!value)
+    {
+        return;
+    }
+
+    int32 lowerBound = INT_MIN;
+    int32 upperBound = INT_MAX;
+    
+    if (value->GetValueInfo()->IsIntBounded())
+    {
+        lowerBound = value->GetValueInfo()->AsIntBounded()->Bounds()->ConstantLowerBound();
+        upperBound = value->GetValueInfo()->AsIntBounded()->Bounds()->ConstantUpperBound();
+    }
+    else if (value->GetValueInfo()->IsIntRange())
+    {
+        lowerBound = value->GetValueInfo()->AsIntRange()->LowerBound();
+        upperBound = value->GetValueInfo()->AsIntRange()->UpperBound();
+    }
+    else
+    {
+        return;
+    }
+
+    const auto EmitBoundCheck = [&](Js::OpCode opcode, int32 bound)
+    {
+        IR::Opnd * boundOpnd = IR::IntConstOpnd::New(bound, TyInt32, instr->m_func, true /*dontEncode*/);
+        IR::Instr * boundCheckInstr = IR::Instr::New(opcode, instr->m_func);
+        boundCheckInstr->SetSrc1(regOpnd);
+        boundCheckInstr->SetSrc2(boundOpnd);
+        instr->InsertBefore(boundCheckInstr);
+    };
+
+    if (lowerBound > INT_MIN)
+    {
+        EmitBoundCheck(Js::OpCode::CheckLowerIntBound, lowerBound);
+    }
+    if (upperBound < INT_MAX)
+    {
+        EmitBoundCheck(Js::OpCode::CheckUpperIntBound, upperBound);
+    }
+}
+
+void
+GlobOpt::EmitIntRangeChecks(IR::Instr* instr)
+{
+    // currently validating for dst only if its IndirOpnd
+    EmitIntRangeChecks(instr, instr->GetSrc1());
+    if (instr->GetDst()->IsIndirOpnd())
+    {
+        EmitIntRangeChecks(instr, instr->GetDst());
+    }
+}
+#endif

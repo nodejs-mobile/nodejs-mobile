@@ -154,7 +154,7 @@ typedef unsigned __int32 uint32_t;
     CHAKRA_API
         JsDiagStopDebugging(
             _In_ JsRuntimeHandle runtimeHandle,
-            _Out_ void** callbackState);
+            _Out_opt_ void** callbackState);
 
     /// <summary>
     ///     Request the runtime to break on next JavaScript statement.
@@ -414,6 +414,7 @@ typedef unsigned __int32 uint32_t;
     ///         NONE = 0x1,
     ///         HAVE_CHILDRENS = 0x2,
     ///         READ_ONLY_VALUE = 0x4,
+    ///         IN_TDZ = 0x8,
     ///     </para>
     ///     <para>
     ///     {
@@ -709,6 +710,7 @@ typedef unsigned __int32 uint32_t;
     ///     Creates a new runtime in Record Mode.
     /// </summary>
     /// <param name="attributes">The attributes of the runtime to be created.</param>
+    /// <param name="enableDebugging">A flag to enable debugging during record.</param>
     /// <param name="snapInterval">The interval to wait between snapshots (measured in millis).</param>
     /// <param name="snapHistoryLength">The amount of history to maintain before discarding -- measured in number of snapshots and controls how far back in time a trace can be reversed.</param>
     /// <param name="openResourceStream">The <c>TTDOpenResourceStreamCallback</c> function for generating a JsTTDStreamHandle to read/write serialized data.</param>
@@ -725,6 +727,7 @@ typedef unsigned __int32 uint32_t;
     CHAKRA_API
         JsTTDCreateRecordRuntime(
             _In_ JsRuntimeAttributes attributes,
+            _In_ bool enableDebugging,
             _In_ size_t snapInterval,
             _In_ size_t snapHistoryLength,
             _In_ TTDOpenResourceStreamCallback openResourceStream,
@@ -739,7 +742,7 @@ typedef unsigned __int32 uint32_t;
     /// </summary>
     /// <param name="attributes">The attributes of the runtime to be created.</param>
     /// <param name="infoUri">The uri where the recorded Time-Travel data should be loaded from.</param>
-    /// <param name="enableDebugging">A flag to enable addtional debugging operation support during replay.</param>
+    /// <param name="enableDebugging">A flag to enable additional debugging operation support during replay.</param>
     /// <param name="openResourceStream">The <c>TTDOpenResourceStreamCallback</c> function for generating a JsTTDStreamHandle to read/write serialized data.</param>
     /// <param name="readBytesFromStream">The <c>JsTTDReadBytesFromStreamCallback</c> function for reading bytes from a JsTTDStreamHandle.</param>
     /// <param name="flushAndCloseStream">The <c>JsTTDFlushAndCloseStreamCallback</c> function for flushing and closing a JsTTDStreamHandle as needed.</param>
@@ -823,7 +826,7 @@ typedef unsigned __int32 uint32_t;
 
     /// <summary>
     ///     TTD API -- may change in future versions:
-    ///     Notify the Js runtime we are at a safe yield point in the event loop (i.e. no locals on the stack and we can proccess as desired).
+    ///     Notify the Js runtime we are at a safe yield point in the event loop (i.e. no locals on the stack and we can process as desired).
     /// </summary>
     /// <returns>The code <c>JsNoError</c> if the operation succeeded, a failure code otherwise.</returns>
     CHAKRA_API
@@ -903,7 +906,7 @@ typedef unsigned __int32 uint32_t;
 
     /// <summary>
     ///     TTD API -- may change in future versions:
-    ///     A check for unimplmented TTD actions in the host.
+    ///     A check for unimplemented TTD actions in the host.
     ///     This API is a TEMPORARY API while we complete the implementation of TTD support in the Node host and will be deleted once that is complete.
     /// </summary>
     /// <param name="msg">The message to print if we should be catching this as a TTD operation.</param>
@@ -963,7 +966,7 @@ typedef unsigned __int32 uint32_t;
     /// <summary>
     ///     TTD API -- may change in future versions:
     ///     During debug operations some additional information is populated during replay. This runs the code between the given
-    ///     snapshots to poulate this information which may be needed by the debugger to determine time-travel jump targets.
+    ///     snapshots to populate this information which may be needed by the debugger to determine time-travel jump targets.
     /// </summary>
     /// <param name="runtimeHandle">The runtime handle that the script is executing in.</param>
     ///<param name = "startSnapTime">The snapshot time that we will start executing from.< / param>
@@ -1010,5 +1013,29 @@ typedef unsigned __int32 uint32_t;
         JsTTDReplayExecution(
             _Inout_ JsTTDMoveMode* moveMode,
             _Out_ int64_t* rootEventTime);
+
+    /// <summary>
+    ///     TTD API -- may change in future versions:
+    ///     Enable or disable autotrace ability from JsRT.
+    /// </summary>
+    /// <param name="status">True to enable autotracing false to disable it.</param>
+    /// <returns>The code <c>JsNoError</c> if the operation succeeded, a failure code otherwise.</returns>
+    CHAKRA_API
+        JsTTDDiagSetAutoTraceStatus(
+            _In_ bool status
+        );
+
+    /// <summary>
+    ///     TTD API -- may change in future versions:
+    ///     A way for the debugger to programatically write a trace when it is at a breakpoint.
+    /// </summary>
+    /// <param name="uri">The URI that the log should be written into.</param>
+    /// <param name="uriLength">The length of the uri array that the host passed in for storing log info.</param>
+    /// <returns>The code <c>JsNoError</c> if the operation succeeded, a failure code otherwise.</returns>
+    CHAKRA_API
+        JsTTDDiagWriteLog(
+            _In_reads_(uriLength) const char* uri,
+            _In_ size_t uriLength
+        );
 
 #endif // _CHAKRADEBUG_H_

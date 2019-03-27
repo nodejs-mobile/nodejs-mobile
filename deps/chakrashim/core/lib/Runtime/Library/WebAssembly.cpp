@@ -8,8 +8,8 @@
 #include "../WasmReader/WasmReaderPch.h"
 #include "Language/WebAssemblySource.h"
 
-namespace Js
-{
+using namespace Js;
+
 Var WebAssembly::EntryCompile(RecyclableObject* function, CallInfo callInfo, ...)
 {
     PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
@@ -171,7 +171,7 @@ Var WebAssembly::EntryInstantiateBound(RecyclableObject* function, CallInfo call
     Var importObj = callInfo.Count > 1 ? args[1] : function->GetScriptContext()->GetLibrary()->GetUndefined();
     Var bufferSrc = callInfo.Count > 2 ? args[2] : function->GetScriptContext()->GetLibrary()->GetUndefined();
 
-    return EntryInstantiate(function, CallInfo(CallFlags_Value, 3), thisVar, bufferSrc, importObj);
+    return CALL_ENTRYPOINT_NOASSERT(EntryInstantiate, function, CallInfo(CallFlags_Value, 3), thisVar, bufferSrc, importObj);
 }
 
 Var WebAssembly::EntryValidate(RecyclableObject* function, CallInfo callInfo, ...)
@@ -228,7 +228,12 @@ Var WebAssembly::EntryQueryResponse(RecyclableObject* function, CallInfo callInf
     }
 
     RecyclableObject* arrayBufferFunc = RecyclableObject::FromVar(arrayBufferProp);
-    Var arrayBufferRes = CALL_FUNCTION(scriptContext->GetThreadContext(), arrayBufferFunc, Js::CallInfo(CallFlags_Value, 1), responseObject);
+    Var arrayBufferRes = nullptr;
+    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+    {
+        arrayBufferRes = CALL_FUNCTION(scriptContext->GetThreadContext(), arrayBufferFunc, Js::CallInfo(CallFlags_Value, 1), responseObject);
+    }
+    END_SAFE_REENTRANT_CALL
 
     // Make sure res.arrayBuffer() is a Promise
     if (!JavascriptPromise::Is(arrayBufferRes))
@@ -264,7 +269,7 @@ Var WebAssembly::TryResolveResponse(RecyclableObject* function, Var thisArg, Var
         CallInfo newCallInfo;
         newCallInfo.Count = 2;
         // We already have a response object, query it now
-        responsePromise = EntryQueryResponse(function, Js::CallInfo(CallFlags_Value, 2), thisArg, responseArg);
+        responsePromise = CALL_ENTRYPOINT_NOASSERT(EntryQueryResponse, function, Js::CallInfo(CallFlags_Value, 2), thisArg, responseArg);
     }
     else if (JavascriptPromise::Is(responseArg))
     {
@@ -294,10 +299,12 @@ WebAssembly::ToNonWrappingUint32(Var val, ScriptContext * ctx)
 void
 WebAssembly::CheckSignature(ScriptContext * scriptContext, Wasm::WasmSignature * sig1, Wasm::WasmSignature * sig2)
 {
+    JIT_HELPER_NOT_REENTRANT_NOLOCK_HEADER(Op_CheckWasmSignature);
     if (!sig1->IsEquivalent(sig2))
     {
         JavascriptError::ThrowWebAssemblyRuntimeError(scriptContext, WASMERR_SignatureMismatch);
     }
+    JIT_HELPER_END(Op_CheckWasmSignature);
 }
 
 uint
@@ -306,5 +313,4 @@ WebAssembly::GetSignatureSize()
     return sizeof(Wasm::WasmSignature);
 }
 
-}
 #endif // ENABLE_WASM

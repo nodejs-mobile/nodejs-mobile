@@ -37,8 +37,7 @@ class JSIntrinsicLoweringTest : public GraphTest {
                     &machine);
     // TODO(titzer): mock the GraphReducer here for better unit testing.
     GraphReducer graph_reducer(zone(), graph());
-    JSIntrinsicLowering reducer(&graph_reducer, &jsgraph,
-                                JSIntrinsicLowering::kDeoptimizationEnabled);
+    JSIntrinsicLowering reducer(&graph_reducer, &jsgraph);
     return reducer.Reduce(node);
   }
 
@@ -89,7 +88,7 @@ TEST_F(JSIntrinsicLoweringTest, InlineIsArray) {
           IsNumberEqual(IsLoadField(AccessBuilder::ForMapInstanceType(),
                                     IsLoadField(AccessBuilder::ForMap(), input,
                                                 effect, CaptureEq(&if_false)),
-                                    effect, _),
+                                    _, _),
                         IsNumberConstant(JS_ARRAY_TYPE)),
           IsMerge(IsIfTrue(AllOf(CaptureEq(&branch),
                                  IsBranch(IsObjectIsSmi(input), control))),
@@ -120,7 +119,7 @@ TEST_F(JSIntrinsicLoweringTest, InlineIsTypedArray) {
           IsNumberEqual(IsLoadField(AccessBuilder::ForMapInstanceType(),
                                     IsLoadField(AccessBuilder::ForMap(), input,
                                                 effect, CaptureEq(&if_false)),
-                                    effect, _),
+                                    _, _),
                         IsNumberConstant(JS_TYPED_ARRAY_TYPE)),
           IsMerge(IsIfTrue(AllOf(CaptureEq(&branch),
                                  IsBranch(IsObjectIsSmi(input), control))),

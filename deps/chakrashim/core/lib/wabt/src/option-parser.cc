@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "option-parser.h"
+#include "src/option-parser.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -73,7 +73,7 @@ void OptionParser::AddOption(char short_name,
 
 void OptionParser::AddOption(const char* long_name,
                              const char* help,
-                             const NullCallback& callback){
+                             const NullCallback& callback) {
   Option option('\0', long_name, std::string(), HasArgument::No, help,
                 [callback](const char*) { callback(); });
   AddOption(option);
@@ -105,19 +105,23 @@ int OptionParser::Match(const char* s,
     if (full[i] == '\0') {
       // Perfect match. Return +1, so it will be preferred over a longer option
       // with the same prefix.
-      if (s[i] == '\0')
+      if (s[i] == '\0') {
         return i + 1;
+      }
 
       // We want to fail if s is longer than full, e.g. --foobar vs. --foo.
       // However, if s ends with an '=', it's OK.
-      if (!(has_argument && s[i] == '='))
+      if (!(has_argument && s[i] == '=')) {
         return -1;
+      }
       break;
     }
-    if (s[i] == '\0')
+    if (s[i] == '\0') {
       break;
-    if (s[i] != full[i])
+    }
+    if (s[i] != full[i]) {
       return -1;
+    }
   }
   return i;
 }
@@ -206,7 +210,7 @@ void OptionParser::Parse(int argc, char* argv[]) {
         // Allow short names to be combined, e.g. "-d -v" => "-dv".
         for (int k = 1; arg[k]; ++k) {
           bool matched = false;
-          for (const Option& option: options_) {
+          for (const Option& option : options_) {
             if (option.short_name && arg[k] == option.short_name) {
               const char* option_argument = nullptr;
               if (option.has_argument) {
@@ -274,7 +278,7 @@ void OptionParser::PrintHelp() {
 
   const size_t kExtraSpace = 8;
   size_t longest_name_length = 0;
-  for (const Option& option: options_) {
+  for (const Option& option : options_) {
     size_t length;
     if (!option.long_name.empty()) {
       length = option.long_name.size();
@@ -286,19 +290,22 @@ void OptionParser::PrintHelp() {
       continue;
     }
 
-    if (length > longest_name_length)
+    if (length > longest_name_length) {
       longest_name_length = length;
+    }
   }
 
-  for (const Option& option: options_) {
-    if (!option.short_name && option.long_name.empty())
+  for (const Option& option : options_) {
+    if (!option.short_name && option.long_name.empty()) {
       continue;
+    }
 
     std::string line;
-    if (option.short_name)
+    if (option.short_name) {
       line += std::string("  -") + option.short_name + ", ";
-    else
+    } else {
       line += "      ";
+    }
 
     std::string flag;
     if (!option.long_name.empty()) {
@@ -314,8 +321,9 @@ void OptionParser::PrintHelp() {
     size_t remaining = longest_name_length + kExtraSpace + 2 - flag.size();
     line += flag + std::string(remaining, ' ');
 
-    if (!option.help.empty())
+    if (!option.help.empty()) {
       line += option.help;
+    }
     printf("%s\n", line.c_str());
   }
 }

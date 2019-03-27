@@ -41,6 +41,7 @@ namespace Js
     public:
         static bool Is(Var instance);
         static ES5Array* FromVar(Var instance);
+        static ES5Array* UnsafeFromVar(Var instance);
         static uint32 ToLengthValue(Var value, ScriptContext* scriptContext);
         bool IsLengthWritable() const;
 
@@ -54,7 +55,7 @@ namespace Js
         //
         // To skip JavascriptArray overrides
         //
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual BOOL IsWritable(PropertyId propertyId) override;
         virtual BOOL SetEnumerable(PropertyId propertyId, BOOL value) override;
         virtual BOOL SetWritable(PropertyId propertyId, BOOL value) override;
@@ -83,7 +84,7 @@ namespace Js
         virtual BOOL Seal() override;
         virtual BOOL Freeze() override;
 
-        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache = nullptr) override;
+        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
 
         // objectArray support
         virtual BOOL SetItemWithAttributes(uint32 index, Var value, PropertyAttributes attributes) override;

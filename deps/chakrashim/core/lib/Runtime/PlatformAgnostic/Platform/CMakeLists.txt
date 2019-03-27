@@ -4,24 +4,36 @@ set(PL_SOURCE_FILES
   Common/UnicodeText.Common.cpp
   Common/HiResTimer.cpp
   Common/DateTime.cpp
-  Linux/EventTrace.cpp
-  Linux/UnicodeText.ICU.cpp
   Linux/NumbersUtility.cpp
-  Linux/Thread.cpp
-  Linux/PerfTrace.cpp
+  POSIX/ArraysUtility.cpp
+  Common/Thread.cpp
   Common/Trace.cpp
   Common/SystemInfo.Common.cpp
   )
 
+if(NO_ICU)
+  set(PL_SOURCE_FILES
+    ${PL_SOURCE_FILES}
+    POSIX/UnicodeText.cpp
+  )
+else()
+  set(PL_SOURCE_FILES
+    ${PL_SOURCE_FILES}
+    Common/UnicodeText.ICU.cpp
+  )
+endif()
+
 if(CC_TARGET_OS_ANDROID OR CC_TARGET_OS_LINUX)
-set(PL_SOURCE_FILES ${PL_SOURCE_FILES}
-  Linux/SystemInfo.cpp
-  )
+  set(PL_SOURCE_FILES ${PL_SOURCE_FILES}
+    Linux/SystemInfo.cpp
+    Linux/PerfTrace.cpp
+    )
 elseif(CC_TARGET_OS_OSX OR CC_TARGET_OS_IOS)
-set(PL_SOURCE_FILES ${PL_SOURCE_FILES}
-  Unix/AssemblyCommon.cpp
-  Unix/SystemInfo.cpp
-  )
+  set(PL_SOURCE_FILES ${PL_SOURCE_FILES}
+    Unix/AssemblyCommon.cpp
+    Unix/SystemInfo.cpp
+    # Linux/PerfTrace.cpp # TODO : implement for OSX?
+    )
 endif()
 
 if(NOT STATIC_LIBRARY)

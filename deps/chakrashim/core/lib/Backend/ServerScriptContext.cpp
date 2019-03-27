@@ -22,23 +22,23 @@ ServerScriptContext::ServerScriptContext(ScriptContextDataIDL * contextData, Ser
     threadContextHolder(threadContextInfo),
     m_isPRNGSeeded(false),
     m_sourceCodeArena(_u("JITSourceCodeArena"), threadContextInfo->GetForegroundPageAllocator(), Js::Throw::OutOfMemory, nullptr),
-    m_interpreterThunkBufferManager(&m_sourceCodeArena, threadContextInfo->GetThunkPageAllocators(), nullptr, _u("Interpreter thunk buffer"), GetThreadContext()->GetProcessHandle()),
-    m_asmJsInterpreterThunkBufferManager(&m_sourceCodeArena, threadContextInfo->GetThunkPageAllocators(), nullptr, _u("Asm.js interpreter thunk buffer"), GetThreadContext()->GetProcessHandle()),
+    m_interpreterThunkBufferManager(&m_sourceCodeArena, threadContextInfo->GetThunkPageAllocators(), nullptr, threadContextInfo, _u("Interpreter thunk buffer"), GetThreadContext()->GetProcessHandle()),
+    m_asmJsInterpreterThunkBufferManager(&m_sourceCodeArena, threadContextInfo->GetThunkPageAllocators(), nullptr, threadContextInfo, _u("Asm.js interpreter thunk buffer"), GetThreadContext()->GetProcessHandle()),
     m_domFastPathHelperMap(nullptr),
     m_moduleRecords(&HeapAllocator::Instance),
+    m_codeGenAlloc(nullptr, nullptr, threadContextInfo, threadContextInfo->GetCodePageAllocators(), threadContextInfo->GetProcessHandle()),
     m_globalThisAddr(0),
 #ifdef PROFILE_EXEC
-    m_codeGenProfiler(nullptr),
+    codeGenProfiler(nullptr),
 #endif
     m_refCount(0),
     m_isClosed(false)
 {
-#ifdef PROFILE_EXEC
-    if (Js::Configuration::Global.flags.IsEnabled(Js::ProfileFlag))
-    {
-        m_codeGenProfiler = HeapNew(Js::ScriptContextProfiler);
-    }
+
+#if !TARGET_64 && _CONTROL_FLOW_GUARD
+    m_codeGenAlloc.canCreatePreReservedSegment = threadContextInfo->CanCreatePreReservedSegment();
 #endif
+
     m_domFastPathHelperMap = HeapNew(JITDOMFastPathHelperMap, &HeapAllocator::Instance, 17);
 }
 
@@ -51,9 +51,11 @@ ServerScriptContext::~ServerScriptContext()
     });
 
 #ifdef PROFILE_EXEC
-    if (m_codeGenProfiler)
+    while (this->codeGenProfiler)
     {
-        HeapDelete(m_codeGenProfiler);
+        Js::ScriptContextProfiler* profiler = this->codeGenProfiler;
+        this->codeGenProfiler = this->codeGenProfiler->next;
+        HeapDelete(profiler);
     }
 #endif
 }
@@ -110,6 +112,12 @@ intptr_t
 ServerScriptContext::GetStringTypeStaticAddr() const
 {
     return m_contextData.stringTypeStaticAddr;
+}
+
+intptr_t
+ServerScriptContext::GetSymbolTypeStaticAddr() const
+{
+    return m_contextData.symbolTypeStaticAddr;
 }
 
 intptr_t
@@ -226,14 +234,6 @@ ServerScriptContext::GetRecyclerAllowNativeCodeBumpAllocation() const
     return m_contextData.recyclerAllowNativeCodeBumpAllocation != 0;
 }
 
-#ifdef ENABLE_SIMDJS
-bool
-ServerScriptContext::IsSIMDEnabled() const
-{
-    return m_contextData.isSIMDEnabled != 0;
-}
-#endif
-
 intptr_t
 ServerScriptContext::GetBuiltinFunctionsBaseAddr() const
 {
@@ -271,6 +271,7 @@ ServerScriptContext::IsPRNGSeeded() const
     return m_isPRNGSeeded;
 }
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 intptr_t
 ServerScriptContext::GetDebuggingFlagsAddr() const
 {
@@ -293,6 +294,13 @@ intptr_t
 ServerScriptContext::GetDebugScriptIdWhenSetAddr() const
 {
     return static_cast<intptr_t>(m_contextData.debugScriptIdWhenSetAddr);
+}
+#endif
+
+intptr_t
+ServerScriptContext::GetChakraLibAddr() const
+{
+    return m_contextData.chakraLibAddr;
 }
 
 bool
@@ -350,6 +358,8 @@ ServerScriptContext::Close()
     Assert(!IsClosed());
     m_isClosed = true;
     
+    m_codeGenAlloc.emitBufferManager.Decommit();
+
 #ifdef STACK_BACK_TRACE
     ServerContextManager::RecordCloseContext(this);
 #endif
@@ -373,10 +383,16 @@ ServerScriptContext::Release()
     }
 }
 
+OOPCodeGenAllocators *
+ServerScriptContext::GetCodeGenAllocators()
+{
+    return &m_codeGenAlloc;
+}
+
 Field(Js::Var)*
 ServerScriptContext::GetModuleExportSlotArrayAddress(uint moduleIndex, uint slotIndex)
 {
-    Assert(m_moduleRecords.ContainsKey(moduleIndex));
+    AssertOrFailFast(m_moduleRecords.ContainsKey(moduleIndex));
     auto record = m_moduleRecords.Item(moduleIndex);
     return record->localExportSlotsAddr;
 }
@@ -396,14 +412,46 @@ ServerScriptContext::AddModuleRecordInfo(unsigned int moduleId, __int64 localExp
     m_moduleRecords.Add(moduleId, record);
 }
 
-Js::ScriptContextProfiler *
-ServerScriptContext::GetCodeGenProfiler() const
-{
 #ifdef PROFILE_EXEC
-    return m_codeGenProfiler;
-#else
+Js::ScriptContextProfiler*
+ServerScriptContext::GetCodeGenProfiler(_In_ PageAllocator* pageAllocator)
+{
+    if (Js::Configuration::Global.flags.IsEnabled(Js::ProfileFlag))
+    {
+        AutoCriticalSection cs(&this->profilerCS);
+
+        Js::ScriptContextProfiler* profiler = this->codeGenProfiler;
+        while (profiler)
+        {
+            if (profiler->pageAllocator == pageAllocator)
+            {
+                if (!profiler->IsInitialized())
+                {
+                    profiler->Initialize(pageAllocator, nullptr);
+                }
+                return profiler;
+            }
+            profiler = profiler->next;
+        }
+
+        // If we didn't find a profiler, allocate a new one
+
+        profiler = HeapNew(Js::ScriptContextProfiler);
+        profiler->Initialize(pageAllocator, nullptr);
+        profiler->next = this->codeGenProfiler;
+
+        this->codeGenProfiler = profiler;
+
+        return profiler;
+    }
     return nullptr;
-#endif
 }
 
-#endif
+Js::ScriptContextProfiler*
+ServerScriptContext::GetFirstCodeGenProfiler() const
+{
+    return this->codeGenProfiler;
+}
+#endif // PROFILE_EXEC
+
+#endif // ENABLE_OOP_NATIVE_CODEGEN

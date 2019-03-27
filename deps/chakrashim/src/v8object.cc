@@ -267,7 +267,7 @@ PropertyAttribute Object::GetPropertyAttributes(Handle<Value> key) {
 }
 
 MaybeLocal<Value> Object::GetOwnPropertyDescriptor(Local<Context> context,
-                                                   Local<String> key) {
+                                                   Local<Name> key) {
   JsValueRef result;
   if (jsrt::GetOwnPropertyDescriptor(this, *key, &result) != JsNoError) {
     return Local<Value>();
@@ -275,7 +275,7 @@ MaybeLocal<Value> Object::GetOwnPropertyDescriptor(Local<Context> context,
   return Local<Value>::New(result);
 }
 
-Local<Value> Object::GetOwnPropertyDescriptor(Local<String> key) {
+Local<Value> Object::GetOwnPropertyDescriptor(Local<Name> key) {
   return FromMaybe(GetOwnPropertyDescriptor(Local<Context>(), key));
 }
 
@@ -338,9 +338,9 @@ bool Object::Delete(uint32_t index) {
   return FromMaybe(Delete(Local<Context>(), index));
 }
 
-void CHAKRA_CALLBACK AcessorExternalObjectFinalizeCallback(void *data) {
+void CHAKRA_CALLBACK AcessorExternalObjectFinalizeCallback(void* data) {
   if (data != nullptr) {
-    AccessorExternalData *accessorData =
+    AccessorExternalData* accessorData =
       static_cast<AccessorExternalData*>(data);
     delete accessorData;
   }
@@ -362,7 +362,7 @@ Maybe<bool> Object::SetAccessor(Handle<Name> name,
   }
 
   if (getter != nullptr) {
-    AccessorExternalData *externalData = new AccessorExternalData();
+    AccessorExternalData* externalData = new AccessorExternalData();
     externalData->type = Getter;
     externalData->propertyName = name;
     externalData->getter = getter;
@@ -378,7 +378,7 @@ Maybe<bool> Object::SetAccessor(Handle<Name> name,
   }
 
   if (setter != nullptr) {
-    AccessorExternalData *externalData = new AccessorExternalData();
+    AccessorExternalData* externalData = new AccessorExternalData();
     externalData->type = Setter;
     externalData->propertyName = name;
     externalData->setter = setter;
@@ -420,7 +420,8 @@ Maybe<bool> Object::SetAccessor(Local<Context> context,
                                 AccessorNameSetterCallback setter,
                                 MaybeLocal<Value> data,
                                 AccessControl settings,
-                                PropertyAttribute attribute) {
+                                PropertyAttribute attribute,
+                                SideEffectType getter_side_effect_type) {
   return SetAccessor(name, getter, setter, FromMaybe(data), settings, attribute,
                      Local<AccessorSignature>());
 }
@@ -449,9 +450,24 @@ bool Object::SetAccessor(Handle<Name> name,
 }
 
 MaybeLocal<Array> Object::GetPropertyNames(Local<Context> context) {
-  JsValueRef arrayRef;
+  return GetPropertyNames(context, KeyCollectionMode::kIncludePrototypes,
+                          ONLY_ENUMERABLE, IndexFilter::kIncludeIndices);
+}
 
-  if (jsrt::GetPropertyNames((JsValueRef)this, &arrayRef) != JsNoError) {
+MaybeLocal<Array> Object::GetPropertyNames(
+      Local<Context> context,
+      KeyCollectionMode mode,
+      PropertyFilter property_filter,
+      IndexFilter index_filter,
+      KeyConversionMode key_conversion) {
+  JsValueRef arrayRef;
+  if (jsrt::GetPropertyNames(
+        static_cast<JsValueRef>(this),
+        static_cast<int>(mode),
+        property_filter,
+        static_cast<int>(index_filter),
+        static_cast<int>(key_conversion),
+        &arrayRef) != JsNoError) {
     return Local<Array>();
   }
 
@@ -589,10 +605,10 @@ Maybe<PropertyAttribute> Object::GetRealNamedPropertyAttributes(
 JsValueRef CHAKRA_CALLBACK Utils::AccessorHandler(
     JsValueRef callee,
     bool isConstructCall,
-    JsValueRef *arguments,
+    JsValueRef* arguments,
     unsigned short argumentCount,  // NOLINT(runtime/int)
-    void *callbackState) {
-  void *externalData;
+    void* callbackState) {
+  void* externalData;
   JsValueRef result = JS_INVALID_REFERENCE;
 
   if (JsGetUndefinedValue(&result) != JsNoError) {
@@ -607,7 +623,7 @@ JsValueRef CHAKRA_CALLBACK Utils::AccessorHandler(
     return result;
   }
 
-  AccessorExternalData *accessorData =
+  AccessorExternalData* accessorData =
     static_cast<AccessorExternalData*>(externalData);
   Local<Value> dataLocal = accessorData->data;
 
@@ -699,7 +715,7 @@ Maybe<bool> Object::SetPrivate(Local<Context> context, Local<Private> key,
 
 
 ObjectTemplate* Object::GetObjectTemplate() {
-  ObjectData *objectData = nullptr;
+  ObjectData* objectData = nullptr;
   return Utils::GetObjectData(this, &objectData) == JsNoError
           && objectData != nullptr ?
     *objectData->objectTemplate : nullptr;
@@ -717,7 +733,9 @@ JsErrorCode Utils::GetObjectData(Object* object, ObjectData** objectData) {
   {
     JsPropertyIdRef selfSymbolIdRef =
       jsrt::IsolateShim::GetCurrent()->GetSelfSymbolPropertyIdRef();
-    if (selfSymbolIdRef != JS_INVALID_REFERENCE) {
+    bool hasSelf = false;
+    if (JsHasProperty(object, selfSymbolIdRef, &hasSelf) != JsNoError &&
+        hasSelf == true) {
       JsValueRef result;
       error = JsGetProperty(object, selfSymbolIdRef, &result);
       if (error != JsNoError) {
@@ -759,11 +777,15 @@ void* Object::GetAlignedPointerFromInternalField(int index) {
   return field ? field->GetPointer() : nullptr;
 }
 
-void Object::SetAlignedPointerInInternalField(int index, void *value) {
+void Object::SetAlignedPointerInInternalField(int index, void* value) {
   ObjectData::FieldValue* field = ObjectData::GetInternalField(this, index);
   if (field) {
     field->SetPointer(value);
   }
+}
+
+int Object::GetIdentityHash() {
+  return 0;
 }
 
 Local<Object> Object::Clone() {
@@ -800,6 +822,10 @@ Isolate* Object::GetIsolate() {
       GetIsolateShim()->GetCurrentAsIsolate();
 }
 
+MaybeLocal<Array> Object::PreviewEntries(bool* is_key_value) {
+  return Array::New();
+}
+
 Local<Object> Object::New(Isolate* isolate) {
   JsValueRef newObjectRef;
   if (JsCreateObject(&newObjectRef) != JsNoError) {
@@ -809,7 +835,7 @@ Local<Object> Object::New(Isolate* isolate) {
   return Local<Object>::New(static_cast<Object*>(newObjectRef));
 }
 
-Object *Object::Cast(Value *obj) {
+Object* Object::Cast(Value* obj) {
   CHAKRA_ASSERT(obj->IsObject());
   return static_cast<Object*>(obj);
 }

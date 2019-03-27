@@ -111,22 +111,21 @@ function launchChildProcess() {
           console.error('[PARENT] %d received %d matching messages.',
                         worker.pid, count);
 
-          assert.strictEqual(count, messages.length,
-                             'A worker received an invalid multicast message');
+          assert.strictEqual(count, messages.length);
         });
 
         clearTimeout(timer);
         console.error('[PARENT] Success');
-        killChildren(workers);
+        killSubprocesses(workers);
       }
     }
   });
 }
 
-function killChildren(children) {
-  Object.keys(children).forEach(function(key) {
-    const child = children[key];
-    child.kill();
+function killSubprocesses(subprocesses) {
+  Object.keys(subprocesses).forEach(function(key) {
+    const subprocess = subprocesses[key];
+    subprocess.kill();
   });
 }
 
@@ -142,7 +141,7 @@ if (process.argv[2] !== 'child') {
                   TIMEOUT);
     console.error('[PARENT] Fail');
 
-    killChildren(workers);
+    killSubprocesses(workers);
 
     process.exit(1);
   }, TIMEOUT);

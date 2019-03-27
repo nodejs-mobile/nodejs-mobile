@@ -50,6 +50,7 @@ EXDEF3    ( CUSTOM     , InvalidOpCode     , OP_Empty                , Empty    
 // External Calls
   DEF3    ( CUSTOM     , StartCall         , OP_StartCall            , StartCall     )
   DEF3_WMS( CUSTOM     , Call              , OP_Call                 , AsmCall       )
+  DEF3    ( CUSTOM     , CheckHeap         , OP_CheckHeap            , Empty         ) // TODO:: Implement CheckHeap in Templatized jit
   DEF3_WMS( CUSTOM     , ArgOut_Db         , OP_ArgOut_Db            , Reg1Double1   )
   DEF3_WMS( CUSTOM     , ArgOut_Int        , OP_ArgOut_Int           , Reg1Int1      )
   DEF3_WMS( CUSTOM     , Conv_VTD          , OP_Conv_VTD             , Double1Reg1   )
@@ -61,9 +62,6 @@ EXDEF3    ( CUSTOM     , InvalidOpCode     , OP_Empty                , Empty    
   DEF3_WMS( CUSTOM     , I_ArgOut_Db       , OP_I_ArgOut_Db          , Reg1Double1   )
   DEF3_WMS( CUSTOM     , I_ArgOut_Flt      , OP_I_ArgOut_Flt         , Reg1Float1    )
   DEF3_WMS( CUSTOM     , I_ArgOut_Int      , OP_I_ArgOut_Int         , Reg1Int1      )
-  DEF3_WMS( CUSTOM     , I_Conv_VTD        , OP_I_Conv_VTD           , Double2       )
-  DEF3_WMS( CUSTOM     , I_Conv_VTI        , OP_I_Conv_VTI           , Int2          )
-  DEF3_WMS( CUSTOM     , I_Conv_VTF        , OP_I_Conv_VTF           , Float2        )
 
   DEF3    ( CUSTOM     , AsmBr             , OP_Br                   , AsmBr         )
   DEF3_WMS( CUSTOM     , BrTrue_Int        , OP_BrTrue               , BrInt1        )
@@ -86,7 +84,6 @@ EXDEF3    ( CUSTOM     , InvalidOpCode     , OP_Empty                , Empty    
   DEF3_WMS( CUSTOM     , Return_Int        , OP_SetReturnInt         , Int2          )
 
 
-  DEF3_WMS( CUSTOM     , LdUndef           , OP_LdUndef              , AsmReg1       )
   DEF3_WMS( CUSTOM     , LdSlotArr         , OP_LdSlot               , ElementSlot   )
   DEF3_WMS( CUSTOM     , LdSlot            , OP_LdSlot               , ElementSlot   )
   DEF3_WMS( CUSTOM     , LdSlot_Db         , Op_LdSlot_Db            , ElementSlot   )
@@ -198,6 +195,7 @@ EXDEF3    ( CUSTOM     , InvalidOpCode     , OP_Empty                , Empty    
   DEF3_WMS( CUSTOM     , Fround_Int        , OP_SetFroundInt         , Float1Int1    )
   DEF3_WMS( CUSTOM     , AsmJsLoopBodyStart,OP_AsmJsLoopBody                 , AsmUnsigned1  )
 
+#ifdef ENABLE_WASM_SIMD
   DEF3_WMS( CUSTOM                              , Simd128_Ld_F4                 , OP_Simd128_LdF4                   , Float32x4_2            )
   DEF3_WMS( CUSTOM                              , Simd128_Ld_I4                 , OP_Simd128_LdI4                   , Int32x4_2              )
   //DEF3_WMS( CUSTOM                              , Simd128_Ld_D2                 , OP_Simd128_LdD2                   , Float64x2_2            )
@@ -317,10 +315,7 @@ EXDEF3    ( CUSTOM     , InvalidOpCode     , OP_Empty                , Empty    
 
   DEF3_WMS( CUSTOM                              , Simd128_ReplaceLane_I4        , OP_Simd128_ReplaceLaneI4          , Int32x4_2Int2)
   DEF3_WMS( CUSTOM                              , Simd128_ReplaceLane_F4        , OP_Simd128_ReplaceLaneF4          , Float32x4_2Int1Float1)
-
-  DEF3_WMS( CUSTOM                              , Simd128_I_Conv_VTF4           , OP_Simd128_I_Conv_VTF4            , Float32x4_2      )
-  DEF3_WMS( CUSTOM                              , Simd128_I_Conv_VTI4           , OP_Simd128_I_Conv_VTI4            , Int32x4_2        )
-  //DEF3_WMS( CUSTOM                              , Simd128_I_Conv_VTD2           , OP_Simd128_I_Conv_VTD2            , Float64x2_2      )
+#endif
 
 // help the caller to undefine all the macros
 #undef DEF2

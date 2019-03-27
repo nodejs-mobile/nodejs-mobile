@@ -9,7 +9,7 @@ const opts = {
   none: undefined
 };
 const bench = common.createBenchmark(main, {
-  n: [2e6],
+  n: [2e4],
   method: [
     'Object',
     'Object_empty',
@@ -22,7 +22,8 @@ const bench = common.createBenchmark(main, {
     'Error',
     'Array',
     'TypedArray',
-    'TypedArray_extra'
+    'TypedArray_extra',
+    'Number'
   ],
   option: Object.keys(opts)
 });
@@ -80,7 +81,7 @@ function main({ method, n, option }) {
       benchmark(n, new Error('error'), options);
       break;
     case 'Array':
-      benchmark(n, Array(20).fill().map((_, i) => i), options);
+      benchmark(n, Array(50).fill().map((_, i) => i), options);
       break;
     case 'TypedArray':
       obj = new Uint8Array(Array(50).fill().map((_, i) => i));
@@ -91,6 +92,9 @@ function main({ method, n, option }) {
       obj.foo = 'bar';
       obj[Symbol('baz')] = 5;
       benchmark(n, obj, options);
+      break;
+    case 'Number':
+      benchmark(n, 0, options);
       break;
     default:
       throw new Error(`Unsupported method "${method}"`);

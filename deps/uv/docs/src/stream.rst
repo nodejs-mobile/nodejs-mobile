@@ -45,7 +45,7 @@ Data types
         `nread` might be 0, which does *not* indicate an error or EOF. This
         is equivalent to ``EAGAIN`` or ``EWOULDBLOCK`` under ``read(2)``.
 
-    The callee is responsible for stopping closing the stream when an error happens
+    The callee is responsible for stopping/closing the stream when an error happens
     by calling :c:func:`uv_read_stop` or :c:func:`uv_close`. Trying to read
     from the stream again is undefined.
 
@@ -227,5 +227,11 @@ API
         the stream.
 
     .. versionchanged:: 1.4.0 UNIX implementation added.
+
+.. c:function:: size_t uv_stream_get_write_queue_size(const uv_stream_t* stream)
+
+    Returns `stream->write_queue_size`.
+
+    .. versionadded:: 1.19.0
 
 .. seealso:: The :c:type:`uv_handle_t` API functions also apply.

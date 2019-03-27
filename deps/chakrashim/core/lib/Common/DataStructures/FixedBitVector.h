@@ -226,8 +226,9 @@ Container BVFixed::GetRange(BVIndex start, BVIndex len) const
     return Container(range);
 }
 
+// the NO_SANITIZE_ADDRESS_CHECK ifdef is to work around a bug in some VC versions
 template<typename Container>
-#ifdef NO_SANITIZE_ADDRESS_FIXVC
+#ifdef NO_SANITIZE_ADDRESS_CHECK
 NO_SANITIZE_ADDRESS
 #endif
 void BVFixed::SetRange(Container* value, BVIndex start, BVIndex len)
@@ -295,7 +296,9 @@ void BVFixed::SetRange(Container* value, BVIndex start, BVIndex len)
         // Default case. We need to process everything 1 at a time
         {
             // First set the first bits
+CLANG_WNO_BEGIN("-Wtautological-compare")
             const BVUnit::BVUnitTContainer mask = MAKE_MASK(oStart, BVUnit::BitsPerWord);
+CLANG_WNO_END
             SET_RANGE(iStart, *bits << oStart, mask);
         }
         // Set the bits in the middle

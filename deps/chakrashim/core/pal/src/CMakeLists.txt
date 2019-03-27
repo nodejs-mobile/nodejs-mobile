@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
 
-include_directories(SYSTEM /usr/local/include)
-
-include(configure.cmake)
-
 project(chakrapal)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -165,11 +161,12 @@ set(SOURCES
   shmemory/shmemory.cpp
   synchobj/event.cpp
   synchobj/mutex.cpp
+  synchobj/semaphore.cpp
   synchmgr/synchcontrollers.cpp
   synchmgr/synchmanager.cpp
   synchmgr/wait.cpp
   sync/cs.cpp
-  sync/CCSpinLock.cpp
+  sync/cclock.cpp
   thread/context.cpp
   thread/process.cpp
   thread/pal_thread.cpp

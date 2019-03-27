@@ -29,26 +29,94 @@ namespace Js
          * to pass this object by reference. Interpreter stack setup code expects
          * CallInfo to be passed by value.
          */
-        explicit CallInfo(ushort count)
+        explicit CallInfo(ArgSlot count)
             : Flags(CallFlags_None)
             , Count(count)
 #ifdef TARGET_64
             , unused(0)
 #endif
         {
+            // Keeping this version to avoid the assert
         }
 
-        CallInfo(CallFlags flags, ushort count)
+        // The bool is used to avoid the signature confusion between the ArgSlot and uint version of the constructor
+        explicit CallInfo(uint count, bool unusedBool)
+            : Flags(CallFlags_None)
+            , Count(count)
+#ifdef TARGET_64
+            , unused(0)
+#endif
+        {
+            AssertOrFailFastMsg(count < CallInfo::kMaxCountArgs, "Argument list too large");
+        }
+
+        CallInfo(CallFlags flags, uint count)
             : Flags(flags)
             , Count(count)
 #ifdef TARGET_64
             , unused(0)
 #endif
         {
+            // Keeping this version to avoid the assert
         }
+
 
         CallInfo(VirtualTableInfoCtorEnum v)
         {
+        }
+
+        ArgSlot GetArgCountWithExtraArgs() const
+        {
+            return CallInfo::GetArgCountWithExtraArgs(this->Flags, this->Count);
+        }
+
+        uint GetLargeArgCountWithExtraArgs() const
+        {
+            return CallInfo::GetLargeArgCountWithExtraArgs(this->Flags, this->Count);
+        }
+
+        bool HasExtraArg() const
+        {
+            return  CallInfo::HasExtraArg(this->Flags);
+        }
+
+        bool HasNewTarget() const
+        {
+            return CallInfo::HasNewTarget(this->Flags);
+        }
+
+        static ArgSlot GetArgCountWithExtraArgs(CallFlags flags, uint count);
+
+        static uint GetLargeArgCountWithExtraArgs(CallFlags flags, uint count);
+
+        static ArgSlot GetArgCountWithoutExtraArgs(CallFlags flags, ArgSlot count);
+
+        static bool HasExtraArg(CallFlags flags)
+        {
+            // Generally HasNewTarget should not be true if CallFlags_ExtraArg is not set.
+            Assert(!CallInfo::HasNewTarget(flags) || flags & CallFlags_ExtraArg);
+
+            // we will still check HasNewTarget to be safe in case if above invariant does not hold.
+            return (flags & CallFlags_ExtraArg) || CallInfo::HasNewTarget(flags);
+        }
+
+        static bool HasNewTarget(CallFlags flags)
+        {
+            return (flags & CallFlags_NewTarget) == CallFlags_NewTarget;
+        }
+
+        // New target value is passed as an extra argument which is nto included in the Count
+        static Var GetNewTarget(CallFlags flag, Var* values, uint count)
+        {
+            if (HasNewTarget(flag))
+            {
+                return values[count];
+            }
+            else
+            {
+                AssertOrFailFast(count > 0);
+                return values[0];
+            }
         }
 
         // Assumes big-endian layout
@@ -72,28 +140,29 @@ namespace Js
         static const ushort ksizeofCount;
         static const ushort ksizeofCallFlags;
         static const uint kMaxCountArgs;
-
-        static bool isDirectEvalCall(CallFlags flags)
-        {
-            // This was recognized as an eval call at compile time. The last one or two args are internal to us.
-            // Argcount will be one of the following when called from global code
-            //  - eval("...")     : argcount 3 : this, evalString, frameDisplay
-            //  - eval.call("..."): argcount 2 : this(which is string) , frameDisplay
-
-            return (flags & (CallFlags_ExtraArg | CallFlags_NewTarget)) == CallFlags_ExtraArg;  // ExtraArg == 1 && NewTarget == 0
-        }
     };
 
     struct InlineeCallInfo
     {
         // Assumes big-endian layout.
-        size_t Count: 4;
-        size_t InlineeStartOffset: sizeof(void*) * CHAR_BIT - 4;
+        uint Count : 4;
+#if TARGET_32
+        uint InlineeStartOffset : 28;
+#else
+        uint unused : 28;
+        uint InlineeStartOffset;
+#endif
         static size_t const MaxInlineeArgoutCount = 0xF;
+#if TARGET_32
+        static uint const ksizeofInlineeStartOffset = 28;
+#else
+        static uint const ksizeofInlineeStartOffset = 32;
+#endif
+        static uint const inlineeStartOffsetShiftCount = (sizeof(void*) * CHAR_BIT - Js::InlineeCallInfo::ksizeofInlineeStartOffset);
 
         static bool Encode(intptr_t &callInfo, size_t count, size_t offset)
         {
-            const size_t offsetMask = (~(size_t)0) >> 4;
+            const size_t offsetMask = ~(uint)0 >> (sizeof(uint) * CHAR_BIT - ksizeofInlineeStartOffset);
             const size_t countMask  = 0x0000000F;
             if (count != (count & countMask))
             {
@@ -105,8 +174,7 @@ namespace Js
                 return false;
             }
 
-            callInfo = (offset << 4) | count;
-
+            callInfo = (offset << inlineeStartOffsetShiftCount) | count;
             return true;
         }
 

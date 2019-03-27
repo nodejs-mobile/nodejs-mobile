@@ -78,20 +78,21 @@ inline size_t _countof(T (&)[N]) {
     } \
   }
 
+#ifdef DEBUG
+#define CHAKRA_ASSERT(expr) assert(expr)
 #define CHAKRA_UNIMPLEMENTED() jsrt::Unimplemented(__FUNCTION__)
 #define CHAKRA_UNIMPLEMENTED_(message) jsrt::Unimplemented(message)
+#else  // DEBUG
+#define CHAKRA_UNIMPLEMENTED()         /* no-op */
+#define CHAKRA_UNIMPLEMENTED_(message) /* no-op */
+#define CHAKRA_ASSERT(expr)            /* no-op */
+#endif  // DEBUG
 
 #define CHAKRA_VERIFY(expr) if (!(expr)) { \
   jsrt::Fatal("internal error %s(%d): %s", __FILE__, __LINE__, #expr); }
 
 #define CHAKRA_VERIFY_NOERROR(errorCode) if (errorCode != JsNoError) { \
   jsrt::Fatal("internal error %s(%d): %x", __FILE__, __LINE__, errorCode); }
-
-#ifdef DEBUG
-#define CHAKRA_ASSERT(expr) assert(expr)
-#else
-#define CHAKRA_ASSERT(expr)
-#endif
 
 namespace jsrt {
 
@@ -100,7 +101,7 @@ class StringUtf8 {
  public:
   StringUtf8();
   ~StringUtf8();
-  char *operator*() { return _str; }
+  char* operator*() { return _str; }
   operator const char *() const { return _str; }
   int length() const { return static_cast<int>(_length); }
   JsErrorCode From(JsValueRef strRef);
@@ -126,31 +127,31 @@ JsErrorCode UintToValue(uint32_t value, JsValueRef* result);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         JsValueRef propName,
-                        JsValueRef *result);
+                        JsValueRef* result);
 
 JsErrorCode GetProperty(JsValueRef ref,
-                        const char *propertyName,
-                        JsValueRef *result);
+                        const char* propertyName,
+                        JsValueRef* result);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         CachedPropertyIdRef cachedIdRef,
-                        JsValueRef *result);
+                        JsValueRef* result);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         JsPropertyIdRef propId,
-                        bool *boolValue);
+                        bool* boolValue);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         CachedPropertyIdRef cachedIdRef,
-                        bool *boolValue);
+                        bool* boolValue);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         JsPropertyIdRef propId,
-                        int *intValue);
+                        int* intValue);
 
 JsErrorCode GetProperty(JsValueRef ref,
                         CachedPropertyIdRef cachedIdRef,
-                        int *intValue);
+                        int* intValue);
 
 JsErrorCode SetProperty(JsValueRef ref,
                         JsValueRef propName,
@@ -161,7 +162,7 @@ JsErrorCode SetProperty(JsValueRef ref,
                         JsValueRef propValue);
 
 JsErrorCode SetProperty(JsValueRef ref,
-                        const char *propertyName,
+                        const char* propertyName,
                         JsValueRef propValue);
 
 JsErrorCode SetProperty(JsValueRef ref,
@@ -174,11 +175,11 @@ JsErrorCode SetProperty(JsValueRef ref,
 
 JsErrorCode SetProperty(JsValueRef ref,
                         JsPropertyIdRef propId,
-                        const char *stringValue);
+                        const char* stringValue);
 
 JsErrorCode SetProperty(JsValueRef ref,
                         CachedPropertyIdRef cachedIdRef,
-                        const char *stringValue);
+                        const char* stringValue);
 
 JsErrorCode DeleteIndexedProperty(JsValueRef object,
                                   unsigned int index);
@@ -192,58 +193,58 @@ JsErrorCode GetOwnPropertyDescriptor(JsValueRef ref,
                                      JsValueRef* result);
 
 JsErrorCode IsZero(JsValueRef value,
-                   bool *result);
+                   bool* result);
 
 JsErrorCode IsUndefined(JsValueRef value,
-                        bool *result);
+                        bool* result);
 
 JsErrorCode HasOwnProperty(JsValueRef object,
                            JsValueRef prop,
-                           JsValueRef *result);
+                           JsValueRef* result);
 
 JsErrorCode HasProperty(JsValueRef object,
                         JsValueRef prop,
-                        bool *result);
+                        bool* result);
 
 JsErrorCode HasProperty(JsValueRef object,
                         CachedPropertyIdRef cachedIdRef,
-                        bool *result);
+                        bool* result);
 
 JsErrorCode HasIndexedProperty(JsValueRef object,
                                unsigned int index,
-                               bool *result);
+                               bool* result);
 
 JsErrorCode GetEnumerableNamedProperties(JsValueRef object,
-                                         JsValueRef *result);
+                                         JsValueRef* result);
 
 JsErrorCode GetEnumerableIndexedProperties(JsValueRef object,
-                                           JsValueRef *result);
+                                           JsValueRef* result);
 
 JsErrorCode GetIndexedOwnKeys(JsValueRef object,
-                              JsValueRef *result);
+                              JsValueRef* result);
 
 JsErrorCode GetNamedOwnKeys(JsValueRef object,
-                            JsValueRef *result);
+                            JsValueRef* result);
 
 JsErrorCode CreateEnumerationIterator(JsValueRef enumeration,
-                                      JsValueRef *result);
+                                      JsValueRef* result);
 
 JsErrorCode CreatePropertyDescriptorsEnumerationIterator(JsValueRef enumeration,
-                                                         JsValueRef *result);
+                                                         JsValueRef* result);
 
 JsErrorCode ConcatArray(JsValueRef first,
                         JsValueRef second,
-                        JsValueRef *result);
+                        JsValueRef* result);
 
 JsErrorCode PushArray(JsValueRef array,
                       JsValueRef item,
-                      JsValueRef *result);
+                      JsValueRef* result);
 
 JsErrorCode CallProperty(JsValueRef ref,
                          CachedPropertyIdRef cachedIdRef,
-                         JsValueRef *arguments,
+                         JsValueRef* arguments,
                          unsigned short argumentCount,  // NOLINT(runtime/int)
-                         JsValueRef *result);
+                         JsValueRef* result);
 
 JsErrorCode CallGetter(JsValueRef ref,
                        CachedPropertyIdRef cachedIdRef,
@@ -253,10 +254,10 @@ JsErrorCode CallGetter(JsValueRef ref,
                        CachedPropertyIdRef cachedIdRef,
                        int* result);
 
-JsErrorCode GetPropertyOfGlobal(const char *propertyName,
-                                JsValueRef *ref);
+JsErrorCode GetPropertyOfGlobal(const char* propertyName,
+                                JsValueRef* ref);
 
-JsErrorCode SetPropertyOfGlobal(const char *propertyName,
+JsErrorCode SetPropertyOfGlobal(const char* propertyName,
                                 JsValueRef ref);
 
 JsValueRef GetNull();
@@ -268,7 +269,7 @@ JsValueRef GetTrue();
 JsValueRef GetFalse();
 
 JsErrorCode GetArrayLength(JsValueRef arrayRef,
-                           unsigned int *arraySize);
+                           unsigned int* arraySize);
 
 bool InstanceOf(JsValueRef first,
                 JsValueRef second);
@@ -278,15 +279,24 @@ JsErrorCode CloneObject(JsValueRef source,
                         bool cloneProtoype = false);
 
 JsErrorCode GetPropertyNames(JsValueRef object,
-                             JsValueRef *namesArray);
+                             JsValueRef* namesArray);
+
+JsErrorCode GetPropertyNames(JsValueRef object,
+                             int mode,
+                             int property_filter,
+                             int index_filter,
+                             int key_conversion,
+                             JsValueRef* namesArray);
+
+JsPropertyIdRef GetExternalPropertyId();
 
 JsErrorCode AddExternalData(JsValueRef ref,
                             JsPropertyIdRef externalDataPropertyId,
-                            void *data,
+                            void* data,
                             JsFinalizeCallback onObjectFinalize);
 
 JsErrorCode AddExternalData(JsValueRef ref,
-                            void *data,
+                            void* data,
                             JsFinalizeCallback onObjectFinalize);
 
 JsErrorCode GetExternalData(JsValueRef ref,
@@ -299,20 +309,20 @@ JsErrorCode GetExternalData(JsValueRef ref,
 JsErrorCode CreateFunctionWithExternalData(JsNativeFunction,
                                            void* data,
                                            JsFinalizeCallback onObjectFinalize,
-                                           JsValueRef *function);
+                                           JsValueRef* function);
 
 JsErrorCode ToString(JsValueRef ref,
                      JsValueRef* strRef, StringUtf8* stringUtf8);
 
-JsErrorCode CreateString(const char *string,
-                         JsValueRef *ref);
+JsErrorCode CreateString(const char* string,
+                         JsValueRef* ref);
 
-JsErrorCode CreatePropertyId(const char *name,
-                             JsValueRef *propertyIdRef);
+JsErrorCode CreatePropertyId(const char* name,
+                             JsValueRef* propertyIdRef);
 
 #define DEF_IS_TYPE(F) \
 JsErrorCode Call##F(JsValueRef value,  \
-JsValueRef *resultRef); \
+JsValueRef* resultRef); \
 
 #include "jsrtcachedpropertyidref.inc"
 #undef DEF_IS_TYPE
@@ -320,9 +330,9 @@ JsValueRef *resultRef); \
 JsValueRef CHAKRA_CALLBACK CollectGarbage(
     JsValueRef callee,
     bool isConstructCall,
-    JsValueRef *arguments,
+    JsValueRef* arguments,
     unsigned short argumentCount,  // NOLINT(runtime/int)
-    void *callbackState);
+    void* callbackState);
 
 // the possible values for the property descriptor options
 enum PropertyDescriptorOptionValues {
@@ -340,13 +350,16 @@ JsErrorCode CreatePropertyDescriptor(
     JsValueRef value,
     JsValueRef getter,
     JsValueRef setter,
-    JsValueRef *descriptor);
+    JsValueRef* descriptor);
 
 JsErrorCode CreatePropertyDescriptor(v8::PropertyAttribute attributes,
                                      JsValueRef value,
                                      JsValueRef getter,
                                      JsValueRef setter,
-                                     JsValueRef *descriptor);
+                                     JsValueRef* descriptor);
+
+JsErrorCode CreateV8PropertyDescriptor(JsValueRef descriptor,
+                                       v8::PropertyDescriptor* result);
 
 JsErrorCode DefineProperty(JsValueRef object,
                            const char * propertyName,
@@ -367,13 +380,13 @@ JsErrorCode DefineProperty(JsValueRef object,
                            JsValueRef setter);
 
 JsErrorCode GetPropertyIdFromName(JsValueRef nameRef,
-                                  JsPropertyIdRef *idRef);
+                                  JsPropertyIdRef* idRef);
 
 JsErrorCode GetPropertyIdFromValue(JsValueRef valueRef,
-                                   JsPropertyIdRef *idRef);
+                                   JsPropertyIdRef* idRef);
 
 JsErrorCode GetObjectConstructor(JsValueRef objectRef,
-                                 JsValueRef *constructorRef);
+                                 JsValueRef* constructorRef);
 
 JsErrorCode SetIndexedProperty(JsValueRef object,
                                unsigned int index,
@@ -381,15 +394,15 @@ JsErrorCode SetIndexedProperty(JsValueRef object,
 
 JsErrorCode GetIndexedProperty(JsValueRef object,
                                unsigned int index,
-                               JsValueRef *value);
+                               JsValueRef* value);
 
 // CHAKRA-TODO : Currently Chakra's ParseScript doesn't support strictMode
 // flag. As a workaround, prepend the script text with 'use strict'.
-JsErrorCode ParseScript(StringUtf8 *script,
+JsErrorCode ParseScript(StringUtf8* script,
                         JsSourceContext sourceContext,
                         JsValueRef sourceUrl,
                         bool isStrictMode,
-                        JsValueRef *result);
+                        JsValueRef* result);
 
 JsErrorCode GetHiddenValuesTable(JsValueRef object,
                                 JsPropertyIdRef* hiddenValueIdRef,
@@ -397,7 +410,7 @@ JsErrorCode GetHiddenValuesTable(JsValueRef object,
                                 bool* isUndefined);
 
 JsErrorCode GetPrivate(JsValueRef object, JsValueRef key,
-                           JsValueRef *result);
+                           JsValueRef* result);
 
 JsErrorCode SetPrivate(JsValueRef object, JsValueRef key,
                            JsValueRef value);
@@ -414,7 +427,7 @@ void ScheduleIdleGcTask(uint64_t timeoutInMilliSeconds = 1000);
 
 void PrepareIdleGC(uv_prepare_t* prepareHandler);
 
-void IdleGC(uv_timer_t *timerHandler);
+void IdleGC(uv_timer_t* timerHandler);
 
 // Arguments buffer for JsCallFunction
 template <int STATIC_COUNT = 4>
@@ -474,6 +487,15 @@ JsErrorCode CallFunction(const T& api,
   return api(func, args, _countof(args), result);
 }
 
+template <class T>
+JsErrorCode CallFunction(const T& api,
+                         JsValueRef func, JsValueRef arg1, JsValueRef arg2,
+                         JsValueRef arg3, JsValueRef arg4, JsValueRef arg5,
+                         JsValueRef* result) {
+  JsValueRef args[] = { GetUndefined(), arg1, arg2, arg3, arg4, arg5 };
+  return api(func, args, _countof(args), result);
+}
+
 inline JsErrorCode CallFunction(JsValueRef func,
                                 JsValueRef* result) {
   return CallFunction(JsCallFunction, func, result);
@@ -494,6 +516,14 @@ inline JsErrorCode CallFunction(JsValueRef func,
                                 JsValueRef arg1, JsValueRef arg2,
                                 JsValueRef arg3, JsValueRef* result) {
   return CallFunction(JsCallFunction, func, arg1, arg2, arg3, result);
+}
+
+inline JsErrorCode CallFunction(JsValueRef func,
+                                JsValueRef arg1, JsValueRef arg2,
+                                JsValueRef arg3, JsValueRef arg4,
+                                JsValueRef arg5, JsValueRef* result) {
+  return CallFunction(JsCallFunction, func, arg1, arg2, arg3, arg4, arg5,
+                      result);
 }
 
 inline JsErrorCode ConstructObject(JsValueRef func,

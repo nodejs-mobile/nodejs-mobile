@@ -2,12 +2,12 @@
 <regress-exe>
 <dir>
   <default>
-    <files>UnitTestFramework</files>
+    <files>262</files>
   </default>
 </dir>
 <dir>
   <default>
-    <files>$262</files>
+    <files>UnitTestFramework</files>
   </default>
 </dir>
 <dir>
@@ -18,6 +18,12 @@
 <dir>
   <default>
     <files>Basics</files>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>ConfigParsing</files>
+    <tags>exclude_jshost,exclude_xplat</tags>
   </default>
 </dir>
 <dir>
@@ -69,6 +75,7 @@
 <dir>
   <default>
     <files>Intl</files>
+    <tags>exclude_noicu</tags>
   </default>
 </dir>
 <dir>
@@ -247,6 +254,11 @@
 </dir>
 <dir>
   <default>
+    <files>es6module</files>
+  </default>
+</dir>
+<dir>
+  <default>
     <files>es7</files>
   </default>
 </dir>
@@ -270,31 +282,37 @@
 <dir>
   <default>
     <files>AsmJs</files>
-    <tags>exclude_serialized,exclude_arm,exclude_arm64,require_backend,require_asmjs</tags>
+    <tags>exclude_serialized,require_backend,require_asmjs</tags>
   </default>
 </dir>
 <dir>
   <default>
     <files>AsmJsFloat</files>
-    <tags>exclude_serialized,exclude_arm,exclude_arm64,require_backend,require_asmjs</tags>
+    <tags>exclude_serialized,require_backend,require_asmjs</tags>
   </default>
 </dir>
 <dir>
   <default>
     <files>AsmJsParser</files>
-    <tags>exclude_serialized,exclude_arm,exclude_arm64,require_backend,require_asmjs</tags>
+    <tags>exclude_serialized,require_backend,require_asmjs</tags>
   </default>
 </dir>
 <dir>
   <default>
     <files>WasmSpec</files>
-    <tags>exclude_serialized,exclude_arm,exclude_arm64,require_backend,exclude_jshost,exclude_win7,require_wasm,exclude_xplat</tags>
+    <tags>exclude_serialized,require_backend,exclude_jshost,exclude_win7,require_wasm</tags>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>WasmSpec.MultiValue</files>
+    <tags>exclude_serialized,require_backend,require_wasm</tags>
   </default>
 </dir>
 <dir>
   <default>
     <files>wasm</files>
-    <tags>exclude_serialized,exclude_arm,exclude_arm64,require_backend,require_wasm</tags>
+    <tags>exclude_serialized,require_backend,require_wasm</tags>
   </default>
 </dir>
 <dir>
@@ -312,13 +330,36 @@
 <dir>
   <default>
     <files>TTExecuteBasic</files>
-    <tags>sequential,exclude_dynapogo,exclude_jshost,exclude_snap,exclude_serialized</tags>
+    <tags>sequential,exclude_dynapogo,exclude_jshost,exclude_snap,exclude_serialized,require_debugger,exclude_sanitize_address</tags>
   </default>
 </dir>
 <dir>
   <default>
     <files>TTBasic</files>
-    <tags>sequential,exclude_dynapogo,exclude_jshost,exclude_snap,exclude_serialized</tags>
+    <tags>sequential,exclude_dynapogo,exclude_jshost,exclude_snap,exclude_serialized,require_debugger,exclude_sanitize_address</tags>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>Scanner</files>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>wasm.simd</files>
+    <tags>require_wasm,exclude_serialized,require_backend,exclude_xplat</tags>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>PRE</files>
+    <tags>require_backend</tags>
+  </default>
+</dir>
+<dir>
+  <default>
+    <files>FlowGraph</files>
+    <tags>require_backend</tags>
   </default>
 </dir>
 </regress-exe>

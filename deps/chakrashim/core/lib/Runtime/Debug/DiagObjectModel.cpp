@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 // Parser includes
 #include "CharClassifier.h"
 // TODO: clean up the need of these regex related header here just for GroupInfo needed in JavascriptRegExpConstructor
@@ -28,7 +29,6 @@
 #include "Types/JavascriptStaticEnumerator.h"
 #include "Library/ForInObjectEnumerator.h"
 #include "Library/ES5Array.h"
-#include "Library/SimdLib.h"
 
 namespace Js
 {
@@ -88,54 +88,12 @@ namespace Js
 #endif
             pOMDisplay = Anew(pRefArena->Arena(), RecyclableArrayDisplay, this);
         }
-#ifdef ENABLE_SIMDJS
-        else if (Js::JavascriptSIMDInt32x4::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdInt32x4ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDFloat32x4::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdFloat32x4ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDInt8x16::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdInt8x16ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDInt16x8::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdInt16x8ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDBool32x4::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdBool32x4ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDBool8x16::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdBool8x16ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDBool16x8::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdBool16x8ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDUint32x4::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdUint32x4ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDUint8x16::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdUint8x16ObjectDisplay, this);
-        }
-        else if (Js::JavascriptSIMDUint16x8::Is(obj))
-        {
-            pOMDisplay = Anew(pRefArena->Arena(), RecyclableSimdUint16x8ObjectDisplay, this);
-        }
-#endif
         else
         {
             pOMDisplay = Anew(pRefArena->Arena(), RecyclableObjectDisplay, this);
         }
 
-        if (this->isConst || this->propId == Js::PropertyIds::_superReferenceSymbol || this->propId == Js::PropertyIds::_superCtorReferenceSymbol)
+        if (this->isConst || this->propId == Js::PropertyIds::_super || this->propId == Js::PropertyIds::_superConstructor)
         {
             pOMDisplay->SetDefaultTypeAttribute(DBGPROP_ATTRIB_VALUE_READONLY);
         }
@@ -269,8 +227,13 @@ namespace Js
             }
             else
             {
-                Js::JavascriptString *builtInName = ParseFunctionName(returnValue->calledFunction->GetDisplayName(), pResolvedObject->scriptContext);
-                swprintf_s(finalName, RETURN_VALUE_MAX_NAME, _u("[%s returned]"), builtInName->GetSz());
+                ENTER_PINNED_SCOPE(JavascriptString, displayName);
+                displayName = returnValue->calledFunction->GetDisplayName();
+
+                const char16 *builtInName = ParseFunctionName(displayName->GetString(), displayName->GetLength(), pResolvedObject->scriptContext);
+                swprintf_s(finalName, RETURN_VALUE_MAX_NAME, _u("[%s returned]"), builtInName);
+
+                LEAVE_PINNED_SCOPE();
             }
             pResolvedObject->obj = returnValue->returnedValue;
             defaultAttributes |= DBGPROP_ATTRIB_VALUE_READONLY;
@@ -288,24 +251,21 @@ namespace Js
     // The debugger uses the functionNameId field instead of the "name" property to get the name of the funtion. The functionNameId field is overloaded and may contain the display name if
     // toString() has been called on the function object. For built-in or external functions the display name can be something like "function Echo() { native code }". We will try to parse the
     // function name out of the display name so the user will see just the function name e.g. "Echo" instead of the full display name in debugger.
-    JavascriptString * VariableWalkerBase::ParseFunctionName(JavascriptString* displayName, ScriptContext* scriptContext)
+    const char16 * VariableWalkerBase::ParseFunctionName(const char16 * displayNameBuffer, const charcount_t displayNameBufferLength, ScriptContext* scriptContext)
     {
-        Assert(displayName);
-        const char16 * displayNameBuffer = displayName->GetString();
-        const charcount_t displayNameBufferLength = displayName->GetLength();
         const charcount_t funcStringLength = _countof(JS_DISPLAY_STRING_FUNCTION_HEADER) - 1; // discount the ending null character in string literal
         const charcount_t templateStringLength = funcStringLength + _countof(JS_DISPLAY_STRING_FUNCTION_BODY) - 1; // discount the ending null character in string literal
         // If the string doesn't meet our expected format; return the original string.
         if (displayNameBufferLength <= templateStringLength || (wmemcmp(displayNameBuffer, JS_DISPLAY_STRING_FUNCTION_HEADER, funcStringLength) != 0))
         {
-            return displayName;
+            return displayNameBuffer;
         }
 
         // Look for the left parenthesis, if we don't find one; return the original string.
         const char16* parenChar = wcschr(displayNameBuffer, '(');
         if (parenChar == nullptr)
         {
-            return displayName;
+            return displayNameBuffer;
         }
 
         charcount_t actualFunctionNameLength = displayNameBufferLength - templateStringLength;
@@ -313,17 +273,12 @@ namespace Js
         char16 * actualFunctionNameBuffer = AnewArray(GetArenaFromContext(scriptContext), char16, actualFunctionNameLength + 1); // The last character will be the null character.
         if (actualFunctionNameBuffer == nullptr)
         {
-            return displayName;
+            return displayNameBuffer;
         }
         js_memcpy_s(actualFunctionNameBuffer, byteLengthForCopy, displayNameBuffer + funcStringLength, byteLengthForCopy);
         actualFunctionNameBuffer[actualFunctionNameLength] = _u('\0');
 
-        JavascriptString * actualFunctionName = JavascriptString::NewWithArenaSz(actualFunctionNameBuffer, scriptContext);
-        if (actualFunctionName == nullptr)
-        {
-            return displayName;
-        }
-        return actualFunctionName;
+        return actualFunctionNameBuffer;
     }
 
     /*static*/
@@ -416,7 +371,7 @@ namespace Js
             Assert(pResolvedObject->propId != Js::Constants::NoProperty);
             Assert(!Js::IsInternalPropertyId(pResolvedObject->propId));
 
-            if (pResolvedObject->propId == Js::PropertyIds::_superReferenceSymbol || pResolvedObject->propId == Js::PropertyIds::_superCtorReferenceSymbol)
+            if (pResolvedObject->propId == Js::PropertyIds::_super || pResolvedObject->propId == Js::PropertyIds::_superConstructor)
             {
                 pResolvedObject->name         = _u("super");
             }
@@ -524,13 +479,12 @@ namespace Js
         // Default to writable (for the case of vars and internal properties).
         *isConst = false;
 
-
-        if (!allowLexicalThis && (propertyId == Js::PropertyIds::_lexicalThisSlotSymbol || propertyId == Js::PropertyIds::_lexicalNewTargetSymbol))
+        if (!allowLexicalThis && (propertyId == Js::PropertyIds::_this || propertyId == Js::PropertyIds::_newTarget))
         {
             return false;
         }
 
-        if (!allowSuperReference && (propertyId == Js::PropertyIds::_superReferenceSymbol || propertyId == Js::PropertyIds::_superCtorReferenceSymbol))
+        if (!allowSuperReference && (propertyId == Js::PropertyIds::_super || propertyId == Js::PropertyIds::_superConstructor))
         {
             return false;
         }
@@ -613,7 +567,7 @@ namespace Js
             ArenaAllocator *arena = pFrame->GetArena();
             ScopeSlots slotArray = GetSlotArray();
 
-            if (slotArray.IsFunctionScopeSlotArray())
+            if (!slotArray.IsDebuggerScopeSlotArray())
             {
                 DebuggerScope *formalScope = GetScopeWhenHaltAtFormals();
                 bool isInParamScope = IsInParamScope(formalScope, pFrame);
@@ -644,7 +598,8 @@ namespace Js
                 }
                 else if (pFBody->GetPropertyIdsForScopeSlotArray() != nullptr)
                 {
-                    uint slotArrayCount = slotArray.GetCount();
+                    uint slotArrayCount = static_cast<uint>(slotArray.GetCount());
+
                     pMembersList = JsUtil::List<DebuggerPropertyDisplayInfo *, ArenaAllocator>::New(arena, slotArrayCount);
 
                     for (uint32 i = 0; i < slotArrayCount; i++)
@@ -962,7 +917,11 @@ namespace Js
     // DiagScopeVariablesWalker
 
     DiagScopeVariablesWalker::DiagScopeVariablesWalker(DiagStackFrame* _pFrame, Var _instance, IDiagObjectModelWalkerBase* innerWalker)
-        : VariableWalkerBase(_pFrame, _instance, UIGroupType_InnerScope, /* allowLexicalThis */ false)
+        : VariableWalkerBase(_pFrame, _instance, UIGroupType_InnerScope, /* allowLexicalThis */ false),
+        pDiagScopeObjects(nullptr),
+        diagScopeVarCount(0),
+        scopeIsInitialized(false), // false until end of method
+        enumWithScopeAlso(false)
     {
         ScriptContext * scriptContext = _pFrame->GetScriptContext();
         ArenaAllocator *arena = GetArenaFromContext(scriptContext);
@@ -1902,9 +1861,8 @@ namespace Js
             Var objValue = nullptr;
 
 #if ENABLE_TTD
-            bool suppressGetterForTTDebug = requestContext->GetThreadContext()->IsRuntimeInTTDMode() && requestContext->GetThreadContext()->TTDLog->ShouldDoGetterInvocationSupression();
             TTD::TTModeStackAutoPopper suppressModeAutoPopper(requestContext->GetThreadContext()->TTDLog);
-            if(suppressGetterForTTDebug)
+            if(requestContext->GetThreadContext()->IsRuntimeInTTDMode())
             {
                 suppressModeAutoPopper.PushModeAndSetToAutoPop(TTD::TTDMode::DebuggerSuppressGetter);
             }
@@ -2139,7 +2097,7 @@ namespace Js
                     auto funcPtr = [&]()
                     {
                         IGNORE_STACKWALK_EXCEPTION(scriptContext);
-                        if (object->CanHaveInterceptors())
+                        if (object->IsExternal())
                         {
                             Js::ForInObjectEnumerator enumerator(object, object->GetScriptContext(), /* enumSymbols */ true);
                             Js::PropertyId propertyId;
@@ -2256,9 +2214,8 @@ namespace Js
         BOOL retValue = FALSE;
 
 #if ENABLE_TTD
-        bool suppressGetterForTTDebug = scriptContext->GetThreadContext()->IsRuntimeInTTDMode() && scriptContext->GetThreadContext()->TTDLog->ShouldDoGetterInvocationSupression();
         TTD::TTModeStackAutoPopper suppressModeAutoPopper(scriptContext->GetThreadContext()->TTDLog);
-        if(suppressGetterForTTDebug)
+        if(scriptContext->GetThreadContext()->IsRuntimeInTTDMode())
         {
             suppressModeAutoPopper.PushModeAndSetToAutoPop(TTD::TTDMode::DebuggerSuppressGetter);
         }
@@ -2459,7 +2416,7 @@ namespace Js
 
                 if (JavascriptOperators::IsObject(object))
                 {
-                    if (object->CanHaveInterceptors() || JavascriptOperators::GetTypeId(object) == TypeIds_Proxy)
+                    if (object->IsExternal() || JavascriptOperators::GetTypeId(object) == TypeIds_Proxy)
                     {
                         try
                         {
@@ -2474,19 +2431,9 @@ namespace Js
                                 {
                                     if (propertyId == Constants::NoProperty)
                                     {
-                                        if (VirtualTableInfo<Js::PropertyString>::HasVirtualTable(obj))
-                                        {
-                                            // If we have a property string, it is assumed that the propertyId is being
-                                            // kept alive with the object
-                                            PropertyString * propertyString = (PropertyString *)obj;
-                                            propertyId = propertyString->GetPropertyRecord()->GetPropertyId();
-                                        }
-                                        else
-                                        {
-                                            const PropertyRecord* propertyRecord;
-                                            objectContext->GetOrAddPropertyRecord(obj->GetSz(), obj->GetLength(), &propertyRecord);
-                                            propertyId = propertyRecord->GetPropertyId();
-                                        }
+                                        const PropertyRecord* propertyRecord;
+                                        objectContext->GetOrAddPropertyRecord(obj, &propertyRecord);
+                                        propertyId = propertyRecord->GetPropertyId();
                                     }
                                     // MoveAndGetNext shouldn't return an internal property id
                                     Assert(!Js::IsInternalPropertyId(propertyId));
@@ -2536,7 +2483,7 @@ namespace Js
                     else
                     {
                         RecyclableObject* wrapperObject = nullptr;
-                        if (JavascriptOperators::GetTypeId(object) == TypeIds_WithScopeObject)
+                        if (JavascriptOperators::GetTypeId(object) == TypeIds_UnscopablesWrapperObject)
                         {
                             wrapperObject = object;
                             object = object->GetThisObjectOrUnWrap();
@@ -2600,6 +2547,7 @@ namespace Js
                                 // We need to special-case RegExp constructor here because it has some special properties (above) and some
                                 // special enumerable properties which should all show up in the debugger.
                                 JavascriptRegExpConstructor* regExp = scriptContext->GetLibrary()->GetRegExpConstructor();
+                                Js::JavascriptFunction* jsFunction = Js::JavascriptFunction::FromVar(object);
 
                                 if (regExp == object)
                                 {
@@ -2615,7 +2563,7 @@ namespace Js
                                         InsertItem(originalObject, object, propertyId, isConst, isUnscoped, &pMethodsGroupWalker);
                                     }
                                 }
-                                else if (Js::JavascriptFunction::FromVar(object)->IsScriptFunction() || Js::JavascriptFunction::FromVar(object)->IsBoundFunction())
+                                else if ((jsFunction->IsScriptFunction() && !jsFunction->GetFunctionProxy()->IsJsBuiltInCode()) || jsFunction->IsBoundFunction())
                                 {
                                     // Adding special property length for the ScriptFunction, like it is done in JavascriptFunction::GetSpecialNonEnumerablePropertyName
                                     InsertItem(originalObject, object, PropertyIds::length, true/*not editable*/, false /*isUnscoped*/, &pMethodsGroupWalker);
@@ -3278,9 +3226,9 @@ namespace Js
 
     BOOL RecyclableTypedArrayAddress::Set(Var updateObject)
     {
-        if (Js::TypedArrayBase::Is(parentArray))
+        Js::TypedArrayBase* typedArrayObj = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(parentArray);
+        if (typedArrayObj)
         {
-            Js::TypedArrayBase* typedArrayObj = Js::TypedArrayBase::FromVar(parentArray);
             return typedArrayObj->SetItem(index, updateObject, PropertyOperation_None);
         }
 
@@ -3298,9 +3246,9 @@ namespace Js
 
     BOOL RecyclableTypedArrayDisplay::HasChildren()
     {
-        if (Js::TypedArrayBase::Is(instance))
+        Js::TypedArrayBase* typedArrayObj = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(instance);
+        if (typedArrayObj)
         {
-            Js::TypedArrayBase* typedArrayObj = Js::TypedArrayBase::FromVar(instance);
             if (typedArrayObj->GetLength() > 0)
             {
                 return TRUE;
@@ -3485,8 +3433,8 @@ namespace Js
         RecyclableObject *obj               = Js::RecyclableObject::FromVar(instance);
 
         Assert(obj->GetPrototype() != nullptr);
-        //withscopeObjects prototype is null
-        Assert(obj->GetPrototype()->GetTypeId() != TypeIds_Null || (obj->GetPrototype()->GetTypeId() == TypeIds_Null && obj->GetTypeId() == TypeIds_WithScopeObject));
+        //UnscopablesWrapperObjects prototype is null
+        Assert(obj->GetPrototype()->GetTypeId() != TypeIds_Null || (obj->GetPrototype()->GetTypeId() == TypeIds_Null && obj->GetTypeId() == TypeIds_UnscopablesWrapperObject));
 
         pResolvedObject->obj                = obj->GetPrototype();
         pResolvedObject->originalObj        = (originalInstance != nullptr) ? Js::RecyclableObject::FromVar(originalInstance) : pResolvedObject->obj;
@@ -3903,6 +3851,7 @@ namespace Js
                 break;
             case JavascriptPromise::PromiseStatusCode_Unresolved:
                 pResolvedObject->obj = scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("pending"));
+                break;
             case JavascriptPromise::PromiseStatusCode_HasResolution:
                 pResolvedObject->obj = scriptContext->GetLibrary()->CreateStringFromCppLiteral(_u("resolved"));
                 break;
@@ -4092,17 +4041,17 @@ namespace Js
         else
         {
             // The scope is defined by a slot array object so grab the function body out to get the function name.
-            ScopeSlots slotArray = ScopeSlots(reinterpret_cast<Var*>(instance));
+            ScopeSlots slotArray = ScopeSlots(reinterpret_cast<Field(Var)*>(instance));
 
-            if(slotArray.IsFunctionScopeSlotArray())
-            {
-                Js::FunctionBody *functionBody = slotArray.GetFunctionInfo()->GetFunctionBody();
-                return functionBody->GetDisplayName();
-            }
-            else
+            if(slotArray.IsDebuggerScopeSlotArray())
             {
                 // handling for block/catch scope
                 return _u("");
+            }
+            else
+            {
+                Js::FunctionBody *functionBody = slotArray.GetFunctionInfo()->GetFunctionBody();
+                return functionBody->GetDisplayName();
             }
         }
     }
@@ -4266,139 +4215,5 @@ namespace Js
         return FALSE;
     }
 #endif
-
-#ifdef ENABLE_SIMDJS
-    //--------------------------
-    // RecyclableSimdObjectWalker
-
-    template <typename simdType, uint elementCount>
-    BOOL RecyclableSimdObjectWalker<simdType, elementCount>::Get(int i, ResolvedObject* pResolvedObject)
-    {
-        Assert(elementCount == 4 || elementCount == 8 || elementCount == 16); // SIMD types such as int32x4, int8x16, int16x8
-        Assert(i >= 0 && i <= elementCount);
-
-        simdType* simd = simdType::FromVar(instance);
-        SIMDValue value = simd->GetValue();
-
-        WCHAR* indexName = AnewArray(GetArenaFromContext(scriptContext), WCHAR, SIMD_INDEX_VALUE_MAX);
-        Assert(indexName);
-        swprintf_s(indexName, SIMD_INDEX_VALUE_MAX, _u("[%d]"), i);
-        pResolvedObject->name = indexName;
-
-        TypeId simdTypeId = JavascriptOperators::GetTypeId(instance);
-
-        switch (simdTypeId)
-        {
-        case TypeIds_SIMDInt32x4:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.i32[i], scriptContext);
-            break;
-        case TypeIds_SIMDFloat32x4:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.f32[i], scriptContext);
-            break;
-        case TypeIds_SIMDInt8x16:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.i8[i], scriptContext);
-            break;
-        case TypeIds_SIMDInt16x8:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.i16[i], scriptContext);
-            break;
-        case TypeIds_SIMDBool32x4:
-            pResolvedObject->obj = JavascriptBoolean::ToVar(value.i32[i], scriptContext);
-            break;
-        case TypeIds_SIMDBool8x16:
-            pResolvedObject->obj = JavascriptBoolean::ToVar(value.i8[i], scriptContext);
-            break;
-        case TypeIds_SIMDBool16x8:
-            pResolvedObject->obj = JavascriptBoolean::ToVar(value.i16[i], scriptContext);
-            break;
-        case TypeIds_SIMDUint32x4:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.u32[i], scriptContext);
-            break;
-        case TypeIds_SIMDUint8x16:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.u8[i], scriptContext);
-            break;
-        case TypeIds_SIMDUint16x8:
-            pResolvedObject->obj = JavascriptNumber::ToVarWithCheck(value.u16[i], scriptContext);
-            break;
-        default:
-            AssertMsg(false, "Unexpected SIMD typeId");
-            return FALSE;
-        }
-
-        pResolvedObject->propId = Constants::NoProperty;
-        pResolvedObject->scriptContext = scriptContext;
-        pResolvedObject->typeId = simdTypeId;
-        pResolvedObject->objectDisplay = pResolvedObject->CreateDisplay();
-        pResolvedObject->objectDisplay->SetDefaultTypeAttribute(DBGPROP_ATTRIB_VALUE_READONLY | DBGPROP_ATTRIB_VALUE_IS_FAKE);
-        pResolvedObject->address = nullptr;
-
-        return TRUE;
-    }
-
-    //--------------------------
-    // RecyclableSimdObjectDisplay
-
-    template <typename simdType, typename simdWalker>
-    LPCWSTR RecyclableSimdObjectDisplay<simdType, simdWalker>::Type()
-    {
-        TypeId simdTypeId = JavascriptOperators::GetTypeId(instance);
-
-        switch (simdTypeId)
-        {
-        case TypeIds_SIMDInt32x4:
-            return  _u("SIMD.Int32x4");
-        case TypeIds_SIMDFloat32x4:
-            return  _u("SIMD.Float32x4");
-        case TypeIds_SIMDInt8x16:
-            return  _u("SIMD.Int8x16");
-        case TypeIds_SIMDInt16x8:
-            return  _u("SIMD.Int16x8");
-        case TypeIds_SIMDBool32x4:
-            return  _u("SIMD.Bool32x4");
-        case TypeIds_SIMDBool8x16:
-            return  _u("SIMD.Bool8x16");
-        case TypeIds_SIMDBool16x8:
-            return  _u("SIMD.Bool16x8");
-        case TypeIds_SIMDUint32x4:
-            return  _u("SIMD.Uint32x4");
-        case TypeIds_SIMDUint8x16:
-            return  _u("SIMD.Uint8x16");
-        case TypeIds_SIMDUint16x8:
-            return  _u("SIMD.Uint16x8");
-        default:
-            AssertMsg(false, "Unexpected SIMD typeId");
-            return nullptr;
-        }
-    }
-
-    template <typename simdType, typename simdWalker>
-    LPCWSTR RecyclableSimdObjectDisplay<simdType, simdWalker>::Value(int radix)
-    {
-        StringBuilder<ArenaAllocator>* builder = GetStringBuilder();
-        builder->Reset();
-
-        simdType* simd = simdType::FromVar(instance);
-        SIMDValue value = simd->GetValue();
-
-        char16* stringBuffer = AnewArray(GetArenaFromContext(scriptContext), char16, SIMD_STRING_BUFFER_MAX);
-
-        simdType::ToStringBuffer(value, stringBuffer, SIMD_STRING_BUFFER_MAX, scriptContext);
-
-        builder->AppendSz(stringBuffer);
-
-        return builder->Detach();
-    }
-
-    template <typename simdType, typename simdWalker>
-    WeakArenaReference<IDiagObjectModelWalkerBase>* RecyclableSimdObjectDisplay<simdType, simdWalker>::CreateWalker()
-    {
-        ReferencedArenaAdapter* pRefArena = scriptContext->GetThreadContext()->GetDebugManager()->GetDiagnosticArena();
-        if (pRefArena)
-        {
-            IDiagObjectModelWalkerBase* pOMWalker = Anew(pRefArena->Arena(), simdWalker, scriptContext, instance);
-            return HeapNew(WeakArenaReference<IDiagObjectModelWalkerBase>, pRefArena, pOMWalker);
-        }
-        return nullptr;
-    }
-
-#endif // #ifdef ENABLE_SIMDJS
 }
+#endif

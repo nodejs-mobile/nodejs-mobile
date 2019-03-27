@@ -29,7 +29,7 @@ function assertVerifies(sig, body) {
 
 assertVerifies(kSig_v_v, [kExprNop]);
 
-// Arguments aren't allow to start functions.
+// Arguments aren't allowed to start functions.
 assertThrows(() => {instantiate(kSig_i_i, [kExprGetLocal, 0]);});
 assertThrows(() => {instantiate(kSig_i_ii, [kExprGetLocal, 0]);});
 assertThrows(() => {instantiate(kSig_i_dd, [kExprGetLocal, 0]);});
@@ -121,4 +121,41 @@ assertThrows(() => {instantiate(kSig_i_v, [kExprI32Const, 0]);});
 
   var module = builder.instantiate(ffi);
   assertTrue(ranned);
+})();
+
+(function testStartFunctionThrowsExplicitly() {
+  print('testStartFunctionThrowsExplicitly');
+  let error = new Error('my explicit error');
+  var ffi = {
+    foo: {
+      throw_fn: function() {
+        throw error;
+      }
+    }
+  };
+  let builder = new WasmModuleBuilder();
+  builder.addImport('foo', 'throw_fn', kSig_v_v);
+  let func = builder.addFunction('', kSig_v_v).addBody([kExprCallFunction, 0]);
+  builder.addStart(func.index);
+
+  assertThrowsEquals(() => builder.instantiate(ffi), error);
+  assertPromiseResult(builder.asyncInstantiate(ffi), assertUnreachable,
+    e => assertSame(e, error));
+  assertPromiseResult(WebAssembly.instantiate(builder.toModule(), ffi),
+    assertUnreachable, e => assertSame(e, error));
+})();
+
+(function testStartFunctionThrowsImplicitly() {
+  print("testStartFunctionThrowsImplicitly");
+  let builder = new WasmModuleBuilder();
+  let func = builder.addFunction('', kSig_v_v).addBody([kExprUnreachable]);
+  builder.addStart(func.index);
+
+  assertThrows(
+      () => builder.instantiate(), WebAssembly.RuntimeError, /unreachable/);
+  assertPromiseResult(builder.asyncInstantiate(), assertUnreachable,
+    e => assertInstanceof(e, WebAssembly.RuntimeError));
+  assertPromiseResult(WebAssembly.instantiate(builder.toModule()),
+    assertUnreachable,
+    e => assertInstanceof(e, WebAssembly.RuntimeError));
 })();

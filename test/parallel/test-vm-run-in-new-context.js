@@ -26,14 +26,12 @@ const common = require('../common');
 const assert = require('assert');
 const vm = require('vm');
 
-assert.strictEqual(typeof global.gc, 'function',
-                   'Run this test with --expose-gc');
-
-common.globalCheck = false;
+if (typeof global.gc !== 'function')
+  assert.fail('Run this test with --expose-gc');
 
 // Run a string
 const result = vm.runInNewContext('\'passed\';');
-assert.strictEqual('passed', result);
+assert.strictEqual(result, 'passed');
 
 // Thrown error
 assert.throws(() => {
@@ -42,7 +40,7 @@ assert.throws(() => {
 
 global.hello = 5;
 vm.runInNewContext('hello = 2');
-assert.strictEqual(5, global.hello);
+assert.strictEqual(global.hello, 5);
 
 
 // Pass values in and out
@@ -54,9 +52,9 @@ global.obj = { foo: 0, baz: 3 };
 /* eslint-disable no-unused-vars */
 const baz = vm.runInNewContext(global.code, global.obj);
 /* eslint-enable no-unused-vars */
-assert.strictEqual(1, global.obj.foo);
-assert.strictEqual(2, global.obj.bar);
-assert.strictEqual(2, global.foo);
+assert.strictEqual(global.obj.foo, 1);
+assert.strictEqual(global.obj.bar, 2);
+assert.strictEqual(global.foo, 2);
 
 // Call a function by reference
 function changeFoo() { global.foo = 100; }
@@ -65,7 +63,7 @@ assert.strictEqual(global.foo, 100);
 
 // Modify an object by reference
 const f = { a: 1 };
-vm.runInNewContext('f.a = 2', { f: f });
+vm.runInNewContext('f.a = 2', { f });
 assert.strictEqual(f.a, 2);
 
 // Use function in context without referencing context
@@ -73,3 +71,33 @@ const fn = vm.runInNewContext('(function() { obj.p = {}; })', { obj: {} });
 global.gc();
 fn();
 // Should not crash
+
+{
+  // Verify that providing a custom filename as a string argument works.
+  const code = 'throw new Error("foo");';
+  const file = 'test_file.vm';
+
+  assert.throws(() => {
+    vm.runInNewContext(code, {}, file);
+  }, (err) => {
+    const lines = err.stack.split('\n');
+
+    assert.strictEqual(lines[0].trim(), `${file}:1`);
+    assert.strictEqual(lines[1].trim(), code);
+    // Skip lines[2] and lines[3]. They're just a ^ and blank line.
+    assert.strictEqual(lines[4].trim(), 'Error: foo');
+    assert(common.engineSpecificMessage({
+      v8: new RegExp(`^at ${file}:1:7$`),
+      chakracore: new RegExp(`^at Global code \\(${file}:1:1\\)$`)
+    }).test(lines[5].trim()));
+    // The rest of the stack is uninteresting.
+    return true;
+  });
+}
+
+common.allowGlobals(
+  global.hello,
+  global.code,
+  global.foo,
+  global.obj
+);

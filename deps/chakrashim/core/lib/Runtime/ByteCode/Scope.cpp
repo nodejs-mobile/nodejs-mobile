@@ -28,7 +28,7 @@ void Scope::ForceAllSymbolNonLocalReference(ByteCodeGenerator *byteCodeGenerator
 {
     this->ForEachSymbol([this, byteCodeGenerator](Symbol *const sym)
     {
-        if (!sym->GetIsArguments())
+        if (!sym->IsArguments() && !sym->IsSpecialSymbol())
         {
             sym->SetHasNonLocalReference();
             byteCodeGenerator->ProcessCapturedSym(sym);
@@ -39,14 +39,7 @@ void Scope::ForceAllSymbolNonLocalReference(ByteCodeGenerator *byteCodeGenerator
 
 bool Scope::IsEmpty() const
 {
-    if (GetFunc()->bodyScope == this || (GetFunc()->IsGlobalFunction() && this->IsGlobalEvalBlockScope()))
-    {
-        return Count() == 0 && !GetFunc()->isThisLexicallyCaptured;
-    }
-    else
-    {
-        return Count() == 0;
-    }
+    return Count() == 0;
 }
 
 void Scope::SetIsObject()
@@ -84,11 +77,11 @@ void Scope::SetIsObject()
     }
 }
 
-void Scope::MergeParamAndBodyScopes(ParseNode *pnodeScope)
+void Scope::MergeParamAndBodyScopes(ParseNodeFnc *pnodeScope)
 {
-    Assert(pnodeScope->sxFnc.funcInfo);
-    Scope *paramScope = pnodeScope->sxFnc.pnodeScopes->sxBlock.scope;
-    Scope *bodyScope = pnodeScope->sxFnc.pnodeBodyScope->sxBlock.scope;
+    Assert(pnodeScope->funcInfo);
+    Scope *paramScope = pnodeScope->pnodeScopes->scope;
+    Scope *bodyScope = pnodeScope->pnodeBodyScope->scope;
 
     if (paramScope->Count() == 0)
     {
@@ -115,11 +108,11 @@ void Scope::MergeParamAndBodyScopes(ParseNode *pnodeScope)
     }
 }
 
-void Scope::RemoveParamScope(ParseNode *pnodeScope)
+void Scope::RemoveParamScope(ParseNodeFnc *pnodeScope)
 {
-    Assert(pnodeScope->sxFnc.funcInfo);
-    Scope *paramScope = pnodeScope->sxFnc.pnodeScopes->sxBlock.scope;
-    Scope *bodyScope = pnodeScope->sxFnc.pnodeBodyScope->sxBlock.scope;
+    Assert(pnodeScope->funcInfo);
+    Scope *paramScope = pnodeScope->pnodeScopes->scope;
+    Scope *bodyScope = pnodeScope->pnodeBodyScope->scope;
 
     // Once the scopes are merged, there's no reason to instantiate the param scope.
     paramScope->SetMustInstantiate(false);

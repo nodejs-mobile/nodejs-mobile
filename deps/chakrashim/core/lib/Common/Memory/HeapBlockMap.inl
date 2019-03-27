@@ -1,5 +1,5 @@
 //-------------------------------------------------------------------------------------------------------
-// Copyright (C) Microsoft. All rights reserved.
+// Copyright (C) Microsoft Corporation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -142,13 +142,38 @@ HeapBlockMap32::Mark(void * candidate, MarkContext * markContext)
 #endif
         ((SmallFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(candidate, markContext);
         break;
+#ifdef RECYCLER_VISITED_HOST
+    case HeapBlock::HeapBlockType::SmallRecyclerVisitedHostBlockType:
+        {
+            void * realCandidate = ((SmallFinalizableHeapBlock*)chunk->map[id2])->GetRealAddressFromInterior(candidate);
+            if (MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate))
+            {
+                break;
+            }
+
+            ((SmallRecyclerVisitedHostHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
+        }
+        break;
+#endif
     case HeapBlock::HeapBlockType::MediumFinalizableBlockType:
 #ifdef RECYCLER_WRITE_BARRIER
     case HeapBlock::HeapBlockType::MediumFinalizableBlockWithBarrierType:
 #endif
         ((MediumFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(candidate, markContext);
         break;
+#ifdef RECYCLER_VISITED_HOST
+    case HeapBlock::HeapBlockType::MediumRecyclerVisitedHostBlockType:
+        {
+            void * realCandidate = ((MediumFinalizableHeapBlock*)chunk->map[id2])->GetRealAddressFromInterior(candidate);
+            if (MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate))
+            {
+                break;
+            }
 
+            ((MediumRecyclerVisitedHostHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
+        }
+        break;
+#endif
     case HeapBlock::HeapBlockType::LargeBlockType:
         ((LargeHeapBlock*)chunk->map[id2])->Mark<doSpecialMark>(candidate, markContext);
         break;
@@ -237,13 +262,13 @@ HeapBlockMap32::MarkInteriorInternal(MarkContext * markContext, L2MapChunk *& ch
     if (largeBlockType)
     {
 
-#if defined(_M_IX86_OR_ARM32)
+#if defined(TARGET_32)
         // we only check the first MaxLargeObjectMarkOffset byte for marking purpuse. 
         if ( (size_t)originalCandidate - (size_t)realCandidate > HeapConstants::MaxLargeObjectMarkOffset )
             return true;
 #endif    
 
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
         if (HeapBlockMap64::GetNodeIndex(originalCandidate) != HeapBlockMap64::GetNodeIndex(realCandidate))
         {
             // We crossed a node boundary (very rare) so we should just re-start from the real candidate.
@@ -262,7 +287,7 @@ HeapBlockMap32::MarkInteriorInternal(MarkContext * markContext, L2MapChunk *& ch
     return MarkInternal<interlocked>(chunk, realCandidate);
 }
 
-template <bool interlocked>
+template <bool interlocked, bool doSpecialMark>
 inline
 void
 HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
@@ -280,6 +305,11 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
 
     if (MarkInternal<interlocked>(chunk, candidate))
     {
+        if (doSpecialMark)
+        {
+            this->OnSpecialMark(chunk, candidate);
+        }
+
         // Already marked (mark internal-then-actual first)
         return;
     }
@@ -295,10 +325,16 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
         break;
 
     case HeapBlock::HeapBlockType::SmallLeafBlockType:
-    case HeapBlock::HeapBlockType::MediumLeafBlockType:
-        // Leaf blocks don't need to be scanned.  Do nothing.
-        break;
+        {
+            // We want to scan leaf blocks for preventing UAFs due to interior pointers on stack.
+            byte bucketIndex = chunk->blockInfo[id2].bucketIndex;
+            uint objectSize = HeapInfo::GetObjectSizeForBucketIndex<SmallAllocationBlockAttributes>(bucketIndex);
+            void * realCandidate = SmallLeafHeapBlock::GetRealAddressFromInterior(candidate, objectSize, bucketIndex);
+            MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate);
 
+            // Leaf object doesn't need to be added to the mark stack.
+        }
+        break;
     case HeapBlock::HeapBlockType::SmallNormalBlockType:
 #ifdef RECYCLER_WRITE_BARRIER
     case HeapBlock::HeapBlockType::SmallNormalBlockWithBarrierType:
@@ -317,6 +353,17 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
                 // Failed to mark due to OOM.
                 ((SmallHeapBlock *)chunk->map[id2])->SetNeedOOMRescan(markContext->GetRecycler());
             }
+        }
+        break;
+    case HeapBlock::HeapBlockType::MediumLeafBlockType:
+        {
+            // We want to scan leaf blocks for preventing UAFs due to interior pointers on stack.
+            byte bucketIndex = chunk->blockInfo[id2].bucketIndex;
+            uint objectSize = HeapInfo::GetObjectSizeForBucketIndex<MediumAllocationBlockAttributes>(bucketIndex);
+            void * realCandidate = MediumLeafHeapBlock::GetRealAddressFromInterior(candidate, objectSize, bucketIndex);
+            MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate);
+
+            // Leaf object doesn't need to be added to the mark stack.
         }
         break;
     case HeapBlock::HeapBlockType::MediumNormalBlockType:
@@ -350,7 +397,7 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
                 break;
             }
 
-            ((SmallFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<false>(realCandidate, markContext);
+            ((SmallFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
         }
         break;
     case HeapBlock::HeapBlockType::MediumFinalizableBlockType:
@@ -364,10 +411,33 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
                 break;
             }
 
-            ((MediumFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<false>(realCandidate, markContext);
+            ((MediumFinalizableHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
         }
         break;
+#ifdef RECYCLER_VISITED_HOST
+    case HeapBlock::HeapBlockType::SmallRecyclerVisitedHostBlockType:
+        {
+            void * realCandidate = ((SmallFinalizableHeapBlock*)chunk->map[id2])->GetRealAddressFromInterior(candidate);
+            if (MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate))
+            {
+                break;
+            }
 
+            ((SmallRecyclerVisitedHostHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
+        }
+        break;
+    case HeapBlock::HeapBlockType::MediumRecyclerVisitedHostBlockType:
+        {
+            void * realCandidate = ((MediumFinalizableHeapBlock*)chunk->map[id2])->GetRealAddressFromInterior(candidate);
+            if (MarkInteriorInternal<interlocked, false>(markContext, chunk, candidate, realCandidate))
+            {
+                break;
+            }
+
+            ((MediumRecyclerVisitedHostHeapBlock*)chunk->map[id2])->ProcessMarkedObject<doSpecialMark>(realCandidate, markContext);
+        }
+        break;
+#endif
     case HeapBlock::HeapBlockType::LargeBlockType:
         {
             void * realCandidate = ((LargeHeapBlock*)chunk->map[id2])->GetRealAddressFromInterior(candidate);
@@ -376,7 +446,7 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
                 break;
             }
 
-            ((LargeHeapBlock*)chunk->map[GetLevel2Id(realCandidate)])->Mark<false>(realCandidate, markContext);
+            ((LargeHeapBlock*)chunk->map[GetLevel2Id(realCandidate)])->Mark<doSpecialMark>(realCandidate, markContext);
         }
         break;
 
@@ -391,7 +461,7 @@ HeapBlockMap32::MarkInterior(void * candidate, MarkContext * markContext)
     }
 }
 
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
 
 //
 // 64-bit Mark
@@ -403,6 +473,10 @@ inline
 void
 HeapBlockMap64::Mark(void * candidate, MarkContext * markContext)
 {
+    if (!list || !HeapInfo::IsAlignedAddress(candidate) || (size_t)candidate < 0x10000)
+    {
+        return;
+    }
     uint index = GetNodeIndex(candidate);
 
     Node * node = list;
@@ -422,11 +496,15 @@ HeapBlockMap64::Mark(void * candidate, MarkContext * markContext)
     // No Node found; must be an invalid reference. Do nothing.
 }
 
-template <bool interlocked>
+template <bool interlocked, bool doSpecialMark>
 inline
 void
 HeapBlockMap64::MarkInterior(void * candidate, MarkContext * markContext)
 {
+    if (!list || (size_t)candidate < 0x10000)
+    {
+        return;
+    }
     uint index = GetNodeIndex(candidate);
 
     Node * node = list;
@@ -436,7 +514,7 @@ HeapBlockMap64::MarkInterior(void * candidate, MarkContext * markContext)
         {
             // Found the correct Node.
             // Process the mark and return.
-            node->map.MarkInterior<interlocked>(candidate, markContext);
+            node->map.MarkInterior<interlocked, doSpecialMark>(candidate, markContext);
             return;
         }
 
@@ -446,4 +524,4 @@ HeapBlockMap64::MarkInterior(void * candidate, MarkContext * markContext)
     // No Node found; must be an invalid reference. Do nothing.
 }
 
-#endif // defined(_M_X64_OR_ARM64)
+#endif // defined(TARGET_64)

@@ -10,10 +10,9 @@ const path = require('path');
 const fs = require('fs');
 const totalCPUs = require('os').cpus().length;
 
-const CLIEngine = require('./eslint').CLIEngine;
-const glob = require('./eslint/node_modules/glob');
+const CLIEngine = require('eslint').CLIEngine;
+const glob = require('eslint/node_modules/glob');
 
-const cwd = process.cwd();
 const cliOptions = {
   rulePaths: rulesDirs,
   extensions: extensions,
@@ -82,9 +81,7 @@ if (cluster.isMaster) {
   if (i !== -1) {
     if (!process.argv[i + 1])
       throw new Error('Missing output filename');
-    var outPath = process.argv[i + 1];
-    if (!path.isAbsolute(outPath))
-      outPath = path.join(cwd, outPath);
+    const outPath = path.resolve(process.argv[i + 1]);
     fd = fs.openSync(outPath, 'w');
     outFn = function(str) {
       fs.writeSync(fd, str, 'utf8');
@@ -155,7 +152,7 @@ if (cluster.isMaster) {
       } else {
         failures += results.length;
       }
-      outFn(formatter(results) + '\r\n');
+      outFn(`${formatter(results)}\r\n`);
       printProgress();
     } else {
       successes += results;
@@ -176,8 +173,6 @@ if (cluster.isMaster) {
       while (paths.length) {
         var dir = paths.shift();
         curPath = dir;
-        if (dir.indexOf('/') > 0)
-          dir = path.join(cwd, dir);
         const patterns = cli.resolveFileGlobPatterns([dir]);
         dir = path.resolve(patterns[0]);
         files = glob.sync(dir, globOptions);
@@ -197,7 +192,7 @@ if (cluster.isMaster) {
     const sliceLen = Math.min(maxWorkload, Math.ceil(files.length / numCPUs));
     var slice;
     if (sliceLen === files.length) {
-      // Micro-ptimization to avoid splicing to an empty array
+      // Micro-optimization to avoid splicing to an empty array
       slice = files;
       files = null;
     } else {
@@ -211,34 +206,27 @@ if (cluster.isMaster) {
       return;
 
     // Clear line
-    outFn('\r' + ' '.repeat(lastLineLen) + '\r');
+    outFn(`\r ${' '.repeat(lastLineLen)}\r`);
 
     // Calculate and format the data for displaying
     const elapsed = process.hrtime(startTime)[0];
-    const mins = padString(Math.floor(elapsed / 60), 2, '0');
-    const secs = padString(elapsed % 60, 2, '0');
-    const passed = padString(successes, 6, ' ');
-    const failed = padString(failures, 6, ' ');
+    const mins = `${Math.floor(elapsed / 60)}`.padStart(2, '0');
+    const secs = `${elapsed % 60}`.padStart(2, '0');
+    const passed = `${successes}`.padStart(6);
+    const failed = `${failures}`.padStart(6);
     var pct = Math.ceil(((totalPaths - paths.length) / totalPaths) * 100);
-    pct = padString(pct, 3, ' ');
+    pct = `${pct}`.padStart(3);
 
     var line = `[${mins}:${secs}|%${pct}|+${passed}|-${failed}]: ${curPath}`;
 
     // Truncate line like cpplint does in case it gets too long
     if (line.length > 75)
-      line = line.slice(0, 75) + '...';
+      line = `${line.slice(0, 75)}...`;
 
     // Store the line length so we know how much to erase the next time around
     lastLineLen = line.length;
 
     outFn(line);
-  }
-
-  function padString(str, len, chr) {
-    str = '' + str;
-    if (str.length >= len)
-      return str;
-    return chr.repeat(len - str.length) + str;
   }
 } else {
   // Worker

@@ -341,7 +341,7 @@ namespace JsUtil
         template <typename TConditionalFunction>
         bool Last(TConditionalFunction function, T& outElement)
         {
-            for (int i = count - 1; i >= 0; --i)
+            for (int i = this->count - 1; i >= 0; --i)
             {
                 if (function(this->buffer[i]))
                 {
@@ -399,7 +399,7 @@ namespace JsUtil
             return pos;
         }
 
-        int32 AddRange(__readonly _In_reads_(count) const T* items, int32 count)
+        int32 AddRange(__readonly _In_reads_(count) T const * items, int32 count)
         {
             Assert(items != nullptr);
             Assert(count > 0);
@@ -420,7 +420,7 @@ namespace JsUtil
                 JsUtil::ExternalApi::RaiseOnIntOverflow();
             }
 
-            js_memcpy_s(buffer + this->count, availableByteSpace, items, givenBufferSize);
+            js_memcpy_s(this->buffer + this->count, availableByteSpace, items, givenBufferSize);
             this->count = requiredSize;
 
             return requiredSize; //Returns count

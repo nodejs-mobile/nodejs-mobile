@@ -1,8 +1,9 @@
 'use strict';
 
 const common = require('../common');
+const ArrayStream = require('../common/arraystream');
+const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const path = require('path');
 const repl = require('repl');
 let found = false;
 
@@ -10,17 +11,19 @@ process.on('exit', () => {
   assert.strictEqual(found, true);
 });
 
-common.ArrayStream.prototype.write = function(output) {
-  if (common.engineSpecificMessage({
-    v8: /var foo bar;/,
-    chakracore: /Expected ';'/  // chakra does not show source
-  }).test(output))
+ArrayStream.prototype.write = function(output) {
+  // Matching only on a minimal piece of the stack because the string will vary
+  // greatly depending on the JavaScript engine. V8 includes `;` because it
+  // displays the line of code (`var foo bar;`) that is causing a problem.
+  // ChakraCore does not display the line of code but includes `;` in the phrase
+  // `Expected ';' `.
+  if (/;/.test(output))
     found = true;
 };
 
-const putIn = new common.ArrayStream();
+const putIn = new ArrayStream();
 repl.start('', putIn);
-let file = path.join(common.fixturesDir, 'syntax', 'bad_syntax');
+let file = fixtures.path('syntax', 'bad_syntax');
 
 if (common.isWindows)
   file = file.replace(/\\/g, '\\\\');

@@ -19,14 +19,21 @@ namespace Js {
         static void __declspec(noreturn) StackOverflow(ScriptContext *scriptContext, PVOID returnAddress);
         static void __declspec(noreturn) NotImplemented();
         static void __declspec(noreturn) InternalError();
-        static void __declspec(noreturn) FatalInternalError();
+        static void __declspec(noreturn) FatalInternalError(HRESULT hr = E_FAIL);
         static void __declspec(noreturn) FatalInternalErrorEx(int scenario);
+        static void __declspec(noreturn) FatalInternalGlobalizationError();
+
         static void __declspec(noreturn) FatalProjectionError();
 #if ENABLE_JS_REENTRANCY_CHECK
         static void __declspec(noreturn) FatalJsReentrancyError();
 #endif
+#ifdef ENABLE_JS_BUILTINS
+        static void __declspec(noreturn) FatalJsBuiltInError();
+#endif
 
-        static void CheckAndThrowOutOfMemory(BOOLEAN status);
+#if !defined(_M_IX86) && defined(_WIN32)
+        static void XDataRegistrationError(HRESULT hr, ULONG_PTR funcStart);
+#endif
 
         static bool ReportAssert(__in LPCSTR fileName, uint lineNumber, __in LPCSTR error, __in LPCSTR message);
         static void LogAssert();
@@ -159,7 +166,7 @@ namespace Js {
     else if (FAILED(hr)) \
     { \
         /* Intended to be the inverse of E_FAIL in CATCH_UNHANDLED_EXCEPTION */ \
-        AssertOrFailFast(false); \
+        AssertOrFailFastHR(false, hr); \
     }
 
 #define CATCH_UNHANDLED_EXCEPTION(hr) \
@@ -291,4 +298,4 @@ namespace Js {
     catch (ex) \
     {
 
-#define DEBUGGER_ATTACHDETACH_FATAL_ERROR_IF_FAILED(hr) if (hr != S_OK) Debugger_AttachDetach_fatal_error(hr);
+#define DEBUGGER_ATTACHDETACH_FATAL_ERROR_IF_FAILED(hr) if (hr != S_OK) Debugger_AttachDetach_unrecoverable_error(hr);

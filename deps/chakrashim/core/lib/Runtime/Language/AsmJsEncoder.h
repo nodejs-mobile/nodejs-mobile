@@ -40,7 +40,9 @@ namespace Js
         ArenaAllocator* mLocalAlloc;
         // Byte offset of first int and double
         int mIntOffset, mDoubleOffset, mFloatOffset;
+#ifdef ENABLE_WASM_SIMD
         int mSimdOffset;
+#endif
         // architecture dependant data to build templatized JIT
         void* mTemplateData;
     public:
@@ -67,12 +69,12 @@ namespace Js
 
 
         void OP_Label( const unaligned OpLayoutEmpty* playout );
-        template <class T> void OP_LdUndef( const unaligned T* playout );
         template <class T> void OP_Br( const unaligned T* playout );
         template <class T> void OP_BrEq( const unaligned T* playout );
         template <class T> void OP_BrEqConst( const unaligned T* playout );
         template <class T> void OP_BrTrue( const unaligned T* playout );
         template <class T> void OP_Empty( const unaligned T* playout );
+        template <class T> void OP_CheckHeap(const unaligned T* playout);
         template <class T> void Op_LdSlot_Db( const unaligned T* playout );
         template <class T> void Op_LdSlot_Int(const unaligned T* playout);
         template <class T> void Op_LdSlot_Flt(const unaligned T* playout);
@@ -113,12 +115,10 @@ namespace Js
         template <class T> void OP_I_ArgOut_Db( const unaligned T* playout );
         template <class T> void OP_I_ArgOut_Int(const unaligned T* playout);
         template <class T> void OP_I_ArgOut_Flt(const unaligned T* playout);
-        template <class T> void OP_I_Conv_VTD( const unaligned T* playout );
-        template <class T> void OP_I_Conv_VTI( const unaligned T* playout );
-        template <class T> void OP_I_Conv_VTF( const unaligned T* playout );
 
         template <class T> void OP_AsmJsLoopBody(const unaligned T* playout);
 
+#ifdef ENABLE_WASM_SIMD
         template <class T> void OP_Simd128_LdF4(const unaligned T* playout);
         template <class T> void OP_Simd128_LdI4(const unaligned T* playout);
         template <class T> void OP_Simd128_LdD2(const unaligned T* playout);
@@ -222,10 +222,7 @@ namespace Js
         template <class T> void OP_Simd128_I_ArgOutF4(const unaligned T* playout);
         template <class T> void OP_Simd128_I_ArgOutI4(const unaligned T* playout);
         template <class T> void OP_Simd128_I_ArgOutD2(const unaligned T* playout);
-
-        template <class T> void OP_Simd128_I_Conv_VTF4(const unaligned T* playout);
-        template <class T> void OP_Simd128_I_Conv_VTI4(const unaligned T* playout);
-        template <class T> void OP_Simd128_I_Conv_VTD2(const unaligned T* playout);
+#endif // ENABLE_WASM_SIMD
     };
 }
 

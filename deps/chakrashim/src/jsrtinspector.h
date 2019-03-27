@@ -30,7 +30,7 @@ class InspectorBreakQueue;
 class Inspector {
  public:
   static bool IsInspectorEnabled();
-  static bool IsReplayDebugEnabled();
+  static bool IsTTDebugEnabled();
   static void StartDebugging(JsRuntimeHandle runtime);
   static void RequestAsyncBreak(JsRuntimeHandle runtime,
                                 v8::InterruptCallback callback,
@@ -48,7 +48,7 @@ class Inspector {
     JsValueRef eventData,
     void* callbackState);
   static void InstallHostCallback(JsValueRef chakraDebugObject,
-    const char *name,
+    const char* name,
     JsNativeFunction nativeFunction);
 
   static JsDiagDebugEventCallback s_callback;

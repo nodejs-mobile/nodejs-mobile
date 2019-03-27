@@ -24,7 +24,6 @@ V8Debugger::V8Debugger(v8::Isolate* isolate, V8InspectorImpl* inspector)
       m_enableCount(0),
       m_breakpointsActivated(true),
       m_runningNestedMessageLoop(false),
-      m_ignoreScriptParsedEventsCounter(0),
       m_maxAsyncCallStackDepth(0),
       m_pauseOnNextStatement(false) {}
 
@@ -91,7 +90,7 @@ void V8Debugger::getCompiledScripts(
     CHAKRA_VERIFY_NOERROR(jsrt::GetIndexedProperty(scripts, i, &script));
 
     result.push_back(wrapUnique(
-        new V8DebuggerScript(m_isolate, script, false)));
+        new V8DebuggerScript(m_isolate, script, false, m_inspector->client())));
   }
 }
 
@@ -249,6 +248,12 @@ void V8Debugger::clearStepping() {
   JsDiagSetStepType(JsDiagStepTypeContinue);
 }
 
+void V8Debugger::writeTTDLog(const String16& uri) {
+  DCHECK(isPaused());
+  auto sval = uri.utf8();
+  JsTTDDiagWriteLog(sval.c_str(), sval.length());
+}
+
 void V8Debugger::reverse() {
   DCHECK(isPaused());
   JsDiagSetStepType(JsDiagStepTypeReverseContinue);
@@ -278,7 +283,7 @@ JavaScriptCallFrames V8Debugger::currentCallFrames(int limit) {
   }
 
   JsValueRef stackTrace = JS_INVALID_REFERENCE;
-  JsDiagGetStackTrace(&stackTrace);
+  CHAKRA_VERIFY_NOERROR(JsDiagGetStackTrace(&stackTrace));
 
   unsigned int length = 0;
   CHAKRA_VERIFY_NOERROR(jsrt::GetArrayLength(stackTrace, &length));
@@ -435,12 +440,13 @@ void V8Debugger::DebugEventHandler(
 }
 
 void V8Debugger::HandleSourceEvents(JsValueRef eventData, bool success) {
-  V8DebuggerAgentImpl *agent = m_inspector->enabledDebuggerAgentForGroup(
+  V8DebuggerAgentImpl* agent = m_inspector->enabledDebuggerAgentForGroup(
       getGroupId(m_isolate->GetCurrentContext()));
 
   if (agent != nullptr) {
     agent->didParseSource(
-        wrapUnique(new V8DebuggerScript(m_isolate, eventData, false)),
+        wrapUnique(new V8DebuggerScript(m_isolate, eventData, false,
+                                        m_inspector->client())),
         success);
   }
 }

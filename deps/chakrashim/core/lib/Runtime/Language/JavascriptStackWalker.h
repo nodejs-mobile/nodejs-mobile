@@ -96,12 +96,12 @@ namespace Js
             Assert(currentIndex == -1);
         }
 
-        static bool             FromPhysicalFrame(InlinedFrameWalker& self, StackFrame& physicalFrame, Js::ScriptFunction *parent, bool fromBailout = false, 
-                                                  int loopNum = -1, const JavascriptStackWalker * const walker = nullptr, bool useInternalFrameInfo = false, bool noAlloc = false);
+        static bool             FromPhysicalFrame(InlinedFrameWalker& self, StackFrame& physicalFrame, Js::ScriptFunction *parent, bool fromBailout,
+                                                  int loopNum, const JavascriptStackWalker * const walker, bool useInternalFrameInfo, bool noAlloc);
         void                    Close();
         bool                    Next(CallInfo& callInfo);
         size_t                  GetArgc() const;
-        Js::Var                *GetArgv(bool includeThis = true) const;
+        Js::Var                *GetArgv(bool includeThis, bool boxArgsAndDeepCopy) const;
         Js::JavascriptFunction *GetFunctionObject() const;
         void                    SetFunctionObject(Js::JavascriptFunction * function);
         Js::Var                 GetArgumentsObject() const;
@@ -113,7 +113,8 @@ namespace Js
         uint32                  GetCurrentInlineeOffset() const;
         uint32                  GetBottomMostInlineeOffset() const;
         Js::JavascriptFunction *GetBottomMostFunctionObject() const;
-        void                    FinalizeStackValues(__in_ecount(argCount) Js::Var args[], size_t argCount) const;
+        void                    FinalizeStackValues(__in_ecount(argCount) Js::Var args[], size_t argCount, bool deepCopy) const;
+        int32                   GetFrameCount() { return frameCount; }
 
     private:
         enum {
@@ -135,11 +136,13 @@ namespace Js
 
         };
 
-        void Initialize(int32 frameCount, __in_ecount(frameCount) InlinedFrame **frames, Js::ScriptFunction *parent);
+    public:
+        InlinedFrame *const     GetFrameAtIndex(signed index) const;
 
+    private:
+        void Initialize(int32 frameCount, __in_ecount(frameCount) InlinedFrame **frames, Js::ScriptFunction *parent);
         void MoveNext();
         InlinedFrame *const GetCurrentFrame() const;
-        InlinedFrame *const GetFrameAtIndex(signed index) const;
 
         Js::ScriptFunction *parentFunction;
         InlinedFrame          **frames;
@@ -214,8 +217,8 @@ namespace Js
         void SetCurrentFunction(JavascriptFunction *  function);
         CallInfo GetCallInfo(bool includeInlinedFrames = true) const;
         CallInfo GetCallInfoFromPhysicalFrame() const;
-        bool GetThis(Var *pThis, int moduleId) const;
-        Js::Var * GetJavascriptArgs() const;
+        void GetThis(Var *pThis, int moduleId) const;
+        Js::Var * GetJavascriptArgs(bool boxArgsAndDeepCopy) const;
         void **GetCurrentArgv() const;
 
         ScriptContext* GetCurrentScriptContext() const;
@@ -228,19 +231,21 @@ namespace Js
         bool GetSourcePosition(const WCHAR** sourceFileName, ULONG* line, LONG* column);
 
         static bool TryIsTopJavaScriptFrameNative(ScriptContext* scriptContext, bool* istopFrameNative, bool ignoreLibraryCode = false);
+        static bool AlignAndCheckAddressOfReturnAddressMatch(void* addressOfReturnAddress, void* nativeLibraryEntryAddress);
 
 #if ENABLE_NATIVE_CODEGEN
         void ClearCachedInternalFrameInfo();
         void SetCachedInternalFrameInfo(InternalFrameType frameType, JavascriptFunction* function, bool hasInlinedFramesOnStack, bool prevIntFrameIsFromBailout);
         InternalFrameInfo GetCachedInternalFrameInfo() const { return this->lastInternalFrameInfo; }
+        void WalkAndClearInlineeFrameCallInfoOnException(void *tryHandlerAddrOfReturnAddr);
 #endif
         bool IsCurrentPhysicalFrameForLoopBody() const;
 
         // noinline, we want to use own stack frame.
         static _NOINLINE BOOL GetCaller(_Out_opt_ JavascriptFunction** ppFunc, ScriptContext* scriptContext);
         static _NOINLINE BOOL GetCaller(_Out_opt_ JavascriptFunction** ppFunc, uint32* byteCodeOffset, ScriptContext* scriptContext);
-        static _NOINLINE bool GetThis(Var* pThis, int moduleId, ScriptContext* scriptContext);
-        static _NOINLINE bool GetThis(Var* pThis, int moduleId, JavascriptFunction* func, ScriptContext* scriptContext);
+        static _NOINLINE void GetThis(Var* pThis, int moduleId, ScriptContext* scriptContext);
+        static _NOINLINE void GetThis(Var* pThis, int moduleId, JavascriptFunction* func, ScriptContext* scriptContext);
 
         static bool IsDisplayCaller(JavascriptFunction* func);
         bool GetDisplayCaller(_Out_opt_ JavascriptFunction ** ppFunc);
@@ -304,6 +309,7 @@ namespace Js
         {
             return previousInterpreterFrameIsFromBailout;
         }
+
 #if DBG
         static bool ValidateTopJitFrame(Js::ScriptContext* scriptContext);
 #endif

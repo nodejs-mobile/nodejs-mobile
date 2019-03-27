@@ -4,8 +4,8 @@ const common = require('../common');
 const util = require('util');
 
 const bench = common.createBenchmark(main, {
-  n: [1e3],
-  len: [1e5],
+  n: [5e2],
+  len: [1e2, 1e5],
   type: [
     'denseArray',
     'sparseArray',
@@ -23,6 +23,8 @@ function main({ n, len, type }) {
       opts = { showHidden: true };
       arr = arr.fill('denseArray');
       break;
+      // For testing, if supplied with an empty type, default to denseArray.
+    case '':
     case 'denseArray':
       arr = arr.fill('denseArray');
       break;

@@ -9,6 +9,7 @@
 #include <cctype>
 
 #include <memory>
+#include <vector>
 
 #include "v8.h"  // NOLINT(build/include)
 
@@ -153,6 +154,13 @@ class V8_EXPORT V8InspectorClient {
 
   virtual void beginUserGesture() {}
   virtual void endUserGesture() {}
+
+  virtual void maxAsyncCallStackDepthChanged(int depth) {}
+
+  virtual std::unique_ptr<StringBuffer> resourceNameToUrl(
+      const StringView& resourceName) {
+    return nullptr;
+  }
 
   virtual std::unique_ptr<StringBuffer> valueSubtype(v8::Local<v8::Value>) {
     return nullptr;

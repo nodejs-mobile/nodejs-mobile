@@ -25,8 +25,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Flags: --allow-natives-syntax --expose-gc
-// Flags: --no-always-opt --opt
+// Flags: --allow-natives-syntax --expose-gc --no-always-opt --opt
 
 // Test element kind of objects.
 
@@ -47,14 +46,14 @@ var elements_kind = {
 }
 
 function getKind(obj) {
-  if (%HasFastSmiElements(obj)) return elements_kind.fast_smi_only;
-  if (%HasFastObjectElements(obj)) return elements_kind.fast;
-  if (%HasFastDoubleElements(obj)) return elements_kind.fast_double;
+  if (%HasSmiElements(obj)) return elements_kind.fast_smi_only;
+  if (%HasObjectElements(obj)) return elements_kind.fast;
+  if (%HasDoubleElements(obj)) return elements_kind.fast_double;
   if (%HasDictionaryElements(obj)) return elements_kind.dictionary;
 }
 
 function isHoley(obj) {
-  if (%HasFastHoleyElements(obj)) return true;
+  if (%HasHoleyElements(obj)) return true;
   return false;
 }
 
@@ -107,13 +106,8 @@ function assertKind(expected, obj, name_opt) {
   a = bar(10);
   assertKind(elements_kind.fast, a);
   assertOptimized(bar);
-  bar(100000);
+  bar(10000);
   assertOptimized(bar);
-
-  // If the argument isn't a smi, things should still work.
-  a = bar("oops");
-  assertOptimized(bar);
-  assertKind(elements_kind.fast, a);
 
   function barn(one, two, three) {
     return new Array(one, two, three);
@@ -180,7 +174,7 @@ function assertKind(expected, obj, name_opt) {
   %OptimizeFunctionOnNextCall(bar);
   a = bar(0);
   assertOptimized(bar);
-  assertFalse(isHoley(a));
+  assertTrue(isHoley(a));
   a = bar(1);  // ouch!
   assertOptimized(bar);
   assertTrue(isHoley(a));
@@ -188,9 +182,7 @@ function assertKind(expected, obj, name_opt) {
   assertTrue(isHoley(a));
   a = bar(0);
   assertOptimized(bar);
-  // Crankshafted functions don't use mementos, so feedback still
-  // indicates a packed array is desired.
-  assertFalse(isHoley(a));
+  assertTrue(isHoley(a));
 })();
 
 // Test: Make sure that crankshaft continues with feedback for large arrays.

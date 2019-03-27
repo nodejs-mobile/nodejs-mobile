@@ -4,7 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
 
-#if defined(ENABLE_INTL_OBJECT) || defined(ENABLE_PROJECTION)
+#if defined(ENABLE_INTL_OBJECT) || defined(ENABLE_JS_BUILTINS) || defined(ENABLE_PROJECTION)
 
 #include "errstr.h"
 #include "Library/EngineInterfaceObject.h"
@@ -92,21 +92,31 @@ namespace Js
         {
             Assert(engineExtensions[extensionKind] == nullptr);
             engineExtensions[extensionKind] = extensionObject;
+
+            // Init the extensionObject if this was already initialized
+            if (this->IsInitialized())
+            {
+                extensionObject->Initialize();
+            }
         }
     }
 
     NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::GetErrorMessage(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_GetErrorMessage));
     NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::LogDebugMessage(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_LogDebugMessage));
     NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::TagPublicLibraryCode(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_TagPublicLibraryCode));
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::SetPrototype(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_SetPrototype));
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::GetArrayLength(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_GetArrayLength));
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::RegexMatch(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_RegexMatch));
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::CallInstanceFunction(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_CallInstanceFunction));
 
 #ifndef GlobalBuiltIn
 #define GlobalBuiltIn(global, method) \
-    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::Intl_BuiltIn_##global##_##method##(FORCE_NO_WRITE_BARRIER_TAG(global##::##method##)); \
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::BuiltIn_##global##_##method##(FORCE_NO_WRITE_BARRIER_TAG(global##::##method##)); \
 
 #define GlobalBuiltInConstructor(global)
 
 #define BuiltInRaiseException(exceptionType, exceptionID) \
-    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::Intl_BuiltIn_raise##exceptionID(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::EntryIntl_BuiltIn_raise##exceptionID)); \
+    NoProfileFunctionInfo EngineInterfaceObject::EntryInfo::BuiltIn_raise##exceptionID(FORCE_NO_WRITE_BARRIER_TAG(EngineInterfaceObject::Entry_BuiltIn_raise##exceptionID)); \
 
 #define BuiltInRaiseException1(exceptionType, exceptionID) BuiltInRaiseException(exceptionType, exceptionID)
 #define BuiltInRaiseException2(exceptionType, exceptionID) BuiltInRaiseException(exceptionType, exceptionID)
@@ -139,11 +149,17 @@ namespace Js
 
     EngineInterfaceObject* EngineInterfaceObject::FromVar(Var aValue)
     {
-        AssertMsg(Is(aValue), "aValue is actually an EngineInterfaceObject");
+        AssertOrFailFastMsg(Is(aValue), "aValue is actually an EngineInterfaceObject");
 
-        return static_cast<EngineInterfaceObject *>(RecyclableObject::FromVar(aValue));
+        return static_cast<EngineInterfaceObject *>(aValue);
     }
 
+    EngineInterfaceObject* EngineInterfaceObject::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Is(aValue), "aValue is actually an EngineInterfaceObject");
+
+        return static_cast<EngineInterfaceObject *>(aValue);
+    }
     void EngineInterfaceObject::Initialize()
     {
         Recycler* recycler = this->GetRecycler();
@@ -192,17 +208,16 @@ namespace Js
     {
         typeHandler->Convert(commonNativeInterfaces, mode, 38);
 
-        ScriptContext* scriptContext = commonNativeInterfaces->GetScriptContext();
-        JavascriptLibrary* library = scriptContext->GetLibrary();
+        JavascriptLibrary* library = commonNativeInterfaces->GetScriptContext()->GetLibrary();
 
 #ifndef GlobalBuiltIn
 #define GlobalBuiltIn(global, method) \
-    library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtIn##global##method, &EngineInterfaceObject::EntryInfo::Intl_BuiltIn_##global##_##method##, 1); \
+    library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtIn##global##method, &EngineInterfaceObject::EntryInfo::BuiltIn_##global##_##method##, 1); \
 
 #define GlobalBuiltInConstructor(global) SetPropertyOn(commonNativeInterfaces, Js::PropertyIds::##global##, library->Get##global##Constructor());
 
 #define BuiltInRaiseException(exceptionType, exceptionID) \
-    library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::raise##exceptionID, &EngineInterfaceObject::EntryInfo::Intl_BuiltIn_raise##exceptionID, 1); \
+    library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::raise##exceptionID, &EngineInterfaceObject::EntryInfo::BuiltIn_raise##exceptionID, 1); \
 
 #define BuiltInRaiseException1(exceptionType, exceptionID) BuiltInRaiseException(exceptionType, exceptionID)
 #define BuiltInRaiseException2(exceptionType, exceptionID) BuiltInRaiseException(exceptionType, exceptionID)
@@ -223,9 +238,16 @@ namespace Js
 
         library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtInGlobalObjectEval, &GlobalObject::EntryInfo::Eval, 2);
 
+        library->AddMember(commonNativeInterfaces, PropertyIds::Object_prototype, library->GetObjectPrototype());
+
         library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::getErrorMessage, &EngineInterfaceObject::EntryInfo::GetErrorMessage, 1);
         library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::logDebugMessage, &EngineInterfaceObject::EntryInfo::LogDebugMessage, 1);
         library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::tagPublicLibraryCode, &EngineInterfaceObject::EntryInfo::TagPublicLibraryCode, 1);
+
+        library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtInSetPrototype, &EngineInterfaceObject::EntryInfo::SetPrototype, 1);
+        library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtInGetArrayLength, &EngineInterfaceObject::EntryInfo::GetArrayLength, 1);
+        library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtInRegexMatch, &EngineInterfaceObject::EntryInfo::RegexMatch, 1);
+        library->AddFunctionToLibraryObject(commonNativeInterfaces, Js::PropertyIds::builtInCallInstanceFunction, &EngineInterfaceObject::EntryInfo::CallInstanceFunction, 1);
 
         commonNativeInterfaces->SetHasNoEnumerableProperties(true);
 
@@ -321,12 +343,110 @@ namespace Js
         return scriptContext->GetLibrary()->GetUndefined();
     }
 
+    /*
+    * First parameter is the object onto which prototype should be set; second is the value
+    */
+    Var EngineInterfaceObject::Entry_SetPrototype(RecyclableObject *function, CallInfo callInfo, ...)
+    {
+        EngineInterfaceObject_CommonFunctionProlog(function, callInfo);
+
+        if (callInfo.Count < 3 || !DynamicObject::Is(args.Values[1]) || !RecyclableObject::Is(args.Values[2]))
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
+
+        DynamicObject* obj = DynamicObject::FromVar(args.Values[1]);
+        RecyclableObject* value = RecyclableObject::FromVar(args.Values[2]);
+
+        obj->SetPrototype(value);
+
+        return obj;
+    }
+
+    /*
+    * First parameter is the array object.
+    */
+    Var EngineInterfaceObject::Entry_GetArrayLength(RecyclableObject *function, CallInfo callInfo, ...)
+    {
+        EngineInterfaceObject_CommonFunctionProlog(function, callInfo);
+
+        if (callInfo.Count < 2)
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
+
+        if (DynamicObject::IsAnyArray(args.Values[1]))
+        {
+            JavascriptArray* arr = JavascriptArray::FromAnyArray(args.Values[1]);
+            return TaggedInt::ToVarUnchecked(arr->GetLength());
+        }
+        else
+        {
+            AssertMsg(false, "Object passed in with unknown type ID, verify Intl.js is correct.");
+            return TaggedInt::ToVarUnchecked(0);
+        }
+    }
+
+    /*
+    * First parameter is the string on which to match.
+    * Second parameter is the regex object
+    */
+    Var EngineInterfaceObject::Entry_RegexMatch(RecyclableObject *function, CallInfo callInfo, ...)
+    {
+        EngineInterfaceObject_CommonFunctionProlog(function, callInfo);
+
+        if (callInfo.Count < 2 || !JavascriptString::Is(args.Values[1]) || !JavascriptRegExp::Is(args.Values[2]))
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
+
+        JavascriptString *stringToUse = JavascriptString::FromVar(args.Values[1]);
+        JavascriptRegExp *regexpToUse = JavascriptRegExp::FromVar(args.Values[2]);
+
+        return RegexHelper::RegexMatchNoHistory(scriptContext, regexpToUse, stringToUse, false);
+    }
+
+    /*
+    * First parameter is the function, then its the this arg; so at least 2 are needed.
+    */
+    Var EngineInterfaceObject::Entry_CallInstanceFunction(RecyclableObject *function, CallInfo callInfo, ...)
+    {
+        EngineInterfaceObject_CommonFunctionProlog(function, callInfo);
+
+        Assert(args.Info.Count <= 5);
+        if (callInfo.Count < 3 || args.Info.Count > 5 || !JavascriptConversion::IsCallable(args.Values[1]) || !RecyclableObject::Is(args.Values[2]))
+        {
+            return scriptContext->GetLibrary()->GetUndefined();
+        }
+
+        RecyclableObject *func = RecyclableObject::FromVar(args.Values[1]);
+
+        AssertOrFailFastMsg(func != scriptContext->GetLibrary()->GetUndefined(), "Trying to callInstanceFunction(undefined, ...)");
+
+        //Shift the arguments by 2 so argument at index 2 becomes the 'this' argument at index 0
+        Var newVars[3];
+        Js::Arguments newArgs(callInfo, newVars);
+
+        for (uint i = 0; i<args.Info.Count - 2; ++i)
+        {
+            newArgs.Values[i] = args.Values[i + 2];
+        }
+
+        newArgs.Info.Count = args.Info.Count - 2;
+
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            return JavascriptFunction::CallFunction<true>(func, func->GetEntryPoint(), newArgs);
+        }
+        END_SAFE_REENTRANT_CALL
+    }
+
 #ifndef GlobalBuiltIn
 #define GlobalBuiltIn(global, method)
 #define GlobalBuiltInConstructor(global)
 
 #define BuiltInRaiseException(exceptionType, exceptionID) \
-    Var EngineInterfaceObject::EntryIntl_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
+    Var EngineInterfaceObject::Entry_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
     { \
         EngineInterfaceObject_CommonFunctionProlog(function, callInfo); \
         \
@@ -334,7 +454,7 @@ namespace Js
     }
 
 #define BuiltInRaiseException1(exceptionType, exceptionID) \
-    Var EngineInterfaceObject::EntryIntl_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
+    Var EngineInterfaceObject::Entry_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
     { \
         EngineInterfaceObject_CommonFunctionProlog(function, callInfo); \
         \
@@ -347,7 +467,7 @@ namespace Js
     }
 
 #define BuiltInRaiseException2(exceptionType, exceptionID) \
-    Var EngineInterfaceObject::EntryIntl_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
+    Var EngineInterfaceObject::Entry_BuiltIn_raise##exceptionID(RecyclableObject *function, CallInfo callInfo, ...) \
     { \
         EngineInterfaceObject_CommonFunctionProlog(function, callInfo); \
         \
@@ -360,7 +480,7 @@ namespace Js
     }
 
 #define BuiltInRaiseException3(exceptionType, exceptionID) \
-    Var EngineInterfaceObject::EntryIntl_BuiltIn_raise##exceptionID##_3(RecyclableObject *function, CallInfo callInfo, ...) \
+    Var EngineInterfaceObject::Entry_BuiltIn_raise##exceptionID##_3(RecyclableObject *function, CallInfo callInfo, ...) \
     { \
         EngineInterfaceObject_CommonFunctionProlog(function, callInfo); \
         \
@@ -383,4 +503,4 @@ namespace Js
 #endif
 
 }
-#endif // ENABLE_INTL_OBJECT || ENABLE_PROJECTION
+#endif // ENABLE_INTL_OBJECT || ENABLE_JS_BUILTINS || ENABLE_PROJECTION

@@ -29,29 +29,14 @@ namespace Js
     bool IsValidCharCount(size_t charCount);
     const charcount_t k_InvalidCharCount = static_cast<charcount_t>(-1);
 
-
-    //
-    // To inspect strings in hybrid debugging, we use vtable lookup to find out concrete string type
-    // then inspect string content accordingly.
-    //
-    // To ensure all known string vtables are listed and exported from chakra.dll and handler class
-    // exists in chakradiag.dll, declare an abstract method in base JavascriptString class. Any concrete
-    // subclass that has runtime string instance must DECLARE_CONCRETE_STRING_CLASS, otherwise
-    // we'll get a compile time error.
-    //
-#if DBG && defined(NTBUILD)
-#define DECLARE_CONCRETE_STRING_CLASS_BASE  virtual void _declareConcreteStringClass() = 0
-#define DECLARE_CONCRETE_STRING_CLASS       virtual void _declareConcreteStringClass() override
-#else
-#define DECLARE_CONCRETE_STRING_CLASS_BASE
-#define DECLARE_CONCRETE_STRING_CLASS
-#endif
-
-    class JavascriptString _ABSTRACT : public RecyclableObject
+    class JavascriptString : public RecyclableObject
     {
         friend Lowerer;
         friend LowererMD;
         friend bool IsValidCharCount(size_t);
+
+        JavascriptString() = delete;
+        JavascriptString(JavascriptString&) = delete;
 
     private:
         Field(const char16*) m_pszValue;         // Flattened, '\0' terminated contents
@@ -68,8 +53,16 @@ namespace Js
         BOOL GetItemAt(charcount_t idxChar, Var* value);
         char16 GetItem(charcount_t index);
 
+        virtual void GetPropertyRecord(_Out_ PropertyRecord const** propertyRecord, bool dontLookupFromDictionary = false);
+        virtual void CachePropertyRecord(_In_ PropertyRecord const* propertyRecord);
+
         _Ret_range_(m_charLength, m_charLength) charcount_t GetLength() const;
+
+        // Non-finalized strings haven't allocated buffers yet, but
+        // it always makes sense to talk about string's size in bytes.
+        charcount_t GetSizeInBytes() const { return GetLength() * sizeof(char16); };
         virtual size_t GetAllocatedByteCount() const;
+
         virtual bool IsSubstring() const;
         int GetLengthAsSignedInt() const;
         const char16* UnsafeGetBuffer() const;
@@ -84,7 +77,7 @@ namespace Js
 
         static const char16* GetSzHelper(JavascriptString *str) { return str->GetSz(); }
         virtual const char16* GetSz();     // Get string, NULL terminated
-        virtual void const * GetOriginalStringReference();  // Get the original full string (Same as GetString() unless it is a SubString);
+        virtual void const * GetOriginalStringReference();  // Get the allocated object that owns the original full string buffer
 
 #if ENABLE_TTD
         //Get the associated property id for this string if there is on (e.g. it is a propertystring otherwise return Js::PropertyIds::_none)
@@ -121,8 +114,8 @@ namespace Js
         virtual PropertyQueryFlags HasItemQuery(uint32 index) override sealed;
         virtual PropertyQueryFlags GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override;
         virtual PropertyQueryFlags GetItemReferenceQuery(Var originalInstance, uint32 index, Var* value, ScriptContext * requestContext) override;
-        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache = nullptr) override;
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+        virtual BOOL GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache = nullptr) override;
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual BOOL IsEnumerable(PropertyId propertyId) override;
         virtual BOOL DeleteProperty(PropertyId propertyId, PropertyOperationFlags propertyOperationFlags) override;
         virtual BOOL DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags propertyOperationFlags) override;
@@ -142,7 +135,8 @@ namespace Js
 
         static bool Is(Var aValue);
         static JavascriptString* FromVar(Var aValue);
-        static bool Equals(Var aLeft, Var aRight);
+        static JavascriptString* UnsafeFromVar(Var aValue);
+        static bool Equals(JavascriptString* aLeft, JavascriptString* aRight);
         static bool LessThan(Var aLeft, Var aRight);
         static bool IsNegZero(JavascriptString *string);
 
@@ -150,15 +144,13 @@ namespace Js
         static int strcmp(JavascriptString *string1, JavascriptString *string2);
 
     private:
-        enum ToCase{
-            ToLower,
-            ToUpper
-        };
         char16* GetSzCopy();   // get a copy of the inner string without compacting the chunks
 
-        static Var ToCaseCore(JavascriptString* pThis, ToCase toCase);
+        template<bool toUpper, bool useInvariant>
+        static JavascriptString* ToCaseCore(JavascriptString* pThis);
         static int IndexOfUsingJmpTable(JmpTable jmpTable, const char16* inputStr, charcount_t len, const char16* searchStr, int searchLen, int position);
         static int LastIndexOfUsingJmpTable(JmpTable jmpTable, const char16* inputStr, charcount_t len, const char16* searchStr, charcount_t searchLen, charcount_t position);
+
         static bool BuildLastCharForwardBoyerMooreTable(JmpTable jmpTable, const char16* searchStr, int searchLen);
         static bool BuildFirstCharBackwardBoyerMooreTable(JmpTable jmpTable, const char16* searchStr, int searchLen);
         static charcount_t ConvertToIndex(Var varIndex, ScriptContext *scriptContext);
@@ -173,7 +165,6 @@ namespace Js
         JavascriptString(StaticType * type);
         JavascriptString(StaticType * type, charcount_t charLength, const char16* szValue);
         DEFINE_VTABLE_CTOR_ABSTRACT(JavascriptString, RecyclableObject);
-        DECLARE_CONCRETE_STRING_CLASS_BASE;
 
         void SetLength(charcount_t newLength);
         void SetBuffer(const char16* buffer);
@@ -190,11 +181,6 @@ namespace Js
         static JavascriptString* NewWithBuffer(__in_ecount(charLength) const char16 * content, charcount_t charLength, ScriptContext * scriptContext);
         static JavascriptString* NewCopySz(__in_z const char16* content, ScriptContext* scriptContext);
         static JavascriptString* NewCopyBuffer(__in_ecount(charLength)  const char16* content, charcount_t charLength, ScriptContext* scriptContext);
-
-        static JavascriptString* NewWithArenaSz(__in_z const char16 * content, ScriptContext* scriptContext);
-        static JavascriptString* NewWithArenaBuffer(__in_ecount(charLength) const char16 * content, charcount_t charLength, ScriptContext * scriptContext);
-
-        static JavascriptString* NewCopySzFromArena(__in_z const char16* content, ScriptContext* scriptContext, ArenaAllocator *arena, charcount_t cchUseLength = 0);
 
         static __ecount(length+1) char16* AllocateLeafAndCopySz(__in Recycler* recycler, __in_ecount(length) const char16* content, charcount_t length);
         static __ecount(length+1) char16* AllocateAndCopySz(__in ArenaAllocator* arena, __in_ecount(length) const char16* content, charcount_t length);
@@ -351,7 +337,8 @@ namespace Js
         static void SearchValueHelper(ScriptContext* scriptContext, Var aValue, JavascriptRegExp ** ppSearchRegEx, JavascriptString ** ppSearchString);
         static void ReplaceValueHelper(ScriptContext* scriptContext, Var aValue, JavascriptFunction ** ppReplaceFn, JavascriptString ** ppReplaceString);
 
-        static Var ToLocaleCaseHelper(Var thisObj, bool toUpper, ScriptContext *scriptContext);
+        template<bool toUpper>
+        static JavascriptString* ToLocaleCaseHelper(JavascriptString* thisObj);
 
         static void InstantiateForceInlinedMembers();
 
@@ -374,6 +361,16 @@ namespace Js
     {
         inline static bool Equals(JavascriptString * str1, JavascriptString * str2)
         {
+            // We want to pin the strings str1 and str2 because flattening of any of these strings could cause a GC and result in the other string getting collected if it was optimized
+            // away by the compiler. We would normally have called the EnterPinnedScope/LeavePinnedScope methods here but it adds extra call instructions to the assembly code. As Equals
+            // methods could get called a lot of times this can show up as regressions in benchmarks.
+            volatile Js::JavascriptString** keepAliveString1 = (volatile Js::JavascriptString**)& str1;
+            volatile Js::JavascriptString** keepAliveString2 = (volatile Js::JavascriptString**)& str2;
+            auto keepAliveLambda = [&]() {
+                UNREFERENCED_PARAMETER(keepAliveString1);
+                UNREFERENCED_PARAMETER(keepAliveString2);
+            };
+
             return (str1->GetLength() == str2->GetLength() &&
                 JsUtil::CharacterBuffer<WCHAR>::StaticEquals(str1->GetString(), str2->GetString(), str1->GetLength()));
         }
@@ -390,7 +387,7 @@ namespace Js
                 JsUtil::CharacterBuffer<WCHAR>::StaticEquals(str1->GetString(), str2->GetBuffer(), str1->GetLength()));
         }
 
-        inline static uint GetHashCode(JavascriptString * str)
+        inline static hash_t GetHashCode(JavascriptString * str)
         {
             return JsUtil::CharacterBuffer<WCHAR>::StaticGetHashCode(str->GetString(), str->GetLength());
         }
@@ -406,7 +403,7 @@ namespace Js
     class JavascriptStringHelpers
     {
     public:
-        static bool Equals(Var aLeft, Var aRight);
+        static bool Equals(T* aLeft, T* aRight);
     };
 }
 
@@ -418,7 +415,7 @@ struct DefaultComparer<Js::JavascriptString*>
         return Js::JavascriptString::Equals(x, y);
     }
 
-    inline static uint GetHashCode(Js::JavascriptString * pStr)
+    inline static hash_t GetHashCode(Js::JavascriptString * pStr)
     {
         return JsUtil::CharacterBuffer<char16>::StaticGetHashCode(pStr->GetString(), pStr->GetLength());
     }

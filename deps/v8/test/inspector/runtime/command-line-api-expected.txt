@@ -108,6 +108,77 @@ Running test: testInspect
     }
 }
 
+Running test: testQueryObjects
+{
+    id : <messageId>
+    result : {
+        result : {
+            className : Function
+            description : function queryObjects(constructor) { [Command Line API] }
+            objectId : <objectId>
+            type : function
+        }
+    }
+}
+{
+    method : Runtime.inspectRequested
+    params : {
+        hints : {
+            queryObjects : true
+        }
+        object : {
+            className : Promise
+            description : Promise
+            objectId : <objectId>
+            type : object
+        }
+    }
+}
+Is Promise.prototype: true
+{
+    method : Runtime.inspectRequested
+    params : {
+        hints : {
+            queryObjects : true
+        }
+        object : {
+            className : Promise
+            description : Promise
+            objectId : <objectId>
+            type : object
+        }
+    }
+}
+Is Promise.prototype: true
+{
+    method : Runtime.inspectRequested
+    params : {
+        hints : {
+            queryObjects : true
+        }
+        object : {
+            className : Object
+            description : Object
+            objectId : <objectId>
+            type : object
+        }
+    }
+}
+Is p: true
+{
+    method : Runtime.inspectRequested
+    params : {
+        hints : {
+            queryObjects : true
+        }
+        object : {
+            description : 1
+            type : number
+            value : 1
+        }
+    }
+}
+
 Running test: testEvaluationResult
 {
     id : <messageId>
@@ -164,7 +235,7 @@ Running test: testDebug
     result : {
         result : {
             className : Function
-            description : function debug(function) { [Command Line API] }
+            description : function debug(function, condition) { [Command Line API] }
             objectId : <objectId>
             type : function
         }
@@ -184,13 +255,39 @@ Running test: testDebug
 foo (:0:16)
 (anonymous) (:0:0)
 [
-    [0] : <scriptId>:0:12:debug
+    [0] : 5:1
 ]
+debugCommand
 foo (:0:16)
 (anonymous) (:0:0)
 [
-    [0] : <scriptId>:0:12:debug
+    [0] : 5:1
 ]
+debugCommand
+toUpper (:0:31)
+(anonymous) (:0:0)
+[
+    [0] : 5:2
+]
+debugCommand
+callSetTimeout (:0:28)
+(anonymous) (:0:0)
+[
+    [0] : 5:3
+]
+debugCommand
+callSetTimeout (:0:28)
+(anonymous) (:0:0)
+[
+    [0] : 5:3
+]
+debugCommand
+fromCharCode (:0:40)
+(anonymous) (:0:0)
+[
+    [0] : 5:4
+]
+debugCommand
 
 Running test: testMonitor
 {
@@ -220,6 +317,7 @@ after first call
 store functions..
 function foo called
 after first call
+function fromCharCode called with arguments: 1, 2, 3
 
 Running test: testProfile
 {

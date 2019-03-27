@@ -26,6 +26,7 @@ class V8TimeTravelAgentImpl : public protocol::TimeTravel::Backend {
   ~V8TimeTravelAgentImpl() override;
 
   // Part of the protocol.
+  void writeTTDLog(ErrorString*, const String16&) override;
   void reverse(ErrorString*) override;
   void stepBack(ErrorString*) override;
 
@@ -36,7 +37,6 @@ class V8TimeTravelAgentImpl : public protocol::TimeTravel::Backend {
 
   V8InspectorSessionImpl* m_session;
   protocol::TimeTravel::Frontend m_frontend;
-  protocol::DictionaryValue* m_state;
 
   DISALLOW_COPY_AND_ASSIGN(V8TimeTravelAgentImpl);
 };

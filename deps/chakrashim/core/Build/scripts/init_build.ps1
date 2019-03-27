@@ -12,7 +12,7 @@
 # before running the Pre-Build script.
 
 param (
-    [ValidateSet("x86", "x64", "arm", "")]
+    [ValidateSet("x86", "x64", "arm", "arm64", "")]
     [string]$arch = "",
     [ValidateSet("debug", "release", "test", "codecoverage", "")]
     [string]$flavor = "",
@@ -152,13 +152,7 @@ if ($BranchName -eq "master") {
     $ShortBranch = $BranchName.replace("release/","")
 }
 
-# unless it is a build branch, subdivide the output directory by month
-if ($BranchPath.StartsWith("build")) {
-    $YearAndMonth = ""
-} else {
-    $YearAndMonth = (Get-Date $buildPushDate -Format yyMM) + "\"
-}
-
+$YearAndMonth = (Get-Date $buildPushDate -Format yyMM) + "\"
 $BuildIdentifier = "${buildPushIdString}_${PushDate}_${Username}_${CommitHash}"
 $ComputedDropPathSegment = "${BranchPath}\${YearAndMonth}${BuildIdentifier}"
 $ObjectDirectory = "${BinariesDirectory}\obj\${BuildPlatform}_${BuildConfiguration}"
@@ -178,6 +172,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $SourcesDirectory "test\log
 New-Item -ItemType Directory -Force -Path (Join-Path $BinariesDirectory "buildlogs")
 New-Item -ItemType Directory -Force -Path (Join-Path $BinariesDirectory "logs")
 
+New-Item -ItemType Directory -Force -Path (Join-Path $DropPath "bin")
 $FlavorBuildIncompleteFile = Join-Path $DropPath "${BuildType}.incomplete"
 
 if (-not (Test-Path $FlavorBuildIncompleteFile)) {

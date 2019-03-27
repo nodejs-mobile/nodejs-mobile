@@ -17,9 +17,9 @@ namespace Js
         __super::SetHostObject(hostObject);
     }
 
-    PropertyQueryFlags ModuleRoot::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags ModuleRoot::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
-        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId)))
+        if (JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId, info)))
         {
             return PropertyQueryFlags::Property_Found;
         }
@@ -27,7 +27,7 @@ namespace Js
         {
             return PropertyQueryFlags::Property_Found;
         }
-        return this->GetLibrary()->GetGlobalObject()->GlobalObject::HasPropertyQuery(propertyId);
+        return this->GetLibrary()->GetGlobalObject()->GlobalObject::HasPropertyQuery(propertyId, info);
     }
 
     BOOL ModuleRoot::EnsureProperty(PropertyId propertyId)
@@ -56,7 +56,7 @@ namespace Js
 
     BOOL ModuleRoot::HasOwnProperty(PropertyId propertyId)
     {
-        return JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId));
+        return JavascriptConversion::PropertyQueryFlagsToBoolean(DynamicObject::HasPropertyQuery(propertyId, nullptr /*info*/));
     }
 
     PropertyQueryFlags ModuleRoot::GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext)
@@ -68,10 +68,12 @@ namespace Js
             if (info) // Avoid testing IsWritable if info not being queried
             {
                 PropertyValueInfo::Set(info, this, index, IsWritable(propertyId) ? PropertyWritable : PropertyNone);
+#if ENABLE_FIXED_FIELDS
                 if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::DisableStoreFieldCache(info);
                 }
+#endif
             }
             return PropertyQueryFlags::Property_Found;
         }
@@ -98,10 +100,12 @@ namespace Js
             if (info) // Avoid testing IsWritable if info not being queried
             {
                 PropertyValueInfo::Set(info, this, index, IsWritable(propertyId) ? PropertyWritable : PropertyNone);
+#if ENABLE_FIXED_FIELDS
                 if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::DisableStoreFieldCache(info);
                 }
+#endif
             }
             return TRUE;
         }
@@ -122,11 +126,11 @@ namespace Js
     PropertyQueryFlags ModuleRoot::GetPropertyQuery(Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext)
     {
         PropertyRecord const * propertyRecord;
-        this->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+        this->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
         return ModuleRoot::GetPropertyQuery(originalInstance, propertyRecord->GetPropertyId(), value, info, requestContext);
     }
 
-    BOOL ModuleRoot::GetAccessors(PropertyId propertyId, Var* getter, Var* setter, ScriptContext * requestContext)
+    _Check_return_ _Success_(return) BOOL ModuleRoot::GetAccessors(PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter, ScriptContext* requestContext)
     {
         if (DynamicObject::GetAccessors(propertyId, getter, setter, requestContext))
         {
@@ -152,10 +156,12 @@ namespace Js
             if (info) // Avoid testing IsWritable if info not being queried
             {
                 PropertyValueInfo::Set(info, this, index, IsWritable(propertyId) ? PropertyWritable : PropertyNone);
+#if ENABLE_FIXED_FIELDS
                 if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::DisableStoreFieldCache(info);
                 }
+#endif
             }
             return PropertyQueryFlags::Property_Found;
         }
@@ -183,10 +189,12 @@ namespace Js
             if (info) // Avoid testing IsWritable if info not being queried
             {
                 PropertyValueInfo::Set(info, this, index, IsWritable(propertyId) ? PropertyWritable : PropertyNone);
+#if ENABLE_FIXED_FIELDS
                 if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::DisableStoreFieldCache(info);
                 }
+#endif
             }
             return TRUE;
         }
@@ -213,24 +221,28 @@ namespace Js
             {
                 JavascriptError::ThrowCantAssignIfStrictMode(flags, this->GetScriptContext());
 
-                if (!this->IsFixedProperty(propertyId))
-                {
-                    PropertyValueInfo::Set(info, this, index, PropertyNone); // Try to cache property info even if not writable
-                }
-                else
+#if ENABLE_FIXED_FIELDS
+                if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::SetNoCache(info, this);
+                }
+                else
+#endif
+                {
+                    PropertyValueInfo::Set(info, this, index, PropertyNone); // Try to cache property info even if not writable
                 }
                 return FALSE;
             }
             this->SetSlot(SetSlotArguments(propertyId, index, value));
-            if (!this->IsFixedProperty(propertyId))
-            {
-                PropertyValueInfo::Set(info, this, index);
-            }
-            else
+#if ENABLE_FIXED_FIELDS
+            if (this->IsFixedProperty(propertyId))
             {
                 PropertyValueInfo::SetNoCache(info, this);
+            }
+            else
+#endif
+            {
+                PropertyValueInfo::Set(info, this, index);
             }
             return TRUE;
         }
@@ -272,25 +284,29 @@ namespace Js
             {
                 JavascriptError::ThrowCantAssignIfStrictMode(flags, this->GetScriptContext());
 
-                if (!this->IsFixedProperty(propertyId))
-                {
-                    PropertyValueInfo::Set(info, this, index, PropertyNone); // Try to cache property info even if not writable
-                }
-                else
+#if ENABLE_FIXED_FIELDS
+                if (this->IsFixedProperty(propertyId))
                 {
                     PropertyValueInfo::SetNoCache(info, this);
+                }
+                else
+#endif
+                {
+                    PropertyValueInfo::Set(info, this, index, PropertyNone); // Try to cache property info even if not writable
                 }
                 return FALSE;
             }
             this->SetSlot(SetSlotArgumentsRoot(propertyId, true, index, value));
-            if (!this->IsFixedProperty(propertyId))
-            {
-                PropertyValueInfo::Set(info, this, index);
-            }
-            else
+#if ENABLE_FIXED_FIELDS
+            if (this->IsFixedProperty(propertyId))
             {
                 PropertyValueInfo::SetNoCache(info, this);
             }
+            else
+#endif
+            {
+                PropertyValueInfo::Set(info, this, index);
+            }            
             return TRUE;
         }
         else if (this->hostObject && this->hostObject->HasProperty(propertyId))
@@ -325,7 +341,7 @@ namespace Js
     BOOL ModuleRoot::SetProperty(JavascriptString* propertyNameString, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
         PropertyRecord const * propertyRecord;
-        this->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString->GetString(), propertyNameString->GetLength(), &propertyRecord);
+        this->GetScriptContext()->GetOrAddPropertyRecord(propertyNameString, &propertyRecord);
         return ModuleRoot::SetProperty(propertyRecord->GetPropertyId(), value, (PropertyOperationFlags)(flags | PropertyOperation_NonFixedValue), info);
     }
 

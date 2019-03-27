@@ -21,17 +21,18 @@ JITTimeFunctionBody::InitializeJITFunctionData(
     Assert(functionBody != nullptr);
 
     // const table
-    jitBody->constCount = functionBody->GetConstantCount();
-    if (functionBody->GetConstantCount() > 0)
+    const Js::RegSlot numConstants = functionBody->GetConstantCount();
+    jitBody->constCount = numConstants;
+    if (numConstants > 0)
     {
-        jitBody->constTable = (intptr_t *)PointerValue(functionBody->GetConstTable());
+        jitBody->constTable = unsafe_write_barrier_cast<intptr_t *>(functionBody->GetConstTable());
         if (!functionBody->GetIsAsmJsFunction())
         {
             jitBody->constTableContent = AnewStructZ(arena, ConstTableContentIDL);
-            jitBody->constTableContent->count = functionBody->GetConstantCount();
-            jitBody->constTableContent->content = AnewArrayZ(arena, RecyclableObjectIDL*, functionBody->GetConstantCount());
+            jitBody->constTableContent->count = numConstants;
+            jitBody->constTableContent->content = AnewArrayZ(arena, RecyclableObjectIDL*, numConstants);
 
-            for (Js::RegSlot reg = Js::FunctionBody::FirstRegSlot; reg < functionBody->GetConstantCount(); ++reg)
+            for (Js::RegSlot reg = Js::FunctionBody::FirstRegSlot; reg < numConstants; ++reg)
             {
                 Js::Var varConst = functionBody->GetConstantVar(reg);
                 Assert(varConst != nullptr);
@@ -156,6 +157,7 @@ JITTimeFunctionBody::InitializeJITFunctionData(
             jitBody->loopHeaders[i].endOffset = loopHeaders[i].endOffset;
             jitBody->loopHeaders[i].isNested = loopHeaders[i].isNested;
             jitBody->loopHeaders[i].isInTry = loopHeaders[i].isInTry;
+            jitBody->loopHeaders[i].isInTryFinally = loopHeaders[i].isInTryFinally;
             jitBody->loopHeaders[i].interpretCount = functionBody->GetLoopInterpretCount(&loopHeaders[i]);
         }
     }
@@ -241,7 +243,7 @@ JITTimeFunctionBody::InitializeJITFunctionData(
     jitBody->displayName = (char16 *)functionBody->GetDisplayName();
     jitBody->objectLiteralTypesAddr = (intptr_t)functionBody->GetObjectLiteralTypesWithLock();
     jitBody->literalRegexCount = functionBody->GetLiteralRegexCount();
-    jitBody->literalRegexes = (intptr_t*)functionBody->GetLiteralRegexesWithLock();
+    jitBody->literalRegexes = unsafe_write_barrier_cast<intptr_t*>(functionBody->GetLiteralRegexesWithLock());
 
     Js::AuxArray<uint32> * slotIdInCachedScopeToNestedIndexArray = functionBody->GetSlotIdInCachedScopeToNestedIndexArrayWithLock();
     if (slotIdInCachedScopeToNestedIndexArray)
@@ -276,6 +278,11 @@ JITTimeFunctionBody::InitializeJITFunctionData(
 #ifdef ENABLE_WASM
         if (functionBody->IsWasmFunction())
         {
+#ifdef ENABLE_WASM_THREADS
+            jitBody->asmJsData->wasmIsSharedMemory = asmFuncInfo->GetWebAssemblyModule()->IsSharedMemory();
+#else
+            jitBody->asmJsData->wasmIsSharedMemory = false;
+#endif
             jitBody->asmJsData->wasmSignatureCount = asmFuncInfo->GetWebAssemblyModule()->GetSignatureCount();
             jitBody->asmJsData->wasmSignaturesBaseAddr = (intptr_t)asmFuncInfo->GetWebAssemblyModule()->GetSignatures();
             jitBody->asmJsData->wasmSignatures = (WasmSignatureIDL*)asmFuncInfo->GetWebAssemblyModule()->GetSignatures();
@@ -489,7 +496,7 @@ Js::PropertyId
 JITTimeFunctionBody::GetPropertyIdFromCacheId(uint cacheId) const
 {
     Assert(m_bodyData.cacheIdToPropertyIdMap);
-    Assert(cacheId < GetInlineCacheCount());
+    AssertOrFailFast(cacheId < GetInlineCacheCount());
     return static_cast<Js::PropertyId>(m_bodyData.cacheIdToPropertyIdMap[cacheId]);
 }
 
@@ -503,7 +510,7 @@ JITTimeFunctionBody::GetReferencedPropertyId(uint index) const
     uint mapIndex = index - TotalNumberOfBuiltInProperties;
 
     Assert(m_bodyData.referencedPropertyIdMap != nullptr);
-    Assert(mapIndex < m_bodyData.referencedPropertyIdCount);
+    AssertOrFailFast(mapIndex < m_bodyData.referencedPropertyIdCount);
 
     return m_bodyData.referencedPropertyIdMap[mapIndex];
 }
@@ -592,6 +599,22 @@ JITTimeFunctionBody::IsWasmFunction() const
     return m_bodyData.isWasmFunction != FALSE;
 }
 
+bool JITTimeFunctionBody::UsesWAsmJsFastVirtualBuffer() const
+{
+    // Using Fast Virtual Buffer means that bounds checks can be omitted
+#if ENABLE_FAST_ARRAYBUFFER
+#ifdef ENABLE_WASM
+    if (IsWasmFunction())
+    {
+        return CONFIG_FLAG(WasmFastArray);
+    }
+#endif
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool
 JITTimeFunctionBody::IsStrictMode() const
 {
@@ -644,6 +667,18 @@ bool
 JITTimeFunctionBody::IsLambda() const
 {
     return Js::FunctionInfo::IsLambda(GetAttributes());
+}
+
+bool
+JITTimeFunctionBody::HasComputedName() const
+{
+    return Js::FunctionInfo::HasComputedName(GetAttributes());
+}
+
+bool
+JITTimeFunctionBody::HasHomeObj() const
+{
+    return Js::FunctionInfo::HasHomeObj(GetAttributes());
 }
 
 bool
@@ -851,7 +886,7 @@ intptr_t
 JITTimeFunctionBody::GetConstantVar(Js::RegSlot location) const
 {
     Assert(m_bodyData.constTable != nullptr);
-    Assert(location < GetConstCount());
+    AssertOrFailFast(location < GetConstCount());
     Assert(location != 0);
 
     return static_cast<intptr_t>(m_bodyData.constTable[location - Js::FunctionBody::FirstRegSlot]);
@@ -862,7 +897,7 @@ JITTimeFunctionBody::GetConstantContent(Js::RegSlot location) const
 {
     Assert(m_bodyData.constTableContent != nullptr);
     Assert(m_bodyData.constTableContent->content != nullptr);
-    Assert(location < GetConstCount());
+    AssertOrFailFast(location < GetConstCount());
     Assert(location != 0);
 
     JITRecyclableObject * obj = (JITRecyclableObject *)m_bodyData.constTableContent->content[location - Js::FunctionBody::FirstRegSlot];
@@ -887,7 +922,7 @@ intptr_t
 JITTimeFunctionBody::GetInlineCache(uint index) const
 {
     Assert(m_bodyData.inlineCaches != nullptr);
-    Assert(index < GetInlineCacheCount());
+    AssertOrFailFast(index < GetInlineCacheCount());
 #if 0 // TODO: michhol OOP JIT, add these asserts
     Assert(this->m_inlineCacheTypes[index] == InlineCacheTypeNone ||
         this->m_inlineCacheTypes[index] == InlineCacheTypeInlineCache);
@@ -900,7 +935,7 @@ intptr_t
 JITTimeFunctionBody::GetIsInstInlineCache(uint index) const
 {
     Assert(m_bodyData.inlineCaches != nullptr);
-    Assert(index < m_bodyData.isInstInlineCacheCount);
+    AssertOrFailFast(index < m_bodyData.isInstInlineCacheCount);
     index += GetInlineCacheCount();
 #if 0 // TODO: michhol OOP JIT, add these asserts
     Assert(this->m_inlineCacheTypes[index] == InlineCacheTypeNone ||
@@ -915,7 +950,7 @@ JITTimeFunctionBody::GetConstantType(Js::RegSlot location) const
 {
     Assert(m_bodyData.constTable != nullptr);
     Assert(m_bodyData.constTableContent != nullptr);
-    Assert(location < GetConstCount());
+    AssertOrFailFast(location < GetConstCount());
     Assert(location != 0);
     auto obj = m_bodyData.constTableContent->content[location - Js::FunctionBody::FirstRegSlot];
 
@@ -938,7 +973,7 @@ JITTimeFunctionBody::GetConstantType(Js::RegSlot location) const
 intptr_t
 JITTimeFunctionBody::GetLiteralRegexAddr(uint index) const
 {
-    Assert(index < m_bodyData.literalRegexCount);
+    AssertOrFailFast(index < m_bodyData.literalRegexCount);
 
     return m_bodyData.literalRegexes[index];
 }
@@ -957,17 +992,6 @@ JITTimeFunctionBody::GetConstTable() const
     return m_bodyData.constTable;
 }
 
-bool
-JITTimeFunctionBody::IsConstRegPropertyString(Js::RegSlot reg, ScriptContextInfo * context) const
-{
-    RecyclableObjectIDL * content = m_bodyData.constTableContent->content[reg - Js::FunctionBody::FirstRegSlot];
-    if (content != nullptr && content->vtbl == context->GetVTableAddress(VtablePropertyString))
-    {
-        return true;
-    }
-    return false;
-}
-
 intptr_t
 JITTimeFunctionBody::GetRootObject() const
 {
@@ -978,7 +1002,7 @@ JITTimeFunctionBody::GetRootObject() const
 Js::FunctionInfoPtrPtr
 JITTimeFunctionBody::GetNestedFuncRef(uint index) const
 {
-    Assert(index < GetNestedCount());
+    AssertOrFailFast(index < GetNestedCount());
     Js::FunctionInfoPtrPtr baseAddr = (Js::FunctionInfoPtrPtr)m_bodyData.nestedFuncArrayAddr;
     return baseAddr + index;
 }
@@ -986,7 +1010,7 @@ JITTimeFunctionBody::GetNestedFuncRef(uint index) const
 intptr_t
 JITTimeFunctionBody::GetLoopHeaderAddr(uint loopNum) const
 {
-    Assert(loopNum < GetLoopCount());
+    AssertOrFailFast(loopNum < GetLoopCount());
     intptr_t baseAddr = m_bodyData.loopHeaderArrayAddr;
     return baseAddr + (loopNum * sizeof(Js::LoopHeader));
 }
@@ -994,7 +1018,7 @@ JITTimeFunctionBody::GetLoopHeaderAddr(uint loopNum) const
 const JITLoopHeaderIDL *
 JITTimeFunctionBody::GetLoopHeaderData(uint loopNum) const
 {
-    Assert(loopNum < GetLoopCount());
+    AssertOrFailFast(loopNum < GetLoopCount());
     return &m_bodyData.loopHeaders[loopNum];
 }
 
@@ -1031,7 +1055,7 @@ JITTimeFunctionBody::HasPropIdToFormalsMap() const
 bool
 JITTimeFunctionBody::IsRegSlotFormal(Js::RegSlot reg) const
 {
-    Assert(reg < m_bodyData.propertyIdsForRegSlotsCount);
+    AssertOrFailFast(reg < m_bodyData.propertyIdsForRegSlotsCount);
     Js::PropertyId propId = (Js::PropertyId)m_bodyData.propertyIdsForRegSlots[reg];
     Js::PropertyIdArray * formalProps = GetFormalsPropIdArray();
     for (uint32 i = 0; i < formalProps->count; i++)
@@ -1097,10 +1121,10 @@ JITTimeFunctionBody::GetFormalsPropIdArray() const
     return  (Js::PropertyIdArray *)m_bodyData.formalsPropIdArray;
 }
 
-Js::ForInCache *
+Js::EnumeratorCache *
 JITTimeFunctionBody::GetForInCache(uint profileId) const
 {
-    return  &((Js::ForInCache *)m_bodyData.forInCacheArrayAddr)[profileId];
+    return  &((Js::EnumeratorCache *)m_bodyData.forInCacheArrayAddr)[profileId];
 }
 
 bool

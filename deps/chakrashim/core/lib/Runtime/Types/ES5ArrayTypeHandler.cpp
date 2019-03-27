@@ -455,7 +455,7 @@ namespace Js
             this->ClearHasOnlyWritableDataProperties();
             if(this->GetFlags() & this->IsPrototypeFlag)
             {
-                instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
             }
         }
 
@@ -516,7 +516,7 @@ namespace Js
                 this->ClearHasOnlyWritableDataProperties();
                 if(this->GetFlags() & this->IsPrototypeFlag)
                 {
-                    instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                    instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
                 }
             }
             return true;
@@ -532,7 +532,7 @@ namespace Js
                 this->ClearHasOnlyWritableDataProperties();
                 if(this->GetFlags() & this->IsPrototypeFlag)
                 {
-                    instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                    instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
                 }
             }
             return true;
@@ -594,7 +594,7 @@ namespace Js
         this->ClearHasOnlyWritableDataProperties();
         if(this->GetFlags() & this->IsPrototypeFlag)
         {
-            instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+            instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
         }
         return true;
     }
@@ -640,7 +640,8 @@ namespace Js
             }
             else if (!(descriptor->Attributes & PropertyConfigurable))
             {
-                JavascriptError::ThrowCantDelete(propertyOperationFlags, instance->GetScriptContext(), TaggedInt::ToString(index, instance->GetScriptContext())->GetString());
+                JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
+                    propertyOperationFlags, instance->GetScriptContext(), TaggedInt::ToString(index, instance->GetScriptContext())->GetString());
 
                 return false;
             }
@@ -655,7 +656,14 @@ namespace Js
         // Not in attribute map
         if (!(GetDataItemAttributes() & PropertyConfigurable))
         {
-            return !HasDataItem(arr, index); // CantDelete
+            if (HasDataItem(arr, index))
+            {
+                JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
+                    propertyOperationFlags, instance->GetScriptContext(), TaggedInt::ToString(index, instance->GetScriptContext())->GetString());
+
+                return false;
+            }
+            return true; // non-existing non-configurable property can be deleted
         }
         return arr->DirectDeleteItemAt<Var>(index);
     }
@@ -724,7 +732,7 @@ namespace Js
     }
 
     template <class T>
-    BOOL ES5ArrayTypeHandlerBase<T>::HasProperty(DynamicObject* instance, PropertyId propertyId, bool *noRedecl)
+    BOOL ES5ArrayTypeHandlerBase<T>::HasProperty(DynamicObject* instance, PropertyId propertyId, bool *noRedecl, _Inout_opt_ PropertyValueInfo* info)
     {
         ScriptContext* scriptContext = instance->GetScriptContext();
         uint32 index;
@@ -740,7 +748,7 @@ namespace Js
             return ES5ArrayTypeHandlerBase<T>::HasItem(instance, index);
         }
 
-        return __super::HasProperty(instance, propertyId, noRedecl);
+        return __super::HasProperty(instance, propertyId, noRedecl, info);
     }
 
     template <class T>
@@ -1032,7 +1040,7 @@ namespace Js
                         this->ClearHasOnlyWritableDataProperties();
                         if(this->GetFlags() & this->IsPrototypeFlag)
                         {
-                            instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                            instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
                         }
                     }
                 }
@@ -1062,7 +1070,7 @@ namespace Js
                         this->ClearHasOnlyWritableDataProperties();
                         if(this->GetFlags() & this->IsPrototypeFlag)
                         {
-                            instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                            instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
                         }
                     }
                 }
@@ -1126,7 +1134,7 @@ namespace Js
             SetLengthWritable(value ? true : false);
             if(!value && this->GetFlags() & this->IsPrototypeFlag)
             {
-                instance->GetLibrary()->NoPrototypeChainsAreEnsuredToHaveOnlyWritableDataProperties();
+                instance->GetLibrary()->GetTypesWithOnlyWritablePropertyProtoChainCache()->Clear();
             }
             return true;
         }
@@ -1151,7 +1159,7 @@ namespace Js
     }
 
     template <class T>
-    BOOL ES5ArrayTypeHandlerBase<T>::GetAccessors(DynamicObject* instance, PropertyId propertyId, Var* getter, Var* setter)
+    _Check_return_ _Success_(return) BOOL ES5ArrayTypeHandlerBase<T>::GetAccessors(DynamicObject* instance, PropertyId propertyId, _Outptr_result_maybenull_ Var* getter, _Outptr_result_maybenull_ Var* setter)
     {
         ScriptContext* scriptContext = instance->GetScriptContext();
 
@@ -1333,6 +1341,16 @@ namespace Js
     BOOL ES5ArrayTypeHandlerBase<T>::GetDescriptor(uint32 index, Js::IndexPropertyDescriptor **ppDescriptor) {
         return indexPropertyMap->TryGetReference(index, ppDescriptor);
     }
+
+#if DBG_DUMP
+    // Explicitly override the superclass's Dump method to prevent misleading output.  Without this method, if
+    // someone calls Dump on an ES5ArrayTypeHandlerBase, the output would make it look like the type is actually
+    // a DictionaryTypeHandlerBase instance.
+    template <typename T> void ES5ArrayTypeHandlerBase<T>::Dump(unsigned indent) const
+    {
+        Output::Print(_u("%*sES5ArrayTypeHandlerBase (0x%p): Dump unimplemented\n"), indent, _u(""), this);
+    }
+#endif
 
     template class ES5ArrayTypeHandlerBase<PropertyIndex>;
     template class ES5ArrayTypeHandlerBase<BigPropertyIndex>;

@@ -42,9 +42,16 @@ namespace Js
 
         static JavascriptError* FromVar(Var aValue)
         {
-            AssertMsg(Is(aValue), "Ensure var is actually a 'JavascriptError'");
+            AssertOrFailFastMsg(Is(aValue), "Ensure var is actually a 'JavascriptError'");
 
             return static_cast<JavascriptError *>(RecyclableObject::FromVar(aValue));
+        }
+
+        static JavascriptError* UnsafeFromVar(Var aValue)
+        {
+            AssertMsg(Is(aValue), "Ensure var is actually a 'JavascriptError'");
+
+            return static_cast<JavascriptError *>(RecyclableObject::UnsafeFromVar(aValue));
         }
 
         void SetNotEnumerable(PropertyId propertyId);
@@ -128,7 +135,7 @@ namespace Js
         static bool ThrowCantAssignIfStrictMode(PropertyOperationFlags flags, ScriptContext* scriptContext);
         static bool ThrowCantExtendIfStrictMode(PropertyOperationFlags flags, ScriptContext* scriptContext);
         static bool ThrowCantDeleteIfStrictMode(PropertyOperationFlags flags, ScriptContext* scriptContext, PCWSTR varName);
-        static bool ThrowCantDelete(PropertyOperationFlags flags, ScriptContext* scriptContext, PCWSTR varName);
+        static bool ThrowCantDeleteIfStrictModeOrNonconfigurable(PropertyOperationFlags flags, ScriptContext* scriptContext, PCWSTR varName);
         static bool ThrowIfStrictModeUndefinedSetter(PropertyOperationFlags flags, Var setterValue, ScriptContext* scriptContext);
         static bool ThrowIfNotExtensibleUndefinedSetter(PropertyOperationFlags flags, Var setterValue, ScriptContext* scriptContext);
 
@@ -150,6 +157,7 @@ namespace Js
         static DWORD GetAdjustedResourceStringHr(DWORD hr, bool isFormatString);
 
         static int32 GetErrorNumberFromResourceID(int32 resourceId);
+        static bool ShouldTypeofErrorBeReThrown(Var errorObject);
 
         virtual JavascriptError* CreateNewErrorOfSameType(JavascriptLibrary* targetJavascriptLibrary);
         JavascriptError* CloneErrorMsgAndNumber(JavascriptLibrary* targetJavascriptLibrary);

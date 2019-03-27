@@ -11,6 +11,7 @@
 #include "test/unittests/test-utils.h"
 
 namespace v8 {
+namespace remote_object_unittest {
 
 typedef TestWithIsolate RemoteObjectTest;
 
@@ -80,7 +81,7 @@ TEST_F(RemoteObjectTest, TypeOfRemoteContext) {
 
   Local<Object> remote_context =
       Context::NewRemoteContext(isolate(), global_template).ToLocalChecked();
-  String::Utf8Value result(remote_context->TypeOf(isolate()));
+  String::Utf8Value result(isolate(), remote_context->TypeOf(isolate()));
   EXPECT_STREQ("object", *result);
 }
 
@@ -93,7 +94,7 @@ TEST_F(RemoteObjectTest, TypeOfRemoteObject) {
 
   Local<Object> remote_object =
       constructor_template->NewRemoteInstance().ToLocalChecked();
-  String::Utf8Value result(remote_object->TypeOf(isolate()));
+  String::Utf8Value result(isolate(), remote_object->TypeOf(isolate()));
   EXPECT_STREQ("object", *result);
 }
 
@@ -111,8 +112,9 @@ TEST_F(RemoteObjectTest, ClassOf) {
       constructor_template->NewRemoteInstance().ToLocalChecked();
   Local<String> class_name = Utils::ToLocal(
       i::handle(Utils::OpenHandle(*remote_object)->class_name(), i_isolate()));
-  String::Utf8Value result(class_name);
+  String::Utf8Value result(isolate(), class_name);
   EXPECT_STREQ("test_class", *result);
 }
 
+}  // namespace remote_object_unittest
 }  // namespace v8

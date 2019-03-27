@@ -7,6 +7,7 @@
 // can share the same array buffer.
 //----------------------------------------------------------------------------
 #include "RuntimeLibraryPch.h"
+#include "AtomicsOperations.h"
 
 #define INSTANTIATE_BUILT_IN_ENTRYPOINTS(typeName) \
     template Var typeName::NewInstance(RecyclableObject* function, CallInfo callInfo, ...); \
@@ -201,134 +202,267 @@ namespace Js
     template <typename TypeName, bool clamped, bool virtualAllocated>
     TypedArray<TypeName, clamped, virtualAllocated>* TypedArray<TypeName, clamped, virtualAllocated>::FromVar(Var aValue)
     {
-        AssertMsg(TypedArray::Is(aValue), "invalid TypedArray");
-        return static_cast<TypedArray<TypeName, clamped, virtualAllocated>*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(TypedArray::Is(aValue), "invalid TypedArray");
+        return static_cast<TypedArray<TypeName, clamped, virtualAllocated>*>(aValue);
     }
 
     template<> Uint8ClampedArray* Uint8ClampedArray::FromVar(Var aValue)
     {
-        AssertMsg(Uint8ClampedArray::Is(aValue), "invalid Uint8ClampedArray");
-        return static_cast<Uint8ClampedArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint8ClampedArray::Is(aValue), "invalid Uint8ClampedArray");
+        return static_cast<Uint8ClampedArray*>(aValue);
     }
 
     template<> Uint8Array* Uint8Array::FromVar(Var aValue)
     {
-        AssertMsg(Uint8Array::Is(aValue), "invalid Uint8Array");
-        return static_cast<Uint8Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint8Array::Is(aValue), "invalid Uint8Array");
+        return static_cast<Uint8Array*>(aValue);
     }
 
     template<> Int8Array* Int8Array::FromVar(Var aValue)
     {
-        AssertMsg(Int8Array::Is(aValue), "invalid Int8Array");
-        return static_cast<Int8Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int8Array::Is(aValue), "invalid Int8Array");
+        return static_cast<Int8Array*>(aValue);
     }
 
     template<> Int16Array* Int16Array::FromVar(Var aValue)
     {
-        AssertMsg(Int16Array::Is(aValue), "invalid Int16Array");
-        return static_cast<Int16Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int16Array::Is(aValue), "invalid Int16Array");
+        return static_cast<Int16Array*>(aValue);
     }
 
     template<> Uint16Array* Uint16Array::FromVar(Var aValue)
     {
-        AssertMsg(Uint16Array::Is(aValue), "invalid Uint16Array");
-        return static_cast<Uint16Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint16Array::Is(aValue), "invalid Uint16Array");
+        return static_cast<Uint16Array*>(aValue);
     }
 
     template<> Int32Array* Int32Array::FromVar(Var aValue)
     {
-        AssertMsg(Int32Array::Is(aValue), "invalid Int32Array");
-        return static_cast<Int32Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int32Array::Is(aValue), "invalid Int32Array");
+        return static_cast<Int32Array*>(aValue);
     }
 
     template<> Uint32Array* Uint32Array::FromVar(Var aValue)
     {
-        AssertMsg(Uint32Array::Is(aValue), "invalid Uint32Array");
-        return static_cast<Uint32Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint32Array::Is(aValue), "invalid Uint32Array");
+        return static_cast<Uint32Array*>(aValue);
     }
 
     template<> Float32Array* Float32Array::FromVar(Var aValue)
     {
-        AssertMsg(Float32Array::Is(aValue), "invalid Float32Array");
-        return static_cast<Float32Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Float32Array::Is(aValue), "invalid Float32Array");
+        return static_cast<Float32Array*>(aValue);
     }
 
     template<> Float64Array* Float64Array::FromVar(Var aValue)
     {
-        AssertMsg(Float64Array::Is(aValue), "invalid Float64Array");
-        return static_cast<Float64Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Float64Array::Is(aValue), "invalid Float64Array");
+        return static_cast<Float64Array*>(aValue);
     }
 
     template<> Int64Array* Int64Array::FromVar(Var aValue)
     {
-        AssertMsg(Int64Array::Is(aValue), "invalid Int64Array");
-        return static_cast<Int64Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int64Array::Is(aValue), "invalid Int64Array");
+        return static_cast<Int64Array*>(aValue);
     }
 
     template<> Uint64Array* Uint64Array::FromVar(Var aValue)
     {
-        AssertMsg(Uint64Array::Is(aValue), "invalid Uint64Array");
-        return static_cast<Uint64Array*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint64Array::Is(aValue), "invalid Uint64Array");
+        return static_cast<Uint64Array*>(aValue);
     }
 
     template<> Int8VirtualArray* Int8VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Int8VirtualArray::Is(aValue), "invalid Int8Array");
-        return static_cast<Int8VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int8VirtualArray::Is(aValue), "invalid Int8Array");
+        return static_cast<Int8VirtualArray*>(aValue);
     }
 
     template<> Uint8ClampedVirtualArray* Uint8ClampedVirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Uint8ClampedVirtualArray::Is(aValue), "invalid Uint8ClampedArray");
-        return static_cast<Uint8ClampedVirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint8ClampedVirtualArray::Is(aValue), "invalid Uint8ClampedArray");
+        return static_cast<Uint8ClampedVirtualArray*>(aValue);
     }
 
     template<> Uint8VirtualArray* Uint8VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Uint8VirtualArray::Is(aValue), "invalid Uint8Array");
-        return static_cast<Uint8VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint8VirtualArray::Is(aValue), "invalid Uint8Array");
+        return static_cast<Uint8VirtualArray*>(aValue);
     }
 
     template<> Int16VirtualArray* Int16VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Int16VirtualArray::Is(aValue), "invalid Int16Array");
-        return static_cast<Int16VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int16VirtualArray::Is(aValue), "invalid Int16Array");
+        return static_cast<Int16VirtualArray*>(aValue);
     }
 
     template<> Uint16VirtualArray* Uint16VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Uint16VirtualArray::Is(aValue), "invalid Uint16Array");
-        return static_cast<Uint16VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint16VirtualArray::Is(aValue), "invalid Uint16Array");
+        return static_cast<Uint16VirtualArray*>(aValue);
     }
 
     template<> Int32VirtualArray* Int32VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Int32VirtualArray::Is(aValue), "invalid Int32Array");
-        return static_cast<Int32VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Int32VirtualArray::Is(aValue), "invalid Int32Array");
+        return static_cast<Int32VirtualArray*>(aValue);
     }
 
     template<> Uint32VirtualArray* Uint32VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Uint32VirtualArray::Is(aValue), "invalid Uint32Array");
-        return static_cast<Uint32VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Uint32VirtualArray::Is(aValue), "invalid Uint32Array");
+        return static_cast<Uint32VirtualArray*>(aValue);
     }
 
     template<> Float32VirtualArray* Float32VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Float32VirtualArray::Is(aValue), "invalid Float32Array");
-        return static_cast<Float32VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Float32VirtualArray::Is(aValue), "invalid Float32Array");
+        return static_cast<Float32VirtualArray*>(aValue);
     }
 
     template<> Float64VirtualArray* Float64VirtualArray::FromVar(Var aValue)
     {
-        AssertMsg(Float64VirtualArray::Is(aValue), "invalid Float64Array");
-        return static_cast<Float64VirtualArray*>(RecyclableObject::FromVar(aValue));
+        AssertOrFailFastMsg(Float64VirtualArray::Is(aValue), "invalid Float64Array");
+        return static_cast<Float64VirtualArray*>(aValue);
     }
 
     template<> BoolArray* BoolArray::FromVar(Var aValue)
     {
+        AssertOrFailFastMsg(BoolArray::Is(aValue), "invalid BoolArray");
+        return static_cast<BoolArray*>(aValue);
+    }
+
+    template <typename TypeName, bool clamped, bool virtualAllocated>
+    TypedArray<TypeName, clamped, virtualAllocated>* TypedArray<TypeName, clamped, virtualAllocated>::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(TypedArray::Is(aValue), "invalid TypedArray");
+        return static_cast<TypedArray<TypeName, clamped, virtualAllocated>*>(aValue);
+    }
+
+    template<> Uint8ClampedArray* Uint8ClampedArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint8ClampedArray::Is(aValue), "invalid Uint8ClampedArray");
+        return static_cast<Uint8ClampedArray*>(aValue);
+    }
+
+    template<> Uint8Array* Uint8Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint8Array::Is(aValue), "invalid Uint8Array");
+        return static_cast<Uint8Array*>(aValue);
+    }
+
+    template<> Int8Array* Int8Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int8Array::Is(aValue), "invalid Int8Array");
+        return static_cast<Int8Array*>(aValue);
+    }
+
+    template<> Int16Array* Int16Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int16Array::Is(aValue), "invalid Int16Array");
+        return static_cast<Int16Array*>(aValue);
+    }
+
+    template<> Uint16Array* Uint16Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint16Array::Is(aValue), "invalid Uint16Array");
+        return static_cast<Uint16Array*>(aValue);
+    }
+
+    template<> Int32Array* Int32Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int32Array::Is(aValue), "invalid Int32Array");
+        return static_cast<Int32Array*>(aValue);
+    }
+
+    template<> Uint32Array* Uint32Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint32Array::Is(aValue), "invalid Uint32Array");
+        return static_cast<Uint32Array*>(aValue);
+    }
+
+    template<> Float32Array* Float32Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Float32Array::Is(aValue), "invalid Float32Array");
+        return static_cast<Float32Array*>(aValue);
+    }
+
+    template<> Float64Array* Float64Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Float64Array::Is(aValue), "invalid Float64Array");
+        return static_cast<Float64Array*>(aValue);
+    }
+
+    template<> Int64Array* Int64Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int64Array::Is(aValue), "invalid Int64Array");
+        return static_cast<Int64Array*>(aValue);
+    }
+
+    template<> Uint64Array* Uint64Array::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint64Array::Is(aValue), "invalid Uint64Array");
+        return static_cast<Uint64Array*>(aValue);
+    }
+
+    template<> Int8VirtualArray* Int8VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int8VirtualArray::Is(aValue), "invalid Int8Array");
+        return static_cast<Int8VirtualArray*>(aValue);
+    }
+
+    template<> Uint8ClampedVirtualArray* Uint8ClampedVirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint8ClampedVirtualArray::Is(aValue), "invalid Uint8ClampedArray");
+        return static_cast<Uint8ClampedVirtualArray*>(aValue);
+    }
+
+    template<> Uint8VirtualArray* Uint8VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint8VirtualArray::Is(aValue), "invalid Uint8Array");
+        return static_cast<Uint8VirtualArray*>(aValue);
+    }
+
+    template<> Int16VirtualArray* Int16VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int16VirtualArray::Is(aValue), "invalid Int16Array");
+        return static_cast<Int16VirtualArray*>(aValue);
+    }
+
+    template<> Uint16VirtualArray* Uint16VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint16VirtualArray::Is(aValue), "invalid Uint16Array");
+        return static_cast<Uint16VirtualArray*>(aValue);
+    }
+
+    template<> Int32VirtualArray* Int32VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Int32VirtualArray::Is(aValue), "invalid Int32Array");
+        return static_cast<Int32VirtualArray*>(aValue);
+    }
+
+    template<> Uint32VirtualArray* Uint32VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Uint32VirtualArray::Is(aValue), "invalid Uint32Array");
+        return static_cast<Uint32VirtualArray*>(aValue);
+    }
+
+    template<> Float32VirtualArray* Float32VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Float32VirtualArray::Is(aValue), "invalid Float32Array");
+        return static_cast<Float32VirtualArray*>(aValue);
+    }
+
+    template<> Float64VirtualArray* Float64VirtualArray::UnsafeFromVar(Var aValue)
+    {
+        AssertMsg(Float64VirtualArray::Is(aValue), "invalid Float64Array");
+        return static_cast<Float64VirtualArray*>(aValue);
+    }
+
+    template<> BoolArray* BoolArray::UnsafeFromVar(Var aValue)
+    {
         AssertMsg(BoolArray::Is(aValue), "invalid BoolArray");
-        return static_cast<BoolArray*>(RecyclableObject::FromVar(aValue));
+        return static_cast<BoolArray*>(aValue);
     }
 
     TypedArrayBase::TypedArrayBase(ArrayBufferBase* arrayBuffer, uint32 offSet, uint mappedLength, uint elementSize, DynamicType* type) :
@@ -439,7 +573,10 @@ namespace Js
                         (iteratorFn != scriptContext->GetLibrary()->EnsureArrayPrototypeValuesFunction() ||
                             !JavascriptArray::Is(firstArgument) || JavascriptLibrary::ArrayIteratorPrototypeHasUserDefinedNext(scriptContext)))
                     {
-                        Var iterator = CALL_FUNCTION(scriptContext->GetThreadContext(), iteratorFn, CallInfo(Js::CallFlags_Value, 1), RecyclableObject::FromVar(firstArgument));
+                        Var iterator = scriptContext->GetThreadContext()->ExecuteImplicitCall(iteratorFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
+                        {
+                            return CALL_FUNCTION(scriptContext->GetThreadContext(), iteratorFn, CallInfo(Js::CallFlags_Value, 1), RecyclableObject::FromVar(firstArgument));
+                        });
 
                         if (!JavascriptOperators::IsObject(iterator))
                         {
@@ -567,9 +704,7 @@ namespace Js
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
 
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && newTarget != nullptr && !JavascriptOperators::IsUndefined(newTarget);
-        Assert(isCtorSuperCall || !(callInfo.Flags & CallFlags_New) || args[0] == nullptr);
+        JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
 
         JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidTypedArray_Constructor);
     }
@@ -584,8 +719,8 @@ namespace Js
 
         AssertMsg(args.Info.Count > 0, "Should always have implicit 'this'");
 
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && newTarget != nullptr && RecyclableObject::Is(newTarget);
+        Var newTarget = args.GetNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::IsConstructorSuperCall(args);
         Assert(isCtorSuperCall || !(callInfo.Flags & CallFlags_New) || args[0] == nullptr);
 
         if (!(callInfo.Flags & CallFlags_New) || (newTarget && JavascriptOperators::IsUndefinedObject(newTarget)))
@@ -593,7 +728,12 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_ClassConstructorCannotBeCalledWithoutNew, _u("[TypedArray]"));
         }
 
-        Var object = TypedArrayBase::CreateNewInstance(args, scriptContext, sizeof(TypeName), TypedArray<TypeName, clamped, virtualAllocated>::Create);
+        Var object = nullptr;
+        BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+        {
+            object = TypedArray::CreateNewInstance(args, scriptContext, sizeof(TypeName), TypedArray<TypeName, clamped, virtualAllocated>::Create);
+        }
+        END_SAFE_REENTRANT_CALL
 
 #if ENABLE_DEBUG_CONFIG_OPTIONS
         if (Js::Configuration::Global.flags.IsEnabled(Js::autoProxyFlag))
@@ -608,7 +748,7 @@ namespace Js
 
     BOOL TypedArrayBase::HasOwnProperty(PropertyId propertyId)
     {
-        return JavascriptConversion::PropertyQueryFlagsToBoolean(HasPropertyQuery(propertyId));
+        return JavascriptConversion::PropertyQueryFlagsToBoolean(HasPropertyQuery(propertyId, nullptr /*info*/));
     }
 
     inline BOOL TypedArrayBase::CanonicalNumericIndexString(PropertyId propertyId, ScriptContext *scriptContext)
@@ -623,7 +763,7 @@ namespace Js
         return JavascriptConversion::CanonicalNumericIndexString(propertyString, &result, scriptContext);
     }
 
-    PropertyQueryFlags TypedArrayBase::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags TypedArrayBase::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         uint32 index = 0;
         ScriptContext *scriptContext = GetScriptContext();
@@ -638,7 +778,7 @@ namespace Js
             return PropertyQueryFlags::Property_NotFound_NoProto;
         }
 
-        return DynamicObject::HasPropertyQuery(propertyId);
+        return DynamicObject::HasPropertyQuery(propertyId, info);
     }
 
     BOOL TypedArrayBase::DeleteProperty(PropertyId propertyId, PropertyOperationFlags flags)
@@ -671,18 +811,17 @@ namespace Js
 
     PropertyQueryFlags TypedArrayBase::GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext)
     {
-        uint32 index = 0;
-        if (GetScriptContext()->IsNumericPropertyId(propertyId, &index))
+        const Js::PropertyRecord* propertyRecord = requestContext->GetPropertyName(propertyId);
+        if (propertyRecord->IsNumeric())
         {
-            *value = this->DirectGetItem(index);
+            *value = this->DirectGetItem(propertyRecord->GetNumericValue());
             if (JavascriptOperators::GetTypeId(*value) == Js::TypeIds_Undefined)
             {
                 return PropertyQueryFlags::Property_NotFound;
             }
             return PropertyQueryFlags::Property_Found;
         }
-
-        if (!requestContext->GetPropertyName(propertyId)->IsSymbol() && CanonicalNumericIndexString(propertyId, requestContext))
+        if (!propertyRecord->IsSymbol() && CanonicalNumericIndexString(propertyId, requestContext))
         {
             *value = requestContext->GetLibrary()->GetUndefined();
             return PropertyQueryFlags::Property_NotFound_NoProto;
@@ -720,6 +859,13 @@ namespace Js
         return PropertyQueryFlags::Property_NotFound_NoProto;
     }
 
+    BOOL TypedArrayBase::DeleteItem(uint32 index, Js::PropertyOperationFlags flags)
+    {
+        JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(
+            flags, GetScriptContext(), GetScriptContext()->GetIntegerString(index)->GetString());
+        return FALSE;
+    }
+
     PropertyQueryFlags TypedArrayBase::GetItemQuery(Var originalInstance, uint32 index, Var* value, ScriptContext* requestContext)
     {
         *value = DirectGetItem(index);
@@ -734,16 +880,16 @@ namespace Js
 
     BOOL TypedArrayBase::SetProperty(PropertyId propertyId, Var value, PropertyOperationFlags flags, PropertyValueInfo* info)
     {
-        uint32 index;
         ScriptContext *scriptContext = GetScriptContext();
 
-        if (GetScriptContext()->IsNumericPropertyId(propertyId, &index))
+        const PropertyRecord* propertyRecord = scriptContext->GetPropertyName(propertyId);
+        if (propertyRecord->IsNumeric())
         {
-            this->DirectSetItem(index, value);
+            this->DirectSetItem(propertyRecord->GetNumericValue(), value);
             return true;
         }
 
-        if (!scriptContext->GetPropertyName(propertyId)->IsSymbol() && CanonicalNumericIndexString(propertyId, scriptContext))
+        if (!propertyRecord->IsSymbol() && CanonicalNumericIndexString(propertyId, scriptContext))
         {
             return FALSE;
         }
@@ -800,9 +946,9 @@ namespace Js
         return __super::GetItemSetter(index, setterValue, requestContext);
     }
 
-    BOOL TypedArrayBase::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL TypedArrayBase::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
-        return enumerator->Initialize(nullptr, this, this, flags, requestContext, forInCache);
+        return enumerator->Initialize(nullptr, this, this, flags, requestContext, enumeratorCache);
     }
 
     JavascriptEnumerator * TypedArrayBase::GetIndexEnumerator(EnumeratorFlags flags, ScriptContext * requestContext)
@@ -947,15 +1093,14 @@ namespace Js
     {
         ScriptContext* scriptContext = GetScriptContext();
 
-        uint32 index;
-
-        if (scriptContext->IsNumericPropertyId(propertyId, &index))
+        const PropertyRecord* propertyRecord = scriptContext->GetPropertyName(propertyId);
+        if (propertyRecord->IsNumeric())
         {
             VerifySetItemAttributes(propertyId, attributes);
-            return SetItem(index, value);
+            return SetItem(propertyRecord->GetNumericValue(), value);
         }
 
-        if (!scriptContext->GetPropertyName(propertyId)->IsSymbol() && CanonicalNumericIndexString(propertyId, scriptContext))
+        if (!propertyRecord->IsSymbol() && CanonicalNumericIndexString(propertyId, scriptContext))
         {
             return FALSE;
         }
@@ -982,13 +1127,20 @@ namespace Js
 
     TypedArrayBase* TypedArrayBase::FromVar(Var aValue)
     {
+        AssertOrFailFastMsg(Is(aValue), "must be a typed array");
+        return static_cast<TypedArrayBase*>(aValue);
+    }
+
+    TypedArrayBase* TypedArrayBase::UnsafeFromVar(Var aValue)
+    {
         AssertMsg(Is(aValue), "must be a typed array");
         return static_cast<TypedArrayBase*>(aValue);
     }
 
     BOOL TypedArrayBase::IsDetachedTypedArray(Var aValue)
     {
-        return Is(aValue) && FromVar(aValue)->IsDetachedBuffer();
+        TypedArrayBase* arr = JavascriptOperators::TryFromVar<TypedArrayBase>(aValue);
+        return arr && arr->IsDetachedBuffer();
     }
 
     void TypedArrayBase::Set(TypedArrayBase* source, uint32 offset)
@@ -1012,11 +1164,13 @@ namespace Js
         // types of the same size are compatible, with the following exceptions:
         // - we cannot memmove between float and int arrays, due to different bit pattern
         // - we cannot memmove to a uint8 clamped array from an int8 array, due to negatives rounding to 0
-        if (GetTypeId() == source->GetTypeId()
-            || (GetBytesPerElement() == source->GetBytesPerElement()
-            && !(Uint8ClampedArray::Is(this) && Int8Array::Is(source))
-            && !Float32Array::Is(this) && !Float32Array::Is(source)
-            && !Float64Array::Is(this) && !Float64Array::Is(source)))
+        if (GetTypeId() == source->GetTypeId() ||
+            (GetBytesPerElement() == source->GetBytesPerElement()
+             && !((Uint8ClampedArray::Is(this) || Uint8ClampedVirtualArray::Is(this)) && (Int8Array::Is(source) || Int8VirtualArray::Is(source)))
+             && !Float32Array::Is(this) && !Float32Array::Is(source) 
+             && !Float32VirtualArray::Is(this) && !Float32VirtualArray::Is(source)
+             && !Float64Array::Is(this) && !Float64Array::Is(source)
+             && !Float64VirtualArray::Is(this) && !Float64VirtualArray::Is(source)))
         {
             const size_t offsetInBytes = offset * BYTES_PER_ELEMENT;
             memmove_s(buffer + offsetInBytes,
@@ -1148,7 +1302,11 @@ namespace Js
         AssertMsg(IsDetachedBuffer(), "Array buffer should be detached if we're calling this method");
 
         this->length = 0;
+#if INT32VAR
+        this->buffer = (BYTE*)TaggedInt::ToVarUnchecked(0);
+#else
         this->buffer = nullptr;
+#endif
     }
 
     Var TypedArrayBase::EntryGetterBuffer(RecyclableObject* function, CallInfo callInfo, ...)
@@ -1165,7 +1323,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        TypedArrayBase* typedArray = TypedArrayBase::FromVar(args[0]);
+        TypedArrayBase* typedArray = TypedArrayBase::UnsafeFromVar(args[0]);
         ArrayBufferBase* arrayBuffer = typedArray->GetArrayBuffer();
 
         if (arrayBuffer == nullptr)
@@ -1190,7 +1348,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        TypedArrayBase* typedArray = TypedArrayBase::FromVar(args[0]);
+        TypedArrayBase* typedArray = TypedArrayBase::UnsafeFromVar(args[0]);
         ArrayBufferBase* arrayBuffer = typedArray->GetArrayBuffer();
 
         if (arrayBuffer == nullptr)
@@ -1219,7 +1377,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        TypedArrayBase* typedArray = TypedArrayBase::FromVar(args[0]);
+        TypedArrayBase* typedArray = TypedArrayBase::UnsafeFromVar(args[0]);
         ArrayBufferBase* arrayBuffer = typedArray->GetArrayBuffer();
 
         if (arrayBuffer == nullptr)
@@ -1248,7 +1406,7 @@ namespace Js
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
 
-        TypedArrayBase* typedArray = TypedArrayBase::FromVar(args[0]);
+        TypedArrayBase* typedArray = TypedArrayBase::UnsafeFromVar(args[0]);
         ArrayBufferBase* arrayBuffer = typedArray->GetArrayBuffer();
 
         if (arrayBuffer == nullptr)
@@ -1399,9 +1557,9 @@ namespace Js
             offset = ArrayBuffer::ToIndex(args[2], JSERR_InvalidTypedArrayLength, scriptContext, ArrayBuffer::MaxArrayBufferLength, false);
         }
 
-        if (TypedArrayBase::Is(args[1]))
+        TypedArrayBase* typedArraySource = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(args[1]);
+        if (typedArraySource)
         {
-            TypedArrayBase* typedArraySource = TypedArrayBase::FromVar(args[1]);
             if (typedArraySource->IsDetachedBuffer() || typedArrayBase->IsDetachedBuffer()) // If IsDetachedBuffer(targetBuffer) is true, then throw a TypeError exception.
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_DetachedTypedArray, _u("[TypedArray].prototype.set"));
@@ -1491,12 +1649,17 @@ namespace Js
 
         if (scriptContext->GetConfig()->IsES6SpeciesEnabled())
         {
-            JavascriptFunction* constructor =
-                JavascriptFunction::FromVar(JavascriptOperators::SpeciesConstructor(this, TypedArrayBase::GetDefaultConstructor(this, scriptContext), scriptContext));
+            JavascriptFunction* defaultConstructor = TypedArrayBase::GetDefaultConstructor(this, scriptContext);
+            RecyclableObject* constructor = JavascriptOperators::SpeciesConstructor(this, defaultConstructor, scriptContext);
+            AssertOrFailFast(JavascriptOperators::IsConstructor(constructor));
 
-            Js::Var constructorArgs[] = { constructor, buffer, JavascriptNumber::ToVar(beginByteOffset, scriptContext), JavascriptNumber::ToVar(newLength, scriptContext) };
-            Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-            newTypedArray = RecyclableObject::FromVar(TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), newLength, scriptContext));
+            bool isDefaultConstructor = constructor == defaultConstructor;
+            newTypedArray = RecyclableObject::FromVar(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+            { 
+                Js::Var constructorArgs[] = { constructor, buffer, JavascriptNumber::ToVar(beginByteOffset, scriptContext), JavascriptNumber::ToVar(newLength, scriptContext) };
+                Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
+                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), newLength, scriptContext);
+            }));
         }
         else
         {
@@ -1526,6 +1689,7 @@ namespace Js
         }
 
         RecyclableObject* constructor = RecyclableObject::FromVar(args[0]);
+        bool isDefaultConstructor = JavascriptLibrary::IsTypedArrayConstructor(constructor, scriptContext);
         RecyclableObject* items = nullptr;
 
         if (args.Info.Count < 2 || !JavascriptConversion::ToObject(args[1], scriptContext, &items))
@@ -1579,21 +1743,19 @@ namespace Js
                 JsUtil::List<Var, ArenaAllocator>* tempList = IteratorToList(iterator, scriptContext, tempAlloc);
 
                 uint32 len = tempList->Count();
+                newObj = JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+                {
+                    Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
+                    Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
+                    return TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+                });
 
-                Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
-                Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-                newObj = TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
-
-                TypedArrayBase* newTypedArrayBase = nullptr;
+                TypedArrayBase* newTypedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
                 JavascriptArray* newArr = nullptr;
 
-                if (TypedArrayBase::Is(newObj))
+                if (!newTypedArrayBase)
                 {
-                    newTypedArrayBase = TypedArrayBase::FromVar(newObj);
-                }
-                else if (JavascriptArray::Is(newObj))
-                {
-                    newArr = JavascriptArray::FromVar(newObj);
+                    newArr = JavascriptOperators::TryFromVar<JavascriptArray>(newObj);
                 }
 
                 for (uint32 k = 0; k < len; k++)
@@ -1605,9 +1767,11 @@ namespace Js
                         Assert(mapFn != nullptr);
                         Assert(mapFnThisArg != nullptr);
 
-                        Js::Var mapFnArgs[] = { mapFnThisArg, kValue, JavascriptNumber::ToVar(k, scriptContext) };
-                        Js::CallInfo mapFnCallInfo(Js::CallFlags_Value, _countof(mapFnArgs));
-                        kValue = mapFn->CallFunction(Js::Arguments(mapFnCallInfo, mapFnArgs));
+                        Var kVar = JavascriptNumber::ToVar(k, scriptContext);
+                        kValue = scriptContext->GetThreadContext()->ExecuteImplicitCall(mapFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
+                        {
+                            return CALL_FUNCTION(scriptContext->GetThreadContext(), mapFn, CallInfo(CallFlags_Value, 3), mapFnThisArg, kValue, kVar);
+                        });
                     }
 
                     // We're likely to have constructed a new TypedArray, but the constructor could return any object
@@ -1632,32 +1796,27 @@ namespace Js
             Var lenValue = JavascriptOperators::OP_GetLength(items, scriptContext);
             uint32 len = JavascriptConversion::ToUInt32(lenValue, scriptContext);
 
-            TypedArrayBase* itemsTypedArrayBase = nullptr;
+            TypedArrayBase* itemsTypedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(items);
             JavascriptArray* itemsArray = nullptr;
 
-            if (TypedArrayBase::Is(items))
+            if (!itemsTypedArrayBase)
             {
-                itemsTypedArrayBase = TypedArrayBase::FromVar(items);
-            }
-            else if (JavascriptArray::Is(items))
-            {
-                itemsArray = JavascriptArray::FromVar(items);
+                itemsArray = JavascriptOperators::TryFromVar<JavascriptArray>(items);
             }
 
-            Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
-            Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-            newObj = TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+            newObj = JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+            {
+                Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(len, scriptContext) };
+                Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
+                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), len, scriptContext);
+            });
 
-            TypedArrayBase* newTypedArrayBase = nullptr;
+            TypedArrayBase* newTypedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
             JavascriptArray* newArr = nullptr;
 
-            if (TypedArrayBase::Is(newObj))
+            if (!newTypedArrayBase)
             {
-                newTypedArrayBase = TypedArrayBase::FromVar(newObj);
-            }
-            else if (JavascriptArray::Is(newObj))
-            {
-                newArr = JavascriptArray::FromVar(newObj);
+                newArr = JavascriptOperators::TryFromVar<JavascriptArray>(newObj);
             }
 
             for (uint32 k = 0; k < len; k++)
@@ -1683,9 +1842,11 @@ namespace Js
                     Assert(mapFn != nullptr);
                     Assert(mapFnThisArg != nullptr);
 
-                    Js::Var mapFnArgs[] = { mapFnThisArg, kValue, JavascriptNumber::ToVar(k, scriptContext) };
-                    Js::CallInfo mapFnCallInfo(Js::CallFlags_Value, _countof(mapFnArgs));
-                    kValue = mapFn->CallFunction(Js::Arguments(mapFnCallInfo, mapFnArgs));
+                    Var kVar = JavascriptNumber::ToVar(k, scriptContext);
+                    kValue = scriptContext->GetThreadContext()->ExecuteImplicitCall(mapFn, Js::ImplicitCall_Accessor, [=]()->Js::Var
+                    {
+                        return CALL_FUNCTION(scriptContext->GetThreadContext(), mapFn, CallInfo(CallFlags_Value, 3), mapFnThisArg, kValue, kVar);
+                    });
                 }
 
                 // If constructor built a TypedArray (likely) or Array (maybe likely) we can do a more direct set operation
@@ -1744,6 +1905,30 @@ namespace Js
     Var TypedArrayBase::GetKeysEntriesValuesHelper(Arguments& args, ScriptContext *scriptContext, LPCWSTR apiName, JavascriptArrayIteratorKind kind)
     {
         TypedArrayBase* typedArrayBase = ValidateTypedArray(args, scriptContext, apiName);
+#ifdef ENABLE_JS_BUILTINS
+        JavascriptLibrary * library = scriptContext->GetLibrary();
+        if (scriptContext->IsJsBuiltInEnabled())
+        {
+            JavascriptString* methodName = JavascriptString::NewWithSz(_u("CreateArrayIterator"), scriptContext);
+            PropertyIds functionIdentifier = JavascriptOperators::GetPropertyId(methodName, scriptContext);
+            Var scriptFunction = JavascriptOperators::OP_GetProperty(library->GetChakraLib(), functionIdentifier, scriptContext);
+
+            Assert(!JavascriptOperators::IsUndefinedOrNull(scriptFunction));
+            Assert(JavascriptConversion::IsCallable(scriptFunction));
+
+            RecyclableObject* function = RecyclableObject::FromVar(scriptFunction);
+
+            Var chakraLibObj = JavascriptOperators::OP_GetProperty(library->GetGlobalObject(), PropertyIds::__chakraLibrary, scriptContext);
+            Var argsIt[] = { chakraLibObj, args[0], TaggedInt::ToVarUnchecked((int)kind) };
+            CallInfo callInfo(CallFlags_Value, 3);
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                return JavascriptFunction::CallFunction<true>(function, function->GetEntryPoint(), Js::Arguments(callInfo, argsIt));
+            }
+            END_SAFE_REENTRANT_CALL
+        }
+        else
+#endif
         return scriptContext->GetLibrary()->CreateArrayIterator(typedArrayBase, kind);
     }
 
@@ -1843,11 +2028,15 @@ namespace Js
                 // We know that the TypedArray.HasItem will be true because k < length and we can skip the check in the TypedArray version of filter.
                 element = typedArrayBase->DirectGetItem(k);
 
-                selected = CALL_FUNCTION(scriptContext->GetThreadContext(),
-                    callBackFn, CallInfo(flags, 4), thisArg,
-                    element,
-                    JavascriptNumber::ToVar(k, scriptContext),
-                    typedArrayBase);
+                BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+                {
+                    selected = CALL_FUNCTION(scriptContext->GetThreadContext(),
+                                    callBackFn, CallInfo(flags, 4), thisArg,
+                                    element,
+                                    JavascriptNumber::ToVar(k, scriptContext),
+                                    typedArrayBase);
+                }
+                END_SAFE_REENTRANT_CALL
 
                 if (JavascriptConversion::ToBoolean(selected, scriptContext))
                 {
@@ -1857,17 +2046,22 @@ namespace Js
 
             uint32 captured = tempList->Count();
 
-            Var constructor = JavascriptOperators::SpeciesConstructor(
-                typedArrayBase, TypedArrayBase::GetDefaultConstructor(args[0], scriptContext), scriptContext);
+            JavascriptFunction* defaultConstructor = TypedArrayBase::GetDefaultConstructor(args[0], scriptContext);
+            RecyclableObject* constructor = JavascriptOperators::SpeciesConstructor(typedArrayBase, defaultConstructor, scriptContext);
+            AssertOrFailFast(JavascriptOperators::IsConstructor(constructor));
 
-            Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(captured, scriptContext) };
-            Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
-            newObj = RecyclableObject::FromVar(TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), captured, scriptContext));
+            bool isDefaultConstructor = constructor == defaultConstructor;
+            newObj = RecyclableObject::FromVar(JavascriptOperators::NewObjectCreationHelper_ReentrancySafe(constructor, isDefaultConstructor, scriptContext->GetThreadContext(), [=]()->Js::Var
+            {
+                Js::Var constructorArgs[] = { constructor, JavascriptNumber::ToVar(captured, scriptContext) };
+                Js::CallInfo constructorCallInfo(Js::CallFlags_New, _countof(constructorArgs));
+                return TypedArrayBase::TypedArrayCreate(constructor, &Js::Arguments(constructorCallInfo, constructorArgs), captured, scriptContext);
+            }));
 
-            if (TypedArrayBase::Is(newObj))
+            TypedArrayBase* newArr = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(newObj);
+            if (newArr)
             {
                 // We are much more likely to have a TypedArray here than anything else
-                TypedArrayBase* newArr = TypedArrayBase::FromVar(newObj);
 
                 for (uint32 i = 0; i < captured; i++)
                 {
@@ -1957,12 +2151,16 @@ namespace Js
 
             Var element = typedArrayBase->DirectGetItem(k);
 
-            CALL_FUNCTION(scriptContext->GetThreadContext(),
-                callBackFn, CallInfo(CallFlags_Value, 4),
-                thisArg,
-                element,
-                JavascriptNumber::ToVar(k, scriptContext),
-                typedArrayBase);
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                CALL_FUNCTION(scriptContext->GetThreadContext(),
+                    callBackFn, CallInfo(CallFlags_Value, 4),
+                    thisArg,
+                    element,
+                    JavascriptNumber::ToVar(k, scriptContext),
+                    typedArrayBase);
+            }
+            END_SAFE_REENTRANT_CALL
         }
 
         return scriptContext->GetLibrary()->GetUndefined();
@@ -2240,11 +2438,16 @@ namespace Js
             ScriptContext* scriptContext = compFn->GetScriptContext();
             Var undefined = scriptContext->GetLibrary()->GetUndefined();
             double dblResult;
-            Var retVal = CALL_FUNCTION(scriptContext->GetThreadContext(),
-                compFn, CallInfo(CallFlags_Value, 3),
-                undefined,
-                JavascriptNumber::ToVarWithCheck((double)x, scriptContext),
-                JavascriptNumber::ToVarWithCheck((double)y, scriptContext));
+            Var retVal = nullptr;
+            BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
+            {
+                retVal = CALL_FUNCTION(scriptContext->GetThreadContext(),
+                            compFn, CallInfo(CallFlags_Value, 3),
+                            undefined,
+                            JavascriptNumber::ToVarWithCheck((double)x, scriptContext),
+                            JavascriptNumber::ToVarWithCheck((double)y, scriptContext));
+            }
+            END_SAFE_REENTRANT_CALL
 
             Assert(TypedArrayBase::Is(contextArray[0]));
             if (TypedArrayBase::IsDetachedTypedArray(contextArray[0]))
@@ -2539,43 +2742,32 @@ namespace Js
     }
 
     // static
-    Var TypedArrayBase::GetDefaultConstructor(Var object, ScriptContext* scriptContext)
+    JavascriptFunction* TypedArrayBase::GetDefaultConstructor(Var object, ScriptContext* scriptContext)
     {
-        TypeId typeId = JavascriptOperators::GetTypeId(object);
-        Var defaultConstructor = nullptr;
-        switch (typeId)
+        switch (JavascriptOperators::GetTypeId(object))
         {
         case TypeId::TypeIds_Int8Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetInt8ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetInt8ArrayConstructor();
         case TypeId::TypeIds_Uint8Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetUint8ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetUint8ArrayConstructor();
         case TypeId::TypeIds_Uint8ClampedArray:
-            defaultConstructor = scriptContext->GetLibrary()->GetUint8ClampedArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetUint8ClampedArrayConstructor();
         case TypeId::TypeIds_Int16Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetInt16ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetInt16ArrayConstructor();
         case TypeId::TypeIds_Uint16Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetUint16ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetUint16ArrayConstructor();
         case TypeId::TypeIds_Int32Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetInt32ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetInt32ArrayConstructor();
         case TypeId::TypeIds_Uint32Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetUint32ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetUint32ArrayConstructor();
         case TypeId::TypeIds_Float32Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetFloat32ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetFloat32ArrayConstructor();
         case TypeId::TypeIds_Float64Array:
-            defaultConstructor = scriptContext->GetLibrary()->GetFloat64ArrayConstructor();
-            break;
+            return scriptContext->GetLibrary()->GetFloat64ArrayConstructor();
         default:
-            Assert(false);
+            Assert(UNREACHED);
+            return nullptr;
         }
-        return defaultConstructor;
     }
 
     Var TypedArrayBase::FindMinOrMax(Js::ScriptContext * scriptContext, TypeId typeId, bool findMax)
@@ -2657,12 +2849,11 @@ namespace Js
     // static
     TypedArrayBase* TypedArrayBase::ValidateTypedArray(Var aValue, ScriptContext *scriptContext, LPCWSTR apiName)
     {
-        if (!TypedArrayBase::Is(aValue))
+        TypedArrayBase *typedArrayBase = JavascriptOperators::TryFromVar<Js::TypedArrayBase>(aValue);
+        if (!typedArrayBase)
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NeedTypedArray);
         }
-
-        TypedArrayBase *typedArrayBase = TypedArrayBase::FromVar(aValue);
 
         if (typedArrayBase->IsDetachedBuffer())
         {
@@ -2677,10 +2868,10 @@ namespace Js
     {
         Var newObj = JavascriptOperators::NewScObject(constructor, *args, scriptContext);
 
-        TypedArrayBase::ValidateTypedArray(newObj, scriptContext, nullptr);
+        TypedArrayBase * typedArray = TypedArrayBase::ValidateTypedArray(newObj, scriptContext, nullptr);
 
         // ECMA262 22.2.4.6 TypedArrayCreate line 3. "If argumentList is a List of a single Number" (args[0] == constructor)
-        if (args->Info.Count == 2 && TypedArrayBase::FromVar(newObj)->GetLength() < length)
+        if (args->Info.Count == 2 && typedArray->GetLength() < length)
         {
             JavascriptError::ThrowTypeError(scriptContext, JSERR_InvalidTypedArrayLength);
         }
@@ -2802,160 +2993,85 @@ namespace Js
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float64Array);
     DIRECT_GET_VAR_CHECK_NO_DETACH_CHECK(Float64VirtualArray);
 
-#define TypedArrayBeginStub(type) \
-        Assert(GetArrayBuffer() || GetArrayBuffer()->GetBuffer()); \
-        Assert(index < GetLength()); \
+#define TypedArrayBeginStub(TypedArrayName) \
+        Assert(GetArrayBuffer() && GetArrayBuffer()->GetBuffer()); \
+        Assert(accessIndex < GetLength()); \
         ScriptContext *scriptContext = GetScriptContext(); \
-        type *buffer = (type*)this->buffer + index;
+        typedef TypedArrayName::TypedArrayType type; \
+        type *buffer = (type*)this->buffer + accessIndex;
 
-#ifdef _WIN32
-#define InterlockedExchangeAdd8 _InterlockedExchangeAdd8
-#define InterlockedExchangeAdd16 _InterlockedExchangeAdd16
-
-#define InterlockedAnd8 _InterlockedAnd8
-#define InterlockedAnd16 _InterlockedAnd16
-
-#define InterlockedOr8 _InterlockedOr8
-#define InterlockedOr16 _InterlockedOr16
-
-#define InterlockedXor8 _InterlockedXor8
-#define InterlockedXor16 _InterlockedXor16
-
-#define InterlockedCompareExchange8 _InterlockedCompareExchange8
-#define InterlockedCompareExchange16 _InterlockedCompareExchange16
-
-#define InterlockedExchange8 _InterlockedExchange8
-#define InterlockedExchange16 _InterlockedExchange16
-#endif
-
-#define InterlockedExchangeAdd32 InterlockedExchangeAdd
-#define InterlockedAnd32 InterlockedAnd
-#define InterlockedOr32 InterlockedOr
-#define InterlockedXor32 InterlockedXor
-#define InterlockedCompareExchange32 InterlockedCompareExchange
-#define InterlockedExchange32 InterlockedExchange
-
-#define TypedArrayAddOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedAdd(__in uint32 index, __in Var second) \
+#define TypedArrayStore(TypedArrayName, fnName, convertFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var value) \
     { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedExchangeAdd##bit((convertType*)buffer, (convertType)convertFn(second, scriptContext)); \
+        TypedArrayBeginStub(TypedArrayName); \
+        double retVal = JavascriptConversion::ToInteger(value, scriptContext); \
+        AtomicsOperations::fnName(buffer, convertFn(retVal)); \
+        return JavascriptNumber::ToVarWithCheck(retVal, scriptContext); \
+    }
+
+#define TypedArrayOp1(TypedArrayName, fnName, convertFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex) \
+    { \
+        TypedArrayBeginStub(TypedArrayName); \
+        type result = AtomicsOperations::fnName(buffer); \
         return JavascriptNumber::ToVar(result, scriptContext); \
     }
 
-#define TypedArrayAndOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedAnd(__in uint32 index, __in Var second) \
+#define TypedArrayOp2(TypedArrayName, fnName, convertFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var value) \
     { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedAnd##bit((convertType*)buffer, (convertType)convertFn(second, scriptContext)); \
+        TypedArrayBeginStub(TypedArrayName); \
+        type result = AtomicsOperations::fnName(buffer, convertFn(value, scriptContext)); \
         return JavascriptNumber::ToVar(result, scriptContext); \
     }
 
-#define TypedArrayCompareExchangeOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedCompareExchange(__in uint32 index, __in Var comparand, __in Var replacementValue) \
+#define TypedArrayOp3(TypedArrayName, fnName, convertFn) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var first, __in Var value) \
     { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedCompareExchange##bit((convertType*)buffer, (convertType)convertFn(replacementValue, scriptContext), (convertType)convertFn(comparand, scriptContext)); \
-        return JavascriptNumber::ToVar(result, scriptContext); \
-    }
-
-#define TypedArrayExchangeOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedExchange(__in uint32 index, __in Var second) \
-    { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedExchange##bit((convertType*)buffer, (convertType)convertFn(second, scriptContext)); \
-        return JavascriptNumber::ToVar(result, scriptContext); \
-    }
-
-#define TypedArrayLoadOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedLoad(__in uint32 index) \
-    { \
-        TypedArrayBeginStub(type); \
-        MemoryBarrier(); \
-        type result = (type)*buffer; \
-        return JavascriptNumber::ToVar(result, scriptContext); \
-    }
-
-#define TypedArrayOrOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedOr(__in uint32 index, __in Var second) \
-    { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedOr##bit((convertType*)buffer, (convertType)convertFn(second, scriptContext)); \
-        return JavascriptNumber::ToVar(result, scriptContext); \
-    }
-
-    // Currently the TypedStore is just using the InterlockedExchange to store the value in the buffer.
-    // TODO The InterlockedExchange will have the sequential consistency any way, not sure why do we need the Memory barrier or std::atomic::store to perform this.
-
-#define TypedArrayStoreOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedStore(__in uint32 index, __in Var second) \
-    { \
-        TypedArrayBeginStub(type); \
-        double d = JavascriptConversion::ToInteger(second, scriptContext); \
-        convertType s = (convertType)JavascriptConversion::ToUInt32(d); \
-        InterlockedExchange##bit((convertType*)buffer, s); \
-        return JavascriptNumber::ToVarWithCheck(d, scriptContext); \
-    }
-
-#define TypedArraySubOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedSub(__in uint32 index, __in Var second) \
-    { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedExchangeAdd##bit((convertType*)buffer, - (convertType)convertFn(second, scriptContext)); \
-        return JavascriptNumber::ToVar(result, scriptContext); \
-    }
-
-#define TypedArrayXorOp(TypedArrayName, bit, type, convertType, convertFn) \
-    template<> \
-    inline Var TypedArrayName##::TypedXor(__in uint32 index, __in Var second) \
-    { \
-        TypedArrayBeginStub(type); \
-        type result = (type)InterlockedXor##bit((convertType*)buffer, (convertType)convertFn(second, scriptContext)); \
+        TypedArrayBeginStub(TypedArrayName); \
+        type result = AtomicsOperations::fnName(buffer, convertFn(first, scriptContext), convertFn(value, scriptContext)); \
         return JavascriptNumber::ToVar(result, scriptContext); \
     }
 
 #define GenerateNotSupportedStub1(TypedArrayName, fnName) \
-    template<> \
-    inline Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex) \
     { \
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray); \
     }
 
 #define GenerateNotSupportedStub2(TypedArrayName, fnName) \
-    template<> \
-    inline Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var value) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var value) \
     { \
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray); \
     }
 
 #define GenerateNotSupportedStub3(TypedArrayName, fnName) \
-    template<> \
-    inline Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var first, __in Var value) \
+    template<>\
+    Var TypedArrayName##::Typed##fnName(__in uint32 accessIndex, __in Var first, __in Var value) \
     { \
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray); \
     }
 
+
 #define GENERATE_FOREACH_TYPEDARRAY(TYPEDARRAY_DEF, NOTSUPPORTEDSTUB, OP) \
-        TYPEDARRAY_DEF(Int8Array, 8, int8, char, JavascriptConversion::ToInt8); \
-        TYPEDARRAY_DEF(Int8VirtualArray, 8, int8, char, JavascriptConversion::ToInt8); \
-        TYPEDARRAY_DEF(Uint8Array, 8, uint8, char, JavascriptConversion::ToUInt8); \
-        TYPEDARRAY_DEF(Uint8VirtualArray, 8, uint8, char, JavascriptConversion::ToUInt8); \
-        TYPEDARRAY_DEF(Int16Array, 16, int16, short, JavascriptConversion::ToInt16); \
-        TYPEDARRAY_DEF(Int16VirtualArray, 16, int16, short, JavascriptConversion::ToInt16); \
-        TYPEDARRAY_DEF(Uint16Array, 16, uint16, short, JavascriptConversion::ToUInt16); \
-        TYPEDARRAY_DEF(Uint16VirtualArray, 16, uint16, short, JavascriptConversion::ToUInt16); \
-        TYPEDARRAY_DEF(Int32Array, 32, int32, LONG, JavascriptConversion::ToInt32); \
-        TYPEDARRAY_DEF(Int32VirtualArray, 32, int32, LONG, JavascriptConversion::ToInt32); \
-        TYPEDARRAY_DEF(Uint32Array, 32, uint32, LONG, JavascriptConversion::ToUInt32); \
-        TYPEDARRAY_DEF(Uint32VirtualArray, 32, uint32, LONG, JavascriptConversion::ToUInt32); \
+        TYPEDARRAY_DEF(Int8Array, OP, JavascriptConversion::ToInt8); \
+        TYPEDARRAY_DEF(Int8VirtualArray, OP, JavascriptConversion::ToInt8); \
+        TYPEDARRAY_DEF(Uint8Array, OP, JavascriptConversion::ToUInt8); \
+        TYPEDARRAY_DEF(Uint8VirtualArray, OP, JavascriptConversion::ToUInt8); \
+        TYPEDARRAY_DEF(Int16Array, OP, JavascriptConversion::ToInt16); \
+        TYPEDARRAY_DEF(Int16VirtualArray, OP, JavascriptConversion::ToInt16); \
+        TYPEDARRAY_DEF(Uint16Array, OP, JavascriptConversion::ToUInt16); \
+        TYPEDARRAY_DEF(Uint16VirtualArray, OP, JavascriptConversion::ToUInt16); \
+        TYPEDARRAY_DEF(Int32Array, OP, JavascriptConversion::ToInt32); \
+        TYPEDARRAY_DEF(Int32VirtualArray, OP, JavascriptConversion::ToInt32); \
+        TYPEDARRAY_DEF(Uint32Array, OP, JavascriptConversion::ToUInt32); \
+        TYPEDARRAY_DEF(Uint32VirtualArray, OP, JavascriptConversion::ToUInt32); \
         NOTSUPPORTEDSTUB(Float32Array, OP); \
         NOTSUPPORTEDSTUB(Float32VirtualArray, OP); \
         NOTSUPPORTEDSTUB(Float64Array, OP); \
@@ -2966,15 +3082,15 @@ namespace Js
         NOTSUPPORTEDSTUB(Uint8ClampedVirtualArray, OP); \
         NOTSUPPORTEDSTUB(BoolArray, OP);
 
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayAddOp, GenerateNotSupportedStub2, Add)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayAndOp, GenerateNotSupportedStub2, And)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayCompareExchangeOp, GenerateNotSupportedStub3, CompareExchange)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayExchangeOp, GenerateNotSupportedStub2, Exchange)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayLoadOp, GenerateNotSupportedStub1, Load)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOrOp, GenerateNotSupportedStub2, Or)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayStoreOp, GenerateNotSupportedStub2, Store)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArraySubOp, GenerateNotSupportedStub2, Sub)
-    GENERATE_FOREACH_TYPEDARRAY(TypedArrayXorOp, GenerateNotSupportedStub2, Xor)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Add)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, And)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp3, GenerateNotSupportedStub3, CompareExchange)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Exchange)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp1, GenerateNotSupportedStub1, Load)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Or)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayStore, GenerateNotSupportedStub2, Store)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Sub)
+    GENERATE_FOREACH_TYPEDARRAY(TypedArrayOp2, GenerateNotSupportedStub2, Xor)
 
     template<>
     VTableValue Int8Array::DummyVirtualFunctionToHinderLinkerICF()
@@ -3504,8 +3620,14 @@ namespace Js
 
     inline CharArray* CharArray::FromVar(Var aValue)
     {
+        AssertOrFailFastMsg(CharArray::Is(aValue), "invalid CharArray");
+        return static_cast<CharArray*>(aValue);
+    }
+
+    inline CharArray* CharArray::UnsafeFromVar(Var aValue)
+    {
         AssertMsg(CharArray::Is(aValue), "invalid CharArray");
-        return static_cast<CharArray*>(RecyclableObject::FromVar(aValue));
+        return static_cast<CharArray*>(aValue);
     }
 
     inline BOOL CharArray::DirectSetItem(__in uint32 index, __in Js::Var value)
@@ -3564,22 +3686,22 @@ namespace Js
         return DirectGetItem(index);
     }
 
-    Var CharArray::TypedAdd(__in uint32 index, Var second)
+    Var CharArray::TypedAdd(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedAnd(__in uint32 index, Var second)
+    Var CharArray::TypedAnd(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedCompareExchange(__in uint32 index, Var comparand, Var replacementValue)
+    Var CharArray::TypedCompareExchange(__in uint32 index, __in Var comparand, __in Var replacementValue)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedExchange(__in uint32 index, Var second)
+    Var CharArray::TypedExchange(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
@@ -3589,22 +3711,22 @@ namespace Js
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedOr(__in uint32 index, Var second)
+    Var CharArray::TypedOr(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedStore(__in uint32 index, Var second)
+    Var CharArray::TypedStore(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedSub(__in uint32 index, Var second)
+    Var CharArray::TypedSub(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }
 
-    Var CharArray::TypedXor(__in uint32 index, Var second)
+    Var CharArray::TypedXor(__in uint32 index, __in Var second)
     {
         JavascriptError::ThrowTypeError(GetScriptContext(), JSERR_InvalidOperationOnTypedArray);
     }

@@ -21,16 +21,81 @@
 #include "v8chakra.h"
 #include "jsrtutils.h"
 
+#include <array>
+
 namespace v8 {
+
+class PromiseResolverData : public ExternalData {
+ public:
+  static const ExternalDataTypes ExternalDataType =
+    ExternalDataTypes::PromiseResolverData;
+
+ private:
+  Persistent<Value> resolve;
+  Persistent<Value> reject;
+
+ public:
+  PromiseResolverData(Local<Value> resolve,
+                      Local<Value> reject)
+      : ExternalData(ExternalDataType),
+        resolve(nullptr, resolve),
+        reject(nullptr, reject) {}
+
+  ~PromiseResolverData() {
+    this->resolve.Reset();
+    this->reject.Reset();
+  }
+
+  static void CHAKRA_CALLBACK FinalizeCallback(void* data) {
+    if (data != nullptr) {
+      PromiseResolverData* promiseResolverData =
+          reinterpret_cast<PromiseResolverData*>(data);
+      delete promiseResolverData;
+    }
+  }
+
+  JsErrorCode Resolve(Local<Value> value) {
+    JsValueRef result = nullptr;
+    std::array<JsValueRef, 2> args = { jsrt::GetUndefined(), *value };
+    return JsCallFunction(*(this->resolve), args.data(), args.size(), &result);
+  }
+
+  JsErrorCode Reject(Local<Value> value) {
+    JsValueRef result = nullptr;
+    std::array<JsValueRef, 2> args = { jsrt::GetUndefined(), *value };
+    return JsCallFunction(*(this->reject), args.data(), args.size(), &result);
+  }
+};
 
 Promise::Promise() { }
 
 Local<Value> Promise::Result() {
-  return Local<Value>();
+  JsValueRef result = JS_INVALID_REFERENCE;
+  if (JsGetPromiseResult(reinterpret_cast<JsValueRef>(this),
+                         &result) != JsNoError) {
+    return Local<Value>();
+  }
+
+  return result;
 }
 
 Promise::PromiseState Promise::State() {
-  return PromiseState::kFulfilled;
+  JsPromiseState state = JsPromiseStatePending;
+  if (JsGetPromiseState(reinterpret_cast<JsValueRef>(this),
+                        &state) != JsNoError) {
+    return PromiseState::kPending;
+  }
+
+  switch (state) {
+    case JsPromiseStateFulfilled:
+      return PromiseState::kFulfilled;
+
+    case JsPromiseStateRejected:
+      return PromiseState::kRejected;
+
+    default:
+      return PromiseState::kPending;
+  }
 }
 
 MaybeLocal<Promise> Promise::Then(Local<Context> context,
@@ -48,6 +113,70 @@ MaybeLocal<Promise> Promise::Catch(Local<Context> context,
 Promise* Promise::Cast(Value* obj) {
   CHAKRA_ASSERT(obj->IsPromise());
   return static_cast<Promise*>(obj);
+}
+
+MaybeLocal<Promise::Resolver> Promise::Resolver::New(Local<Context> context) {
+  JsValueRef promise, resolve, reject;
+  if (JsCreatePromise(&promise, &resolve, &reject) != JsNoError) {
+    return Local<Promise::Resolver>();
+  }
+
+  PromiseResolverData* data = new PromiseResolverData(resolve, reject);
+  if (jsrt::AddExternalData(
+          promise, data, PromiseResolverData::FinalizeCallback) != JsNoError) {
+    delete data;
+    return Local<Promise::Resolver>();
+  }
+
+  return Local<Promise::Resolver>::New(promise);
+}
+
+Local<Promise::Resolver> Promise::Resolver::New(Isolate* isolate) {
+  return New(isolate->GetCurrentContext()).ToLocalChecked();
+}
+
+Local<Promise> Promise::Resolver::GetPromise() {
+  return Local<Promise>::New(static_cast<JsValueRef>(this));
+}
+
+Promise::Resolver* Promise::Resolver::Cast(Value* obj) {
+  CHAKRA_ASSERT(obj->IsPromise());
+  return static_cast<Promise::Resolver*>(obj);
+}
+
+Maybe<bool> Promise::Resolver::Resolve(Local<Context> context,
+                                       Local<Value> value) {
+  PromiseResolverData* data = nullptr;
+  if (!ExternalData::TryGetFromProperty(this, jsrt::GetExternalPropertyId(),
+                                        &data)) {
+    return Nothing<bool>();
+  }
+
+  if (data->Resolve(value) != JsNoError) {
+    return Nothing<bool>();
+  }
+
+  return Just(true);
+}
+
+void Promise::Resolver::Resolve(Local<Value> value) {
+  Local<Context> context;
+  Resolve(context, value);
+}
+
+Maybe<bool> Promise::Resolver::Reject(Local<Context> context,
+                                      Local<Value> value) {
+  PromiseResolverData* data = nullptr;
+  if (!ExternalData::TryGetFromProperty(this, jsrt::GetExternalPropertyId(),
+                                        &data)) {
+    return Nothing<bool>();
+  }
+
+  if (data->Reject(value) != JsNoError) {
+    return Nothing<bool>();
+  }
+
+  return Just(true);
 }
 
 }  // namespace v8

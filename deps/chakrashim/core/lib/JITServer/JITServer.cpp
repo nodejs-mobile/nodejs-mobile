@@ -119,72 +119,38 @@ __RPC_USER PSCRIPTCONTEXT_HANDLE_rundown(__RPC__in PSCRIPTCONTEXT_HANDLE phConte
     ServerCleanupScriptContext(nullptr, &phContext);
 }
 
-HRESULT CheckModuleAddress(HANDLE process, LPCVOID remoteImageBase, LPCVOID localImageBase)
+HRESULT
+ServerConnectProcess(
+    handle_t binding,
+#ifdef USE_RPC_HANDLE_MARSHALLING
+    HANDLE processHandle,
+#endif
+    intptr_t chakraBaseAddress,
+    intptr_t crtBaseAddress
+)
 {
-    byte remoteImageHeader[0x1000];
-    MEMORY_BASIC_INFORMATION remoteImageInfo;
-    SIZE_T resultBytes = VirtualQueryEx(process, (LPCVOID)remoteImageBase, &remoteImageInfo, sizeof(remoteImageInfo));
-    if (resultBytes != sizeof(remoteImageInfo))
+    DWORD clientPid;
+    HRESULT hr = HRESULT_FROM_WIN32(I_RpcBindingInqLocalClientPID(binding, &clientPid));
+    if (FAILED(hr))
     {
+        return hr;
+    }
+#ifdef USE_RPC_HANDLE_MARSHALLING
+    HANDLE targetHandle;
+    if (!DuplicateHandle(GetCurrentProcess(), processHandle, GetCurrentProcess(), &targetHandle, 0, false, DUPLICATE_SAME_ACCESS))
+    {
+        Assert(UNREACHED);
         return E_ACCESSDENIED;
     }
-    if (remoteImageInfo.BaseAddress != (PVOID)remoteImageBase)
+#else
+    HANDLE targetHandle = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_LIMITED_INFORMATION, false, clientPid);
+    if (!targetHandle)
     {
+        Assert(UNREACHED);
         return E_ACCESSDENIED;
     }
-    if (remoteImageInfo.Type != MEM_IMAGE)
-    {
-        return E_ACCESSDENIED;
-    }
-    if (remoteImageInfo.State != MEM_COMMIT)
-    {
-        return E_ACCESSDENIED;
-    }
-
-    if (remoteImageInfo.RegionSize < sizeof(remoteImageHeader))
-    {
-        return E_ACCESSDENIED;
-    }
-
-    if (!ReadProcessMemory(process, remoteImageBase, remoteImageHeader, sizeof(remoteImageHeader), &resultBytes))
-    {
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-    if (resultBytes < sizeof(remoteImageHeader))
-    {
-        return E_ACCESSDENIED;
-    }
-    PIMAGE_DOS_HEADER localDosHeader = (PIMAGE_DOS_HEADER)localImageBase;
-    PIMAGE_NT_HEADERS localNtHeader = (PIMAGE_NT_HEADERS)((BYTE*)localDosHeader + localDosHeader->e_lfanew);
-
-    PIMAGE_DOS_HEADER remoteDosHeader = (PIMAGE_DOS_HEADER)remoteImageHeader;
-    PIMAGE_NT_HEADERS remoteNtHeader = (PIMAGE_NT_HEADERS)((BYTE*)remoteDosHeader + remoteDosHeader->e_lfanew);
-
-    uintptr_t remoteHeaderMax = (uintptr_t)remoteImageHeader + sizeof(remoteImageHeader);
-    uintptr_t remoteMaxRead = (uintptr_t)remoteNtHeader + sizeof(IMAGE_NT_HEADERS);
-    if (remoteMaxRead >= remoteHeaderMax || remoteMaxRead < (uintptr_t)remoteImageHeader)
-    {
-        return E_ACCESSDENIED;
-    }
-
-    if (localNtHeader->FileHeader.NumberOfSections != remoteNtHeader->FileHeader.NumberOfSections)
-    {
-        return E_ACCESSDENIED;
-    }
-    if (localNtHeader->FileHeader.NumberOfSymbols != remoteNtHeader->FileHeader.NumberOfSymbols)
-    {
-        return E_ACCESSDENIED;
-    }
-    if (localNtHeader->OptionalHeader.CheckSum != remoteNtHeader->OptionalHeader.CheckSum)
-    {
-        return E_ACCESSDENIED;
-    }
-    if (localNtHeader->OptionalHeader.SizeOfImage != remoteNtHeader->OptionalHeader.SizeOfImage)
-    {
-        return E_ACCESSDENIED;
-    }
-
-    return S_OK;
+#endif
+    return ProcessContextManager::RegisterNewProcess(clientPid, targetHandle, chakraBaseAddress, crtBaseAddress);
 }
 
 #pragma warning(push)
@@ -193,9 +159,6 @@ HRESULT
 ServerInitializeThreadContext(
     /* [in] */ handle_t binding,
     /* [in] */ __RPC__in ThreadContextDataIDL * threadContextData,
-#ifdef USE_RPC_HANDLE_MARSHALLING
-    /* [in] */ __RPC__in HANDLE processHandle,
-#endif
     /* [out] */ __RPC__deref_out_opt PPTHREADCONTEXT_HANDLE threadContextInfoAddress,
     /* [out] */ __RPC__out intptr_t *prereservedRegionAddr,
     /* [out] */ __RPC__out intptr_t *jitThunkAddr)
@@ -218,28 +181,30 @@ ServerInitializeThreadContext(
     {
         return hr;
     }
-#ifdef USE_RPC_HANDLE_MARSHALLING
-    HANDLE targetHandle;
-    if (!DuplicateHandle(GetCurrentProcess(), processHandle, GetCurrentProcess(), &targetHandle, 0, false, DUPLICATE_SAME_ACCESS))
+    ProcessContext* processContext = ProcessContextManager::GetProcessContext(clientPid);
+    if (processContext == nullptr)
     {
         return E_ACCESSDENIED;
     }
-#else
-    HANDLE targetHandle = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_QUERY_LIMITED_INFORMATION, false, clientPid);
-    if (!targetHandle)
-    {
-        return E_ACCESSDENIED;
-    }
-#endif
     try
     {
         AUTO_NESTED_HANDLED_EXCEPTION_TYPE(static_cast<ExceptionType>(ExceptionType_OutOfMemory));
-        contextInfo = HeapNew(ServerThreadContext, threadContextData, targetHandle);
+        contextInfo = HeapNew(ServerThreadContext, threadContextData, processContext);
         ServerContextManager::RegisterThreadContext(contextInfo);
     }
     catch (Js::OutOfMemoryException)
     {
-        CloseHandle(targetHandle);
+        if (contextInfo)
+        {
+            // If we OOM while registering the ThreadContext, we need to free it
+            HeapDelete(contextInfo);
+        }
+        else
+        {
+            // If we OOM while creating the ThreadContext, then we haven't transfered ownership
+            // of the ProcessContext reference, so we must release it here
+            processContext->Release();
+        }
         return E_OUTOFMEMORY;
     }
 
@@ -249,16 +214,6 @@ ServerInitializeThreadContext(
         {
             return E_ACCESSDENIED;
         }
-        hr = CheckModuleAddress(targetHandle, (LPCVOID)contextInfo->GetRuntimeChakraBaseAddress(), (LPCVOID)AutoSystemInfo::Data.dllLoadAddress);
-        if (FAILED(hr))
-        {
-            return hr;
-        }
-        hr = CheckModuleAddress(targetHandle, (LPCVOID)contextInfo->GetRuntimeCRTBaseAddress(), (LPCVOID)contextInfo->GetJITCRTBaseAddress());
-        if (FAILED(hr))
-        {
-            return hr;
-        }
 
         *threadContextInfoAddress = (PTHREADCONTEXT_HANDLE)EncodePointer(contextInfo);
 
@@ -266,8 +221,9 @@ ServerInitializeThreadContext(
         if (!PHASE_OFF1(Js::PreReservedHeapAllocPhase))
         {
             *prereservedRegionAddr = (intptr_t)contextInfo->GetPreReservedSectionAllocator()->EnsurePreReservedRegion();
+            contextInfo->SetCanCreatePreReservedSegment(*prereservedRegionAddr != 0);
         }
-#if _M_IX86 || _M_X64
+#if !defined(_M_ARM)
         *jitThunkAddr = (intptr_t)contextInfo->GetJITThunkEmitter()->EnsureInitialized();
 #endif
 #endif
@@ -374,6 +330,11 @@ ServerAddDOMFastPathHelper(
         Assert(false);
         return RPC_S_INVALID_ARG;
     }
+    if (helper < 0 || helper >= IR::JnHelperMethodCount)
+    {
+        Assert(UNREACHED);
+        return E_ACCESSDENIED;
+    }
 
     return ServerCallWrapper(scriptContextInfo, [&]()->HRESULT
     {
@@ -449,6 +410,7 @@ ServerCleanupScriptContext(
         scriptContextInfo->Close();
         ServerContextManager::UnRegisterScriptContext(scriptContextInfo);
     }
+
     // This tells the run-time, when it is marshalling the out
     // parameters, that the context handle has been closed normally.
     *scriptContextInfoAddress = nullptr;
@@ -474,11 +436,7 @@ ServerCloseScriptContext(
     return ServerCallWrapper(scriptContextInfo, [&]()->HRESULT
     {
 #ifdef PROFILE_EXEC
-        auto profiler = scriptContextInfo->GetCodeGenProfiler();
-        if (profiler && profiler->IsInitialized())
-        {
-            profiler->ProfilePrint(Js::Configuration::Global.flags.Profile.GetFirstPhase());
-        }
+        scriptContextInfo->GetFirstCodeGenProfiler()->ProfilePrint();
 #endif
         scriptContextInfo->Close();
         ServerContextManager::UnRegisterScriptContext(scriptContextInfo);
@@ -577,11 +535,15 @@ ServerNewInterpreterThunkBlock(
             &thunkCount
         );
 
-        emitBufferManager->CommitBufferForInterpreter(alloc, runtimeAddress, InterpreterThunkEmitter::BlockSize);
+        if (!emitBufferManager->CommitBufferForInterpreter(alloc, runtimeAddress, InterpreterThunkEmitter::BlockSize))
+        {
+            Js::Throw::OutOfMemory();
+        }
+
         // Call to set VALID flag for CFG check
         if (CONFIG_FLAG(OOPCFGRegistration))
         {
-            threadContext->SetValidCallTargetForCFG(runtimeAddress);
+            emitBufferManager->SetValidCallTarget(alloc, runtimeAddress, true);
         }
 
         thunkOutput->thunkCount = thunkCount;
@@ -599,7 +561,7 @@ ServerNewInterpreterThunkBlock(
 HRESULT
 ServerIsInterpreterThunkAddr(
     /* [in] */ handle_t binding,
-    /* [in] */ PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress,
+    /* [in] */ __RPC__in PSCRIPTCONTEXT_HANDLE scriptContextInfoAddress,
     /* [in] */ intptr_t address,
     /* [in] */ boolean asmjsThunk,
     /* [out] */ __RPC__out boolean * result)
@@ -627,11 +589,10 @@ ServerIsInterpreterThunkAddr(
 HRESULT
 ServerFreeAllocation(
     /* [in] */ handle_t binding,
-    /* [in] */ __RPC__in PTHREADCONTEXT_HANDLE threadContextInfo,
-    /* [in] */ intptr_t codeAddress,
-    /* [in] */ intptr_t thunkAddress)
+    /* [in] */ __RPC__in PSCRIPTCONTEXT_HANDLE scriptContextInfo,
+    /* [in] */ intptr_t codeAddress)
 {
-    ServerThreadContext * context = (ServerThreadContext*)DecodePointer(threadContextInfo);
+    ServerScriptContext* context = (ServerScriptContext*)DecodePointer(scriptContextInfo);
 
     if (context == nullptr)
     {
@@ -641,17 +602,7 @@ ServerFreeAllocation(
 
     return ServerCallWrapper(context, [&]()->HRESULT
     {
-        if (CONFIG_FLAG(OOPCFGRegistration) && !thunkAddress)
-        {
-            context->SetValidCallTargetForCFG((PVOID)codeAddress, false);
-        }
         context->GetCodeGenAllocators()->emitBufferManager.FreeAllocation((void*)codeAddress);
-#if defined(_CONTROL_FLOW_GUARD) && (_M_IX86 || _M_X64)
-        if (thunkAddress)
-        {
-            context->GetJITThunkEmitter()->FreeThunk(thunkAddress);
-        }
-#endif
         return S_OK;
     });
 }
@@ -671,7 +622,7 @@ ServerIsNativeAddr(
 
     *result = false;
 
-    ServerThreadContext * context = (ServerThreadContext*)DecodePointer(threadContextInfo);
+    ServerThreadContext* context = (ServerThreadContext*)DecodePointer(threadContextInfo);
     if (context == nullptr)
     {
         Assert(false);
@@ -736,6 +687,19 @@ ServerRemoteCodeGen(
         Assert(false);
         return RPC_S_INVALID_ARG;
     }
+#if DBG
+    size_t serializedRpcDataSize = 0;
+    const unsigned char* serializedRpcData = nullptr;
+    JITManager::SerializeRPCData(workItemData, &serializedRpcDataSize, &serializedRpcData);
+    struct AutoFreeArray
+    {
+        const byte* arr = nullptr;
+        size_t bufferSize = 0;
+        ~AutoFreeArray() { HeapDeleteArray(bufferSize, arr); }
+    } autoFreeArray;
+    autoFreeArray.arr = serializedRpcData;
+    autoFreeArray.bufferSize = serializedRpcDataSize;
+#endif
 
     return ServerCallWrapper(scriptContextInfo, [&]() ->HRESULT
     {
@@ -771,13 +735,13 @@ ServerRemoteCodeGen(
             Output::Flush();
         }
 
-        auto profiler = scriptContextInfo->GetCodeGenProfiler();
 #ifdef PROFILE_EXEC
-        if (profiler && !profiler->IsInitialized())
-        {
-            profiler->Initialize(pageAllocator, nullptr);
-        }
+        Js::ScriptContextProfiler* profiler = scriptContextInfo->GetCodeGenProfiler(pageAllocator);
+#else
+        Js::ScriptContextProfiler* profiler = nullptr;
 #endif
+
+#if !FLOATVAR
         if (jitWorkItem->GetWorkItemData()->xProcNumberPageSegment)
         {
             jitData->numberPageSegments = (XProcNumberPageSegment*)midl_user_allocate(sizeof(XProcNumberPageSegment));
@@ -789,6 +753,7 @@ ServerRemoteCodeGen(
 
             memcpy_s(jitData->numberPageSegments, sizeof(XProcNumberPageSegment), jitWorkItem->GetWorkItemData()->xProcNumberPageSegment, sizeof(XProcNumberPageSegment));
         }
+#endif
 
         Func::Codegen(
             &jitArena,
@@ -799,7 +764,7 @@ ServerRemoteCodeGen(
             nullptr,
             nullptr,
             jitWorkItem->GetPolymorphicInlineCacheInfo(),
-            threadContextInfo->GetCodeGenAllocators(),
+            scriptContextInfo->GetCodeGenAllocators(),
 #if !FLOATVAR
             nullptr, // number allocator
 #endif
@@ -843,6 +808,66 @@ ServerRemoteCodeGen(
 JsUtil::BaseHashSet<ServerThreadContext*, HeapAllocator> ServerContextManager::threadContexts(&HeapAllocator::Instance);
 JsUtil::BaseHashSet<ServerScriptContext*, HeapAllocator> ServerContextManager::scriptContexts(&HeapAllocator::Instance);
 CriticalSection ServerContextManager::cs;
+
+BaseDictionary<DWORD, ProcessContext*, HeapAllocator> ProcessContextManager::ProcessContexts(&HeapAllocator::Instance);
+CriticalSection ProcessContextManager::cs;
+
+HRESULT
+ProcessContextManager::RegisterNewProcess(DWORD pid, HANDLE processHandle, intptr_t chakraBaseAddress, intptr_t crtBaseAddress)
+{
+    AutoCriticalSection autoCS(&cs);
+    for (auto iter = ProcessContexts.GetIteratorWithRemovalSupport(); iter.IsValid(); iter.MoveNext())
+    {
+        ProcessContext* context = iter.CurrentValue();
+        // We can delete a ProcessContext if no ThreadContexts refer to it and the process is terminated
+        if (!context->HasRef() && WaitForSingleObject(context->processHandle, 0) == WAIT_OBJECT_0)
+        {
+            iter.RemoveCurrent();
+            HeapDelete(context);
+        }
+    }
+    // We cannot register multiple ProcessContexts for a single process
+    if (ProcessContexts.ContainsKey(pid))
+    {
+        Assert(UNREACHED);
+        return E_ACCESSDENIED;
+    }
+
+    ProcessContext* context = nullptr;
+    try
+    {
+        AUTO_NESTED_HANDLED_EXCEPTION_TYPE(static_cast<ExceptionType>(ExceptionType_OutOfMemory));
+
+        context = HeapNew(ProcessContext, processHandle, chakraBaseAddress, crtBaseAddress);
+        ProcessContexts.Add(pid, context);
+    }
+    catch (Js::OutOfMemoryException)
+    {
+        if (context != nullptr)
+        {
+            // If we OOM while registering the ProcessContext, we should free it
+            HeapDelete(context);
+        }
+        return E_OUTOFMEMORY;
+    }
+
+    return S_OK;
+}
+
+ProcessContext*
+ProcessContextManager::GetProcessContext(DWORD pid)
+{
+    AutoCriticalSection autoCS(&cs);
+    ProcessContext* context = nullptr;
+    // It is possible that we don't have a ProcessContext for a pid in case ProcessContext initialization failed,
+    // or if the calling process terminated and the ProcessContext was already cleaned up before we got here
+    if (ProcessContexts.ContainsKey(pid))
+    {
+        context = ProcessContexts.Item(pid);
+        context->AddRef();
+    }
+    return context;
+}
 
 #ifdef STACK_BACK_TRACE
 SList<ServerContextManager::ClosedContextEntry<ServerThreadContext>*, NoThrowHeapAllocator> ServerContextManager::ClosedThreadContextList(&NoThrowHeapAllocator::Instance);

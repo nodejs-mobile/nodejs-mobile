@@ -24,12 +24,7 @@ const common = require('../common');
 const assert = require('assert');
 
 // does node think that i18n was enabled?
-// for chakra i18n is enabled
-let enablei18n = common.engineSpecificMessage({
-  v8: process.config.variables.v8_enable_i18n_support,
-  chakracore: true
-});
-
+let enablei18n = process.config.variables.v8_enable_i18n_support;
 if (enablei18n === undefined) {
   enablei18n = 0;
 }
@@ -70,13 +65,11 @@ if (!common.hasIntl) {
   const GMT = 'Etc/GMT';
 
   // Construct an English formatter. Should format to "Jan 70"
-  const dtf =
-      new Intl.DateTimeFormat(['en'],
-                              {
-                                timeZone: GMT,
-                                month: 'short',
-                                year: '2-digit'
-                              });
+  const dtf = new Intl.DateTimeFormat(['en'], {
+    timeZone: GMT,
+    month: 'short',
+    year: '2-digit'
+  });
 
   // If list is specified and doesn't contain 'en' then return.
   if (process.config.variables.icu_locales && !haveLocale('en')) {
@@ -89,16 +82,19 @@ if (!common.hasIntl) {
 
   // Check casing
   {
-    assert.strictEqual('I'.toLocaleLowerCase('tr'), 'ı');
+    // ChakraCore doesn't support taking a parameter for toLocaleLowerCase
+    // https://github.com/Microsoft/ChakraCore/issues/3710
+    assert.strictEqual('I'.toLocaleLowerCase('tr'),
+                       common.engineSpecificMessage({
+                         v8: 'ı',
+                         chakracore: 'i',
+                       }));
   }
 
   // Check with toLocaleString
   {
     const localeString = dtf.format(date0);
-    assert.strictEqual(localeString, common.engineSpecificMessage({
-      v8: 'Jan 70',
-      chakracore: '\u200EJan\u200E \u200E70'
-    }));
+    assert.strictEqual(localeString, 'Jan 70');
   }
   // Options to request GMT
   const optsGMT = { timeZone: GMT };
@@ -106,11 +102,7 @@ if (!common.hasIntl) {
   // Test format
   {
     const localeString = date0.toLocaleString(['en'], optsGMT);
-    assert.strictEqual(localeString, common.engineSpecificMessage({
-      v8: '1/1/1970, 12:00:00 AM',
-      chakracore: '\u200E1\u200E/\u200E1\u200E/\u200E1970\u200E ' +
-        '\u200E12\u200E:\u200E00\u200E:\u200E00\u200E \u200EAM'
-    }));
+    assert.strictEqual(localeString, '1/1/1970, 12:00:00 AM');
   }
   // number format
   const numberFormat = new Intl.NumberFormat(['en']).format(12345.67890);
@@ -119,14 +111,14 @@ if (!common.hasIntl) {
   const collOpts = { sensitivity: 'base', ignorePunctuation: true };
   const coll = new Intl.Collator(['en'], collOpts);
 
-  assert.strictEqual(coll.compare('blackbird', 'black-bird'), 0,
-                     'ignore punctuation failed');
-  assert.strictEqual(coll.compare('blackbird', 'red-bird'), -1,
-                     'compare less failed');
-  assert.strictEqual(coll.compare('bluebird', 'blackbird'), 1,
-                     'compare greater failed');
-  assert.strictEqual(coll.compare('Bluebird', 'bluebird'), 0,
-                     'ignore case failed');
-  assert.strictEqual(coll.compare('\ufb03', 'ffi'), 0,
-                     'ffi ligature (contraction) failed');
+  // ignore punctuation
+  assert.strictEqual(coll.compare('blackbird', 'black-bird'), 0);
+  // compare less
+  assert.strictEqual(coll.compare('blackbird', 'red-bird'), -1);
+  // compare greater
+  assert.strictEqual(coll.compare('bluebird', 'blackbird'), 1);
+  // ignore case
+  assert.strictEqual(coll.compare('Bluebird', 'bluebird'), 0);
+  // ffi ligature (contraction)
+  assert.strictEqual(coll.compare('\ufb03', 'ffi'), 0);
 }

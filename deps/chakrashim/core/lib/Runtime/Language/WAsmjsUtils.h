@@ -34,22 +34,14 @@ namespace WAsmJs
 
     typedef Js::RegSlot RegSlot;
 
-    uint32 ConvertOffset(uint32 ptr, uint32 fromSize, uint32 toSize);
-    template<typename ToType> uint32 ConvertOffset(uint32 ptr, uint32 fromSize)
+    uint32 ConvertOffset(uint32 offset, uint32 fromSize, uint32 toSize);
+    template<typename ToType> uint32 ConvertOffset(uint32 offset, uint32 fromSize)
     {
-        return ConvertOffset(ptr, fromSize, sizeof(ToType));
+        return ConvertOffset(offset, fromSize, sizeof(ToType));
     }
-    template<typename FromType, typename ToType> uint32 ConvertOffset(uint32 ptr)
+    template<typename FromType, typename ToType> uint32 ConvertOffset(uint32 offset)
     {
-        return ConvertOffset(ptr, sizeof(FromType), sizeof(ToType));
-    }
-    template<typename T> uint32 ConvertToJsVarOffset(uint32 ptr)
-    {
-        return ConvertOffset<T, Js::Var>(ptr);
-    }
-    template<typename T> uint32 ConvertFromJsVarOffset(uint32 ptr)
-    {
-        return ConvertOffset<Js::Var, T>(ptr);
+        return ConvertOffset<ToType>(offset, sizeof(FromType));
     }
 
     struct EmitInfoBase
@@ -73,6 +65,8 @@ namespace WAsmJs
     const Types LastType = (Types)(LIMIT - 1);
     uint32 GetTypeByteSize(Types type);
     Types FromIRType(IRType irType);
+    template<typename T>
+    Types FromPrimitiveType();
 
     /// Register space for const, parameters, variables and tmp values
     ///     --------------------------------------------------------
@@ -146,6 +140,13 @@ namespace WAsmJs
             PrintTmpRegisterAllocation(mNextLocation);
 #endif
             return mNextLocation++;
+        }
+
+        RegSlot PeekNextTmpRegister()
+        {
+            // Make sure this function is called correctly
+            Assert(mNextLocation <= mRegisterCount && mNextLocation >= mFirstTmpReg);
+            return mNextLocation;
         }
 
         // Release a location for a temporary register, must be the last location acquired
@@ -238,7 +239,6 @@ namespace WAsmJs
             return false;
         }
 
-        template<typename T> static Types GetRegisterSpaceType();
 #if DBG_DUMP
         // Used for debugging
         Types mType;

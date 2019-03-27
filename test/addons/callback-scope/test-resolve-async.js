@@ -4,10 +4,9 @@ const common = require('../../common');
 const assert = require('assert');
 const { testResolveAsync } = require(`./build/${common.buildType}/binding`);
 
-let called = false;
-testResolveAsync().then(common.mustCall(() => {
-  called = true;
-}));
+// Checks that resolving promises from C++ works.
 
-setTimeout(common.mustCall(() => { assert(called); }),
-           common.platformTimeout(20));
+let called = false;
+testResolveAsync().then(() => { called = true; });
+
+process.on('beforeExit', () => { assert(called); });

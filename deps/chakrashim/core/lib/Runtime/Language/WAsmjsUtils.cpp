@@ -6,15 +6,10 @@
 #include "RuntimeLanguagePch.h"
 
 #if defined(ASMJS_PLAT) || defined(ENABLE_WASM)
+#include "InterpreterStackFrame.h"
 
 namespace WAsmJs
 {
-
-template<> Types RegisterSpace::GetRegisterSpaceType<int32>(){return WAsmJs::INT32;}
-template<> Types RegisterSpace::GetRegisterSpaceType<int64>(){return WAsmJs::INT64;}
-template<> Types RegisterSpace::GetRegisterSpaceType<float>(){return WAsmJs::FLOAT32;}
-template<> Types RegisterSpace::GetRegisterSpaceType<double>(){return WAsmJs::FLOAT64;}
-template<> Types RegisterSpace::GetRegisterSpaceType<AsmJsSIMDValue>(){return WAsmJs::SIMD;}
 
 #ifdef ENABLE_DEBUG_CONFIG_OPTIONS
     namespace Tracing
@@ -96,28 +91,37 @@ template<> Types RegisterSpace::GetRegisterSpaceType<AsmJsSIMDValue>(){return WA
     bool ShouldJitFunction(Js::FunctionBody* body, uint interpretedCount)
     {
 #if ENABLE_NATIVE_CODEGEN
-        const bool noJit = PHASE_OFF(Js::BackEndPhase, body) ||
+        if (PHASE_OFF(Js::BackEndPhase, body) ||
             PHASE_OFF(Js::FullJitPhase, body) ||
             body->GetScriptContext()->GetConfig()->IsNoNative() ||
-            body->GetIsAsmJsFullJitScheduled();
+            body->GetIsAsmJsFullJitScheduled())
+        {
+            return false;
+        }
+#if ENABLE_OOP_NATIVE_CODEGEN
+        if (JITManager::GetJITManager()->IsOOPJITEnabled() && !JITManager::GetJITManager()->IsConnected())
+        {
+            return false;
+        }
+#endif
         const bool forceNative = CONFIG_ISENABLED(Js::ForceNativeFlag);
         const uint minAsmJsInterpretRunCount = (uint)CONFIG_FLAG(MinAsmJsInterpreterRunCount);
         const uint maxAsmJsInterpretRunCount = (uint)CONFIG_FLAG(MaxAsmJsInterpreterRunCount);
-        return !noJit && (forceNative || interpretedCount >= minAsmJsInterpretRunCount || interpretedCount >= maxAsmJsInterpretRunCount);
+        return forceNative || interpretedCount >= minAsmJsInterpretRunCount || interpretedCount >= maxAsmJsInterpretRunCount;
 #else
         return false;
 #endif
     }
 
-    uint32 ConvertOffset(uint32 ptr, uint32 fromSize, uint32 toSize)
+    uint32 ConvertOffset(uint32 offset, uint32 fromSize, uint32 toSize)
     {
         if (fromSize == toSize)
         {
-            return ptr;
+            return offset;
         }
-        uint64 tmp = ptr * fromSize;
+        uint64 tmp = (uint64)offset * (uint64)fromSize;
         tmp = Math::Align<uint64>(tmp, toSize);
-        tmp /= toSize;
+        tmp /= (uint64)toSize;
         if (tmp > (uint64)UINT32_MAX)
         {
             Math::DefaultOverflowPolicy();
@@ -174,6 +178,12 @@ template<> Types RegisterSpace::GetRegisterSpaceType<AsmJsSIMDValue>(){return WA
         }
         return WAsmJs::LIMIT;
     }
+
+    template<> Types FromPrimitiveType<int32>() { return WAsmJs::INT32; }
+    template<> Types FromPrimitiveType<int64>() { return WAsmJs::INT64; }
+    template<> Types FromPrimitiveType<float>() { return WAsmJs::FLOAT32; }
+    template<> Types FromPrimitiveType<double>() { return WAsmJs::FLOAT64; }
+    template<> Types FromPrimitiveType<AsmJsSIMDValue>() { return WAsmJs::SIMD; }
 
 #if DBG_DUMP
     void RegisterSpace::GetTypeDebugName(Types type, char16* buf, uint bufsize, bool shortName)
@@ -280,11 +290,14 @@ template<> Types RegisterSpace::GetRegisterSpaceType<AsmJsSIMDValue>(){return WA
             }
         }
 
+        // The offset currently carries the total size of the funcInfo after handling the last type
+        funcInfo->SetTotalSizeinBytes(offset);
+
         // These bytes offset already calculated the alignment, used them to determine how many Js::Var we need to do the allocation
         uint32 stackByteSize = offset;
         uint32 bytesUsedForConst = constSourcesInfo.bytesUsed;
-        uint32 jsVarUsedForConstsTable = ConvertToJsVarOffset<byte>(bytesUsedForConst);
-        uint32 totalVarsNeeded = ConvertToJsVarOffset<byte>(stackByteSize);
+        uint32 jsVarUsedForConstsTable = ConvertOffset<byte, Js::Var>(bytesUsedForConst);
+        uint32 totalVarsNeeded = ConvertOffset<byte, Js::Var>(stackByteSize);
 
         uint32 jsVarNeededForVars = totalVarsNeeded - jsVarUsedForConstsTable;
         if (totalVarsNeeded < jsVarUsedForConstsTable)
@@ -313,7 +326,7 @@ template<> Types RegisterSpace::GetRegisterSpaceType<AsmJsSIMDValue>(){return WA
         // this value is the number of Var slots needed to allocate all the const
         uint32 bytesUsedForConst = GetConstSourceInfos().bytesUsed;
         // Add the registers not included in the const table
-        uint32 nbConst = ConvertToJsVarOffset<byte>(bytesUsedForConst) + Js::FunctionBody::FirstRegSlot;
+        uint32 nbConst = ConvertOffset<byte, Js::Var>(bytesUsedForConst) + Js::FunctionBody::FirstRegSlot;
         body->CheckAndSetConstantCount(nbConst);
     }
 

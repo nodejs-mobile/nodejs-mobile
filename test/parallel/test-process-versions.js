@@ -3,12 +3,12 @@ const common = require('../common');
 const assert = require('assert');
 
 const expected_keys = ['ares', 'http_parser', 'modules', 'node',
-                       'uv', 'zlib', 'nghttp2'];
-
+                       'uv', 'zlib', 'nghttp2', 'napi'];
+const jsEngine = process.jsEngine || 'v8';
 if (common.isAndroid || common.isIOS) {
   expected_keys.push('mobile');
 }
-expected_keys.push(process.jsEngine);
+expected_keys.push(jsEngine);
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');
@@ -34,8 +34,10 @@ assert(commonTemplate.test(process.versions.node));
 assert(commonTemplate.test(process.versions.uv));
 assert(commonTemplate.test(process.versions.zlib));
 
-assert(/^\d+\.\d+\.\d+(?:\.\d+)?(?: \(candidate\))?$/
-  .test(process.versions[process.jsEngine || 'v8']));
+assert(common.engineSpecificMessage({
+  v8: /^\d+\.\d+\.\d+(?:\.\d+)?-node\.\d+(?: \(candidate\))?$/,
+  chakracore: /^\d+\.\d+\.\d+(?:\.\d+)?(?: \(candidate\))?$/
+}).test(process.versions[jsEngine]));
 assert(/^\d+$/.test(process.versions.modules));
 
 for (let i = 0; i < expected_keys.length; i++) {

@@ -4,14 +4,13 @@
 //-------------------------------------------------------------------------------------------------------
 #include "CommonExceptionsPch.h"
 
-#ifdef _MSC_VER
-inline
-#endif
+// Disable inline so that _ReturnAdddress() will get the address of the calling function.
+_NOINLINE
 void ReportFatalException(
     __in ULONG_PTR context,
     __in HRESULT exceptionCode,
     __in ErrorReason reasonCode,
-    __in ULONG scenario)
+    __in ULONG_PTR scenario)
 {
     // avoid the error text methods to be optimized out.
     UNREFERENCED_PARAMETER(scenario);
@@ -24,6 +23,7 @@ void ReportFatalException(
 #ifdef DISABLE_SEH
     TerminateProcess(GetCurrentProcess(), (UINT)DBG_TERMINATE_PROCESS);
 #else
+    void * addressToBlame = _ReturnAddress();
     __try
     {
         ULONG_PTR ExceptionInformation[2];
@@ -31,7 +31,7 @@ void ReportFatalException(
         ExceptionInformation[1] = (ULONG_PTR)context;
         RaiseException(exceptionCode, EXCEPTION_NONCONTINUABLE, 2, (ULONG_PTR*)ExceptionInformation);
     }
-    __except(FatalExceptionFilter(GetExceptionInformation()))
+    __except(FatalExceptionFilter(GetExceptionInformation(), addressToBlame))
     {
     }
 #endif // DISABLE_SEH
@@ -46,35 +46,35 @@ _NOINLINE void JavascriptDispatch_OOM_fatal_error(
     ReportFatalException(context, E_OUTOFMEMORY, JavascriptDispatch_OUTOFMEMORY, scenario);
 };
 
-_NOINLINE void CustomHeap_BadPageState_fatal_error(
+_NOINLINE void CustomHeap_BadPageState_unrecoverable_error(
     __in ULONG_PTR context)
 {
     int scenario = 1;
     ReportFatalException(context, E_UNEXPECTED, CustomHeap_MEMORYCORRUPTION, scenario);
 };
 
-_NOINLINE void MarkStack_OOM_fatal_error()
+_NOINLINE void MarkStack_OOM_unrecoverable_error()
 {
     int scenario = 1;
     ReportFatalException(NULL, E_OUTOFMEMORY, MarkStack_OUTOFMEMORY, scenario);
 };
 
-_NOINLINE void Amd64StackWalkerOutOfContexts_fatal_error(
+_NOINLINE void Amd64StackWalkerOutOfContexts_unrecoverable_error(
     __in ULONG_PTR context)
 {
     int scenario = 1;
     ReportFatalException(context, E_UNEXPECTED, Fatal_Amd64StackWalkerOutOfContexts, scenario);
 }
 
-_NOINLINE void FailedToBox_OOM_fatal_error(
+_NOINLINE void FailedToBox_OOM_unrecoverable_error(
     __in ULONG_PTR context)
 {
     int scenario = 1;
     ReportFatalException(context, E_UNEXPECTED, Fatal_FailedToBox_OUTOFMEMORY, scenario);
 }
 
-#if defined(RECYCLER_WRITE_BARRIER) && defined(_M_X64_OR_ARM64)
-_NOINLINE void X64WriteBarrier_OOM_fatal_error()
+#if defined(RECYCLER_WRITE_BARRIER) && defined(TARGET_64)
+_NOINLINE void X64WriteBarrier_OOM_unrecoverable_error()
 {
     int scenario = 3;
     ReportFatalException(NULL, E_OUTOFMEMORY, WriteBarrier_OUTOFMEMORY, scenario);
@@ -108,19 +108,20 @@ _NOINLINE void LargeHeapBlock_Metadata_Corrupted(
 };
 #endif
 
-_NOINLINE void FromDOM_NoScriptScope_fatal_error()
+// If you see this error, it is because of a DOM bug. Assign to daniec or jdweiner.
+_NOINLINE void FromDOM_NoScriptScope_unrecoverable_error()
 {
     int scenario = 5;
     ReportFatalException(NULL, E_UNEXPECTED, EnterScript_FromDOM_NoScriptScope, scenario);
 }
 
-_NOINLINE void Debugger_AttachDetach_fatal_error(HRESULT hr)
+_NOINLINE void Debugger_AttachDetach_unrecoverable_error(HRESULT hr)
 {
     int scenario = 5;
     ReportFatalException(NULL, hr, Fatal_Debugger_AttachDetach_Failure, scenario);
 }
 
-_NOINLINE void EntryExitRecord_Corrupted_fatal_error()
+_NOINLINE void EntryExitRecord_Corrupted_unrecoverable_error()
 {
     int scenario = 6;
     ReportFatalException(NULL, E_UNEXPECTED, Fatal_EntryExitRecordCorruption, scenario);
@@ -132,10 +133,101 @@ _NOINLINE void UnexpectedExceptionHandling_fatal_error()
     ReportFatalException(NULL, E_UNEXPECTED, Fatal_UnexpectedExceptionHandling, scenario);
 }
 
-_NOINLINE void RpcFailure_fatal_error(HRESULT hr)
+_NOINLINE void RpcFailure_unrecoverable_error(HRESULT hr)
 {
     int scenario = 8;
     ReportFatalException(NULL, hr, Fatal_RpcFailure, scenario);
+}
+
+_NOINLINE void OutOfMemory_unrecoverable_error()
+{
+    int scenario = 9;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void RecyclerSingleAllocationLimit_unrecoverable_error()
+{
+    int scenario = 10;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void MemGCSingleAllocationLimit_unrecoverable_error()
+{
+    int scenario = 11;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+// same as OutOfMemory_unrecoverable_error, but with a different `scenario`
+// - just to cause separate bucketing of these failures 
+_NOINLINE void OutOfMemoryTooManyPinnedObjects_unrecoverable_error()
+{
+    int scenario = 12;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+// same as OutOfMemory_unrecoverable_error, but with a different `scenario`
+// - just to cause separate bucketing of these failures 
+_NOINLINE void OutOfMemoryTooManyClosedContexts_unrecoverable_error()
+{
+    int scenario = 13;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+// same as OutOfMemory_unrecoverable_error, but with a different `scenario`
+// - just to cause separate bucketing of these failures 
+_NOINLINE void OutOfMemoryAllocationPolicy_unrecoverable_error()
+{
+    int scenario = 14;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void XDataRegistration_unrecoverable_error(HRESULT hr, ULONG_PTR scenario)
+{
+    ReportFatalException(NULL, hr, Fatal_XDataRegistration, scenario);
+}
+
+///////
+//
+// The following variety of OOM unrecoverable errors are similar to the ones above 
+// and exist specifically for additional distinct bucketing of crash dumps for 
+// diagnostics purposes.
+//
+///////
+
+_NOINLINE void OutOfMemoryTooManyPinnedObjects_unrecoverable_error_visible()
+{
+    int scenario = 15;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void OutOfMemoryTooManyClosedContexts_unrecoverable_error_visible()
+{
+    int scenario = 16;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void OutOfMemoryAllocationPolicy_unrecoverable_error_visible()
+{
+    int scenario = 17;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void OutOfMemoryTooManyPinnedObjects_unrecoverable_error_notvisible()
+{
+    int scenario = 18;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void OutOfMemoryTooManyClosedContexts_unrecoverable_error_notvisible()
+{
+    int scenario = 19;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
+}
+
+_NOINLINE void OutOfMemoryAllocationPolicy_unrecoverable_error_notvisible()
+{
+    int scenario = 20;
+    ReportFatalException(NULL, E_OUTOFMEMORY, Fatal_OutOfMemory, scenario);
 }
 
 #pragma optimize("",on)

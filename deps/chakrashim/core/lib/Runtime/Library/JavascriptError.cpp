@@ -29,7 +29,7 @@ namespace Js
 
     bool JavascriptError::Is(Var aValue)
     {
-        AssertMsg(aValue != NULL, "Error is NULL - did it come from an out of memory exception?");
+        AssertMsg(aValue != NULL, "Error is NULL - did it come from an oom exception?");
         return JavascriptOperators::GetTypeId(aValue) == TypeIds_Error;
     }
 
@@ -123,7 +123,7 @@ namespace Js
         JavascriptOperators::SetProperty(pError, pError, PropertyIds::description, descriptionString, scriptContext);
         pError->SetNotEnumerable(PropertyIds::description);
 
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
+        Var newTarget = args.GetNewTarget();
         return JavascriptError::NewInstance(function, pError, callInfo, newTarget, message);
     }
 
@@ -134,7 +134,7 @@ namespace Js
         ARGUMENTS(args, callInfo); \
         ScriptContext* scriptContext = function->GetScriptContext(); \
         JavascriptError* pError = scriptContext->GetLibrary()->Create##name(); \
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0]; \
+        Var newTarget = args.GetNewTarget(); \
         Var message = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined(); \
         return JavascriptError::NewInstance(function, pError, callInfo, newTarget, message); \
     }
@@ -159,7 +159,7 @@ namespace Js
         ScriptContext* scriptContext = function->GetScriptContext();
         JavascriptError* pError = scriptContext->GetHostScriptContext()->CreateWinRTError(nullptr, nullptr);
 
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
+        Var newTarget = args.GetNewTarget();
         Var message = args.Info.Count > 1 ? args[1] : scriptContext->GetLibrary()->GetUndefined();
         return JavascriptError::NewInstance(function, pError, callInfo, newTarget, message);
     }
@@ -186,7 +186,7 @@ namespace Js
         JavascriptString *outputStr, *message;
 
         // get error.name
-        BOOL hasName = JavascriptOperators::GetProperty(thisError, PropertyIds::name, &value, scriptContext, NULL) &&
+        BOOL hasName = JavascriptOperators::GetPropertyNoCache(thisError, PropertyIds::name, &value, scriptContext) &&
             JavascriptOperators::GetTypeId(value) != TypeIds_Undefined;
 
         if (hasName)
@@ -199,7 +199,7 @@ namespace Js
         }
 
         // get error.message
-        if (JavascriptOperators::GetProperty(thisError, PropertyIds::message, &value, scriptContext, NULL)
+        if (JavascriptOperators::GetPropertyNoCache(thisError, PropertyIds::message, &value, scriptContext)
             && JavascriptOperators::GetTypeId(value) != TypeIds_Undefined)
         {
             message = JavascriptConversion::ToString(value, scriptContext);
@@ -527,7 +527,7 @@ namespace Js
         // This version needs to be called in script.
         Assert(scriptContext->GetThreadContext()->IsScriptActive());
 
-        Var number = JavascriptOperators::GetProperty(errorObject, Js::PropertyIds::number, scriptContext, NULL);
+        Var number = JavascriptOperators::GetPropertyNoCache(errorObject, Js::PropertyIds::number, scriptContext);
         if (TaggedInt::Is(number))
         {
             hr = TaggedInt::ToInt32(number);
@@ -694,7 +694,7 @@ namespace Js
         return false;
     }
 
-    bool JavascriptError::ThrowCantDelete(PropertyOperationFlags flags, ScriptContext* scriptContext, PCWSTR varName)
+    bool JavascriptError::ThrowCantDeleteIfStrictModeOrNonconfigurable(PropertyOperationFlags flags, ScriptContext* scriptContext, PCWSTR varName)
     {
         bool isNonConfigThrow = (flags & PropertyOperation_ThrowOnDeleteIfNotConfig) == PropertyOperation_ThrowOnDeleteIfNotConfig;
 
@@ -736,6 +736,26 @@ namespace Js
             return true;
         }
         return false;
+    }
+
+    bool JavascriptError::ShouldTypeofErrorBeReThrown(Var errorObject)
+    {
+        HRESULT hr = (errorObject != nullptr && Js::JavascriptError::Is(errorObject))
+            ? Js::JavascriptError::GetRuntimeError(Js::RecyclableObject::FromVar(errorObject), nullptr)
+            : S_OK;
+
+        return JavascriptError::GetErrorNumberFromResourceID(JSERR_UndefVariable) != (int32)hr
+#ifdef ENABLE_PROJECTION
+            // WinRT projected objects can return TYPE_E_ELEMENTNOTFOUND for missing properties
+            // which is not the same code as JSERR_UndefVariable. However, the meaning of the
+            // two error codes is morally equivalent in typeof scenario. Special case this here
+            // because we do not want typeof to leak these exceptions.
+            && !(errorObject != nullptr
+                && Js::JavascriptError::Is(errorObject)
+                && Js::JavascriptError::FromVar(errorObject)->GetErrorType() == kjstWinRTError
+                && hr == TYPE_E_ELEMENTNOTFOUND)
+#endif
+            ;
     }
 
     // Gets the error number associated with the resource ID for an error message.
@@ -831,6 +851,7 @@ namespace Js
         if (cse->ei.bstrDescription)
         {
             value = JavascriptString::NewCopySz(cse->ei.bstrDescription, scriptContext);
+            JavascriptOperators::OP_SetProperty(error, PropertyIds::description, value, scriptContext);
             JavascriptOperators::OP_SetProperty(error, PropertyIds::message, value, scriptContext);
         }
 

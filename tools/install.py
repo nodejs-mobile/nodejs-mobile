@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
+import ast
 import errno
-import json
 import os
 import re
 import shutil
@@ -20,9 +20,7 @@ def abspath(*args):
 
 def load_config():
   s = open('config.gypi').read()
-  s = re.sub(r'#.*?\n', '', s) # strip comments
-  s = re.sub(r'\'', '"', s) # convert quotes
-  return json.loads(s)
+  return ast.literal_eval(s)
 
 def try_unlink(path):
   try:
@@ -33,6 +31,7 @@ def try_unlink(path):
 def try_symlink(source_path, link_path):
   print 'symlinking %s -> %s' % (source_path, link_path)
   try_unlink(link_path)
+  try_mkdir_r(os.path.dirname(link_path))
   os.symlink(source_path, link_path)
 
 def try_mkdir_r(path):
@@ -133,7 +132,10 @@ def files(action):
       if sys.platform != 'darwin':
         output_prefix += 'lib.target/'
 
-  action([output_prefix + output_file], 'bin/' + output_file)
+  if 'false' == variables.get('node_shared'):
+    action([output_prefix + output_file], 'bin/' + output_file)
+  else:
+    action([output_prefix + output_file], 'lib/' + output_file)
 
   if 'true' == variables.get('node_use_dtrace'):
     action(['out/Release/node.d'], 'lib/dtrace/node.d')
@@ -174,6 +176,7 @@ def headers(action):
   if 'v8' == variables.get('node_engine'):
     subdir_files('deps/v8/include', 'include/node/', action)
   elif 'chakracore' == variables.get('node_engine'):
+    action(['src/chakra_ttd.h'], 'include/node/')
     subdir_files('deps/chakrashim/include', 'include/node/', action)
     subdir_files('deps/chakrashim/src', 'include/node/', action)
   else:
@@ -186,7 +189,7 @@ def headers(action):
      'false' == variables.get('node_shared_openssl'):
     subdir_files('deps/openssl/openssl/include/openssl', 'include/node/openssl/', action)
     subdir_files('deps/openssl/config/archs', 'include/node/openssl/archs', action)
-    action(['deps/openssl/config/opensslconf.h'], 'include/node/openssl/')
+    subdir_files('deps/openssl/config', 'include/node/openssl', action)
 
   if 'false' == variables.get('node_shared_zlib'):
     action([

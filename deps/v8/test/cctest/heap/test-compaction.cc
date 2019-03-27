@@ -2,22 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/factory.h"
+#include "src/heap/factory.h"
 #include "src/heap/mark-compact.h"
 #include "src/isolate.h"
-// FIXME(mstarzinger, marja): This is weird, but required because of the missing
-// (disallowed) include: src/factory.h -> src/objects-inl.h
 #include "src/objects-inl.h"
-// FIXME(mstarzinger, marja): This is weird, but required because of the missing
-// (disallowed) include: src/feedback-vector.h ->
-// src/feedback-vector-inl.h
-#include "src/feedback-vector-inl.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/heap/heap-tester.h"
 #include "test/cctest/heap/heap-utils.h"
 
 namespace v8 {
 namespace internal {
+namespace heap {
 
 namespace {
 
@@ -26,7 +21,11 @@ void CheckInvariantsOfAbortedPage(Page* page) {
   // 1) Markbits are cleared
   // 2) The page is not marked as evacuation candidate anymore
   // 3) The page is not marked as aborted compaction anymore.
-  CHECK(MarkingState::Internal(page).bitmap()->IsClean());
+  CHECK(page->heap()
+            ->mark_compact_collector()
+            ->non_atomic_marking_state()
+            ->bitmap(page)
+            ->IsClean());
   CHECK(!page->IsEvacuationCandidate());
   CHECK(!page->IsFlagSet(Page::COMPACTION_WAS_ABORTED));
 }
@@ -41,12 +40,13 @@ void CheckAllObjectsOnPage(std::vector<Handle<FixedArray>>& handles,
 }  // namespace
 
 HEAP_TEST(CompactionFullAbortedPage) {
+  if (FLAG_never_compact) return;
   // Test the scenario where we reach OOM during compaction and the whole page
   // is aborted.
 
   // Disable concurrent sweeping to ensure memory is in an expected state, i.e.,
   // we can reach the state of a half aborted page.
-  FLAG_concurrent_sweeping = false;
+  ManualGCScope manual_gc_scope;
   FLAG_manual_evacuation_candidates_selection = true;
   CcTest::InitializeVM();
   Isolate* isolate = CcTest::i_isolate();
@@ -83,12 +83,13 @@ HEAP_TEST(CompactionFullAbortedPage) {
 
 
 HEAP_TEST(CompactionPartiallyAbortedPage) {
+  if (FLAG_never_compact) return;
   // Test the scenario where we reach OOM during compaction and parts of the
   // page have already been migrated to a new one.
 
   // Disable concurrent sweeping to ensure memory is in an expected state, i.e.,
   // we can reach the state of a half aborted page.
-  FLAG_concurrent_sweeping = false;
+  ManualGCScope manual_gc_scope;
   FLAG_manual_evacuation_candidates_selection = true;
 
   const int objects_per_page = 10;
@@ -155,6 +156,7 @@ HEAP_TEST(CompactionPartiallyAbortedPage) {
 
 
 HEAP_TEST(CompactionPartiallyAbortedPageIntraAbortedPointers) {
+  if (FLAG_never_compact) return;
   // Test the scenario where we reach OOM during compaction and parts of the
   // page have already been migrated to a new one. Objects on the aborted page
   // are linked together. This test makes sure that intra-aborted page pointers
@@ -162,7 +164,7 @@ HEAP_TEST(CompactionPartiallyAbortedPageIntraAbortedPointers) {
 
   // Disable concurrent sweeping to ensure memory is in an expected state, i.e.,
   // we can reach the state of a half aborted page.
-  FLAG_concurrent_sweeping = false;
+  ManualGCScope manual_gc_scope;
   FLAG_manual_evacuation_candidates_selection = true;
 
   const int objects_per_page = 10;
@@ -239,6 +241,7 @@ HEAP_TEST(CompactionPartiallyAbortedPageIntraAbortedPointers) {
 
 
 HEAP_TEST(CompactionPartiallyAbortedPageWithStoreBufferEntries) {
+  if (FLAG_never_compact) return;
   // Test the scenario where we reach OOM during compaction and parts of the
   // page have already been migrated to a new one. Objects on the aborted page
   // are linked together and the very first object on the aborted page points
@@ -249,7 +252,7 @@ HEAP_TEST(CompactionPartiallyAbortedPageWithStoreBufferEntries) {
 
   // Disable concurrent sweeping to ensure memory is in an expected state, i.e.,
   // we can reach the state of a half aborted page.
-  FLAG_concurrent_sweeping = false;
+  ManualGCScope manual_gc_scope;
   FLAG_manual_evacuation_candidates_selection = true;
 
   const int objects_per_page = 10;
@@ -336,7 +339,7 @@ HEAP_TEST(CompactionPartiallyAbortedPageWithStoreBufferEntries) {
       Address broken_address = holder->address() + 2 * kPointerSize + 1;
       // Convert it to a vector to create a string from it.
       Vector<const uint8_t> string_to_broken_addresss(
-          reinterpret_cast<const uint8_t*>(&broken_address), 8);
+          reinterpret_cast<const uint8_t*>(&broken_address), kPointerSize);
 
       Handle<String> string;
       do {
@@ -358,5 +361,6 @@ HEAP_TEST(CompactionPartiallyAbortedPageWithStoreBufferEntries) {
   }
 }
 
+}  // namespace heap
 }  // namespace internal
 }  // namespace v8

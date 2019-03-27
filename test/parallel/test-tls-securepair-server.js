@@ -42,7 +42,7 @@ function log(a) {
 
 const server = net.createServer(common.mustCall(function(socket) {
   log(`connection fd=${socket.fd}`);
-  const sslcontext = tls.createSecureContext({ key: key, cert: cert });
+  const sslcontext = tls.createSecureContext({ key, cert });
   sslcontext.context.setCiphers('RC4-SHA:AES128-SHA:AES256-SHA');
 
   const pair = tls.createSecurePair(sslcontext, true);
@@ -112,10 +112,6 @@ server.listen(0, common.mustCall(function() {
   // To test use: openssl s_client -connect localhost:8000
 
   const args = ['s_client', '-connect', `127.0.0.1:${this.address().port}`];
-
-  // for the performance and stability issue in s_client on Windows
-  if (common.isWindows)
-    args.push('-no_rand_screen');
 
   const client = spawn(common.opensslCli, args);
 

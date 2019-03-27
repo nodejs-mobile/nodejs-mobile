@@ -11,6 +11,7 @@ namespace Js
         typedef JsUtil::LeafValueDictionary<Js::LocalFunctionId, Js::FunctionBody*>::Type FunctionBodyDictionary;
         typedef JsUtil::LeafValueDictionary<Js::LocalFunctionId, Js::ParseableFunctionInfo*>::Type DeferredFunctionsDictionary;
         typedef JsUtil::List<Js::FunctionInfo *, Recycler> FunctionInfoList;
+        typedef JsUtil::BaseHashSet<Js::PropertyRecord const *, Recycler>  BoundedPropertyRecordHashSet;
 
         friend class RemoteUtf8SourceInfo;
         friend class ScriptContext;
@@ -40,11 +41,17 @@ namespace Js
             this->byteCodeGenerationFlags = byteCodeGenerationFlags;
         }
 
+
         bool IsInDebugMode() const
         {
+#ifdef ENABLE_SCRIPT_DEBUGGING
             return (this->debugModeSource != nullptr || this->debugModeSourceIsEmpty) && this->m_isInDebugMode;
+#else
+            return false;
+#endif
         }
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
         void SetInDebugMode(bool inDebugMode)
         {
             AssertMsg(!GetIsLibraryCode(), "Shouldn't call SetInDebugMode for Library code.");
@@ -75,6 +82,7 @@ namespace Js
                 this->debugModeSourceLength = 0;
             }
         }
+#endif
 
         size_t CharacterIndexToByteIndex(charcount_t cchIndex) const
         {
@@ -209,8 +217,7 @@ namespace Js
             return matchedFunctionBody;
         }
 
-        void SetHostBuffer(BYTE * pcszCode);
-
+#ifdef ENABLE_SCRIPT_DEBUGGING
         bool HasDebugDocument() const
         {
             return m_debugDocument != nullptr;
@@ -229,6 +236,7 @@ namespace Js
         }
 
         void ClearDebugDocument(bool close = true);
+#endif
 
         void SetIsCesu8(bool isCesu8)
         {
@@ -263,7 +271,7 @@ namespace Js
 
         bool IsHostManagedSource() const;
 
-        static int StaticGetHashCode(__in const Utf8SourceInfo* const si)
+        static hash_t StaticGetHashCode(__in const Utf8SourceInfo* const si)
         {
             return si->GetSourceHolder()->GetHashCode();
         }
@@ -289,7 +297,6 @@ namespace Js
         static Utf8SourceInfo* NewWithNoCopy(ScriptContext* scriptContext,
             LPCUTF8 utf8String, int32 length, size_t numBytes,
             SRCINFO const* srcInfo, bool isLibraryCode, Js::Var scriptSource = nullptr);
-        static Utf8SourceInfo* Clone(ScriptContext* scriptContext, const Utf8SourceInfo* sourceinfo);
 
         ScriptContext * GetScriptContext() const
         {
@@ -303,14 +310,14 @@ namespace Js
             this->m_lineOffsetCache = nullptr;
         }
 
-        void CreateLineOffsetCache(const JsUtil::LineOffsetCache<Recycler>::LineOffsetCacheItem *items, charcount_t numberOfItems);
+        void CreateLineOffsetCache(const charcount_t *lineCharacterOffsets, const charcount_t *lineByteOffsets, charcount_t numberOfItems);
 
         size_t GetLineCount()
         {
             return this->GetLineOffsetCache()->GetLineCount();
         }
 
-        JsUtil::LineOffsetCache<Recycler> *GetLineOffsetCache()
+        LineOffsetCache *GetLineOffsetCache()
         {
             AssertMsg(this->m_lineOffsetCache != nullptr, "LineOffsetCache wasn't created, EnsureLineOffsetCache should have been called.");
             return m_lineOffsetCache;
@@ -358,44 +365,49 @@ namespace Js
         void SetCallerUtf8SourceInfo(Utf8SourceInfo* callerUtf8SourceInfo);
         Utf8SourceInfo* GetCallerUtf8SourceInfo() const;
 
+        BoundedPropertyRecordHashSet * GetBoundedPropertyRecordHashSet() { return &this->boundedPropertyRecordHashSet; }
+#ifdef NTBUILD
         bool GetDebugDocumentName(BSTR * sourceName);
+#endif
     private:
 
         Field(charcount_t) m_cchLength;               // The number of characters encoded in m_utf8Source.
         Field(ISourceHolder*) sourceHolder;
 
-        FieldNoBarrier(BYTE*) m_pHostBuffer;  // Pointer to a host source buffer (null unless this is host code that we need to free)
-
         Field(FunctionBodyDictionary*) functionBodyDictionary;
         Field(DeferredFunctionsDictionary*) m_deferredFunctionsDictionary;
         Field(FunctionInfoList*) topLevelFunctionInfoList;
+        Field(BoundedPropertyRecordHashSet) boundedPropertyRecordHashSet;
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
         Field(DebugDocument*) m_debugDocument;
+#endif
 
         Field(const SRCINFO*) m_srcInfo;
         Field(DWORD_PTR) m_secondaryHostSourceContext;
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
         Field(LPCUTF8) debugModeSource;
         Field(size_t) debugModeSourceLength;
-
+#endif
         Field(ScriptContext* const) m_scriptContext;   // Pointer to ScriptContext under which this source info was created
 
         // Line offset cache used for quickly finding line/column offsets.
-        Field(JsUtil::LineOffsetCache<Recycler>*) m_lineOffsetCache;
+        Field(LineOffsetCache*) m_lineOffsetCache;
 
         // Utf8SourceInfo of the caller, used for mapping eval/new Function node to its caller node for debugger
         Field(Utf8SourceInfo*) callerUtf8SourceInfo;
 
         Field(bool) m_deferredFunctionsInitialized : 1;
         Field(bool) m_isCesu8 : 1;
-        Field(bool) m_hasHostBuffer : 1;
         Field(bool) m_isLibraryCode : 1;           // true, the current source belongs to the internal library code. Used for debug purpose to not show in debugger
         Field(bool) m_isXDomain : 1;
         // we found that m_isXDomain could cause regression without CORS, so the new flag is just for callee.caller in window.onerror
         Field(bool) m_isXDomainString : 1;
+#ifdef ENABLE_SCRIPT_DEBUGGING
         Field(bool) debugModeSourceIsEmpty : 1;
         Field(bool) m_isInDebugMode : 1;
-
+#endif
         Field(uint) m_sourceInfoId;
 
         // Various flags preserved for Edit-and-Continue re-compile purpose

@@ -17,12 +17,9 @@ function test(arrayBuffer, offset, length) {
 
 const acceptableOOMErrors = [
   'Array buffer allocation failed',
-  'Invalid array buffer length'
+  'Invalid array buffer length',
+  'Array length must be a finite positive integer'
 ];
-
-if (common.isChakraEngine) {
-  acceptableOOMErrors.push('Array length must be a finite positive integer');
-}
 
 const length = 1000;
 const offset = 4294967296; /* 1 << 32 */
@@ -34,7 +31,6 @@ try {
 } catch (e) {
   if (e instanceof RangeError && acceptableOOMErrors.includes(e.message))
     common.skip(`Unable to allocate ${size} bytes for ArrayBuffer`);
-
   throw e;
 }
 

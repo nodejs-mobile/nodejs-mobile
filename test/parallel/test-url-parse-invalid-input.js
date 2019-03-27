@@ -4,26 +4,34 @@ const assert = require('assert');
 const url = require('url');
 
 // https://github.com/joyent/node/issues/568
-const errMessage = /^TypeError: Parameter "url" must be a string, not (?:undefined|boolean|number|object|function|symbol)$/;
 [
-  undefined,
-  null,
-  true,
-  false,
-  0.0,
-  0,
-  [],
-  {},
-  () => {},
-  Symbol('foo')
-].forEach((val) => {
-  assert.throws(() => { url.parse(val); }, errMessage);
+  [undefined, 'undefined'],
+  [null, 'object'],
+  [true, 'boolean'],
+  [false, 'boolean'],
+  [0.0, 'number'],
+  [0, 'number'],
+  [[], 'object'],
+  [{}, 'object'],
+  [() => {}, 'function'],
+  [Symbol('foo'), 'symbol']
+].forEach(([val, type]) => {
+  common.expectsError(() => {
+    url.parse(val);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    type: TypeError,
+    message: `The "url" argument must be of type string. Received type ${type}`
+  });
 });
 
-assert.throws(
-  () => { url.parse('http://%E0%A4%A@fail'); },
-  common.engineSpecificMessage({
-    v8: /^URIError: URI malformed$/,
-    chakracore: /^URIError: The URI to be decoded is not a valid encoding$/
-  })
-);
+assert.throws(() => { url.parse('http://%E0%A4%A@fail'); },
+              (e) => {
+                // The error should be a URIError.
+                if (!(e instanceof URIError))
+                  return false;
+
+                // The error should be from the JS engine and not from Node.js.
+                // JS engine errors do not have the `code` property.
+                return e.code === undefined;
+              });

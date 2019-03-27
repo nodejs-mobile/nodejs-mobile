@@ -21001,22 +21001,6 @@ undefined
 10
 [object DataView]
 Start same thread different engine test on file dataview.js
-property of global: print
-
-property of global: read
-property of global: readbuffer
-property of global: printDataView
-exception is -2146823281Unable to get property 'toString' of undefined or null reference
-property of global: GetResult
-exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
-property of global: testOneOffset
-exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
-property of global: testOneValue
-test one value undefined
-exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
-property of global: oneTest
-test one value 0
-exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
 property of global: getFuncs
 sub object 0 in getFuncs is getInt8
 sub object 1 in getFuncs is getUint8
@@ -21053,6 +21037,18 @@ sub object 4 in testValue is 296
 property of global: arrayBuffer
 property of global: dataView
 sub object 2 in dataView is 10
+property of global: printDataView
+exception is -2146823281Unable to get property 'toString' of undefined or null reference
+property of global: GetResult
+exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
+property of global: testOneOffset
+exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
+property of global: testOneValue
+test one value undefined
+exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
+property of global: oneTest
+test one value 0
+exception is -2146823281Unable to get property 'byteLength' of undefined or null reference
 testing file int8array.js
 test1
 10
@@ -22077,12 +22073,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file int8array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '5' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is 1
@@ -22314,6 +22304,8 @@ property of global: invalidSizeValues
 sub object 0 in invalidSizeValues is -1
 sub object 1 in invalidSizeValues is Infinity
 sub object 2 in invalidSizeValues is -Infinity
+property of global: oneTest
+exception is -2146823281Unable to set property '5' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -23179,12 +23171,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file uint8array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is 128
@@ -23394,6 +23380,8 @@ property of global: test19
 sub object 0 in test19 is 0
 sub object 1 in test19 is 128
 sub object 2 in test19 is 10
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -24173,12 +24161,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file int16array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is -32768
@@ -24345,6 +24327,8 @@ property of global: test19
 sub object 0 in test19 is 0
 sub object 1 in test19 is -32768
 sub object 2 in test19 is 0
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -25139,12 +25123,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file uint16array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is 32768
@@ -25314,6 +25292,8 @@ property of global: test19
 sub object 0 in test19 is 32768
 sub object 1 in test19 is 32768
 sub object 2 in test19 is 0
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -26091,12 +26071,6 @@ foo == bar
 byteLength = 28
 
 Start same thread different engine test on file int32array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is -2147483648
@@ -26253,6 +26227,8 @@ sub object 4 in test24 is 10
 sub object 5 in test24 is 10
 sub object 6 in test24 is 0
 sub object foo in test24 is bar
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -26996,12 +26972,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file uint32array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is 2147483648
@@ -27147,6 +27117,8 @@ property of global: test19
 sub object 0 in test19 is 2147483648
 sub object 1 in test19 is 2147483648
 sub object 2 in test19 is 0
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -27897,12 +27869,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file float32array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is 0.5400000214576721
@@ -28050,6 +28016,8 @@ property of global: test19
 sub object 0 in test19 is 0.5400000214576721
 sub object 1 in test19 is 0.5400000214576721
 sub object 2 in test19 is 0
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow
@@ -28766,12 +28734,6 @@ undefined
 30
 undefined
 Start same thread different engine test on file float64array.js
-property of global: print
-undefined
-property of global: read
-property of global: readbuffer
-property of global: oneTest
-exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: test1
 sub object 0 in test1 is 0
 sub object 1 in test1 is -0.65
@@ -28904,6 +28866,8 @@ property of global: test21
 sub object 0 in test21 is 0
 sub object 1 in test21 is 0
 sub object 2 in test21 is undefined
+property of global: oneTest
+exception is -2146823281Unable to set property '1' of undefined or null reference
 property of global: printObj
 exception is -2146823281Unable to get property 'toString' of undefined or null reference
 property of global: verifyThrow

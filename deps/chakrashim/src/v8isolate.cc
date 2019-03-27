@@ -27,40 +27,66 @@ namespace v8 {
 HeapProfiler dummyHeapProfiler;
 CpuProfiler dummyCpuProfiler;
 
-Isolate* Isolate::NewWithTTDSupport(const CreateParams& params,
-                      size_t optReplayUriLength, const char* optReplayUri,
-                      bool doRecord, bool doReplay, bool doDebug,
-                      uint32_t snapInterval, uint32_t snapHistoryLength) {
-  Isolate* iso = jsrt::IsolateShim::New(optReplayUriLength, optReplayUri,
-                                        doRecord, doReplay, doDebug,
-                                        snapInterval, snapHistoryLength);
+Isolate* Isolate::Allocate() {
+  return AllocateWithTTDSupport(0, nullptr, false, false, false, UINT32_MAX,
+                                UINT32_MAX);
+}
+
+Isolate* Isolate::AllocateWithTTDSupport(size_t optReplayUriLength,
+                                         const char* optReplayUri,
+                                         bool doRecord, bool doReplay,
+                                         bool doDebug, uint32_t snapInterval,
+                                         uint32_t snapHistoryLength) {
+  return jsrt::IsolateShim::New(optReplayUriLength, optReplayUri, doRecord,
+                                doReplay, doDebug, snapInterval,
+                                snapHistoryLength);
+}
+
+void Isolate::Initialize(Isolate* isolate, const CreateParams& params) {
+  jsrt::IsolateShim* isoShim = jsrt::IsolateShim::FromIsolate(isolate);
 
   if (params.array_buffer_allocator) {
-    CHAKRA_VERIFY(!jsrt::IsolateShim::FromIsolate(iso)->arrayBufferAllocator);
-    jsrt::IsolateShim::FromIsolate(iso)->arrayBufferAllocator =
-        params.array_buffer_allocator;
+    CHAKRA_VERIFY(!isoShim->arrayBufferAllocator);
+    isoShim->arrayBufferAllocator = params.array_buffer_allocator;
   }
-  return iso;
 }
 
 Isolate* Isolate::New(const CreateParams& params) {
-  return NewWithTTDSupport(params, 0, nullptr, false, false, false, UINT32_MAX,
-                           UINT32_MAX);
+  Isolate* isolate = Allocate();
+  Initialize(isolate, params);
+
+  return isolate;
+}
+
+Isolate* Isolate::NewWithTTDSupport(const CreateParams& params,
+                                    size_t optReplayUriLength,
+                                    const char* optReplayUri, bool doRecord,
+                                    bool doReplay, bool doDebug,
+                                    uint32_t snapInterval,
+                                    uint32_t snapHistoryLength) {
+  Isolate* isolate = AllocateWithTTDSupport(optReplayUriLength, optReplayUri,
+                                            doRecord, doReplay, doDebug,
+                                            snapInterval, snapHistoryLength);
+  Initialize(isolate, params);
+
+  return isolate;
 }
 
 Isolate* Isolate::New() {
-  return jsrt::IsolateShim::New(0, nullptr,
-                                false, false, false,
-                                UINT32_MAX, UINT32_MAX);
+  return Allocate();
 }
 
-Isolate *Isolate::GetCurrent() {
+Isolate* Isolate::GetCurrent() {
   return jsrt::IsolateShim::GetCurrentAsIsolate();
 }
 
 void Isolate::SetAbortOnUncaughtExceptionCallback(
   AbortOnUncaughtExceptionCallback callback) {
   // CHAKRA-TODO: To be implemented
+}
+
+void Isolate::DiscardThreadSpecificMetadata() {
+  CHAKRA_UNIMPLEMENTED();
 }
 
 void Isolate::Enter() {
@@ -112,7 +138,7 @@ Local<Context> Isolate::GetCurrentContext() {
 }
 
 void Isolate::SetPromiseRejectCallback(PromiseRejectCallback callback) {
-  // CHAKRA does not support this explicit callback
+  jsrt::IsolateShim::FromIsolate(this)->SetPromiseRejectCallback(callback);
 }
 
 void Isolate::SetPromiseHook(PromiseHook hook) {
@@ -145,6 +171,10 @@ void Isolate::SetJitCodeEventHandler(JitCodeEventOptions options,
   // need it because we do our own ETW tracing.
 }
 
+void Isolate::EnqueueMicrotask(Local<Function> microtask) {
+  jsrt::IsolateShim::FromIsolate(this)->QueueMicrotask(*microtask);
+}
+
 void Isolate::EnqueueMicrotask(MicrotaskCallback microtask, void* data) {
   // CHAKRA-TODO: Current microTask implementation only support queueing
   // javascript functions. Need to add support to queue native functions
@@ -153,7 +183,10 @@ void Isolate::EnqueueMicrotask(MicrotaskCallback microtask, void* data) {
 }
 
 void Isolate::RunMicrotasks() {
-  jsrt::ContextShim::GetCurrent()->RunMicrotasks();
+  jsrt::IsolateShim::FromIsolate(this)->RunMicrotasks();
+}
+
+void Isolate::SetMicrotasksPolicy(MicrotasksPolicy policy) {
 }
 
 void Isolate::SetAutorunMicrotasks(bool autorun) {
@@ -173,14 +206,30 @@ CpuProfiler* Isolate::GetCpuProfiler() {
 }
 
 void Isolate::AddGCPrologueCallback(
+  GCCallbackWithData callback, void* data, GCType gc_type_filter) {
+}
+
+void Isolate::AddGCPrologueCallback(
   GCCallback callback, GCType gc_type_filter) {
+}
+
+void Isolate::RemoveGCPrologueCallback(
+  GCCallbackWithData callback, void* data) {
 }
 
 void Isolate::RemoveGCPrologueCallback(GCCallback callback) {
 }
 
 void Isolate::AddGCEpilogueCallback(
+  GCCallbackWithData callback, void* data, GCType gc_type_filter) {
+}
+
+void Isolate::AddGCEpilogueCallback(
   GCCallback callback, GCType gc_type_filter) {
+}
+
+void Isolate::RemoveGCEpilogueCallback(
+  GCCallbackWithData callback, void* data) {
 }
 
 void Isolate::RemoveGCEpilogueCallback(GCCallback callback) {
@@ -199,7 +248,7 @@ void Isolate::TerminateExecution() {
 }
 
 void Isolate::RequestGarbageCollectionForTesting(GarbageCollectionType type) {
-  JsCollectGarbage(jsrt::IsolateShim::FromIsolate(this)->GetRuntimeHandle());
+  jsrt::IsolateShim::FromIsolate(this)->CollectGarbage();
 }
 
 void Isolate::SetCounterFunction(CounterLookupCallback) {
@@ -225,7 +274,7 @@ bool Isolate::IdleNotification(int idle_time_in_ms) {
 }
 
 void Isolate::LowMemoryNotification() {
-  CHAKRA_UNIMPLEMENTED();
+  jsrt::IsolateShim::GetCurrent()->CollectGarbage();
 }
 
 int Isolate::ContextDisposedNotification() {
@@ -233,7 +282,7 @@ int Isolate::ContextDisposedNotification() {
   return 0;
 }
 
-void Isolate::GetHeapStatistics(HeapStatistics *heap_statistics) {
+void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
   size_t memoryUsage;
   if (!jsrt::IsolateShim::FromIsolate(this)->GetMemoryUsage(&memoryUsage)) {
     return;
@@ -251,6 +300,16 @@ bool Isolate::GetHeapSpaceStatistics(HeapSpaceStatistics* space_statistics,
                                      size_t index) {
   // Chakra doesn't expose HEAP space stats
   return true;
+}
+
+void Isolate::SetAllowWasmCodeGenerationCallback(
+    AllowWasmCodeGenerationCallback callback) {
+  // CHAKRA-TODO: Figure out what to do here
+}
+
+// this is used with the --prof argument for V8 profiling
+void Isolate::SetIdle(bool is_idle) {
+  CHAKRA_UNIMPLEMENTED();
 }
 
 Isolate::DisallowJavascriptExecutionScope::DisallowJavascriptExecutionScope(

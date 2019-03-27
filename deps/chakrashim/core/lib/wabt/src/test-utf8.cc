@@ -16,7 +16,7 @@
 
 #include "gtest/gtest.h"
 
-#include "utf8.h"
+#include "src/utf8.h"
 
 using namespace wabt;
 
@@ -58,21 +58,15 @@ TEST(utf8, valid_empty) {
 }
 
 TEST(utf8, valid_1_byte) {
-  FOR_RANGE(cu0, 0, 0x80) {
-    assert_is_valid_utf8(true, 1, cu0);
-  }
+  FOR_RANGE(cu0, 0, 0x80) { assert_is_valid_utf8(true, 1, cu0); }
 }
 
 TEST(utf8, invalid_continuation_bytes) {
-  FOR_RANGE(cu0, 0x80, 0xc0) {
-    assert_is_valid_utf8(false, 1, cu0);
-  }
+  FOR_RANGE(cu0, 0x80, 0xc0) { assert_is_valid_utf8(false, 1, cu0); }
 }
 
 TEST(utf8, invalid_2_byte) {
-  FOR_RANGE(cu0, 0xc0, 0xc2) {
-    assert_is_valid_utf8(false, 1, cu0);
-  }
+  FOR_RANGE(cu0, 0xc0, 0xc2) { assert_is_valid_utf8(false, 1, cu0); }
 }
 
 TEST(utf8, valid_2_bytes) {
@@ -98,8 +92,9 @@ TEST(utf8, valid_3_bytes_e0) {
 TEST(utf8, valid_3_bytes) {
   FOR_RANGE(cu0, 0xe1, 0xf0) {
     // Handle 0xed in valid_3_bytes_ed.
-    if (cu0 == 0xed)
+    if (cu0 == 0xed) {
       continue;
+    }
 
     FOR_EACH_BYTE(cu1) {
       FOR_EACH_BYTE(cu2) {

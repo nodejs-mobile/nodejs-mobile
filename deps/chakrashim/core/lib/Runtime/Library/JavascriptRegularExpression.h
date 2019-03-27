@@ -25,14 +25,13 @@ namespace Js
         // Initialization of this pattern is deferred until split() is called, or it's copied from another
         // RegExp object.
         Field(UnifiedRegex::RegexPattern*) splitPattern;
-
         Field(Var) lastIndexVar;  // null => must build lastIndexVar from current lastIndex
 
     public:
-
         // Three states for lastIndex value:
         //  1. lastIndexVar has been updated, we must calculate lastIndex from it when we next need it
         static const CharCount NotCachedValue = (CharCount)-2;
+
     private:
         //  2. ToNumber(lastIndexVar) yields +inf or -inf or an integer not in range [0, MaxCharCount]
         static const CharCount InvalidValue = CharCountFlag;
@@ -83,7 +82,7 @@ namespace Js
         UnifiedRegex::RegexFlags SetRegexFlag(PropertyId propertyId, UnifiedRegex::RegexFlags flags, UnifiedRegex::RegexFlags flag, ScriptContext* scriptContext);
 
         // For boxing stack instance
-        JavascriptRegExp(JavascriptRegExp * instance);
+        JavascriptRegExp(JavascriptRegExp * instance, bool deepCopy);
 
         DEFINE_MARSHAL_OBJECT_TO_SCRIPT_CONTEXT(JavascriptRegExp);
     protected:
@@ -124,13 +123,14 @@ namespace Js
         static bool Is(Var aValue);
         static bool IsRegExpLike(Var aValue, ScriptContext* scriptContext);
         static JavascriptRegExp* FromVar(Var aValue);
+        static JavascriptRegExp* UnsafeFromVar(Var aValue);
 
         static JavascriptRegExp* CreateRegEx(const char16* pSource, CharCount sourceLen,
             UnifiedRegex::RegexFlags flags, ScriptContext *scriptContext);
         static JavascriptRegExp* CreateRegEx(Var aValue, Var options, ScriptContext *scriptContext);
         static JavascriptRegExp* CreateRegExNoCoerce(Var aValue, Var options, ScriptContext *scriptContext);
         static UnifiedRegex::RegexPattern* CreatePattern(Var aValue, Var options, ScriptContext *scriptContext);
-        static Var OP_NewRegEx(Var aCompiledRegex, ScriptContext* scriptContext);
+        static Var OP_NewRegEx(UnifiedRegex::RegexPattern* aCompiledRegex, ScriptContext* scriptContext);
 
         JavascriptString *ToString(bool sourceOnly = false);
 
@@ -181,7 +181,7 @@ namespace Js
 
         virtual bool HasReadOnlyPropertiesInvisibleToTypeHandler() override { return true; }
 
-        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId) override;
+        virtual PropertyQueryFlags HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyQuery(Var originalInstance, JavascriptString* propertyNameString, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
         virtual PropertyQueryFlags GetPropertyReferenceQuery(Var originalInstance, PropertyId propertyId, Var* value, PropertyValueInfo* info, ScriptContext* requestContext) override;
@@ -201,7 +201,7 @@ namespace Js
         virtual uint GetSpecialPropertyCount() const override;
         virtual PropertyId const * GetSpecialPropertyIds() const override;
 
-        static Js::JavascriptRegExp * BoxStackInstance(Js::JavascriptRegExp * instance);
+        static Js::JavascriptRegExp * BoxStackInstance(Js::JavascriptRegExp * instance, bool deepCopy);
 
 #if ENABLE_TTD
     public:

@@ -5,7 +5,7 @@
 #include "RuntimeBasePch.h"
 #include "Library/JavascriptProxy.h"
 #include "Library/HostObjectBase.h"
-#include "Types/WithScopeObject.h"
+#include "Types/UnscopablesWrapperObject.h"
 
 #if ENABLE_CROSSSITE_TRACE
 #define TTD_XSITE_LOG(CTX, MSG, VAR) if((CTX)->ShouldPerformRecordOrReplayAction()) \
@@ -28,14 +28,18 @@ namespace Js
         {
             return FALSE;
         }
-        RecyclableObject * object = RecyclableObject::FromVar(instance);
+        RecyclableObject * object = RecyclableObject::UnsafeFromVar(instance);
         if (object->GetScriptContext() == requestContext)
         {
             return FALSE;
         }
+        if (PHASE_TRACE1(Js::Phase::MarshalPhase))
+        {
+            Output::Print(_u("NeedMarshalVar: %p (var sc: %p, request sc: %p)\n"), instance, object->GetScriptContext(), requestContext);
+        }
         if (DynamicType::Is(object->GetTypeId()))
         {
-            return !DynamicObject::FromVar(object)->IsCrossSiteObject() && !object->IsExternal();
+            return !DynamicObject::UnsafeFromVar(object)->IsCrossSiteObject() && !object->IsExternal();
         }
         return TRUE;
     }
@@ -58,11 +62,11 @@ namespace Js
             HostScriptContext * hostScriptContext = scriptContext->GetHostScriptContext();
             if (!hostScriptContext || !hostScriptContext->SetCrossSiteForFunctionType(function))
             {
-                if (function->GetDynamicType()->GetIsShared())
+                if (function->GetDynamicType()->GetIsLocked())
                 {
-                    TTD_XSITE_LOG(scriptContext, "SetCrossSiteForSharedFunctionType ", object);
+                    TTD_XSITE_LOG(scriptContext, "SetCrossSiteForLockedFunctionType ", object);
 
-                    function->GetLibrary()->SetCrossSiteForSharedFunctionType(function);
+                    function->GetLibrary()->SetCrossSiteForLockedFunctionType(function);
                 }
                 else
                 {
@@ -99,6 +103,11 @@ namespace Js
             {
                 MarshalDynamicObject(scriptContext, prototypeObject);
             }
+            if (JavascriptProxy::Is(prototypeObject))
+            {
+                // Fetching prototype of proxy can invoke trap - which we don't want during the marshalling time.
+                break;
+            }
             prototype = prototypeObject->GetPrototype();
         }
     }
@@ -119,10 +128,13 @@ namespace Js
         for (uint16 i = 0; i < length; i++)
         {
             Var value = display->GetItem(i);
-            if (WithScopeObject::Is(value))
+            if (UnscopablesWrapperObject::Is(value))
             {
                 // Here we are marshalling the wrappedObject and then ReWrapping th object in the new context.
-                value = JavascriptOperators::ToWithObject(CrossSite::MarshalVar(scriptContext, WithScopeObject::FromVar(value)->GetWrappedObject()), scriptContext);
+                RecyclableObject* wrappedObject = UnscopablesWrapperObject::FromVar(value)->GetWrappedObject();
+                ScriptContext* wrappedObjectScriptContext = wrappedObject->GetScriptContext();
+                value = JavascriptOperators::ToUnscopablesWrapperObject(CrossSite::MarshalVar(scriptContext,
+                  wrappedObject, wrappedObjectScriptContext), scriptContext);
             }
             else
             {
@@ -135,6 +147,20 @@ namespace Js
     }
 
     // static
+    Var CrossSite::MarshalVar(ScriptContext* scriptContext, Var value, ScriptContext* objectScriptContext)
+    {
+        if (scriptContext != objectScriptContext)
+        {
+            if (value == nullptr || Js::TaggedNumber::Is(value))
+            {
+                return value;
+            }
+            return MarshalVarInner(scriptContext, RecyclableObject::FromVar(value), false);
+        }
+        return value;
+    }
+
+    // static
     Var CrossSite::MarshalVar(ScriptContext* scriptContext, Var value, bool fRequestWrapper)
     {
         // value might be null from disable implicit call
@@ -142,9 +168,25 @@ namespace Js
         {
             return value;
         }
-        Js::RecyclableObject* object =  RecyclableObject::FromVar(value);
+        Js::RecyclableObject* object =  RecyclableObject::UnsafeFromVar(value);
+
         if (fRequestWrapper || scriptContext != object->GetScriptContext())
         {
+            if (PHASE_TRACE1(Js::Phase::MarshalPhase))
+            {
+                Output::Print(_u("MarshalVar: %p (var sc: %p, request sc: %p, requestWrapper: %d)\n"), object, object->GetScriptContext(), scriptContext, fRequestWrapper);
+            }
+
+            // Do not allow marshaling if a callable object is being marshalled into a high privileged
+            // script context.
+            if (JavascriptConversion::IsCallable(object))
+            {
+                ScriptContext* objectScriptContext = object->GetScriptContext();
+                if (scriptContext->GetPrivilegeLevel() < objectScriptContext->GetPrivilegeLevel())
+                {
+                    return scriptContext->GetLibrary()->GetUndefined();
+                }
+            }
             return MarshalVarInner(scriptContext, object, fRequestWrapper);
         }
         return value;
@@ -169,9 +211,9 @@ namespace Js
             //TODO: what happens if the gaurd in marshal (MarshalDynamicObject) isn't true?
             //
 
-            if(function->GetDynamicType()->GetIsShared())
+            if(function->GetTypeHandler()->GetIsLocked())
             {
-                function->GetLibrary()->SetCrossSiteForSharedFunctionType(function);
+                function->GetLibrary()->SetCrossSiteForLockedFunctionType(function);
             }
             else
             {
@@ -211,23 +253,26 @@ namespace Js
         }
 #endif
 
+        // Marshaling should not cause any re-entrancy.
+        JS_REENTRANCY_LOCK(jsReentLock, scriptContext->GetThreadContext());
+
 #if ENABLE_COPYONACCESS_ARRAY
         JavascriptLibrary::CheckAndConvertCopyOnAccessNativeIntArray<Var>(object);
 #endif
         TypeId typeId = object->GetTypeId();
         AssertMsg(typeId != TypeIds_Enumerator, "enumerator shouldn't be marshalled here");
 
-        // At the moment the mental model for WithScopeObject Marshaling is this:
-        // Are we trying to marshal a WithScopeObject in the Frame Display? - then 1) unwrap in MarshalFrameDisplay,
-        // 2) marshal the wrapped object, 3) Create a new WithScopeObject in the current scriptContext and re-wrap.
-        // We can avoid copying the WithScopeObject because it has no properties and never should.
-        // Thus creating a new WithScopeObject per context in MarshalFrameDisplay should be kosher.
+        // At the moment the mental model for UnscopablesWrapperObject Marshaling is this:
+        // Are we trying to marshal a UnscopablesWrapperObject in the Frame Display? - then 1) unwrap in MarshalFrameDisplay,
+        // 2) marshal the wrapped object, 3) Create a new UnscopablesWrapperObject in the current scriptContext and re-wrap.
+        // We can avoid copying the UnscopablesWrapperObject because it has no properties and never should.
+        // Thus creating a new UnscopablesWrapperObject per context in MarshalFrameDisplay should be kosher.
         // If it is not a FrameDisplay then we should not marshal. We can wrap cross context objects with a
-        // withscopeObject in a different context. When we unwrap for property lookups and the wrapped object
+        // UnscopablesWrapperObject in a different context. When we unwrap for property lookups and the wrapped object
         // is cross context, then we marshal the wrapped object into the current scriptContext, thus avoiding
-        // the need to copy the WithScopeObject itself. Thus We don't have to handle marshaling the WithScopeObject
+        // the need to copy the UnscopablesWrapperObject itself. Thus We don't have to handle marshaling the UnscopablesWrapperObject
         // in non-FrameDisplay cases.
-        AssertMsg(typeId != TypeIds_WithScopeObject, "WithScopeObject shouldn't be marshalled here");
+        AssertMsg(typeId != TypeIds_UnscopablesWrapperObject, "UnscopablesWrapperObject shouldn't be marshalled here");
 
         if (StaticType::Is(typeId))
         {
@@ -280,9 +325,18 @@ namespace Js
         {
             if (!dynamicObject->IsCrossSiteObject())
             {
-                TTD_XSITE_LOG(object->GetScriptContext(), "MarshalDynamicObjectAndPrototype", object);
+                if (JavascriptProxy::Is(dynamicObject))
+                {
+                    // We don't need to marshal the prototype chain in the case of Proxy. Otherwise we will go to the user code.
+                    TTD_XSITE_LOG(object->GetScriptContext(), "MarshalDynamicObject", object);
+                    MarshalDynamicObject(scriptContext, dynamicObject);
+                }
+                else
+                {
+                    TTD_XSITE_LOG(object->GetScriptContext(), "MarshalDynamicObjectAndPrototype", object);
 
-                MarshalDynamicObjectAndPrototype(scriptContext, dynamicObject);
+                    MarshalDynamicObjectAndPrototype(scriptContext, dynamicObject);
+                }
             }
         }
         else
@@ -326,18 +380,9 @@ namespace Js
         TTD_XSITE_LOG(callable->GetScriptContext(), "DefaultOrProfileThunk", callable);
 
 #ifdef ENABLE_WASM
-        if (AsmJsScriptFunction::IsWasmScriptFunction(function))
+        if (WasmScriptFunction::Is(function))
         {
-            AsmJsFunctionInfo* asmInfo = funcInfo->GetFunctionBody()->GetAsmJsFunctionInfo();
-            Assert(asmInfo);
-            if (asmInfo->IsWasmDeferredParse())
-            {
-                entryPoint = WasmLibrary::WasmDeferredParseExternalThunk;
-            }
-            else
-            {
-                entryPoint = Js::AsmJsExternalEntryPoint;
-            }
+            entryPoint = Js::AsmJsExternalEntryPoint;
         } else
 #endif
         if (funcInfo->HasBody())
@@ -385,17 +430,7 @@ namespace Js
             if (funcInfo->GetFunctionProxy()->IsFunctionBody() &&
                 funcInfo->GetFunctionBody()->GetIsAsmJsFunction())
             {
-#ifdef ENABLE_WASM
-                AsmJsFunctionInfo* asmInfo = funcInfo->GetFunctionBody()->GetAsmJsFunctionInfo();
-                if (asmInfo && asmInfo->IsWasmDeferredParse())
-                {
-                    entryPoint = WasmLibrary::WasmDeferredParseExternalThunk;
-                }
-                else
-#endif
-                {
-                    entryPoint = Js::AsmJsExternalEntryPoint;
-                }
+                entryPoint = Js::AsmJsExternalEntryPoint;
             }
             else
 #endif
@@ -421,6 +456,10 @@ namespace Js
     Var CrossSite::CommonThunk(RecyclableObject* recyclableObject, JavascriptMethod entryPoint, Arguments args)
     {
         DynamicObject* function = DynamicObject::FromVar(recyclableObject);
+
+        FunctionInfo * functionInfo = (JavascriptFunction::Is(function) ? JavascriptFunction::FromVar(function)->GetFunctionInfo() : nullptr);
+        AutoDisableRedeferral autoDisableRedeferral(functionInfo);
+
         ScriptContext* targetScriptContext = function->GetScriptContext();
         Assert(!targetScriptContext->IsClosed());
         Assert(function->IsExternal() || function->IsCrossSiteObject());
@@ -431,7 +470,11 @@ namespace Js
 
         if (callerHostScriptContext == calleeHostScriptContext || (callerHostScriptContext == nullptr && !calleeHostScriptContext->HasCaller()))
         {
-            return JavascriptFunction::CallFunction<true>(function, entryPoint, args);
+            BEGIN_SAFE_REENTRANT_CALL(targetScriptContext->GetThreadContext())
+            {
+                return JavascriptFunction::CallFunction<true>(function, entryPoint, args, true /*useLargeArgCount*/);
+            }
+            END_SAFE_REENTRANT_CALL
         }
 
 #if DBG_DUMP || defined(PROFILE_EXEC) || defined(PROFILE_MEM)
@@ -444,20 +487,25 @@ namespace Js
         if (args.Values[0] == nullptr)
         {
             i = 1;
-            Assert(args.Info.Flags & CallFlags_New);
+            Assert(args.IsNewCall());
             Assert(JavascriptProxy::Is(function) || (JavascriptFunction::Is(function) && JavascriptFunction::FromVar(function)->GetFunctionInfo()->GetAttributes() & FunctionInfo::SkipDefaultNewObject));
         }
         uint count = args.Info.Count;
-        if ((args.Info.Flags & CallFlags_ExtraArg) && ((args.Info.Flags & CallFlags_NewTarget) == 0))
-        {
-            // The final eval arg is a frame display that needs to be marshaled specially.
-            args.Values[count-1] = CrossSite::MarshalFrameDisplay(targetScriptContext, (FrameDisplay*)args.Values[count-1]);
-            count--;
-        }
         for (; i < count; i++)
         {
             args.Values[i] = CrossSite::MarshalVar(targetScriptContext, args.Values[i]);
         }
+        if (args.HasNewTarget())
+        {
+            // Last value is new.target
+            args.Values[count] = CrossSite::MarshalVar(targetScriptContext, args.GetNewTarget());
+        }
+        else if (args.HasExtraArg())
+        {
+            // The final eval arg is a frame display that needs to be marshaled specially.
+            args.Values[count] = CrossSite::MarshalFrameDisplay(targetScriptContext, args.GetFrameDisplay());
+        }
+
 
 #if ENABLE_NATIVE_CODEGEN
         CheckCodeGenFunction checkCodeGenFunction = GetCheckCodeGenFunction(entryPoint);
@@ -503,7 +551,11 @@ namespace Js
             }
             wasDispatchExCallerPushed = TRUE;
 
-            result = JavascriptFunction::CallFunction<true>(function, entryPoint, args);
+            BEGIN_SAFE_REENTRANT_CALL(targetScriptContext->GetThreadContext())
+            {
+                result = JavascriptFunction::CallFunction<true>(function, entryPoint, args, true /*useLargeArgCount*/);
+            }
+            END_SAFE_REENTRANT_CALL
             ScriptContext* callerScriptContext = callerHostScriptContext->GetScriptContext();
             result = CrossSite::MarshalVar(callerScriptContext, result);
         },
@@ -549,7 +601,7 @@ namespace Js
         }
         while (DynamicType::Is(object->GetTypeId()) && !JavascriptProxy::Is(object))
         {
-            DynamicObject* dynamicObject = DynamicObject::FromVar(object);
+            DynamicObject* dynamicObject = DynamicObject::UnsafeFromVar(object);
             if (!dynamicObject->IsCrossSiteObject() && !dynamicObject->IsExternal())
             {
                 // force to install cross-site thunk on prototype objects.

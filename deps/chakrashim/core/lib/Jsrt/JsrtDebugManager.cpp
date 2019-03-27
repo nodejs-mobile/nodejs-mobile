@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "JsrtPch.h"
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "JsrtDebugManager.h"
 #include "JsrtDebugEventObject.h"
 #include "JsrtDebugUtils.h"
@@ -106,6 +107,7 @@ void JsrtDebugManager::DispatchHalt(Js::InterpreterHaltState* haltState)
     case Js::STOP_EXCEPTIONTHROW: /*JsDiagDebugEventRuntimeException*/
         this->ReportExceptionBreak(haltState);
         break;
+    case Js::STOP_DOMMUTATIONBREAKPOINT:
     case Js::STOP_MUTATIONBREAKPOINT:
         AssertMsg(false, "Not yet handled");
         break;
@@ -652,7 +654,7 @@ Js::BreakpointProbe* JsrtDebugManager::SetBreakpointHelper_TTD(int64 desiredBpId
         // Don't see a use case for supporting multiple breakpoints at same location.
         // If a breakpoint already exists, just return that
         Js::BreakpointProbe* probe = debugDocument->FindBreakpoint(statement);
-        TTDAssert(probe == nullptr || desiredBpId == -1, "We shouldn't be resetting this BP unless it was cleared eariler!");
+        TTDAssert(probe == nullptr || desiredBpId == -1, "We shouldn't be resetting this BP unless it was cleared earlier!");
 
         if(probe == nullptr)
         {
@@ -761,3 +763,4 @@ JsDiagDebugEvent JsrtDebugManager::GetDebugEventFromStopType(Js::StopType stopTy
 
     return JsDiagDebugEventBreakpoint;
 }
+#endif

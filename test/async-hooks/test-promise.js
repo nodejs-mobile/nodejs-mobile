@@ -1,9 +1,13 @@
 'use strict';
 
 const common = require('../common');
+
 const assert = require('assert');
 const initHooks = require('./init-hooks');
 const { checkInvocations } = require('./hook-checks');
+
+if (!common.isMainThread)
+  common.skip('Worker bootstrapping works differently -> different async IDs');
 
 const hooks = initHooks();
 

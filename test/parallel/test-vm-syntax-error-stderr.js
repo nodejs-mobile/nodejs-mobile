@@ -21,8 +21,9 @@ p.stderr.on('data', (data) => output += data);
 p.stderr.on('end', common.mustCall(() => {
   assert(/BEGIN CERT/.test(output));
   assert(/^\s+\^/m.test(output));
-  assert(common.engineSpecificMessage({
+
+  common.engineSpecificMessage({
     v8: /Invalid left-hand side expression in prefix operation/,
     chakracore: /SyntaxError: Expected ';'/
-  }).test(output));
+  }).test(output);
 }));

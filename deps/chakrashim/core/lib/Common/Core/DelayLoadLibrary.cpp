@@ -52,6 +52,35 @@ bool DelayLoadLibrary::IsAvailable()
 
 #if _WIN32
 
+static Kernel32Library Kernel32LibraryObject;
+Kernel32Library* Kernel32Library::Instance = &Kernel32LibraryObject;
+
+LPCTSTR Kernel32Library::GetLibraryName() const
+{
+    return _u("kernel32.dll");
+}
+
+HRESULT Kernel32Library::SetThreadDescription(
+    _In_ HANDLE hThread,
+    _In_ PCWSTR lpThreadDescription
+)
+{
+    if (m_hModule)
+    {
+        if (setThreadDescription == nullptr)
+        {
+            setThreadDescription = (PFnSetThreadDescription)GetFunction("SetThreadDescription");
+            if (setThreadDescription == nullptr)
+            {
+                return S_FALSE;
+            }
+        }
+        return setThreadDescription(hThread, lpThreadDescription);
+    }
+
+  return S_FALSE;
+}
+
 static NtdllLibrary NtdllLibraryObject;
 NtdllLibrary* NtdllLibrary::Instance = &NtdllLibraryObject;
 
@@ -63,13 +92,14 @@ LPCTSTR NtdllLibrary::GetLibraryName() const
 #if PDATA_ENABLED
 
 _Success_(return == 0)
-DWORD NtdllLibrary::AddGrowableFunctionTable( _Out_ PVOID * DynamicTable,
+NtdllLibrary::NTSTATUS NtdllLibrary::AddGrowableFunctionTable( _Out_ PVOID * DynamicTable,
     _In_reads_(MaximumEntryCount) PRUNTIME_FUNCTION FunctionTable,
     _In_ DWORD EntryCount,
     _In_ DWORD MaximumEntryCount,
     _In_ ULONG_PTR RangeBase,
     _In_ ULONG_PTR RangeEnd )
 {
+    Assert(AutoSystemInfo::Data.IsWin8OrLater());
     if(m_hModule)
     {
         if(addGrowableFunctionTable == NULL)
@@ -81,18 +111,34 @@ DWORD NtdllLibrary::AddGrowableFunctionTable( _Out_ PVOID * DynamicTable,
                 return 1;
             }
         }
-        return addGrowableFunctionTable(DynamicTable,
+
+#if DBG
+        // Validate the PDATA was not registered or already unregistered
+        ULONG_PTR            imageBase = 0;
+        RUNTIME_FUNCTION  *runtimeFunction = RtlLookupFunctionEntry((DWORD64)RangeBase, &imageBase, nullptr);
+        Assert(runtimeFunction == NULL);
+#endif
+
+        *DynamicTable = nullptr;
+        NTSTATUS status = addGrowableFunctionTable(DynamicTable,
             FunctionTable,
             EntryCount,
             MaximumEntryCount,
             RangeBase,
             RangeEnd);
+#if _M_X64
+        PHASE_PRINT_TESTTRACE1(Js::XDataPhase, _u("[%d]Register: Begin: %llx, End: %x, Unwind: %llx, RangeBase: %llx, RangeEnd: %llx, table: %llx, Status: %x\n"),
+           GetCurrentThreadId(), FunctionTable->BeginAddress, FunctionTable->EndAddress, FunctionTable->UnwindInfoAddress, RangeBase, RangeEnd, *DynamicTable, status);
+#endif
+        Assert((status >= 0 && *DynamicTable != nullptr) || status == 0xC000009A /*STATUS_INSUFFICIENT_RESOURCES*/);
+        return status;
     }
     return 1;
 }
 
 VOID NtdllLibrary::DeleteGrowableFunctionTable( _In_ PVOID DynamicTable )
 {
+    Assert(AutoSystemInfo::Data.IsWin8OrLater());
     if(m_hModule)
     {
         if(deleteGrowableFunctionTable == NULL)
@@ -105,6 +151,8 @@ VOID NtdllLibrary::DeleteGrowableFunctionTable( _In_ PVOID DynamicTable )
             }
         }
         deleteGrowableFunctionTable(DynamicTable);
+
+        PHASE_PRINT_TESTTRACE1(Js::XDataPhase, _u("[%d]UnRegister: table: %llx\n"), GetCurrentThreadId(), DynamicTable);
     }
 }
 
@@ -302,6 +350,45 @@ NtdllLibrary::NTSTATUS NtdllLibrary::Close(_In_ HANDLE Handle)
     return -1;
 #else
     return NtClose(Handle);
+#endif
+}
+
+#ifndef DELAYLOAD_UNLOCKMEMORY
+extern "C"
+WINBASEAPI
+NtdllLibrary::NTSTATUS
+WINAPI
+NtUnlockVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _Inout_ PVOID *BaseAddress,
+    _Inout_ PSIZE_T RegionSize,
+    _In_ ULONG MapType
+);
+#endif
+
+NtdllLibrary::NTSTATUS NtdllLibrary::UnlockVirtualMemory(
+    _In_ HANDLE ProcessHandle,
+    _Inout_ PVOID *BaseAddress,
+    _Inout_ PSIZE_T RegionSize,
+    _In_ ULONG MapType)
+{
+#ifdef DELAYLOAD_UNLOCKMEMORY
+    if (m_hModule)
+    {
+        if (unlock == nullptr)
+        {
+            unlock = (PFnNtUnlockVirtualMemory)GetFunction("NtUnlockVirtualMemory");
+            if (unlock == nullptr)
+            {
+                Assert(false);
+                return -1;
+            }
+        }
+        return unlock(ProcessHandle, BaseAddress, RegionSize, MapType);
+    }
+    return -1;
+#else
+    return NtUnlockVirtualMemory(ProcessHandle, BaseAddress, RegionSize, MapType);
 #endif
 }
 

@@ -4,10 +4,18 @@
 //-------------------------------------------------------------------------------------------------------
 #include "stdafx.h"
 #include "Core/AtomLockGuids.h"
-#include <CommonPal.h>
 #ifdef _WIN32
 #include <winver.h>
 #include <process.h>
+#include <fcntl.h>
+#else
+#include <pthread.h>
+#endif
+
+#ifdef __linux__
+#include <sys/sysinfo.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
 #endif
 
 unsigned int MessageBase::s_messageCount = 0;
@@ -105,27 +113,30 @@ void __stdcall PrintChVersion()
 #ifdef _WIN32
 void __stdcall PrintChakraCoreVersion()
 {
-    char filename[_MAX_PATH];
-    char drive[_MAX_DRIVE];
-    char dir[_MAX_DIR];
+    char16 filename[_MAX_PATH];
+    char16 drive[_MAX_DRIVE];
+    char16 dir[_MAX_DIR];
 
-    LPCSTR chakraDllName = GetChakraDllName();
+    LPCWSTR chakraDllName = GetChakraDllNameW();
+    char16 modulename[_MAX_PATH];
+    if (!PlatformAgnostic::SystemInfo::GetBinaryLocation(modulename, _MAX_PATH))
+    {
+        return;
+    }
 
-    char modulename[_MAX_PATH];
-    GetModuleFileNameA(NULL, modulename, _MAX_PATH);
-    _splitpath_s(modulename, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
-    _makepath_s(filename, drive, dir, chakraDllName, nullptr);
+    _wsplitpath_s(modulename, drive, _MAX_DRIVE, dir, _MAX_DIR, nullptr, 0, nullptr, 0);
+    _wmakepath_s(filename, drive, dir, chakraDllName, nullptr);
 
     UINT size = 0;
     LPBYTE lpBuffer = NULL;
-    DWORD verSize = GetFileVersionInfoSizeA(filename, NULL);
+    DWORD verSize = GetFileVersionInfoSizeW(filename, NULL);
 
     if (verSize != NULL)
     {
         LPSTR verData = new char[verSize];
 
-        if (GetFileVersionInfoA(filename, NULL, verSize, verData) &&
-            VerQueryValue(verData, _u("\\"), (VOID FAR * FAR *)&lpBuffer, &size) &&
+        if (GetFileVersionInfoW(filename, NULL, verSize, verData) &&
+            VerQueryValueW(verData, _u("\\"), (VOID FAR * FAR *)&lpBuffer, &size) &&
             (size != 0))
         {
             VS_FIXEDFILEINFO *verInfo = (VS_FIXEDFILEINFO *)lpBuffer;
@@ -134,7 +145,7 @@ void __stdcall PrintChakraCoreVersion()
                 // Doesn't matter if you are on 32 bit or 64 bit,
                 // DWORD is always 32 bits, so first two revision numbers
                 // come from dwFileVersionMS, last two come from dwFileVersionLS
-                printf("%s version %d.%d.%d.%d\n",
+                wprintf(_u("%s version %lu.%lu.%lu.%lu\n"),
                     chakraDllName,
                     (verInfo->dwFileVersionMS >> 16) & 0xffff,
                     (verInfo->dwFileVersionMS >> 0) & 0xffff,
@@ -172,6 +183,16 @@ Error:
     return hr;
 }
 
+HANDLE GetFileHandle(LPCWSTR filename)
+{
+    if (filename != nullptr)
+    {
+        return CreateFile(filename, GENERIC_WRITE, FILE_SHARE_DELETE,
+            nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    return GetStdHandle(STD_OUTPUT_HANDLE);
+}
+
 HRESULT CreateLibraryByteCodeHeader(LPCSTR contentsRaw, JsFinalizeCallback contentsRawFinalizeCallback, DWORD lengthBytes, LPCWSTR bcFullPath, LPCSTR libraryNameNarrow)
 {
     HANDLE bcFileHandle = nullptr;
@@ -181,51 +202,48 @@ HRESULT CreateLibraryByteCodeHeader(LPCSTR contentsRaw, JsFinalizeCallback conte
     DWORD written;
     // For validating the header file against the library file
     auto outputStr =
-        "//-------------------------------------------------------------------------------------------------------\r\n"
-        "// Copyright (C) Microsoft. All rights reserved.\r\n"
-        "// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.\r\n"
-        "//-------------------------------------------------------------------------------------------------------\r\n"
-        "#if 0\r\n";
+        "//-------------------------------------------------------------------------------------------------------\n"
+        "// Copyright (C) Microsoft. All rights reserved.\n"
+        "// Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.\n"
+        "//-------------------------------------------------------------------------------------------------------\n"
+        "#if 0\n";
 
+    std::string normalizedContentStr;
+    char* nextToken = nullptr;
+    char* token = strtok_s((char*)contentsRaw, "\r", &nextToken);
+    while (token)
+    {
+        normalizedContentStr.append(token);
+        token = strtok_s(nullptr, "\r", &nextToken);
+    }
+    // We no longer need contentsRaw, so call the finalizer for it if one was provided
+    if (contentsRawFinalizeCallback != nullptr)
+    {
+        contentsRawFinalizeCallback((void*)contentsRaw);
+    }
 
+    const char* normalizedContent = normalizedContentStr.c_str();
     // We still need contentsRaw after this, so pass a null finalizeCallback into it
-    HRESULT hr = GetSerializedBuffer(contentsRaw, nullptr, &bufferVal);
+    HRESULT hr = GetSerializedBuffer(normalizedContent, nullptr, &bufferVal);
 
     IfFailedGoLabel((hr), ErrorRunFinalize);
 
     IfJsrtErrorHRLabel(ChakraRTInterface::JsGetArrayBufferStorage(bufferVal, &bcBuffer, &bcBufferSize), ErrorRunFinalize);
 
-    bcFileHandle = CreateFile(bcFullPath, GENERIC_WRITE, FILE_SHARE_DELETE,
-        nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (bcFileHandle == INVALID_HANDLE_VALUE)
-    {
-        IfFailedGoLabel(E_FAIL, ErrorRunFinalize);
-    }
+    bcFileHandle = GetFileHandle(bcFullPath);
+    IfFalseGo(bcFileHandle != INVALID_HANDLE_VALUE && bcFileHandle != nullptr);
 
     IfFalseGoLabel(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr), ErrorRunFinalize);
-    IfFalseGoLabel(WriteFile(bcFileHandle, contentsRaw, lengthBytes, &written, nullptr), ErrorRunFinalize);
-    if (lengthBytes < 2 || contentsRaw[lengthBytes - 2] != '\r' || contentsRaw[lengthBytes - 1] != '\n')
-    {
-        outputStr = "\r\n#endif\r\n";
-    }
-    else
-    {
-        outputStr = "#endif\r\n";
-    }
-    
-    // We no longer need contentsRaw, so call the finalizer for it if one was provided
-    if(contentsRawFinalizeCallback != nullptr)
-    {
-        contentsRawFinalizeCallback((void*)contentsRaw);
-    }
+    IfFalseGoLabel(WriteFile(bcFileHandle, normalizedContent, (DWORD)normalizedContentStr.size(), &written, nullptr), ErrorRunFinalize);
+    outputStr = "\n#endif\n";
 
     IfFalseGo(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr));
 
     // Write out the bytecode
-    outputStr = "namespace Js\r\n{\r\n    const char Library_Bytecode_";
+    outputStr = "namespace Js\n{\n    const char Library_Bytecode_";
     IfFalseGo(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr));
     IfFalseGo(WriteFile(bcFileHandle, libraryNameNarrow, (DWORD)strlen(libraryNameNarrow), &written, nullptr));
-    outputStr = "[] = {\r\n/* 00000000 */";
+    outputStr = "[] = {\n/* 00000000 */";
     IfFalseGo(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr));
 
     for (unsigned int i = 0; i < bcBufferSize; i++)
@@ -249,24 +267,17 @@ HRESULT CreateLibraryByteCodeHeader(LPCSTR contentsRaw, JsFinalizeCallback conte
         if (i % 16 == 15 && i < bcBufferSize - 1)
         {
             char offset[17];
-            _snprintf_s(offset, sizeof(offset), _countof(offset), "\r\n/* %08X */", i + 1);  // close quote, new line, offset and open quote
-            IfFalseGo(WriteFile(bcFileHandle, offset, (DWORD)strlen(offset), &written, nullptr));
+            int actualLen = _snprintf_s(offset, sizeof(offset), _countof(offset), "\n/* %08X */", i + 1);  // close quote, new line, offset and open quote
+            IfFalseGo(WriteFile(bcFileHandle, offset, actualLen, &written, nullptr));
         }
     }
-    outputStr = "};\r\n\r\n";
+    outputStr = "};\n\n";
     IfFalseGo(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr));
 
-    outputStr = "}\r\n";
+    outputStr = "}\n";
     IfFalseGo(WriteFile(bcFileHandle, outputStr, (DWORD)strlen(outputStr), &written, nullptr));
 
-    if(false)
-    {
 ErrorRunFinalize:
-        if(contentsRawFinalizeCallback != nullptr)
-        {
-            contentsRawFinalizeCallback((void*)contentsRaw);
-        }
-    }
 Error:
     if (bcFileHandle != nullptr)
     {
@@ -304,7 +315,7 @@ static bool CHAKRA_CALLBACK DummyJsSerializedScriptLoadUtf8Source(
     return true;
 }
 
-HRESULT RunScript(const char* fileName, LPCSTR fileContents, JsFinalizeCallback fileContentsFinalizeCallback, JsValueRef bufferValue, char *fullPath)
+HRESULT RunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, JsFinalizeCallback fileContentsFinalizeCallback, JsValueRef bufferValue, char *fullPath, JsValueRef parserStateCache)
 {
     HRESULT hr = S_OK;
     MessageQueue * messageQueue = new MessageQueue();
@@ -385,18 +396,18 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, JsFinalizeCallback 
         IfJsErrorFailLogLabel(ChakraRTInterface::JsCreateString(fullPath,
             strlen(fullPath), &fname), ErrorRunFinalize);
 
-        if(bufferValue != nullptr)
+        if (bufferValue != nullptr)
         {
-            if(fileContents == nullptr)
+            if (fileContents == nullptr)
             {
                 // if we have no fileContents, no worry about freeing them, and the call is simple.
                 runScript = ChakraRTInterface::JsRunSerialized(
-                        bufferValue,
-                        nullptr /*JsSerializedLoadScriptCallback*/,
-                        0 /*SourceContext*/,
-                        fname,
-                        nullptr /*result*/
-                        );
+                    bufferValue,
+                    nullptr /*JsSerializedLoadScriptCallback*/,
+                    0 /*SourceContext*/,
+                    fname,
+                    nullptr /*result*/
+                );
             }
             else // fileContents != nullptr
             {
@@ -408,28 +419,44 @@ HRESULT RunScript(const char* fileName, LPCSTR fileContents, JsFinalizeCallback 
 
                 // Now we can run our script, with this serializedCallbackInfo as the sourcecontext
                 runScript = ChakraRTInterface::JsRunSerialized(
-                        bufferValue,
-                        DummyJsSerializedScriptLoadUtf8Source,
-                        reinterpret_cast<JsSourceContext>(&serializedCallbackInfo),
-                        // Use source ptr as sourceContext
-                        fname,
-                        nullptr /*result*/);
+                    bufferValue,
+                    DummyJsSerializedScriptLoadUtf8Source,
+                    reinterpret_cast<JsSourceContext>(&serializedCallbackInfo),
+                    // Use source ptr as sourceContext
+                    fname,
+                    nullptr /*result*/);
                 // Now that we're down here, we can free the fileContents if they weren't sent into
                 // a GC-managed object.
-                if(!serializedCallbackInfo.freeingHandled)
+                if (!serializedCallbackInfo.freeingHandled)
                 {
-                    if(fileContentsFinalizeCallback != nullptr)
+                    if (fileContentsFinalizeCallback != nullptr)
                     {
                         fileContentsFinalizeCallback((void*)fileContents);
                     }
                 }
             }
         }
-        else // bufferValue == nullptr
+        else if (parserStateCache != nullptr)
         {
             JsValueRef scriptSource;
             IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
-                (unsigned int)strlen(fileContents),
+                (unsigned int)fileLength,
+                fileContentsFinalizeCallback, (void*)fileContents, &scriptSource));
+
+            // TODO: Support TTD
+            runScript = ChakraRTInterface::JsRunScriptWithParserState(
+                scriptSource,
+                WScriptJsrt::GetNextSourceContext(),
+                fname,
+                JsParseScriptAttributeNone,
+                parserStateCache,
+                nullptr);
+        }
+        else // bufferValue == nullptr && parserStateCache == nullptr
+        {
+            JsValueRef scriptSource;
+            IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
+                (unsigned int)fileLength,
                 fileContentsFinalizeCallback, (void*)fileContents, &scriptSource));
 #if ENABLE_TTD
             if(doTTRecord)
@@ -521,26 +548,160 @@ Error:
 static HRESULT CreateRuntime(JsRuntimeHandle *runtime)
 {
     HRESULT hr = E_FAIL;
+
+#ifndef _WIN32
+    // On Posix, malloc optimistically returns a non-null address without
+    // checking if it's actually able to back that allocation in memory
+    // Upon use of that address however, if the address space for that allocation
+    // can't be committed, the process is killed
+    // See the man page for malloc
+    //
+    // In order to avoid having to deal with this, we set the memory limit for the
+    // runtime to the size of the physical memory on the system
+    // TODO: 
+    // We could move the following into its own platform agnostic API
+    // but in this case, this is a one-time call thats not applicable
+    // on Windows so decided to leave as is
+    // Additionally, we can probably do better than just limit to the physical memory
+    // size
+
+#if defined(__APPLE__) || defined(__linux__)
+    size_t memoryLimit;
+#ifdef __APPLE__
+    int totalRamHW[] = { CTL_HW, HW_MEMSIZE };
+    size_t length = sizeof(memoryLimit);
+    if (sysctl(totalRamHW, 2, &memoryLimit, &length, NULL, 0) == -1)
+    {
+        memoryLimit = 0;
+    }
+#else
+    struct sysinfo sysInfo;
+    if (sysinfo(&sysInfo) == -1)
+    {
+        memoryLimit = 0;
+    }
+    else
+    {
+        memoryLimit = sysInfo.totalram;
+    }
+#endif // __APPLE__
+#endif // __APPLE__ || __linux
+#endif // !_WIN32
+
     IfJsErrorFailLog(ChakraRTInterface::JsCreateRuntime(jsrtAttributes, nullptr, runtime));
 
 #ifndef _WIN32
-    // On Posix, malloc may not return NULL even if there is no
-    // memory left. However, kernel will send SIGKILL to process
-    // in case we use that `not actually available` memory address.
-    // (See posix man malloc and OOM)
-
-    size_t memoryLimit;
-    if (PlatformAgnostic::SystemInfo::GetTotalRam(&memoryLimit))
-    {
-        IfJsErrorFailLog(ChakraRTInterface::JsSetRuntimeMemoryLimit(*runtime, memoryLimit));
-    }
+    IfJsErrorFailLog(ChakraRTInterface::JsSetRuntimeMemoryLimit(*runtime, memoryLimit));
 #endif
+
     hr = S_OK;
 Error:
     return hr;
 }
 
-HRESULT CreateAndRunSerializedScript(const char* fileName, LPCSTR fileContents, JsFinalizeCallback fileContentsFinalizeCallback, char *fullPath)
+HRESULT GetParserStateBuffer(LPCSTR fileContents, JsFinalizeCallback fileContentsFinalizeCallback, JsValueRef *parserStateBuffer)
+{
+    HRESULT hr = S_OK;
+    JsValueRef scriptSource = nullptr;
+
+    IfJsErrorFailLog(ChakraRTInterface::JsCreateExternalArrayBuffer((void*)fileContents,
+        (unsigned int)strlen(fileContents), fileContentsFinalizeCallback, (void*)fileContents, &scriptSource));
+
+    IfJsErrorFailLog(ChakraRTInterface::JsSerializeParserState(scriptSource, parserStateBuffer, JsParseScriptAttributeNone));
+
+Error:
+    return hr;
+}
+
+HRESULT CreateParserState(LPCSTR fileContents, size_t fileLength, JsFinalizeCallback fileContentsFinalizeCallback, LPCWSTR fullPath)
+{
+    HRESULT hr = S_OK;
+    HANDLE fileHandle = nullptr;
+    JsValueRef parserStateBuffer = nullptr;
+    BYTE *buffer = nullptr;
+    unsigned int bufferSize = 0;
+
+    IfFailedGoLabel(GetParserStateBuffer(fileContents, fileContentsFinalizeCallback, &parserStateBuffer), Error);
+    IfJsErrorFailLog(ChakraRTInterface::JsGetArrayBufferStorage(parserStateBuffer, &buffer, &bufferSize));
+
+    fileHandle = GetFileHandle(fullPath);
+    IfFalseGo(fileHandle != INVALID_HANDLE_VALUE && fileHandle != nullptr);
+
+    for (unsigned int i = 0; i < bufferSize; i++)
+    {
+        const unsigned int BYTES_PER_LINE = 32;
+        DWORD written = 0;
+        char scratch[3];
+        auto scratchLen = sizeof(scratch);
+        int num = _snprintf_s(scratch, scratchLen, _countof(scratch), "%02X", buffer[i]);
+        Assert(num == 2);
+        IfFalseGo(WriteFile(fileHandle, scratch, (DWORD)(scratchLen - 1), &written, nullptr));
+
+        // Add line breaks so this block can be readable
+        if (i % BYTES_PER_LINE == (BYTES_PER_LINE - 1) && i < bufferSize - 1)
+        {
+            IfFalseGo(WriteFile(fileHandle, "\n", 1, &written, nullptr));
+        }
+    }
+
+Error:
+    if (fileHandle != nullptr)
+    {
+        CloseHandle(fileHandle);
+    }
+    return hr;
+}
+
+HRESULT CreateParserStateAndRunScript(const char* fileName, LPCSTR fileContents, size_t fileLength, JsFinalizeCallback fileContentsFinalizeCallback, char *fullPath)
+{
+    HRESULT hr = S_OK;
+    JsRuntimeHandle runtime = JS_INVALID_RUNTIME_HANDLE;
+    JsContextRef context = JS_INVALID_REFERENCE, current = JS_INVALID_REFERENCE;
+    JsValueRef bufferVal;
+
+    // We don't want this to free fileContents when it completes, so the finalizeCallback is nullptr
+    IfFailedGoLabel(GetParserStateBuffer(fileContents, nullptr, &bufferVal), ErrorRunFinalize);
+
+    // Bytecode buffer is created in one runtime and will be executed on different runtime.
+    IfFailedGoLabel(CreateRuntime(&runtime), ErrorRunFinalize);
+    chRuntime = runtime;
+
+    IfJsErrorFailLogLabel(ChakraRTInterface::JsCreateContext(runtime, &context), ErrorRunFinalize);
+    IfJsErrorFailLogLabel(ChakraRTInterface::JsGetCurrentContext(&current), ErrorRunFinalize);
+    IfJsErrorFailLogLabel(ChakraRTInterface::JsSetCurrentContext(context), ErrorRunFinalize);
+
+    // Initialized the WScript object on the new context
+    if (!WScriptJsrt::Initialize())
+    {
+        IfFailedGoLabel(E_FAIL, ErrorRunFinalize);
+    }
+
+    // This is our last call to use fileContents, so pass in the finalizeCallback
+    IfFailGo(RunScript(fileName, fileContents, fileLength, fileContentsFinalizeCallback, nullptr, fullPath, bufferVal));
+
+    if (false)
+    {
+ErrorRunFinalize:
+        if (fileContentsFinalizeCallback != nullptr)
+        {
+            fileContentsFinalizeCallback((void*)fileContents);
+        }
+    }
+Error:
+    if (current != JS_INVALID_REFERENCE)
+    {
+        ChakraRTInterface::JsSetCurrentContext(current);
+    }
+
+    if (runtime != JS_INVALID_RUNTIME_HANDLE)
+    {
+        ChakraRTInterface::JsDisposeRuntime(runtime);
+    }
+
+    return hr;
+}
+
+HRESULT CreateAndRunSerializedScript(const char* fileName, LPCSTR fileContents, size_t fileLength, JsFinalizeCallback fileContentsFinalizeCallback, char *fullPath)
 {
     HRESULT hr = S_OK;
     JsRuntimeHandle runtime = JS_INVALID_RUNTIME_HANDLE;
@@ -566,7 +727,7 @@ HRESULT CreateAndRunSerializedScript(const char* fileName, LPCSTR fileContents, 
     }
 
     // This is our last call to use fileContents, so pass in the finalizeCallback
-    IfFailGo(RunScript(fileName, fileContents, fileContentsFinalizeCallback, bufferVal, fullPath));
+    IfFailGo(RunScript(fileName, fileContents, fileLength, fileContentsFinalizeCallback, bufferVal, fullPath, nullptr));
 
     if(false)
     {
@@ -618,7 +779,7 @@ HRESULT ExecuteTest(const char* fileName)
         IfJsErrorFailLog(ChakraRTInterface::JsTTDCreateContext(runtime, true, &context));
         IfJsErrorFailLog(ChakraRTInterface::JsSetCurrentContext(context));
 
-        IfFailGo(RunScript(fileName, fileContents, WScriptJsrt::FinalizeFree, nullptr, nullptr));
+        IfFailGo(RunScript(fileName, fileContents, lengthBytes, WScriptJsrt::FinalizeFree, nullptr, nullptr, nullptr));
 
         unsigned int rcount = 0;
         IfJsErrorFailLog(ChakraRTInterface::JsSetCurrentContext(nullptr));
@@ -713,30 +874,43 @@ HRESULT ExecuteTest(const char* fileName)
             IfFailGo(E_FAIL);
         }
 
+        if (HostConfigFlags::flags.TrackRejectedPromises)
+        {
+            ChakraRTInterface::JsSetHostPromiseRejectionTracker(WScriptJsrt::PromiseRejectionTrackerCallback, nullptr);
+        }
+        
         len = strlen(fullPath);
         if (HostConfigFlags::flags.GenerateLibraryByteCodeHeaderIsEnabled)
         {
-            if (HostConfigFlags::flags.GenerateLibraryByteCodeHeader != nullptr && *HostConfigFlags::flags.GenerateLibraryByteCodeHeader != _u('\0'))
-            {
-                CHAR libraryName[_MAX_PATH];
-                CHAR ext[_MAX_EXT];
-                _splitpath_s(fullPath, NULL, 0, NULL, 0, libraryName, _countof(libraryName), ext, _countof(ext));
 
-                IfFailGo(CreateLibraryByteCodeHeader(fileContents, WScriptJsrt::FinalizeFree, lengthBytes, HostConfigFlags::flags.GenerateLibraryByteCodeHeader, libraryName));
-            }
-            else
+            if (HostConfigFlags::flags.GenerateLibraryByteCodeHeader != nullptr)
             {
-                fwprintf(stderr, _u("FATAL ERROR: -GenerateLibraryByteCodeHeader must provide the file name, i.e., -GenerateLibraryByteCodeHeader:<bytecode file name>, exiting\n"));
-                IfFailGo(E_FAIL);
+                if (wcslen(HostConfigFlags::flags.GenerateLibraryByteCodeHeader) == 0)
+                {
+                    HostConfigFlags::flags.GenerateLibraryByteCodeHeader = nullptr;
+                }
             }
+            CHAR libraryName[_MAX_PATH];
+            CHAR ext[_MAX_EXT];
+            _splitpath_s(fullPath, NULL, 0, NULL, 0, libraryName, _countof(libraryName), ext, _countof(ext));
+
+            IfFailGo(CreateLibraryByteCodeHeader(fileContents, WScriptJsrt::FinalizeFree, lengthBytes, HostConfigFlags::flags.GenerateLibraryByteCodeHeader, libraryName));
         }
         else if (HostConfigFlags::flags.SerializedIsEnabled)
         {
-            CreateAndRunSerializedScript(fileName, fileContents, WScriptJsrt::FinalizeFree, fullPath);
+            CreateAndRunSerializedScript(fileName, fileContents, lengthBytes, WScriptJsrt::FinalizeFree, fullPath);
+        }
+        else if (HostConfigFlags::flags.GenerateParserStateCacheIsEnabled)
+        {
+            CreateParserState(fileContents, lengthBytes, WScriptJsrt::FinalizeFree, nullptr);
+        }
+        else if (HostConfigFlags::flags.UseParserStateCacheIsEnabled)
+        {
+            CreateParserStateAndRunScript(fileName, fileContents, lengthBytes, WScriptJsrt::FinalizeFree, fullPath);
         }
         else
         {
-            IfFailGo(RunScript(fileName, fileContents, WScriptJsrt::FinalizeFree, nullptr, fullPath));
+            IfFailGo(RunScript(fileName, fileContents, lengthBytes, WScriptJsrt::FinalizeFree, nullptr, fullPath, nullptr));
         }
     }
 Error:
@@ -800,8 +974,8 @@ HRESULT ExecuteTestWithMemoryCheck(char* fileName)
 #ifdef _WIN32
 bool HandleJITServerFlag(int& argc, _Inout_updates_to_(argc, argc) LPWSTR argv[])
 {
-    LPCWSTR flag = L"-jitserver:";
-    LPCWSTR flagWithoutColon = L"-jitserver";
+    LPCWSTR flag = _u("-jitserver:");
+    LPCWSTR flagWithoutColon = _u("-jitserver");
     size_t flagLen = wcslen(flag);
 
     int i = 0;
@@ -809,7 +983,7 @@ bool HandleJITServerFlag(int& argc, _Inout_updates_to_(argc, argc) LPWSTR argv[]
     {
         if (!_wcsicmp(argv[i], flagWithoutColon))
         {
-            connectionUuidString = L"";
+            connectionUuidString = _u("");
             break;
         }
         else if (!_wcsnicmp(argv[i], flag, flagLen))
@@ -817,7 +991,7 @@ bool HandleJITServerFlag(int& argc, _Inout_updates_to_(argc, argc) LPWSTR argv[]
             connectionUuidString = argv[i] + flagLen;
             if (wcslen(connectionUuidString) == 0)
             {
-                fwprintf(stdout, L"[FAILED]: must pass a UUID to -jitserver:\n");
+                fwprintf(stdout, _u("[FAILED]: must pass a UUID to -jitserver:\n"));
                 return false;
             }
             else
@@ -850,7 +1024,7 @@ int _cdecl RunJITServer(int argc, __in_ecount(argc) LPWSTR argv[])
 
     if (!success)
     {
-        wprintf(L"\nDll load failed\n");
+        wprintf(_u("\nDll load failed\n"));
         return ERROR_DLL_INIT_FAILED;
     }
 
@@ -865,7 +1039,7 @@ int _cdecl RunJITServer(int argc, __in_ecount(argc) LPWSTR argv[])
     status = initRpcServer(&connectionUuid, nullptr, nullptr);
     if (FAILED(status))
     {
-        wprintf(L"InitializeJITServer failed by 0x%x\n", status);
+        wprintf(_u("InitializeJITServer failed by 0x%x\n"), status);
         goto cleanup;
     }
     status = 0;
@@ -906,6 +1080,17 @@ int _cdecl wmain(int argc, __in_ecount(argc) LPWSTR argv[])
 #endif
 
 #ifdef _WIN32
+    // Set the output mode of stdout so we can display non-ASCII characters on the console and redirect to file as UTF-8
+    {
+        int result = _setmode(_fileno(stdout), _O_U8TEXT); // set stdout to UTF-8 mode
+        if (result == -1)
+        {
+            // Failed to set mode. Undefined behavior may result, so exit now.
+            wprintf(_u("Failed to set output stream mode. Exiting...\n"));
+            return EXIT_FAILURE;
+        }
+    }
+
     bool runJITServer = HandleJITServerFlag(argc, argv);
 #endif
     int retval = -1;
@@ -1049,6 +1234,11 @@ int _cdecl wmain(int argc, __in_ecount(argc) LPWSTR argv[])
 
     if (success)
     {
+        if (HostConfigFlags::flags.CustomConfigFile != NULL) 
+        {
+            ChakraRTInterface::SetConfigFile(HostConfigFlags::flags.CustomConfigFile);
+        }
+
 #ifdef _WIN32
 #if ENABLE_NATIVE_CODEGEN
         if (HostConfigFlags::flags.OOPJIT)
@@ -1101,6 +1291,12 @@ return_cleanup:
     }
     delete[] argv;
     argv = nullptr;
-#endif
+#ifdef NO_SANITIZE_ADDRESS_CHECK
+    pthread_exit(&retval);
+#else
     return retval;
+#endif
+#else
+    return retval;
+#endif
 }

@@ -29,7 +29,7 @@
 #define WABT_TRACING 0
 #endif
 
-#include "common.h"
+#include "src/common.h"
 
 namespace wabt {
 
@@ -41,7 +41,7 @@ struct TraceScope {
   WABT_DISALLOW_COPY_AND_ASSIGN(TraceScope);
   TraceScope() = delete;
   TraceScope(const char* method);
-  template<typename... Args>
+  template <typename... Args>
   TraceScope(const char* method, const char* format, Args&&... args)
       : method_(method) {
     PrintEnter(method);
@@ -70,4 +70,4 @@ struct TraceScope {
 
 }  // end namespace wabt
 
-#endif // WABT_TRACING_H_
+#endif  // WABT_TRACING_H_

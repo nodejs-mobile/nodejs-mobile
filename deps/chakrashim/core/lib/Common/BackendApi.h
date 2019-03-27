@@ -7,11 +7,7 @@
 
 #if DYNAMIC_INTERPRETER_THUNK
 #define DefaultEntryThunk Js::InterpreterStackFrame::DelayDynamicInterpreterThunk
-#if _M_X64
 #define AsmJsDefaultEntryThunk Js::InterpreterStackFrame::AsmJsDelayDynamicInterpreterThunk
-#elif _M_IX86
-#define AsmJsDefaultEntryThunk Js::InterpreterStackFrame::DelayDynamicInterpreterThunk
-#endif
 #else
 #define DefaultEntryThunk Js::InterpreterStackFrame::InterpreterThunk
 #endif
@@ -37,7 +33,6 @@ struct InlinedFrameLayout;
 
 typedef intptr_t IntConstType;
 typedef uintptr_t  UIntConstType;
-typedef IntMath<IntConstType>::Type IntConstMath;
 typedef double  FloatConstType;
 
 #include "EmitBuffer.h"
@@ -71,6 +66,9 @@ void GenerateAllFunctions(NativeCodeGenerator * nativeCodeGen, Js::FunctionBody 
 #endif
 #ifdef IR_VIEWER
 Js::Var RejitIRViewerFunction(NativeCodeGenerator *nativeCodeGen, Js::FunctionBody *fn, Js::ScriptContext *scriptContext);
+#endif
+#ifdef ALLOW_JIT_REPRO
+HRESULT JitFromEncodedWorkItem(NativeCodeGenerator *nativeCodeGen, _In_reads_(bufferSize) const byte* buffer, _In_ uint bufferSize);
 #endif
 
 BOOL IsIntermediateCodeGenThunk(Js::JavascriptMethod codeAddress);
@@ -210,6 +208,7 @@ enum LibraryValue {
     ValueNegativeZero,
     ValueNumberTypeStatic,
     ValueStringTypeStatic,
+    ValueSymbolTypeStatic,
     ValueObjectType,
     ValueObjectHeaderInlinedType,
     ValueRegexType,
@@ -234,6 +233,7 @@ enum VTableValue {
     VtableDynamicObject,
     VtableInvalid,
     VtablePropertyString,
+    VtableLazyJSONString,
     VtableLiteralStringWithPropertyStringPtr,
     VtableJavascriptBoolean,
     VtableJavascriptArray,
@@ -271,6 +271,8 @@ enum VTableValue {
     VtableJavascriptGeneratorFunction,
     VtableJavascriptAsyncFunction,
     VtableStackScriptFunction,
+    VtableScriptFunctionWithInlineCacheAndHomeObj,
+    VtableScriptFunctionWithInlineCacheHomeObjAndComputedName,
     VtableConcatStringMulti,
     VtableCompoundString,
     // SIMD_JS

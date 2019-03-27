@@ -14,21 +14,15 @@
  * limitations under the License.
  */
 
-#include "apply-names.h"
+#include "src/apply-names.h"
 
 #include <cassert>
 #include <cstdio>
 #include <vector>
 
-#include "expr-visitor.h"
-#include "ir.h"
-#include "string-view.h"
-
-#define CHECK_RESULT(expr)  \
-  do {                      \
-    if (Failed(expr))       \
-      return Result::Error; \
-  } while (0)
+#include "src/expr-visitor.h"
+#include "src/ir.h"
+#include "src/string-view.h"
 
 namespace wabt {
 
@@ -52,6 +46,8 @@ class NameApplier : public ExprVisitor::DelegateNop {
   Result OnGetLocalExpr(GetLocalExpr*) override;
   Result BeginIfExpr(IfExpr*) override;
   Result EndIfExpr(IfExpr*) override;
+  Result BeginIfExceptExpr(IfExceptExpr*) override;
+  Result EndIfExceptExpr(IfExceptExpr*) override;
   Result BeginLoopExpr(LoopExpr*) override;
   Result EndLoopExpr(LoopExpr*) override;
   Result OnSetGlobalExpr(SetGlobalExpr*) override;
@@ -59,9 +55,7 @@ class NameApplier : public ExprVisitor::DelegateNop {
   Result OnTeeLocalExpr(TeeLocalExpr*) override;
   Result BeginTryExpr(TryExpr*) override;
   Result EndTryExpr(TryExpr*) override;
-  Result OnCatchExpr(TryExpr*, Catch*) override;
   Result OnThrowExpr(ThrowExpr*) override;
-  Result OnRethrowExpr(RethrowExpr*) override;
 
  private:
   void PushLabel(const std::string& label);
@@ -76,6 +70,7 @@ class NameApplier : public ExprVisitor::DelegateNop {
   Result UseNameForExceptVar(Var* var);
   Result UseNameForParamAndLocalVar(Func* func, Var* var);
   Result VisitFunc(Index func_index, Func* func);
+  Result VisitGlobal(Global* global);
   Result VisitExport(Index export_index, Export* export_);
   Result VisitElemSegment(Index elem_segment_index, ElemSegment* segment);
   Result VisitDataSegment(Index data_segment_index, DataSegment* segment);
@@ -103,13 +98,15 @@ string_view NameApplier::FindLabelByVar(Var* var) {
   if (var->is_name()) {
     for (int i = labels_.size() - 1; i >= 0; --i) {
       const std::string& label = labels_[i];
-      if (label == var->name())
+      if (label == var->name()) {
         return label;
+      }
     }
     return string_view();
   } else {
-    if (var->index() >= labels_.size())
+    if (var->index() >= labels_.size()) {
       return string_view();
+    }
     return labels_[labels_.size() - 1 - var->index()];
   }
 }
@@ -120,62 +117,70 @@ void NameApplier::UseNameForVar(string_view name, Var* var) {
     return;
   }
 
-  if (!name.empty())
+  if (!name.empty()) {
     var->set_name(name);
+  }
 }
 
 Result NameApplier::UseNameForFuncTypeVar(Var* var) {
   FuncType* func_type = module_->GetFuncType(*var);
-  if (!func_type)
+  if (!func_type) {
     return Result::Error;
+  }
   UseNameForVar(func_type->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForFuncVar(Var* var) {
   Func* func = module_->GetFunc(*var);
-  if (!func)
+  if (!func) {
     return Result::Error;
+  }
   UseNameForVar(func->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForGlobalVar(Var* var) {
   Global* global = module_->GetGlobal(*var);
-  if (!global)
+  if (!global) {
     return Result::Error;
+  }
   UseNameForVar(global->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForTableVar(Var* var) {
   Table* table = module_->GetTable(*var);
-  if (!table)
+  if (!table) {
     return Result::Error;
+  }
   UseNameForVar(table->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForMemoryVar(Var* var) {
   Memory* memory = module_->GetMemory(*var);
-  if (!memory)
+  if (!memory) {
     return Result::Error;
+  }
   UseNameForVar(memory->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForExceptVar(Var* var) {
   Exception* except = module_->GetExcept(*var);
-  if (!except)
+  if (!except) {
     return Result::Error;
+  }
   UseNameForVar(except->name, var);
   return Result::Ok;
 }
 
 Result NameApplier::UseNameForParamAndLocalVar(Func* func, Var* var) {
   Index local_index = func->GetLocalIndex(*var);
-  if (local_index >= func->GetNumParamsAndLocals())
+  if (local_index >= func->GetNumParamsAndLocals()) {
     return Result::Error;
+  }
 
   Index num_params = func->GetNumParams();
   std::string* name;
@@ -202,7 +207,7 @@ Result NameApplier::UseNameForParamAndLocalVar(Func* func, Var* var) {
 }
 
 Result NameApplier::BeginBlockExpr(BlockExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -212,7 +217,7 @@ Result NameApplier::EndBlockExpr(BlockExpr* expr) {
 }
 
 Result NameApplier::BeginLoopExpr(LoopExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -234,8 +239,7 @@ Result NameApplier::OnBrIfExpr(BrIfExpr* expr) {
 }
 
 Result NameApplier::OnBrTableExpr(BrTableExpr* expr) {
-  VarVector& targets = *expr->targets;
-  for (Var& target : targets) {
+  for (Var& target : expr->targets) {
     string_view label = FindLabelByVar(&target);
     UseNameForVar(label, &target);
   }
@@ -246,7 +250,7 @@ Result NameApplier::OnBrTableExpr(BrTableExpr* expr) {
 }
 
 Result NameApplier::BeginTryExpr(TryExpr* expr) {
-  PushLabel(expr->block->label);
+  PushLabel(expr->block.label);
   return Result::Ok;
 }
 
@@ -255,21 +259,8 @@ Result NameApplier::EndTryExpr(TryExpr*) {
   return Result::Ok;
 }
 
-Result NameApplier::OnCatchExpr(TryExpr*, Catch* expr) {
-  if (!expr->IsCatchAll()) {
-    CHECK_RESULT(UseNameForExceptVar(&expr->var));
-  }
-  return Result::Ok;
-}
-
 Result NameApplier::OnThrowExpr(ThrowExpr* expr) {
   CHECK_RESULT(UseNameForExceptVar(&expr->var));
-  return Result::Ok;
-}
-
-Result NameApplier::OnRethrowExpr(RethrowExpr* expr) {
-  string_view label = FindLabelByVar(&expr->var);
-  UseNameForVar(label, &expr->var);
   return Result::Ok;
 }
 
@@ -279,7 +270,9 @@ Result NameApplier::OnCallExpr(CallExpr* expr) {
 }
 
 Result NameApplier::OnCallIndirectExpr(CallIndirectExpr* expr) {
-  CHECK_RESULT(UseNameForFuncTypeVar(&expr->var));
+  if (expr->decl.has_func_type) {
+    CHECK_RESULT(UseNameForFuncTypeVar(&expr->decl.type_var));
+  }
   return Result::Ok;
 }
 
@@ -294,11 +287,22 @@ Result NameApplier::OnGetLocalExpr(GetLocalExpr* expr) {
 }
 
 Result NameApplier::BeginIfExpr(IfExpr* expr) {
-  PushLabel(expr->true_->label);
+  PushLabel(expr->true_.label);
   return Result::Ok;
 }
 
 Result NameApplier::EndIfExpr(IfExpr* expr) {
+  PopLabel();
+  return Result::Ok;
+}
+
+Result NameApplier::BeginIfExceptExpr(IfExceptExpr* expr) {
+  PushLabel(expr->true_.label);
+  CHECK_RESULT(UseNameForExceptVar(&expr->except_var));
+  return Result::Ok;
+}
+
+Result NameApplier::EndIfExceptExpr(IfExceptExpr* expr) {
   PopLabel();
   return Result::Ok;
 }
@@ -324,14 +328,19 @@ Result NameApplier::VisitFunc(Index func_index, Func* func) {
     CHECK_RESULT(UseNameForFuncTypeVar(&func->decl.type_var));
   }
 
-  MakeTypeBindingReverseMapping(func->decl.sig.param_types,
+  MakeTypeBindingReverseMapping(func->decl.sig.param_types.size(),
                                 func->param_bindings, &param_index_to_name_);
 
-  MakeTypeBindingReverseMapping(func->local_types, func->local_bindings,
+  MakeTypeBindingReverseMapping(func->local_types.size(), func->local_bindings,
                                 &local_index_to_name_);
 
   CHECK_RESULT(visitor_.VisitFunc(func));
   current_func_ = nullptr;
+  return Result::Ok;
+}
+
+Result NameApplier::VisitGlobal(Global* global) {
+  CHECK_RESULT(visitor_.VisitExprList(global->init_expr));
   return Result::Ok;
 }
 
@@ -345,6 +354,7 @@ Result NameApplier::VisitExport(Index export_index, Export* export_) {
 Result NameApplier::VisitElemSegment(Index elem_segment_index,
                                      ElemSegment* segment) {
   CHECK_RESULT(UseNameForTableVar(&segment->table_var));
+  CHECK_RESULT(visitor_.VisitExprList(segment->offset));
   for (Var& var : segment->vars) {
     CHECK_RESULT(UseNameForFuncVar(&var));
   }
@@ -354,6 +364,7 @@ Result NameApplier::VisitElemSegment(Index elem_segment_index,
 Result NameApplier::VisitDataSegment(Index data_segment_index,
                                      DataSegment* segment) {
   CHECK_RESULT(UseNameForMemoryVar(&segment->memory_var));
+  CHECK_RESULT(visitor_.VisitExprList(segment->offset));
   return Result::Ok;
 }
 
@@ -361,6 +372,8 @@ Result NameApplier::VisitModule(Module* module) {
   module_ = module;
   for (size_t i = 0; i < module->funcs.size(); ++i)
     CHECK_RESULT(VisitFunc(i, module->funcs[i]));
+  for (size_t i = 0; i < module->globals.size(); ++i)
+    CHECK_RESULT(VisitGlobal(module->globals[i]));
   for (size_t i = 0; i < module->exports.size(); ++i)
     CHECK_RESULT(VisitExport(i, module->exports[i]));
   for (size_t i = 0; i < module->elem_segments.size(); ++i)

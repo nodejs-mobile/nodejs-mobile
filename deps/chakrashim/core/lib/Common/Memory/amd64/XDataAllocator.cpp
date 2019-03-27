@@ -124,26 +124,33 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
     xdataInfo->pdata.EndAddress = (DWORD)(xdataInfo->pdata.BeginAddress + functionSize);
     xdataInfo->pdata.UnwindInfoAddress = (DWORD)((intptr_t)xdataInfo->address - baseAddress);
 
+    HRESULT hr = S_OK;
     BOOLEAN success = FALSE;
     if (AutoSystemInfo::Data.IsWin8OrLater())
     {
-        DWORD status = NtdllLibrary::Instance->AddGrowableFunctionTable(&xdataInfo->functionTable,
+        NTSTATUS status = NtdllLibrary::Instance->AddGrowableFunctionTable(&xdataInfo->functionTable,
             &xdataInfo->pdata,
             /*MaxEntryCount*/ 1,
             /*Valid entry count*/ 1,
             /*RangeBase*/ functionStart,
             /*RangeEnd*/ functionStart + functionSize);
         success = NT_SUCCESS(status);
-        if (success)
-        {
-            Assert(xdataInfo->functionTable != nullptr);
-        }
+        hr = status;
+        
     }
     else
     {
         success = RtlAddFunctionTable(&xdataInfo->pdata, 1, functionStart);
+        if (!success)
+        {
+            hr = E_OUTOFMEMORY; // only OOM error can happen for RtlAddFunctionTable
+        }
     }
-    Js::Throw::CheckAndThrowOutOfMemory(success);
+
+    if (!success)
+    {
+        Js::Throw::XDataRegistrationError(hr, functionStart);
+    }
 
 #if DBG
     // Validate that the PDATA registration succeeded
@@ -162,12 +169,7 @@ void XDataAllocator::Register(XDataAllocation * xdataInfo, ULONG_PTR functionSta
 void XDataAllocator::Unregister(XDataAllocation * xdataInfo)
 {
 #ifdef _WIN32
-    // Delete the table
-    if (AutoSystemInfo::Data.IsWin8OrLater())
-    {
-        NtdllLibrary::Instance->DeleteGrowableFunctionTable(xdataInfo->functionTable);
-    }
-    else
+    if (!AutoSystemInfo::Data.IsWin8OrLater())
     {
         BOOLEAN success = RtlDeleteFunctionTable(&xdataInfo->pdata);
         Assert(success);

@@ -1,4 +1,4 @@
-//-------------------------------------------------------------------------------------------------------
+﻿//-------------------------------------------------------------------------------------------------------
 // Copyright (C) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
@@ -102,20 +102,9 @@ namespace Js
         return NewWithBuffer(content, GetBufferLength(content), scriptContext);
     }
 
-    JavascriptString* JavascriptString::NewWithArenaSz(__in_z const char16 * content, ScriptContext * scriptContext)
-    {
-        AssertMsg(content != nullptr, "NULL value passed to JavascriptString::New");
-        return NewWithArenaBuffer(content, GetBufferLength(content), scriptContext);
-    }
-
     JavascriptString* JavascriptString::NewWithBuffer(__in_ecount(cchUseLength) const char16 * content, charcount_t cchUseLength, ScriptContext * scriptContext)
     {
         return NewWithBufferT<LiteralString, false>(content, cchUseLength, scriptContext);
-    }
-
-    JavascriptString* JavascriptString::NewWithArenaBuffer(__in_ecount(cchUseLength) const char16* content, charcount_t cchUseLength, ScriptContext* scriptContext)
-    {
-        return NewWithBufferT<ArenaLiteralString, false>(content, cchUseLength, scriptContext);
     }
 
     JavascriptString* JavascriptString::NewCopySz(__in_z const char16* content, ScriptContext* scriptContext)
@@ -126,21 +115,6 @@ namespace Js
     JavascriptString* JavascriptString::NewCopyBuffer(__in_ecount(cchUseLength) const char16* content, charcount_t cchUseLength, ScriptContext* scriptContext)
     {
         return NewWithBufferT<LiteralString, true>(content, cchUseLength, scriptContext);
-    }
-
-    JavascriptString* JavascriptString::NewCopySzFromArena(__in_z const char16* content,
-        ScriptContext* scriptContext, ArenaAllocator *arena, charcount_t cchUseLength)
-    {
-        AssertMsg(content != nullptr, "NULL value passed to JavascriptString::New");
-
-        if (!cchUseLength)
-        {
-            cchUseLength = JavascriptString::GetBufferLength(content);
-        }
-
-        char16* buffer = JavascriptString::AllocateAndCopySz(arena, content, cchUseLength);
-        return ArenaLiteralString::New(scriptContext->GetLibrary()->GetStringTypeStatic(),
-            buffer, cchUseLength, arena);
     }
 
     Var JavascriptString::NewInstance(RecyclableObject* function, CallInfo callInfo, ...)
@@ -154,20 +128,19 @@ namespace Js
 
         // SkipDefaultNewObject function flag should have prevented the default object from
         // being created, except when call true a host dispatch.
-        Var newTarget = callInfo.Flags & CallFlags_NewTarget ? args.Values[args.Info.Count] : args[0];
-        bool isCtorSuperCall = (callInfo.Flags & CallFlags_New) && newTarget != nullptr && !JavascriptOperators::IsUndefined(newTarget);
-        Assert(isCtorSuperCall || !(callInfo.Flags & CallFlags_New) || args[0] == nullptr
-            || JavascriptOperators::GetTypeId(args[0]) == TypeIds_HostDispatch);
+        Var newTarget = args.GetNewTarget();
+        bool isCtorSuperCall = JavascriptOperators::GetAndAssertIsConstructorSuperCall(args);
 
         JavascriptString* str;
         Var result;
 
         if (args.Info.Count > 1)
         {
-            if (JavascriptSymbol::Is(args[1]) && !(callInfo.Flags & CallFlags_New))
+            JavascriptSymbol * symbol = JavascriptOperators::TryFromVar<JavascriptSymbol>(args[1]);
+            if (symbol && !(callInfo.Flags & CallFlags_New))
             {
                 // By ES2015 21.1.1.1 step 2, calling the String constructor directly results in an explicit ToString, which does not throw.
-                return JavascriptSymbol::ToString(JavascriptSymbol::FromVar(args[1])->GetValue(), scriptContext);
+                return JavascriptSymbol::ToString(symbol->GetValue(), scriptContext);
                 // Calling with new is an implicit ToString on the Symbol, resulting in a throw. For this case we can let JavascriptConversion handle the call.
             }
             str = JavascriptConversion::ToString(args[1], scriptContext);
@@ -187,7 +160,7 @@ namespace Js
         }
 
         return isCtorSuperCall ?
-            JavascriptOperators::OrdinaryCreateFromConstructor(RecyclableObject::FromVar(newTarget), RecyclableObject::FromVar(result), nullptr, scriptContext) :
+            JavascriptOperators::OrdinaryCreateFromConstructor(RecyclableObject::FromVar(newTarget), RecyclableObject::UnsafeFromVar(result), nullptr, scriptContext) :
             result;
     }
 
@@ -251,11 +224,34 @@ namespace Js
         return JavascriptOperators::GetTypeId(aValue) == TypeIds_String;
     }
 
+    void JavascriptString::GetPropertyRecord(_Out_ Js::PropertyRecord const ** propertyRecord, bool dontLookupFromDictionary)
+    {
+        *propertyRecord = nullptr;
+        if (dontLookupFromDictionary)
+        {
+            return;
+        }
+
+        GetScriptContext()->GetOrAddPropertyRecord(GetString(), GetLength(), propertyRecord);
+    }
+
+    void JavascriptString::CachePropertyRecord(_In_ PropertyRecord const* propertyRecord)
+    {
+        // Base string doesn't have enough room to keep this value, so do nothing
+    }
+
     JavascriptString* JavascriptString::FromVar(Var aValue)
+    {
+        AssertOrFailFastMsg(Is(aValue), "Ensure var is actually a 'JavascriptString'");
+
+        return static_cast<JavascriptString *>(aValue);
+    }
+
+    JavascriptString* JavascriptString::UnsafeFromVar(Var aValue)
     {
         AssertMsg(Is(aValue), "Ensure var is actually a 'JavascriptString'");
 
-        return static_cast<JavascriptString *>(RecyclableObject::FromVar(aValue));
+        return static_cast<JavascriptString *>(aValue);
     }
 
     charcount_t
@@ -263,7 +259,7 @@ namespace Js
     {
         size_t cchActual = wcslen(content);
 
-#if defined(_M_X64_OR_ARM64)
+#if defined(TARGET_64)
         if (!IsValidCharCount(cchActual))
         {
             // Limit javascript string to 31-bit length
@@ -751,6 +747,7 @@ case_2:
         Var value;
         if (pThis->GetItemAt(idxPosition, &value))
         {
+            value = BreakSpeculation(value);
             return value;
         }
         else
@@ -799,7 +796,7 @@ case_2:
             return scriptContext->GetLibrary()->GetNaN();
         }
 
-        return TaggedInt::ToVarUnchecked(pThis->GetItem(idxPosition));
+        return BreakSpeculation(TaggedInt::ToVarUnchecked(pThis->GetItem(idxPosition)));
     }
 
     Var JavascriptString::EntryCodePointAt(RecyclableObject* function, CallInfo callInfo, ...)
@@ -874,15 +871,11 @@ case_2:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_This_NullOrUndefined, _u("String.prototype.concat"));
         }
 
-        JavascriptString* pstr = nullptr;
         JavascriptString* accum = nullptr;
         for (uint index = 0; index < args.Info.Count; index++)
         {
-            if (JavascriptString::Is(args[index]))
-            {
-                pstr = JavascriptString::FromVar(args[index]);
-            }
-            else
+            JavascriptString * pstr = JavascriptOperators::TryFromVar<JavascriptString>(args[index]);
+            if (!pstr)
             {
                 pstr = JavascriptConversion::ToString(args[index], scriptContext);
             }
@@ -1137,18 +1130,17 @@ case_2:
         // 2. Let S be ? ToString(O).
         // 3. Let searchStr be ? ToString(searchString).
 
+        // default search string if the search argument is not provided
+
         JavascriptString * pThis = nullptr;
+
         GetThisStringArgument(args, scriptContext, _u("String.prototype.lastIndexOf"), &pThis);
 
-        // default search string if the search argument is not provided
-        JavascriptString * searchArg;
+        JavascriptString * searchArg = nullptr;
         if(args.Info.Count > 1)
         {
-            if (JavascriptString::Is(args[1]))
-            {
-                searchArg = JavascriptString::FromVar(args[1]);
-            }
-            else
+            searchArg = JavascriptOperators::TryFromVar<JavascriptString>(args[1]);
+            if (!searchArg)
             {
                 searchArg = JavascriptConversion::ToString(args[1], scriptContext);
             }
@@ -1264,16 +1256,10 @@ case_2:
         }
         AssertMsg(args.Info.Count > 0, "Negative argument count");
 
-        JavascriptString * pThis;
-        if (JavascriptString::Is(args[0]))
+        JavascriptString * pThis = JavascriptOperators::TryFromVar<JavascriptString>(args[0]);
+        if (!pThis)
         {
-            pThis = JavascriptString::FromVar(args[0]);
-        }
-        else
-        {
-
             pThis = JavascriptConversion::CoerseString(args[0], scriptContext , apiNameForErrorMsg);
-
         }
 
         *ppThis = pThis;
@@ -1296,13 +1282,13 @@ case_2:
             {
                 JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_FirstCannotBeRegExp, apiNameForErrorMsg);
             }
-            else if (JavascriptString::Is(args[1]))
-            {
-                pSearch = JavascriptString::FromVar(args[1]);
-            }
             else
             {
-                pSearch = JavascriptConversion::ToString(args[1], scriptContext);
+                pSearch = JavascriptOperators::TryFromVar<JavascriptString>(args[1]);
+                if (!pSearch)
+                {
+                    pSearch = JavascriptConversion::ToString(args[1], scriptContext);
+                }
             }
         }
 
@@ -1311,6 +1297,8 @@ case_2:
 
     Var JavascriptString::EntryLocaleCompare(RecyclableObject* function, CallInfo callInfo, ...)
     {
+        using namespace PlatformAgnostic;
+
         PROBE_STACK(function->GetScriptContext(), Js::Constants::MinStackDefault);
 
         ARGUMENTS(args, callInfo);
@@ -1335,27 +1323,46 @@ case_2:
             EngineInterfaceObject* nativeEngineInterfaceObj = scriptContext->GetLibrary()->GetEngineInterfaceObject();
             if (nativeEngineInterfaceObj)
             {
-                IntlEngineInterfaceExtensionObject* intlExtensionObject = static_cast<IntlEngineInterfaceExtensionObject*>(nativeEngineInterfaceObj->GetEngineExtension(EngineInterfaceExtensionKind_Intl));
+                IntlEngineInterfaceExtensionObject* intlExtensionObject = static_cast<IntlEngineInterfaceExtensionObject*>(
+                    nativeEngineInterfaceObj->GetEngineExtension(EngineInterfaceExtensionKind_Intl));
+
+#ifdef INTL_WINGLOB
                 if (args.Info.Count == 2)
                 {
                     auto undefined = scriptContext->GetLibrary()->GetUndefined();
-                    CallInfo toPass(callInfo.Flags, 7);
-                    return intlExtensionObject->EntryIntl_CompareString(function, toPass, undefined, pThis, pThat, undefined, undefined, undefined, undefined);
+                    CallInfo toPass(callInfo.Flags, 3);
+                    ThreadContext *threadContext = scriptContext->GetThreadContext();
+                    return threadContext->ExecuteImplicitCall(function, ImplicitCall_Accessor,
+                        [threadContext, intlExtensionObject, function, toPass, undefined, pThis, pThat]() -> Var
+                        {
+                            return CALL_ENTRYPOINT(threadContext, intlExtensionObject->EntryIntl_CompareString,
+                                function, toPass, undefined, pThis, pThat);
+                        }
+                    );
                 }
-                else
+#endif
+
+                // Check if String.prototype.localeCompare/Intl.Collator was already initialized
+                JavascriptFunction* func = intlExtensionObject->GetStringLocaleCompare();
+                if (func)
                 {
-                    JavascriptFunction* func = intlExtensionObject->GetStringLocaleCompare();
-                    if (func)
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
                     {
                         return func->CallFunction(args);
                     }
-                    // Initialize String.prototype.toLocaleCompare
-                    scriptContext->GetLibrary()->InitializeIntlForStringPrototype();
-                    func = intlExtensionObject->GetStringLocaleCompare();
-                    if (func)
+                    END_SAFE_REENTRANT_CALL
+                }
+
+                // String.prototype.localeCompare/Intl.Collator was not initialized yet, so we need to manually initialize it here
+                scriptContext->GetLibrary()->InitializeIntlForStringPrototype();
+                func = intlExtensionObject->GetStringLocaleCompare();
+                if (func)
+                {
+                    BEGIN_SAFE_REENTRANT_CALL(scriptContext->GetThreadContext())
                     {
                         return func->CallFunction(args);
                     }
+                    END_SAFE_REENTRANT_CALL
                 }
             }
         }
@@ -1367,25 +1374,18 @@ case_2:
         const char16* pThatStr = pThat->GetString();
         int thatStrCount = pThat->GetLength();
 
-        // xplat-todo: doing a locale-insensitive compare here
-        // but need to move locale-specific string comparison to
-        // platform agnostic interface
-#ifdef ENABLE_GLOBALIZATION
-        LCID lcid = GetUserDefaultLCID();
-        int result = CompareStringW(lcid, NULL, pThisStr, thisStrCount, pThatStr, thatStrCount );
-        if (result == 0)
+        int result = UnicodeText::LogicalStringCompare(pThisStr, thisStrCount, pThatStr, thatStrCount);
+
+        // LogicalStringCompare will return -2 if CompareStringEx fails.
+        if (result == -2)
         {
             // TODO there is no spec on the error thrown here.
             // When the support for HR errors is implemented replace this with the same error reported by v5.8
             JavascriptError::ThrowRangeError(function->GetScriptContext(),
                 VBSERR_InternalError /* TODO-ERROR: _u("Failed compare operation")*/ );
         }
-        return JavascriptNumber::ToVar(result-2, scriptContext);
-#else // !ENABLE_GLOBALIZATION
-        // no ICU / or external support for localization. Use c-lib
-        const int result = wcscmp(pThisStr, pThatStr);
-        return JavascriptNumber::ToVar(result > 0 ? 1 : result == 0 ? 0 : -1, scriptContext);
-#endif
+
+        return JavascriptNumber::ToVar(result, scriptContext);
     }
 
 
@@ -1443,12 +1443,8 @@ case_2:
 
         if (args.Info.Count >= 2 && !(JavascriptOperators::IsUndefinedObject(args.Values[1])))
         {
-            JavascriptString *formStr = nullptr;
-            if (JavascriptString::Is(args[1]))
-            {
-                formStr = JavascriptString::FromVar(args[1]);
-            }
-            else
+            JavascriptString *formStr = JavascriptOperators::TryFromVar<JavascriptString>(args[1]);
+            if (!formStr)
             {
                 formStr = JavascriptConversion::ToString(args[1], scriptContext);
             }
@@ -1758,8 +1754,8 @@ case_2:
 
     Var JavascriptString::GetRegExSymbolFunction(Var regExp, PropertyId propertyId, ScriptContext* scriptContext)
     {
-        return JavascriptOperators::GetProperty(
-            RecyclableObject::FromVar(JavascriptOperators::ToObject(regExp, scriptContext)),
+        return JavascriptOperators::GetPropertyNoCache(
+            JavascriptOperators::ToObject(regExp, scriptContext),
             propertyId,
             scriptContext);
     }
@@ -1772,7 +1768,7 @@ case_2:
             JavascriptError::ThrowTypeError(scriptContext, JSERR_FunctionArgument_Invalid, varName);
         }
 
-        RecyclableObject* fnObj = RecyclableObject::FromVar(fn);
+        RecyclableObject* fnObj = RecyclableObject::UnsafeFromVar(fn);
         return CallRegExFunction<argCount>(fnObj, regExp, args, scriptContext);
     }
 
@@ -1780,7 +1776,11 @@ case_2:
     Var JavascriptString::CallRegExFunction<1>(RecyclableObject* fnObj, Var regExp, Arguments& args, ScriptContext *scriptContext)
     {
         // args[0]: String
-        return CALL_FUNCTION(scriptContext->GetThreadContext(), fnObj, CallInfo(CallFlags_Value, 2), regExp, args[0]);
+        ThreadContext * threadContext = scriptContext->GetThreadContext();
+        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 2), regExp, args[0]);
+        });
     }
 
     template<>
@@ -1795,7 +1795,11 @@ case_2:
             return CallRegExFunction<1>(fnObj, regExp, args, scriptContext);
         }
 
-        return CALL_FUNCTION(scriptContext->GetThreadContext(), fnObj, CallInfo(CallFlags_Value, 3), regExp, args[0], args[2]);
+        ThreadContext * threadContext = scriptContext->GetThreadContext();
+        return threadContext->ExecuteImplicitCall(fnObj, ImplicitCall_Accessor, [=]()->Js::Var
+        {
+            return CALL_FUNCTION(threadContext, fnObj, CallInfo(CallFlags_Value, 3), regExp, args[0], args[2]);
+        });
     }
 
     Var JavascriptString::EntrySlice(RecyclableObject* function, CallInfo callInfo, ...)
@@ -1846,6 +1850,9 @@ case_2:
         {
             idxEnd = idxStart;
         }
+
+        pThis = (JavascriptString*)BreakSpeculation(pThis);
+
         return SubstringCore(pThis, idxStart, idxEnd - idxStart, scriptContext);
     }
 
@@ -1893,7 +1900,7 @@ case_2:
             if (!scriptContext->GetConfig()->IsES6RegExSymbolsEnabled()
                 && JavascriptRegExp::Is(args[1]))
             {
-                return RegexHelper::RegexSplit(scriptContext, JavascriptRegExp::FromVar(args[1]), input, limit,
+                return RegexHelper::RegexSplit(scriptContext, JavascriptRegExp::UnsafeFromVar(args[1]), input, limit,
                     RegexHelper::IsResultNotUsed(callInfo.Flags));
             }
             else
@@ -1965,6 +1972,8 @@ case_2:
             return pThis;
         }
 
+        pThis = (JavascriptString*)BreakSpeculation(pThis);
+
         return SubstringCore(pThis, idxStart, idxEnd - idxStart, scriptContext);
     }
 
@@ -2020,6 +2029,8 @@ case_2:
             //return the string if we need to substr entire span
             return pThis;
         }
+
+        pThis = (JavascriptString*)BreakSpeculation(pThis);
 
         Assert(0 <= idxStart && idxStart <= idxEnd && idxEnd <= len);
         return SubstringCore(pThis, idxStart, idxEnd - idxStart, scriptContext);
@@ -2081,7 +2092,7 @@ case_2:
 
         if (maxLength > JavascriptString::MaxCharLength)
         {
-            Throw::OutOfMemory();
+            JavascriptError::ThrowRangeError(scriptContext, JSERR_OutOfBoundString);
         }
 
         JavascriptString * fillerString = nullptr;
@@ -2131,7 +2142,10 @@ case_2:
 
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        return ToLocaleCaseHelper(args[0], false, scriptContext);
+        JavascriptString * pThis = nullptr;
+        GetThisStringArgument(args, scriptContext, _u("String.prototype.toLocaleLowerCase"), &pThis);
+
+        return ToLocaleCaseHelper<false /* toUpper */>(pThis);
     }
 
     Var JavascriptString::EntryToLocaleUpperCase(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2143,8 +2157,19 @@ case_2:
 
         Assert(!(callInfo.Flags & CallFlags_New));
 
-        return ToLocaleCaseHelper(args[0], true, scriptContext);
+        JavascriptString * pThis = nullptr;
+        GetThisStringArgument(args, scriptContext, _u("String.prototype.toLocaleUpperCase"), &pThis);
+
+        return ToLocaleCaseHelper<true /* toUpper */>(pThis);
     }
+
+    template<bool toUpper>
+    JavascriptString* JavascriptString::ToLocaleCaseHelper(JavascriptString* pThis)
+    {
+        // TODO: implement locale-sensitive Intl versions of these functions
+        return ToCaseCore<toUpper, false>(pThis);
+    }
+
 
     Var JavascriptString::EntryToLowerCase(RecyclableObject* function, CallInfo callInfo, ...)
     {
@@ -2158,23 +2183,7 @@ case_2:
         JavascriptString * pThis = nullptr;
         GetThisStringArgument(args, scriptContext, _u("String.prototype.toLowerCase"), &pThis);
 
-        // Fast path for one character strings
-        if (pThis->GetLength() == 1)
-        {
-            char16 inChar = pThis->GetString()[0];
-            char16 outChar = inChar;
-#if DBG
-            DWORD converted =
-#endif
-                PlatformAgnostic::UnicodeText::ChangeStringCaseInPlace(
-                    PlatformAgnostic::UnicodeText::CaseFlags::CaseFlagsLower, &outChar, 1);
-
-            Assert(converted == 1);
-
-            return (inChar == outChar) ? pThis : scriptContext->GetLibrary()->GetCharStringCache().GetStringForChar(outChar);
-        }
-
-        return ToCaseCore(pThis, ToLower);
+        return ToCaseCore<false, true>(pThis);
     }
 
     Var JavascriptString::EntryToString(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2198,7 +2207,7 @@ case_2:
             if (JavascriptOperators::GetTypeId(args[0]) == TypeIds_HostDispatch)
             {
                 Var result;
-                if (RecyclableObject::FromVar(args[0])->InvokeBuiltInOperationRemotely(EntryToString, args, &result))
+                if (RecyclableObject::UnsafeFromVar(args[0])->InvokeBuiltInOperationRemotely(EntryToString, args, &result))
                 {
                     return result;
                 }
@@ -2222,109 +2231,136 @@ case_2:
         JavascriptString* pThis = nullptr;
         GetThisStringArgument(args, scriptContext, _u("String.prototype.toUpperCase"), &pThis);
 
-        // Fast path for one character strings
-        if (pThis->GetLength() == 1)
-        {
-            char16 inChar = pThis->GetString()[0];
-            char16 outChar = inChar;
-#if DBG
-            DWORD converted =
-#endif
-                PlatformAgnostic::UnicodeText::ChangeStringCaseInPlace(
-                    PlatformAgnostic::UnicodeText::CaseFlags::CaseFlagsUpper, &outChar, 1);
-
-            Assert(converted == 1);
-
-            return (inChar == outChar) ? pThis : scriptContext->GetLibrary()->GetCharStringCache().GetStringForChar(outChar);
-        }
-
-        return ToCaseCore(pThis, ToUpper);
+        return ToCaseCore<true, true>(pThis);
     }
 
-    Var JavascriptString::ToCaseCore(JavascriptString* pThis, ToCase toCase)
+    template<bool toUpper, bool useInvariant>
+    JavascriptString* JavascriptString::ToCaseCore(JavascriptString* pThis)
     {
-        charcount_t count = pThis->GetLength();
-
-        const char16* inStr = pThis->GetString();
-        const char16* inStrLim = inStr + count;
-        const char16* i = inStr;
-
-        // Try to find out the chars that do not need casing (in the ASCII range)
-        if (toCase == ToUpper)
+        using namespace PlatformAgnostic::UnicodeText;
+        if (pThis->GetLength() == 0)
         {
-            while (i < inStrLim)
-            {
-                // first range of ascii lower-case (97-122)
-                // second range of ascii lower-case (223-255)
-                // non-ascii chars (255+)
-                if (*i >= 'a')
-                {
-                    if (*i <= 'z') { break; }
-                    if (*i >= 223) { break; }
-                }
-                i++;
-            }
+            return pThis;
         }
-        else
+
+        ScriptContext* scriptContext = pThis->type->GetScriptContext();
+        ApiError error = ApiError::NoError;
+        charcount_t pThisLength = pThis->GetLength();
+
+        if (useInvariant)
         {
-            Assert(toCase == ToLower);
-            while (i < inStrLim)
+            const char16 *pThisString = pThis->GetString();
+            bool isAscii = true;
+            for (charcount_t i = 0; i < pThisLength; i++)
             {
-                // first range of ascii uppercase (65-90)
-                // second range of ascii uppercase (192-222)
-                // non-ascii chars (255+)
-                if (*i >= 'A')
+                if (pThisString[i] >= 0x80)
                 {
-                    if (*i <= 'Z') { break; }
-                    if (*i >= 192)
+                    isAscii = false;
+                    break;
+                }
+            }
+
+            if (isAscii)
+            {
+                char16 *ret = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, UInt32Math::Add(pThisLength, 1));
+                const char16 diffBetweenCases = 32;
+                for (charcount_t i = 0; i < pThisLength; i++)
+                {
+                    char16 cur = pThisString[i];
+                    if (toUpper)
                     {
-                        if (*i < 223) { break; }
-                        if (*i >= 255) { break; }
+                        if (cur >= _u('a') && cur <= _u('z'))
+                        {
+                            ret[i] = cur - diffBetweenCases;
+                        }
+                        else
+                        {
+                            ret[i] = cur;
+                        }
+                    }
+                    else
+                    {
+                        if (cur >= _u('A') && cur <= _u('Z'))
+                        {
+                            ret[i] = cur + diffBetweenCases;
+                        }
+                        else
+                        {
+                            ret[i] = cur;
+                        }
                     }
                 }
-                i++;
+
+                ret[pThisLength] = 0;
+
+                return JavascriptString::NewWithBuffer(ret, pThisLength, scriptContext);
             }
         }
 
-        // If no char needs casing, return immediately
-        if (i == inStrLim) { return pThis; }
-
-        // Otherwise, copy the string and start casing
-        charcount_t countToCase = (charcount_t)(inStrLim - i);
-        BufferStringBuilder builder(count, pThis->type->GetScriptContext());
-        char16 *outStr = builder.DangerousGetWritableBuffer();
-
-        char16* outStrLim = outStr + count;
-        char16 *o = outStr;
-
-        while (o < outStrLim)
-        {
-            *o++ = *inStr++;
-        }
-
-        if(toCase == ToUpper)
-        {
-#if DBG
-            DWORD converted =
+        // pre-flight to get the length required, as it may be longer than the original string
+        // ICU and Win32(/POSIX) implementations of these functions differ slightly in how to get the required number of characters.
+        // For Win32 (LCMapStringEx), you must provide nullptr/0, as providing a buffer that is too small will cause an error and will *not*
+        // report the number of characters required. For ICU, however, you can provide a buffer that is too short, and it will still return
+        // the length it actually needs.
+        //
+        // This is a small performance optimization because to(Upper|Lower)Case is can show up hot in certain scenarios.
+        // ICU still allows nullptr/0 to be passed to get the string length, and more conservative callers of ChangeStringLinguisticCase should do just that.
+        // TODO(jahorto): A truly PlatformAgnostic API wouldn't require cases like this. Once PlatformAgnostic is allowed to use
+        // Chakra's memory subsystems, this API should be converted to one that only takes a source string and returns a Recycler-allocated
+        // string in the correct case, performed using whatever operation is the fastest available on that platform.
+#ifdef INTL_ICU
+        charcount_t guessBufferLength = UInt32Math::Add(pThisLength, 1);
+        char16 *guessBuffer = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, guessBufferLength);
+#else
+        charcount_t guessBufferLength = 0;
+        char16 *guessBuffer = nullptr;
 #endif
-                PlatformAgnostic::UnicodeText::ChangeStringCaseInPlace(
-                    PlatformAgnostic::UnicodeText::CaseFlags::CaseFlagsUpper, outStrLim - countToCase, countToCase);
 
-            Assert(converted == countToCase);
-        }
-        else
+        charcount_t requiredStringLength = ChangeStringLinguisticCase<toUpper, useInvariant>(pThis->GetSz(), pThis->GetLength(), guessBuffer, guessBufferLength, &error);
+        if (error == ApiError::OutOfMemory)
         {
-            Assert(toCase == ToLower);
-#if DBG
-            DWORD converted =
-#endif
-                PlatformAgnostic::UnicodeText::ChangeStringCaseInPlace(
-                    PlatformAgnostic::UnicodeText::CaseFlags::CaseFlagsLower, outStrLim - countToCase, countToCase);
-
-            Assert(converted == countToCase);
+            Throw::OutOfMemory();
         }
 
-        return builder.ToString();
+        // We exit ToCaseCore early if the source string is 0-length, and casing a non-zero length string should
+        // never result in a zero-length string.
+        AssertOrFailFast(requiredStringLength > 0 && IsValidCharCount(requiredStringLength));
+
+#ifdef INTL_ICU
+        if (error == ApiError::NoError)
+        {
+            if (requiredStringLength == 1)
+            {
+                // don't create a new string in case we may have cached this string earlier
+                return scriptContext->GetLibrary()->GetCharStringCache().GetStringForChar(guessBuffer[0]);
+            }
+            else
+            {
+                // use requiredStringLength instead of guessBufferLength because the string can get shorter
+                return JavascriptString::NewWithBuffer(guessBuffer, requiredStringLength, scriptContext);
+            }
+        }
+        AssertOrFailFast(error == ApiError::InsufficientBuffer);
+#else
+        AssertOrFailFast(error == ApiError::NoError);
+        if (requiredStringLength == 1)
+        {
+            // this one-char string special case is only for non-ICU because there should never be a case where the error
+            // was InsufficientBufer but the required length was 1
+            char16 buffer[2] = { pThis->GetSz()[0], 0 };
+            charcount_t actualStringLength = ChangeStringLinguisticCase<toUpper, useInvariant>(pThis->GetSz(), pThis->GetLength(), buffer, 2, &error);
+            AssertOrFailFast(actualStringLength == 1 && error == ApiError::NoError);
+            return scriptContext->GetLibrary()->GetCharStringCache().GetStringForChar(buffer[0]);
+        }
+#endif
+
+        AssertOrFailFast(requiredStringLength > 1);
+
+        charcount_t bufferLength = UInt32Math::Add(requiredStringLength, 1);
+        char16* buffer = RecyclerNewArrayLeaf(scriptContext->GetRecycler(), char16, bufferLength);
+        charcount_t actualStringLength = ChangeStringLinguisticCase<toUpper, useInvariant>(pThis->GetSz(), pThis->GetLength(), buffer, bufferLength, &error);
+        AssertOrFailFast(actualStringLength == requiredStringLength && error == ApiError::NoError);
+        return JavascriptString::NewWithBuffer(buffer, actualStringLength, scriptContext);
     }
 
     Var JavascriptString::EntryTrim(RecyclableObject* function, CallInfo callInfo, ...)
@@ -2444,6 +2480,13 @@ case_2:
                 Assert(idxEnd >= 0);
             }
         }
+
+        if (idxStart == 0 && idxEnd == len - 1)
+        {
+            AssertMsg(scriptContext == arg->GetScriptContext(), "Should have already marshaled the string in cross site thunk");
+            return arg;
+        }
+
         return SubstringCore(arg, idxStart, idxEnd - idxStart + 1, scriptContext);
     }
 
@@ -2545,8 +2588,8 @@ case_2:
         Assert(!(callInfo.Flags & CallFlags_New));
         CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(String_Prototype_startsWith);
 
-        JavascriptString * pThis;
-        JavascriptString * pSearch;
+        ENTER_PINNED_SCOPE(JavascriptString, pThis);
+        ENTER_PINNED_SCOPE(JavascriptString, pSearch);
 
         GetThisAndSearchStringArguments(args, scriptContext, _u("String.prototype.startsWith"), &pThis, &pSearch, false);
 
@@ -2578,6 +2621,8 @@ case_2:
                 return scriptContext->GetLibrary()->GetTrue();
             }
         }
+        LEAVE_PINNED_SCOPE();   //  pSearch
+        LEAVE_PINNED_SCOPE();  //  pThis
 
         return scriptContext->GetLibrary()->GetFalse();
     }
@@ -2598,8 +2643,8 @@ case_2:
         Assert(!(callInfo.Flags & CallFlags_New));
         CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(String_Prototype_endsWith);
 
-        JavascriptString * pThis;
-        JavascriptString * pSearch;
+        ENTER_PINNED_SCOPE(JavascriptString, pThis);
+        ENTER_PINNED_SCOPE(JavascriptString, pSearch);
 
         GetThisAndSearchStringArguments(args, scriptContext, _u("String.prototype.endsWith"), &pThis, &pSearch, false);
 
@@ -2631,6 +2676,8 @@ case_2:
                 return scriptContext->GetLibrary()->GetTrue();
             }
         }
+        LEAVE_PINNED_SCOPE();   //  pSearch
+        LEAVE_PINNED_SCOPE();  //  pThis
 
         return scriptContext->GetLibrary()->GetFalse();
     }
@@ -2675,7 +2722,7 @@ case_2:
             if (JavascriptOperators::GetTypeId(args[0]) == TypeIds_HostDispatch)
             {
                 Var result;
-                if (RecyclableObject::FromVar(args[0])->InvokeBuiltInOperationRemotely(EntryValueOf, args, &result))
+                if (RecyclableObject::UnsafeFromVar(args[0])->InvokeBuiltInOperationRemotely(EntryValueOf, args, &result))
                 {
                     return result;
                 }
@@ -2845,15 +2892,15 @@ case_2:
 
         if (pch < pchEnd)
         {
-        switch (*pch)
-        {
-        case '-':
-            isNegative = true;
-            // Fall through.
-        case '+':
+            switch (*pch)
+            {
+            case '-':
+                isNegative = true;
+                // Fall through.
+            case '+':
                 pch++;
-            break;
-        }
+                break;
+            }
         }
 
         if (0 == radix)
@@ -2981,7 +3028,7 @@ case_2:
         // TODO: Use GetString here instead of GetSz (need to modify DblFromHex and StrToDbl to take a length)
         for (pch = this->GetSz(); IsWhiteSpaceCharacter(*pch); pch++)
             ;
-        if (0 == *pch)
+        if (pch == this->m_pszValue + len)
         {
             *result = 0;
             return true;
@@ -3038,7 +3085,7 @@ case_2:
         return result;
     }
 
-    bool JavascriptString::Equals(Var aLeft, Var aRight)
+    bool JavascriptString::Equals(JavascriptString* aLeft, JavascriptString* aRight)
     {
         return JavascriptStringHelpers<JavascriptString>::Equals(aLeft, aRight);
     }
@@ -3079,7 +3126,9 @@ case_2:
 
             // a. Let s be the value of value's [[StringData]] internal slot.
             // b. If s is not undefined, then return s.
-            *pString = JavascriptString::FromVar(CrossSite::MarshalVar(scriptContext, pStringObj->Unwrap()));
+            *pString = pStringObj->Unwrap();
+            *pString = JavascriptString::FromVar(CrossSite::MarshalVar(scriptContext,
+              *pString, pStringObj->GetScriptContext()));
             return TRUE;
         }
 
@@ -3113,7 +3162,7 @@ case_2:
         charcount_t cchPropertyValue;
         charcount_t cchTotalChars;
         charcount_t ich;
-        JavascriptString * pThis;
+        JavascriptString * pThis = nullptr;
         JavascriptString * pPropertyValue = nullptr;
         const char16 * propertyValueStr = nullptr;
         uint quotesCount = 0;
@@ -3154,11 +3203,8 @@ case_2:
             }
         }
 
-        if (JavascriptString::Is(args[0]))
-        {
-            pThis = JavascriptString::FromVar(args[0]);
-        }
-        else
+        pThis = JavascriptOperators::TryFromVar<JavascriptString>(args[0]);
+        if (!pThis)
         {
             pThis = JavascriptConversion::ToString(args[0], scriptContext);
         }
@@ -3174,11 +3220,8 @@ case_2:
             // Need one string argument.
             if (args.Info.Count >= 2)
             {
-                if (JavascriptString::Is(args[1]))
-                {
-                    pPropertyValue = JavascriptString::FromVar(args[1]);
-                }
-                else
+                pPropertyValue = JavascriptOperators::TryFromVar<JavascriptString>(args[1]);
+                if (!pPropertyValue)
                 {
                     pPropertyValue = JavascriptConversion::ToString(args[1], scriptContext);
                 }
@@ -3321,52 +3364,7 @@ case_2:
 
         return builder.ToString();
     }
-    Var JavascriptString::ToLocaleCaseHelper(Var thisObj, bool toUpper, ScriptContext *scriptContext)
-    {
-        using namespace PlatformAgnostic::UnicodeText;
 
-        JavascriptString * pThis;
-
-        if (JavascriptString::Is(thisObj))
-        {
-            pThis = JavascriptString::FromVar(thisObj);
-        }
-        else
-        {
-            pThis = JavascriptConversion::ToString(thisObj, scriptContext);
-        }
-
-        uint32 strLength = pThis->GetLength();
-        if (strLength == 0)
-        {
-            return pThis;
-        }
-
-        // Get the number of chars in the mapped string.
-        CaseFlags caseFlags = (toUpper ? CaseFlags::CaseFlagsUpper : CaseFlags::CaseFlagsLower);
-        const char16* str = pThis->GetString();
-        ApiError err = ApiError::NoError;
-        int32 count = PlatformAgnostic::UnicodeText::ChangeStringLinguisticCase(caseFlags, str, strLength, nullptr, 0, &err);
-
-        if (count <= 0)
-        {
-            AssertMsg(err != ApiError::NoError, "LCMapString failed");
-            Throw::InternalError();
-        }
-
-        BufferStringBuilder builder(count, scriptContext);
-        char16* stringBuffer = builder.DangerousGetWritableBuffer();
-
-        int count1 = PlatformAgnostic::UnicodeText::ChangeStringLinguisticCase(caseFlags, str, strLength, stringBuffer, count, &err);
-
-        if (count1 <= 0)
-        {
-            AssertMsg(err != ApiError::NoError, "LCMapString failed");
-            Throw::InternalError();
-        }
-
-        return builder.ToString();
-    }
 
     int JavascriptString::IndexOfUsingJmpTable(JmpTable jmpTable, const char16* inputStr, charcount_t len, const char16* searchStr, int searchLen, int position)
     {
@@ -3551,7 +3549,7 @@ case_2:
                 // Quick check for first character.
                 if (stringSz[i] == substringSz[0])
                 {
-                    if (substringLen == 1 || wmemcmp(stringSz + i + 1, substringSz + 1, substringLen - 1) == 0)
+                    if (substringLen == 1 || wmemcmp(stringSz + i + 1, substringSz + 1, (substringLen - 1)) == 0)
                     {
                         return i + start;
                     }
@@ -3567,6 +3565,15 @@ case_2:
         uint string1Len = string1->GetLength();
         uint string2Len = string2->GetLength();
 
+        // We want to pin the strings string1 and string2 because flattening of any of these strings could cause a GC and result in the other string getting collected if it was optimized
+        // away by the compiler. We would normally have called the EnterPinnedScope/LeavePinnedScope methods here but it adds extra call instructions to the assembly code. As Equals
+        // methods could get called a lot of times this can show up as regressions in benchmarks.
+        volatile Js::JavascriptString** keepAliveString1 = (volatile Js::JavascriptString**)& string1;
+        volatile Js::JavascriptString** keepAliveString2 = (volatile Js::JavascriptString**)& string2;
+        auto keepAliveLambda = [&]() {
+            UNREFERENCED_PARAMETER(keepAliveString1);
+            UNREFERENCED_PARAMETER(keepAliveString2);
+        };
         int result = wmemcmp(string1->GetString(), string2->GetString(), min(string1Len, string2Len));
 
         return (result == 0) ? (int)(string1Len - string2Len) : result;
@@ -3740,7 +3747,7 @@ case_2:
         return concatString;
     }
 
-    PropertyQueryFlags JavascriptString::HasPropertyQuery(PropertyId propertyId)
+    PropertyQueryFlags JavascriptString::HasPropertyQuery(PropertyId propertyId, _Inout_opt_ PropertyValueInfo* info)
     {
         if (propertyId == PropertyIds::length)
         {
@@ -3847,11 +3854,11 @@ case_2:
         return JavascriptConversion::BooleanToPropertyQueryFlags(this->GetItemAt(index, value));
     }
 
-    BOOL JavascriptString::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, ForInCache * forInCache)
+    BOOL JavascriptString::GetEnumerator(JavascriptStaticEnumerator * enumerator, EnumeratorFlags flags, ScriptContext* requestContext, EnumeratorCache * enumeratorCache)
     {
         return enumerator->Initialize(
             RecyclerNew(GetScriptContext()->GetRecycler(), JavascriptStringEnumerator, this, requestContext),
-            nullptr, nullptr, flags, requestContext, forInCache);
+            nullptr, nullptr, flags, requestContext, enumeratorCache);
     }
 
     BOOL JavascriptString::DeleteProperty(PropertyId propertyId, PropertyOperationFlags propertyOperationFlags)
@@ -3867,8 +3874,7 @@ case_2:
 
     BOOL JavascriptString::DeleteProperty(JavascriptString *propertyNameString, PropertyOperationFlags propertyOperationFlags)
     {
-        JsUtil::CharacterBuffer<WCHAR> propertyName(propertyNameString->GetString(), propertyNameString->GetLength());
-        if (BuiltInPropertyRecords::length.Equals(propertyName))
+        if (BuiltInPropertyRecords::length.Equals(propertyNameString))
         {
             JavascriptError::ThrowCantDeleteIfStrictMode(propertyOperationFlags, this->GetScriptContext(), propertyNameString->GetString());
 
@@ -3903,29 +3909,28 @@ case_2:
 
     /* static */
     template <typename T>
-    bool JavascriptStringHelpers<T>::Equals(Var aLeft, Var aRight)
+    bool JavascriptStringHelpers<T>::Equals(T* aLeft, T* aRight)
     {
-        AssertMsg(T::Is(aLeft) && T::Is(aRight), "string comparison");
-
         if (aLeft == aRight) return true;
 
-        T *leftString = T::FromVar(aLeft);
-        T *rightString = T::FromVar(aRight);
+        // methods could get called a lot of times this can show up as regressions in benchmarks.
+        volatile T** keepAliveLeftString = (volatile T**)& aLeft;
+        volatile T** keepAliveRightString = (volatile T**)& aRight;
+        auto keepAliveLambda = [&]() {
+            UNREFERENCED_PARAMETER(keepAliveLeftString);
+            UNREFERENCED_PARAMETER(keepAliveRightString);
+        };
 
-        if (leftString->GetLength() != rightString->GetLength())
+        if (aLeft->GetLength() != aRight->GetLength())
         {
             return false;
         }
 
-        if (wmemcmp(leftString->GetString(), rightString->GetString(), leftString->GetLength()) == 0)
-        {
-            return true;
-        }
-        return false;
+        return JsUtil::CharacterBuffer<char16>::StaticEquals(aLeft->GetString(), aRight->GetString(), aLeft->GetLength());
     }
 
 #if ENABLE_NATIVE_CODEGEN
-    template bool JavascriptStringHelpers<JITJavascriptString>::Equals(Var aLeft, Var aRight);
+    template bool JavascriptStringHelpers<JITJavascriptString>::Equals(JITJavascriptString* aLeft, JITJavascriptString* aRight);
 #endif
 
 }

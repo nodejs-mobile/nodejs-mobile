@@ -3,6 +3,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
+
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Language/JavascriptStackWalker.h"
 #include "Language/InterpreterStackFrame.h"
 
@@ -471,6 +473,51 @@ namespace Js
 
         OUTPUT_TRACE(Js::DebuggerPhase, _u("ProbeContainer::DispatchExceptionBreakpoint: end: pHaltState=%p, fSuccess=%d\n"), pHaltState, fSuccess);
         return fSuccess;
+    }
+
+    void ProbeContainer::DispatchDOMMutationBreakpoint()
+    {
+        InterpreterHaltState haltState(STOP_DOMMUTATIONBREAKPOINT, /*_executingFunction*/nullptr);
+        OUTPUT_TRACE(Js::DebuggerPhase, _u("ProbeContainer::DispatchDOMMutationBreakpoint: start: this=%p, pHaltState=%p\n"), this, haltState);
+        if (!CanDispatchHalt(&haltState))
+        {
+            return;
+        }
+
+        int currentOffset = -1;
+        TryFinally([&]()
+        {
+            InitializeLocation(&haltState);
+            OUTPUT_TRACE(Js::DebuggerPhase, _u("ProbeContainer::DispatchDOMMutationBreakpoint: initialized location: pHaltState=%p, pHaltState->IsValid()=%d\n"),
+                haltState, haltState.IsValid());
+
+            if (haltState.IsValid())
+            {
+                if (haltState.topFrame->IsInterpreterFrame())
+                {
+                    currentOffset = haltState.GetCurrentOffset();
+                    Assert(currentOffset > 0);
+                    haltState.SetCurrentOffset(currentOffset - 1);
+                }
+                debugManager->stepController.Deactivate(&haltState);
+                debugManager->asyncBreakController.Deactivate();
+
+                haltState.GetFunction()->CheckAndRegisterFuncToDiag(pScriptContext);
+
+                Assert(haltState.GetFunction()->GetScriptContext() == pScriptContext);
+
+                haltCallbackProbe->DispatchHalt(&haltState);
+            }
+        },
+            [&](bool)
+        {
+            // Restore the current offset;
+            if (currentOffset != -1 && haltState.topFrame->IsInterpreterFrame())
+            {
+                haltState.SetCurrentOffset(currentOffset);
+            }
+            DestroyLocation();
+        });
     }
 
     void ProbeContainer::DispatchMutationBreakpoint(InterpreterHaltState* pHaltState)
@@ -1088,3 +1135,4 @@ namespace Js
     }
 #endif
 } // namespace Js.
+#endif

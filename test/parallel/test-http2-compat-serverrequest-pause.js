@@ -1,4 +1,3 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
@@ -29,8 +28,8 @@ server.on('request', common.mustCall((req, res) => {
 
   // shouldn't throw if underlying Http2Stream no longer exists
   res.on('finish', common.mustCall(() => process.nextTick(() => {
-    assert.doesNotThrow(() => req.pause());
-    assert.doesNotThrow(() => req.resume());
+    req.pause();
+    req.resume();
   })));
 }));
 
@@ -47,7 +46,7 @@ server.listen(0, common.mustCall(() => {
   request.resume();
   request.end(testStr);
   request.on('end', common.mustCall(function() {
-    client.destroy();
+    client.close();
     server.close();
   }));
 }));

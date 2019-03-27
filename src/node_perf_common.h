@@ -1,9 +1,12 @@
 #ifndef SRC_NODE_PERF_COMMON_H_
 #define SRC_NODE_PERF_COMMON_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include "node.h"
 #include "v8.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 
@@ -23,22 +26,16 @@ extern uint64_t performance_v8_start;
   V(V8_START, "v8Start")                                                      \
   V(LOOP_START, "loopStart")                                                  \
   V(LOOP_EXIT, "loopExit")                                                    \
-  V(BOOTSTRAP_COMPLETE, "bootstrapComplete")                                  \
-  V(THIRD_PARTY_MAIN_START, "thirdPartyMainStart")                            \
-  V(THIRD_PARTY_MAIN_END, "thirdPartyMainEnd")                                \
-  V(CLUSTER_SETUP_START, "clusterSetupStart")                                 \
-  V(CLUSTER_SETUP_END, "clusterSetupEnd")                                     \
-  V(MODULE_LOAD_START, "moduleLoadStart")                                     \
-  V(MODULE_LOAD_END, "moduleLoadEnd")                                         \
-  V(PRELOAD_MODULE_LOAD_START, "preloadModulesLoadStart")                     \
-  V(PRELOAD_MODULE_LOAD_END, "preloadModulesLoadEnd")
+  V(BOOTSTRAP_COMPLETE, "bootstrapComplete")
+
 
 #define NODE_PERFORMANCE_ENTRY_TYPES(V)                                       \
   V(NODE, "node")                                                             \
   V(MARK, "mark")                                                             \
   V(MEASURE, "measure")                                                       \
   V(GC, "gc")                                                                 \
-  V(FUNCTION, "function")
+  V(FUNCTION, "function")                                                     \
+  V(HTTP2, "http2")
 
 enum PerformanceMilestone {
 #define V(name, _) NODE_PERFORMANCE_MILESTONE_##name,
@@ -54,19 +51,44 @@ enum PerformanceEntryType {
   NODE_PERFORMANCE_ENTRY_TYPE_INVALID
 };
 
-#define PERFORMANCE_MARK(env, n)                                              \
-  do {                                                                        \
-    node::performance::MarkPerformanceMilestone(env,                          \
-                         node::performance::NODE_PERFORMANCE_MILESTONE_##n);  \
-  } while (0);
+class performance_state {
+ public:
+  explicit performance_state(v8::Isolate* isolate) :
+    root(
+      isolate,
+      sizeof(performance_state_internal)),
+    milestones(
+      isolate,
+      offsetof(performance_state_internal, milestones),
+      NODE_PERFORMANCE_MILESTONE_INVALID,
+      root),
+    observers(
+      isolate,
+      offsetof(performance_state_internal, observers),
+      NODE_PERFORMANCE_ENTRY_TYPE_INVALID,
+      root) {
+    for (size_t i = 0; i < milestones.Length(); i++)
+      milestones[i] = -1.;
+  }
 
-struct performance_state {
-  // doubles first so that they are always sizeof(double)-aligned
-  double milestones[NODE_PERFORMANCE_MILESTONE_INVALID];
-  uint32_t observers[NODE_PERFORMANCE_ENTRY_TYPE_INVALID];
+  AliasedBuffer<uint8_t, v8::Uint8Array> root;
+  AliasedBuffer<double, v8::Float64Array> milestones;
+  AliasedBuffer<uint32_t, v8::Uint32Array> observers;
+
+  void Mark(enum PerformanceMilestone milestone,
+            uint64_t ts = PERFORMANCE_NOW());
+
+ private:
+  struct performance_state_internal {
+    // doubles first so that they are always sizeof(double)-aligned
+    double milestones[NODE_PERFORMANCE_MILESTONE_INVALID];
+    uint32_t observers[NODE_PERFORMANCE_ENTRY_TYPE_INVALID];
+  };
 };
 
 }  // namespace performance
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_NODE_PERF_COMMON_H_

@@ -7,7 +7,7 @@
 class HeapConstants
 {
 public:
-#if defined(_M_IX86_OR_ARM32)
+#if defined(TARGET_32)
     static const uint MaxSmallObjectSize = 512;
 #else
     static const uint MaxSmallObjectSize = 768;
@@ -19,7 +19,7 @@ public:
     static const uint MaxMediumObjectSize = 9216;
 #endif
 
-#if defined(_M_IX86_OR_ARM32)
+#if defined(TARGET_32)
     // Only if a pointer points to first 8k region of a large object, it will set the mark bit in the chunk->MarkBits
     // If the pointer points outside of that region, no mark bit will be set
     static const uint MaxLargeObjectMarkOffset = 8 * 1024; 
@@ -48,17 +48,9 @@ class SmallAllocationBlockAttributes
 public:
     static const size_t MinObjectSize = HeapConstants::ObjectGranularity;
 
-#if defined(_M_IX86_OR_ARM32)
-    static const size_t PageCount = 2;
-#elif defined(__IOS__)&&defined(_M_ARM64)
-// iOS has 16K pageSize instead of the regular 4K expected on most systems.
     static const size_t PageCount = 1;
-#else
-    static const size_t PageCount = 4;
-#endif
     static const size_t BitVectorCount = ((PageCount * AutoSystemInfo::PageSize) / HeapConstants::ObjectGranularity);
     static const ushort MaxAddressBit = BitVectorCount - 1;
-
     static const uint   BucketCount = HeapConstants::BucketCount;
     static const size_t BucketGranularity = HeapConstants::ObjectGranularity;
     static const uint   MaxObjectSize = HeapConstants::MaxSmallObjectSize;

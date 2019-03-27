@@ -20,9 +20,9 @@
 #include <string>
 #include <vector>
 
-#include "common.h"
-#include "feature.h"
-#include "stream.h"
+#include "src/common.h"
+#include "src/feature.h"
+#include "src/stream.h"
 
 namespace wabt {
 
@@ -45,10 +45,15 @@ struct ObjdumpOptions {
   bool disassemble;
   bool debug;
   bool relocs;
-  Features features;
   ObjdumpMode mode;
   const char* filename;
   const char* section_name;
+};
+
+struct ObjdumpSymbol {
+  wabt::SymbolType kind;
+  std::string name;
+  Index index;
 };
 
 // read_binary_objdump uses this state to store information from previous runs
@@ -57,6 +62,9 @@ struct ObjdumpState {
   std::vector<Reloc> code_relocations;
   std::vector<Reloc> data_relocations;
   std::vector<std::string> function_names;
+  std::vector<std::string> global_names;
+  std::vector<std::string> section_names;
+  std::vector<ObjdumpSymbol> symtab;
 };
 
 Result ReadBinaryObjdump(const uint8_t* data,

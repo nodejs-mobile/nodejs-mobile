@@ -11,8 +11,7 @@ namespace Js
     //
     void ScopeInfo::SaveSymbolInfo(Symbol* sym, MapSymbolData* mapSymbolData)
     {
-        // We don't need to create slot for or save "arguments"
-        bool needScopeSlot = !sym->GetIsArguments() && sym->GetHasNonLocalReference();
+        bool needScopeSlot = sym->GetHasNonLocalReference();
         Js::PropertyId scopeSlot = Constants::NoSlot;
 
         if (sym->GetIsModuleExportStorage())
@@ -23,7 +22,7 @@ namespace Js
         else if (needScopeSlot)
         {
             // Any symbol may have non-local ref from deferred child. Allocate slot for it.
-            scopeSlot = sym->EnsureScopeSlot(mapSymbolData->func);
+            scopeSlot = sym->EnsureScopeSlot(mapSymbolData->byteCodeGenerator, mapSymbolData->func);
         }
 
         if (needScopeSlot || sym->GetIsModuleExportStorage())
@@ -33,6 +32,7 @@ namespace Js
             this->SetSymbolType(scopeSlot, sym->GetSymbolType());
             this->SetHasFuncAssignment(scopeSlot, sym->GetHasFuncAssignment());
             this->SetIsBlockVariable(scopeSlot, sym->GetIsBlockVar());
+            this->SetIsConst(scopeSlot, sym->GetIsConst());
             this->SetIsFuncExpr(scopeSlot, sym->GetIsFuncExpr());
             this->SetIsModuleExportStorage(scopeSlot, sym->GetIsModuleExportStorage());
             this->SetIsModuleImport(scopeSlot, sym->GetIsModuleImport());
@@ -52,7 +52,7 @@ namespace Js
     //
     // Create scope info for a single scope.
     //
-    ScopeInfo* ScopeInfo::SaveOneScopeInfo(/*ByteCodeGenerator* byteCodeGenerator, ParseableFunctionInfo* parent,*/ Scope* scope, ScriptContext *scriptContext)
+    ScopeInfo* ScopeInfo::SaveOneScopeInfo(ByteCodeGenerator* byteCodeGenerator, Scope* scope, ScriptContext *scriptContext)
     {
         Assert(scope->GetScopeInfo() == nullptr);
         Assert(scope->GetScopeType() != ScopeType_Global);
@@ -61,9 +61,6 @@ namespace Js
 
         // Add argsPlaceHolder which includes same name args and destructuring patterns on parameters
         AddSlotCount(count, scope->GetFunc()->argsPlaceHolderSlotCount);
-        AddSlotCount(count, scope->GetFunc()->thisScopeSlot != Js::Constants::NoRegister ? 1 : 0);
-        AddSlotCount(count, scope->GetFunc()->superScopeSlot != Js::Constants::NoRegister ? 1 : 0);
-        AddSlotCount(count, scope->GetFunc()->newTargetScopeSlot != Js::Constants::NoRegister ? 1 : 0);
 
         ScopeInfo* scopeInfo = RecyclerNewPlusZ(scriptContext->GetRecycler(),
             count * sizeof(SymbolInfo),
@@ -74,13 +71,18 @@ namespace Js
         scopeInfo->mustInstantiate = scope->GetMustInstantiate();
         scopeInfo->isCached = (scope->GetFunc()->GetBodyScope() == scope) && scope->GetFunc()->GetHasCachedScope();
         scopeInfo->hasLocalInClosure = scope->GetHasOwnLocalInClosure();
-        
+
+        if (scope->GetScopeType() == ScopeType_FunctionBody)
+        {
+            scopeInfo->isGeneratorFunctionBody = scope->GetFunc()->byteCodeFunction->GetFunctionInfo()->IsGenerator();
+            scopeInfo->isAsyncFunctionBody = scope->GetFunc()->byteCodeFunction->GetFunctionInfo()->IsAsync();
+        }
 
         TRACE_BYTECODE(_u("\nSave ScopeInfo: %s #symbols: %d %s\n"),
             scope->GetFunc()->name, count,
             scopeInfo->isObject ? _u("isObject") : _u(""));
 
-        MapSymbolData mapSymbolData = { scope->GetFunc(), 0 };
+        MapSymbolData mapSymbolData = { byteCodeGenerator, scope->GetFunc(), 0 };
         scope->ForEachSymbol([&mapSymbolData, scopeInfo, scope](Symbol * sym)
         {
             Assert(scope == sym->GetScope());
@@ -107,7 +109,7 @@ namespace Js
     //
     // Save scope info for an individual scope and link it to its enclosing scope.
     //
-    ScopeInfo * ScopeInfo::SaveScopeInfo(Scope * scope/*ByteCodeGenerator* byteCodeGenerator, FuncInfo* parentFunc, FuncInfo* func*/, ScriptContext * scriptContext)
+    ScopeInfo * ScopeInfo::SaveScopeInfo(ByteCodeGenerator* byteCodeGenerator, Scope * scope, ScriptContext * scriptContext)
     {
         // Advance past scopes that will be excluded from the closure environment. (But note that we always want the body scope.)
         while (scope && (!scope->GetMustInstantiate() && scope != scope->GetFunc()->GetBodyScope()))
@@ -129,13 +131,13 @@ namespace Js
         }
 
         // Do the work for this scope.
-        scopeInfo = ScopeInfo::SaveOneScopeInfo(scope, scriptContext);
+        scopeInfo = ScopeInfo::SaveOneScopeInfo(byteCodeGenerator, scope, scriptContext);
 
         // Link to the parent (if any).
         scope = scope->GetEnclosingScope();
         if (scope)
         {
-            scopeInfo->SetParentScopeInfo(ScopeInfo::SaveScopeInfo(scope, scriptContext));
+            scopeInfo->SetParentScopeInfo(ScopeInfo::SaveScopeInfo(byteCodeGenerator, scope, scriptContext));
         }
 
         return scopeInfo;
@@ -165,7 +167,7 @@ namespace Js
             currentScope = currentScope->GetEnclosingScope();
         }
 
-        ScopeInfo * scopeInfo = ScopeInfo::SaveScopeInfo(currentScope, byteCodeGenerator->GetScriptContext());
+        ScopeInfo * scopeInfo = ScopeInfo::SaveScopeInfo(byteCodeGenerator, currentScope, byteCodeGenerator->GetScriptContext());
         if (scopeInfo != nullptr)
         {
             funcInfo->byteCodeFunction->SetScopeInfo(scopeInfo);
@@ -235,6 +237,7 @@ namespace Js
 
                 sym->SetScopeSlot(static_cast<PropertyId>(i));
                 sym->SetIsBlockVar(GetIsBlockVariable(i));
+                sym->SetIsConst(GetIsConst(i));
                 sym->SetIsFuncExpr(GetIsFuncExpr(i));
                 sym->SetIsModuleExportStorage(GetIsModuleExportStorage(i));
                 sym->SetIsModuleImport(GetIsModuleImport(i));

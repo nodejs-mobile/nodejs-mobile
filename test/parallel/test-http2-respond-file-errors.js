@@ -1,17 +1,15 @@
-// Flags: --expose-http2
 'use strict';
 
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
+const fixtures = require('../common/fixtures');
 const http2 = require('http2');
-const path = require('path');
 
 const optionsWithTypeError = {
   offset: 'number',
   length: 'number',
-  statCheck: 'function',
-  getTrailers: 'function'
+  statCheck: 'function'
 };
 
 const types = {
@@ -24,11 +22,12 @@ const types = {
   symbol: Symbol('test')
 };
 
-const fname = path.resolve(common.fixturesDir, 'elipses.txt');
+const fname = fixtures.path('elipses.txt');
 
 const server = http2.createServer();
 
 server.on('stream', common.mustCall((stream) => {
+
   // Check for all possible TypeError triggers on options
   Object.keys(optionsWithTypeError).forEach((option) => {
     Object.keys(types).forEach((type) => {
@@ -38,7 +37,7 @@ server.on('stream', common.mustCall((stream) => {
 
       common.expectsError(
         () => stream.respondWithFile(fname, {
-          [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+          'content-type': 'text/plain'
         }, {
           [option]: types[type]
         }),
@@ -55,7 +54,7 @@ server.on('stream', common.mustCall((stream) => {
   // Should throw if :status 204, 205 or 304
   [204, 205, 304].forEach((status) => common.expectsError(
     () => stream.respondWithFile(fname, {
-      [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'text/plain',
+      'content-type': 'text/plain',
       ':status': status,
     }),
     {
@@ -65,12 +64,10 @@ server.on('stream', common.mustCall((stream) => {
   ));
 
   // Should throw if headers already sent
-  stream.respond({
-    ':status': 200,
-  });
+  stream.respond({ ':status': 200 });
   common.expectsError(
     () => stream.respondWithFile(fname, {
-      [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+      'content-type': 'text/plain'
     }),
     {
       code: 'ERR_HTTP2_HEADERS_SENT',
@@ -82,7 +79,7 @@ server.on('stream', common.mustCall((stream) => {
   stream.destroy();
   common.expectsError(
     () => stream.respondWithFile(fname, {
-      [http2.constants.HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+      'content-type': 'text/plain'
     }),
     {
       code: 'ERR_HTTP2_INVALID_STREAM',
@@ -95,8 +92,8 @@ server.listen(0, common.mustCall(() => {
   const client = http2.connect(`http://localhost:${server.address().port}`);
   const req = client.request();
 
-  req.on('streamClosed', common.mustCall(() => {
-    client.destroy();
+  req.on('close', common.mustCall(() => {
+    client.close();
     server.close();
   }));
   req.end();

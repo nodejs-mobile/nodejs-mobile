@@ -21,15 +21,19 @@
 
 'use strict';
 const common = require('../common');
+const hijackstdio = require('../common/hijackstdio');
+const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const { join } = require('path');
 const { execFile } = require('child_process');
 
 // test for leaked global detection
-global.gc = 42;  // Not a valid global unless --expose_gc is set.
-assert.deepStrictEqual(common.leakedGlobals(), ['gc']);
-delete global.gc;
-
+{
+  const p = fixtures.path('leakedGlobal.js');
+  execFile(process.argv[0], [p], common.mustCall((ex, stdout, stderr) => {
+    assert.notStrictEqual(ex.code, 0);
+    assert.ok(/\bAssertionError\b.*\bUnexpected global\b.*\bgc\b/.test(stderr));
+  }));
+}
 
 // common.mustCall() tests
 assert.throws(function() {
@@ -45,12 +49,12 @@ assert.throws(function() {
 }, /^TypeError: Invalid minimum value: \/foo\/$/);
 
 // assert.fail() tests
-assert.throws(
+common.expectsError(
   () => { assert.fail('fhqwhgads'); },
-  common.expectsError({
+  {
     code: 'ERR_ASSERTION',
     message: /^fhqwhgads$/
-  }));
+  });
 
 const fnOnce = common.mustCall(() => {});
 fnOnce();
@@ -72,10 +76,10 @@ fnAtLeast2Called3();
 
 const failFixtures = [
   [
-    join(common.fixturesDir, 'failmustcall1.js'),
+    fixtures.path('failmustcall1.js'),
     'Mismatched <anonymous> function calls. Expected exactly 2, actual 1.'
   ], [
-    join(common.fixturesDir, 'failmustcall2.js'),
+    fixtures.path('failmustcall2.js'),
     'Mismatched <anonymous> function calls. Expected at least 2, actual 1.'
   ]
 ];
@@ -95,7 +99,7 @@ const HIJACK_TEST_ARRAY = [ 'foo\n', 'bar\n', 'baz\n' ];
   const stream = process[`std${txt}`];
   const originalWrite = stream.write;
 
-  common[`hijackStd${txt}`](common.mustCall(function(data) {
+  hijackstdio[`hijackStd${txt}`](common.mustCall(function(data) {
     assert.strictEqual(data, HIJACK_TEST_ARRAY[stream.writeTimes]);
   }, HIJACK_TEST_ARRAY.length));
   assert.notStrictEqual(originalWrite, stream.write);
@@ -105,14 +109,14 @@ const HIJACK_TEST_ARRAY = [ 'foo\n', 'bar\n', 'baz\n' ];
   });
 
   assert.strictEqual(HIJACK_TEST_ARRAY.length, stream.writeTimes);
-  common[`restoreStd${txt}`]();
+  hijackstdio[`restoreStd${txt}`]();
   assert.strictEqual(originalWrite, stream.write);
 });
 
 // hijackStderr and hijackStdout again
 // for console
 [[ 'err', 'error' ], [ 'out', 'log' ]].forEach(([ type, method ]) => {
-  common[`hijackStd${type}`](common.mustCall(function(data) {
+  hijackstdio[`hijackStd${type}`](common.mustCall(function(data) {
     assert.strictEqual(data, 'test\n');
 
     // throw an error
@@ -120,7 +124,7 @@ const HIJACK_TEST_ARRAY = [ 'foo\n', 'bar\n', 'baz\n' ];
   }));
 
   console[method]('test');
-  common[`restoreStd${type}`]();
+  hijackstdio[`restoreStd${type}`]();
 });
 
 let uncaughtTimes = 0;

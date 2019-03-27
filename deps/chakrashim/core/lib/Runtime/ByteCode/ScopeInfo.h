@@ -5,16 +5,23 @@
 #pragma once
 
 namespace Js {
+    class ByteCodeBufferBuilder;
+    class ByteCodeBufferReader;
+
     //
     // ScopeInfo is used to persist Scope info of outer functions. When reparsing deferred nested
     // functions, use persisted ScopeInfo to restore outer closures.
     //
     class ScopeInfo
     {
+        friend class ByteCodeBufferBuilder;
+        friend class ByteCodeBufferReader;
+
         DECLARE_RECYCLER_VERIFY_MARK_FRIEND()
 
         struct MapSymbolData
         {
+            ByteCodeGenerator *byteCodeGenerator;
             FuncInfo* func;
             int nonScopeSymbolCount;
         };
@@ -27,11 +34,12 @@ namespace Js {
                 Field(PropertyRecord const*) name;
             };
             Field(SymbolType) symbolType;
-            Field(bool) hasFuncAssignment;
-            Field(bool) isBlockVariable;
-            Field(bool) isFuncExpr;
-            Field(bool) isModuleExportStorage;
-            Field(bool) isModuleImport;
+            Field(bool) hasFuncAssignment : 1;
+            Field(bool) isBlockVariable : 1;
+            Field(bool) isConst : 1;
+            Field(bool) isFuncExpr : 1;
+            Field(bool) isModuleExportStorage : 1;
+            Field(bool) isModuleImport : 1;
         };
 
     private:
@@ -43,8 +51,9 @@ namespace Js {
         Field(BYTE) mustInstantiate : 1;       // the scope must be instantiated as an object/array
         Field(BYTE) isCached : 1;              // indicates that local vars and functions are cached across invocations
         Field(BYTE) areNamesCached : 1;
-        Field(BYTE) canMergeWithBodyScope : 1;
         Field(BYTE) hasLocalInClosure : 1;
+        Field(BYTE) isGeneratorFunctionBody : 1;
+        Field(BYTE) isAsyncFunctionBody : 1;
 
         FieldNoBarrier(Scope *) scope;
         Field(::ScopeType) scopeType;
@@ -54,7 +63,7 @@ namespace Js {
 
     private:
         ScopeInfo(FunctionInfo * function, int symbolCount)
-            : functionInfo(function), /*funcExprScopeInfo(nullptr), paramScopeInfo(nullptr),*/ symbolCount(symbolCount), parent(nullptr), scope(nullptr), areNamesCached(false), hasLocalInClosure(false)/*, parentOnly(false)*/
+            : functionInfo(function), /*funcExprScopeInfo(nullptr), paramScopeInfo(nullptr),*/ symbolCount(symbolCount), parent(nullptr), scope(nullptr), areNamesCached(false), hasLocalInClosure(false), isGeneratorFunctionBody(false), isAsyncFunctionBody(false)/*, parentOnly(false)*/
         {
         }
 
@@ -84,6 +93,13 @@ namespace Js {
             Assert(!areNamesCached);
             Assert(i >= 0 && i < symbolCount);
             symbols[i].isBlockVariable = is;
+        }
+
+        void SetIsConst(int i, bool is)
+        {
+            Assert(!areNamesCached);
+            Assert(i >= 0 && i < symbolCount);
+            symbols[i].isConst = is;
         }
 
         void SetIsFuncExpr(int i, bool is)
@@ -151,6 +167,12 @@ namespace Js {
             return symbols[i].isBlockVariable;
         }
 
+        bool GetIsConst(int i)
+        {
+            Assert(i >= 0 && i < symbolCount);
+            return symbols[i].isConst;
+        }
+
         bool GetIsFuncExpr(int i)
         {
             Assert(i >= 0 && i < symbolCount);
@@ -166,8 +188,8 @@ namespace Js {
 
         void SaveSymbolInfo(Symbol* sym, MapSymbolData* mapSymbolData);
 
-        static ScopeInfo* SaveScopeInfo(Scope * scope, ScriptContext * scriptContext);
-        static ScopeInfo* SaveOneScopeInfo(Scope * scope, ScriptContext * scriptContext);
+        static ScopeInfo* SaveScopeInfo(ByteCodeGenerator * byteCodeGenerator, Scope * scope, ScriptContext * scriptContext);
+        static ScopeInfo* SaveOneScopeInfo(ByteCodeGenerator * byteCodeGenerator, Scope * scope, ScriptContext * scriptContext);
 
     public:
         FunctionInfo * GetFunctionInfo() const
@@ -244,6 +266,16 @@ namespace Js {
         bool GetHasOwnLocalInClosure() const
         {
             return hasLocalInClosure;
+        }
+
+        bool IsGeneratorFunctionBody() const
+        {
+            return this->isGeneratorFunctionBody;
+        }
+
+        bool IsAsyncFunctionBody() const
+        {
+            return this->isAsyncFunctionBody;
         }
 
         static void SaveEnclosingScopeInfo(ByteCodeGenerator* byteCodeGenerator, /*FuncInfo* parentFunc,*/ FuncInfo* func);

@@ -1,5 +1,5 @@
 //-------------------------------------------------------------------------------------------------------
-// Copyright (C) Microsoft. All rights reserved.
+// Copyright (C) Microsoft Corporation and contributors. All rights reserved.
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 
@@ -7,6 +7,30 @@
 
 namespace Wasm
 {
+    const uint16 EXTENDED_OFFSET = 256;
+    namespace Simd {
+        const size_t VEC_WIDTH = 4;
+        typedef uint32 simdvec [VEC_WIDTH]; //TODO: maybe we should pull in SIMDValue?
+        const size_t MAX_LANES = 16;
+        void EnsureSimdIsEnabled();
+        bool IsEnabled();
+    }
+
+    namespace Threads
+    {
+        bool IsEnabled();
+    };
+
+    namespace WasmNontrapping
+    {
+        bool IsEnabled();
+    };
+
+    namespace SignExtends
+    {
+        bool IsEnabled();
+    };
+
     namespace WasmTypes
     {
         enum WasmType
@@ -17,25 +41,84 @@ namespace Wasm
             I64 = 2,
             F32 = 3,
             F64 = 4,
+#ifdef ENABLE_WASM_SIMD
+            M128 = 5,
+#endif
             Limit,
-            Any
+            Ptr,
+            Any,
+
+            FirstLocalType = I32,
+            AllLocalTypes = 
+                  1 << I32
+                | 1 << I64
+                | 1 << F32
+                | 1 << F64
+#ifdef ENABLE_WASM_SIMD
+                | 1 << M128
+#endif
         };
+
+        namespace SwitchCaseChecks
+        {
+            template<WasmType... T>
+            struct bv;
+
+            template<>
+            struct bv<>
+            {
+                static constexpr uint value = 0;
+            };
+
+            template<WasmType... K>
+            struct bv<Limit, K...>
+            {
+                static constexpr uint value = bv<K...>::value;
+            };
+
+            template<WasmType K1, WasmType... K>
+            struct bv<K1, K...>
+            {
+                static constexpr uint value = (1 << K1) | bv<K...>::value;
+            };
+        }
+
+#ifdef ENABLE_WASM_SIMD
+#define WASM_M128_CHECK_TYPE Wasm::WasmTypes::M128
+#else
+#define WASM_M128_CHECK_TYPE Wasm::WasmTypes::Limit
+#endif
+
+        template<WasmType... T>
+        __declspec(noreturn) void CompileAssertCases()
+        {
+            CompileAssertMsg(SwitchCaseChecks::bv<T...>::value == AllLocalTypes, "WasmTypes missing in switch-case");
+            AssertOrFailFastMsg(UNREACHED, "The WasmType case should have been handled");
+        }
+
+        template<WasmType... T>
+        void CompileAssertCasesNoFailFast()
+        {
+            CompileAssertMsg(SwitchCaseChecks::bv<T...>::value == AllLocalTypes, "WasmTypes missing in switch-case");
+            AssertMsg(UNREACHED, "The WasmType case should have been handled");
+        }
+
+        extern const char16* const strIds[Limit];
+
         bool IsLocalType(WasmTypes::WasmType type);
         uint32 GetTypeByteSize(WasmType type);
         const char16* GetTypeName(WasmType type);
     }
+    typedef WasmTypes::WasmType Local;
 
-    namespace ExternalKinds
+    enum class ExternalKinds: uint8
     {
-        enum ExternalKind
-        {
-            Function = 0,
-            Table = 1,
-            Memory = 2,
-            Global = 3,
-            Limit
-        };
-    }
+        Function = 0,
+        Table = 1,
+        Memory = 2,
+        Global = 3,
+        Limit
+    };
 
     namespace FunctionIndexTypes
     {
@@ -63,9 +146,11 @@ namespace Wasm
 #include "WasmBinaryOpCodes.h"
     };
 
-    enum WasmOp : byte
+    enum WasmOp : uint16
     {
-#define WASM_OPCODE(opname, opcode, sig, nyi) wb##opname = opcode,
+#define WASM_OPCODE(opname, opcode, ...) wb##opname = opcode,
+// Add prefix to the enum to get a compiler error if there is a collision between operators and prefixes
+#define WASM_PREFIX(name, value, ...) prefix##name = value,
 #include "WasmBinaryOpCodes.h"
     };
 
@@ -77,7 +162,18 @@ namespace Wasm
             double f64;
             int32 i32;
             int64 i64;
+            Simd::simdvec v128;
         };
+    };
+
+    struct WasmShuffleNode
+    {
+        uint8 indices[Simd::MAX_LANES];
+    };
+
+    struct WasmLaneNode
+    {
+        uint index;
     };
 
     struct WasmVarNode
@@ -111,7 +207,35 @@ namespace Wasm
 
     struct WasmBlock
     {
-        WasmTypes::WasmType sig;
+    private:
+        bool isSingleResult;
+        union
+        {
+            WasmTypes::WasmType singleResult;
+            uint32 signatureId;
+        };
+    public:
+        bool IsSingleResult() const { return isSingleResult; }
+        void SetSignatureId(uint32 id)
+        {
+            isSingleResult = false;
+            signatureId = id;
+        }
+        uint32 GetSignatureId() const 
+        {
+            Assert(!isSingleResult);
+            return signatureId;
+        }
+        void SetSingleResult(WasmTypes::WasmType type)
+        {
+            isSingleResult = true;
+            singleResult = type;
+        }
+        WasmTypes::WasmType GetSingleResult() const
+        {
+            Assert(isSingleResult);
+            return singleResult;
+        }
     };
 
     struct WasmNode
@@ -126,6 +250,8 @@ namespace Wasm
             WasmConstLitNode cnst;
             WasmMemOpNode mem;
             WasmVarNode var;
+            WasmLaneNode lane;
+            WasmShuffleNode shuffle;
         };
     };
 
@@ -134,12 +260,12 @@ namespace Wasm
         uint32 index;
         uint32 nameLength;
         const char16* name;
-        ExternalKinds::ExternalKind kind;
+        ExternalKinds kind;
     };
 
     struct WasmImport
     {
-        ExternalKinds::ExternalKind kind;
+        ExternalKinds kind;
         uint32 modNameLen;
         const char16* modName;
         uint32 importNameLen;

@@ -38,7 +38,7 @@ public:
         return m_charLength;
     }
 
-    static bool Equals(Js::Var aLeft, Js::Var aRight)
+    static bool Equals(JITJavascriptString* aLeft, JITJavascriptString* aRight)
     {
         return Js::JavascriptStringHelpers<JITJavascriptString>::Equals(aLeft, aRight);
     }
@@ -54,6 +54,15 @@ public:
     }
 
     static JITJavascriptString * FromVar(Js::Var var)
+    {
+        Assert(offsetof(JITJavascriptString, m_pszValue) == Js::JavascriptString::GetOffsetOfpszValue());
+        Assert(offsetof(JITJavascriptString, m_charLength) == Js::JavascriptString::GetOffsetOfcharLength());
+        AssertOrFailFast(Is(var));
+
+        return reinterpret_cast<JITJavascriptString*>(var);
+    }
+
+    static JITJavascriptString * UnsafeFromVar(Js::Var var)
     {
         Assert(offsetof(JITJavascriptString, m_pszValue) == Js::JavascriptString::GetOffsetOfpszValue());
         Assert(offsetof(JITJavascriptString, m_charLength) == Js::JavascriptString::GetOffsetOfcharLength());

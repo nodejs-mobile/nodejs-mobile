@@ -9,13 +9,11 @@ namespace Js
     class ParseableFunctionInfo;
     class DeferDeserializeFunctionInfo;
 
-    class FunctionInfo: public FinalizableObject
+    class FunctionInfo
     {
         friend class RemoteFunctionBody;
-    protected:
-        DEFINE_VTABLE_CTOR_NOBASE(FunctionInfo);
-    public:
 
+    public:
         enum Attributes : uint32
         {
             None                           = 0x00000,
@@ -40,13 +38,16 @@ namespace Js
             EnclosedByGlobalFunc           = 0x40000,
             CanDefer                       = 0x80000,
             AllowDirectSuper               = 0x100000,
-            BaseConstructorKind            = 0x200000
+            BaseConstructorKind            = 0x200000,
+            Method                         = 0x400000, // The function is a method
+            ComputedName                   = 0x800000,
+            ActiveScript                   = 0x1000000,
+            HomeObj                        = 0x2000000
         };
         FunctionInfo(JavascriptMethod entryPoint, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
         FunctionInfo(JavascriptMethod entryPoint, _no_write_barrier_tag, Attributes attributes = None, LocalFunctionId functionId = Js::Constants::NoFunctionId, FunctionProxy* functionBodyImpl = nullptr);
         FunctionInfo(FunctionInfo& that); // Todo: (leish)(swb) find a way to prevent non-static initializer calling this ctor
 
-        static bool Is(void *ptr);
         static DWORD GetFunctionBodyImplOffset() { return offsetof(FunctionInfo, functionBodyImpl); }
         static BYTE GetOffsetOfFunctionProxy()
         {
@@ -71,12 +72,16 @@ namespace Js
 
         bool IsClassConstructor() const { return ((this->attributes & ClassConstructor) != 0); }
         bool IsClassMethod() const { return ((this->attributes & ClassMethod) != 0); }
+        bool IsMethod() const { return ((this->attributes & Method) != 0); }
         bool IsModule() const { return ((this->attributes & Module) != 0); }
         bool HasSuperReference() const { return ((this->attributes & SuperReference) != 0); }
         bool CanBeDeferred() const { return ((this->attributes & CanDefer) != 0); }
         static bool IsCoroutine(Attributes attributes) { return ((attributes & (Async | Generator)) != 0); }
         bool IsCoroutine() const { return IsCoroutine(this->attributes); }
-
+        static bool HasComputedName(Attributes attributes) { return (attributes & Attributes::ComputedName) != 0; }
+        bool HasComputedName() const { return HasComputedName(this->attributes); }
+        static bool HasHomeObj(Attributes attributes) { return (attributes & Attributes::HomeObj) != 0; }
+        bool HasHomeObj() const { return HasHomeObj(this->attributes); }
 
         BOOL HasBody() const { return functionBodyImpl != NULL; }
         BOOL HasParseableInfo() const { return this->HasBody() && !this->IsDeferredDeserializeFunction(); }
@@ -116,16 +121,6 @@ namespace Js
         uint GetCompileCount() const { return compileCount; }
         void SetCompileCount(uint count) { compileCount = count; }
 
-        virtual void Finalize(bool isShutdown) override
-        {
-        }
-
-        virtual void Dispose(bool isShutdown) override
-        {
-        }
-
-        virtual void Mark(Recycler *recycler) override { AssertMsg(false, "Mark called on object that isn't TrackableObject"); }
-
         BOOL IsDeferredDeserializeFunction() const { return ((this->attributes & DeferredDeserialize) == DeferredDeserialize); }
         BOOL IsDeferredParseFunction() const { return ((this->attributes & DeferredParse) == DeferredParse); }
         void SetCapturesThis() { attributes = (Attributes)(attributes | Attributes::CapturesThis); }
@@ -136,7 +131,8 @@ namespace Js
         bool GetAllowDirectSuper() const { return (attributes & Attributes::AllowDirectSuper) != 0; }
         void SetBaseConstructorKind() { attributes = (Attributes)(attributes | Attributes::BaseConstructorKind); }
         bool GetBaseConstructorKind() const { return (attributes & Attributes::BaseConstructorKind) != 0; }
-
+        bool IsActiveScript() const { return ((this->attributes & Attributes::ActiveScript) != 0); }
+        void SetIsActiveScript() { attributes = (Attributes)(attributes | Attributes::ActiveScript); }
     protected:
         FieldNoBarrier(JavascriptMethod) originalEntryPoint;
         FieldWithBarrier(FunctionProxy *) functionBodyImpl;     // Implementation of the function- null if the function doesn't have a body
@@ -157,4 +153,28 @@ namespace Js
             : FunctionInfo(FORCE_NO_WRITE_BARRIER_TAG(entryPoint), Attributes::DoNotProfile)
         {}
     };
+
+    class AutoDisableRedeferral
+    {
+    public:
+        AutoDisableRedeferral(FunctionInfo * functionInfo) : functionInfo(functionInfo), canDefer(false) 
+        {
+            if (functionInfo)
+            {
+                canDefer = functionInfo->CanBeDeferred();
+                functionInfo->SetAttributes((FunctionInfo::Attributes)(functionInfo->GetAttributes() & ~FunctionInfo::Attributes::CanDefer));
+            }
+        }
+        ~AutoDisableRedeferral() 
+        {
+            if (functionInfo && canDefer)
+            {
+                functionInfo->SetAttributes((FunctionInfo::Attributes)(functionInfo->GetAttributes() | FunctionInfo::Attributes::CanDefer));
+            }
+        }
+    private:
+            FunctionInfo * functionInfo;
+            bool canDefer;
+    };
+
 };

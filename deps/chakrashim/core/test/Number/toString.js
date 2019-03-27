@@ -8,7 +8,10 @@ runTest('new Number(-444123)');
 runTest('new Number("444" + "123.789123456789875436")');
 runTest('new Number(-444123.78963636363636363636)');
 runTest('new Number(0)');
+runTest('0.9999999999999999e21');
 runTest('1e21');
+runTest('1.0000000000000001e21');
+runTest('-1.0000000000000001e21');
 
 function runTest(numberToTestAsString)
 {
@@ -46,6 +49,16 @@ function runTest(numberToTestAsString)
          !(1.245.toFixed(2) + "" == "1.25") ||
          !(8.255.toFixed(2) + "" == "8.26") ) {
         throw Error("1.255.toFixed(2) != 1.25 or 8.255.toFixed(2) != 8.26 ??");
+    }
+
+    var rstr = "";
+    for(var i = 0.0001; i < 0.001; i += 0.0001) {
+        rstr += i.toPrecision(3) + "";
+    }
+
+    if (rstr != "0.0001000.0002000.0003000.0004000.0005000.0006000.0007000.0008000.000900") {
+        throw new Error(rstr + " != " +
+                "0.0001000.0002000.0003000.0004000.0005000.0006000.0007000.0008000.000900");
     }
 
     if (-4.223372036854776e+12 + "" != -4.223372036854776e+12.toFixed(3)) {

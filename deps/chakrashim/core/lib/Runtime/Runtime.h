@@ -9,6 +9,7 @@
 //========================
 // Parser includes
 //========================
+#include "Parser.h"
 #include "ParserCommon.h"
 #include "ParseFlags.h"
 #include "rterror.h"
@@ -82,7 +83,7 @@ namespace Js
     struct ByteCodeReader;
     struct ByteCodeWriter;
     enum class EnumeratorFlags : byte;
-    struct ForInCache;
+    struct EnumeratorCache;
     class JavascriptStaticEnumerator;
     class ForInObjectEnumerator;
     class JavascriptConversion;
@@ -116,13 +117,14 @@ namespace Js
     class JavascriptPromiseCapabilitiesExecutorFunction;
     class JavascriptPromiseResolveOrRejectFunction;
     class JavascriptPromiseReactionTaskFunction;
+    class JavascriptPromiseThenFinallyFunction;
+    class JavascriptPromiseThunkFinallyFunction;
     class JavascriptPromiseResolveThenableTaskFunction;
     class JavascriptPromiseAllResolveElementFunction;
     struct JavascriptPromiseAllResolveElementFunctionRemainingElementsWrapper;
     struct JavascriptPromiseResolveOrRejectFunctionAlreadyResolvedWrapper;
     class JavascriptGenerator;
     class LiteralString;
-    class ArenaLiteralString;
     class JavascriptStringObject;
     struct PropertyDescriptor;
     class Type;
@@ -132,17 +134,18 @@ namespace Js
     class DeferredTypeHandlerBase;
     template <bool IsPrototype> class NullTypeHandler;
     template<size_t size> class SimpleTypeHandler;
-    class PathTypeHandler;
+    class PathTypeHandlerBase;
     class IndexPropertyDescriptor;
     class DynamicObject;
     class ArrayObject;
-    class WithScopeObject;
+    class UnscopablesWrapperObject;
     class SpreadArgument;
     class JavascriptString;
     class StringCopyInfo;
     class StringCopyInfoStack;
     class ObjectPrototypeObject;
     class PropertyString;
+    class PropertyRecordUsageCache;
     class ArgumentsObject;
     class HeapArgumentsObject;
     class ActivationObject;
@@ -153,35 +156,6 @@ namespace Js
 
     struct RestrictedErrorStrings;
     class JavascriptError;
-
-#ifdef ENABLE_SIMDJS
-//SIMD_JS
-    // SIMD
-    class JavascriptSIMDObject;
-    class SIMDFloat32x4Lib;
-    class JavascriptSIMDFloat32x4;
-    class SIMDFloat64x2Lib;
-    class JavascriptSIMDFloat64x2;
-    class SIMDInt32x4Lib;
-    class JavascriptSIMDInt32x4;
-    class SIMDInt16x8Lib;
-    class JavascriptSIMDInt16x8;
-    class SIMDInt8x16Lib;
-    class JavascriptSIMDInt8x16;
-    class SIMDUint16x8Lib;
-    class JavascriptSIMDUint16x8;
-    class SIMDUint8x16Lib;
-    class JavascriptSIMDUint8x16;
-    class SIMDUint32x4Lib;
-    class JavascriptSIMDUint32x4;
-    class SIMDBool32x4Lib;
-    class JavascriptSIMDBool32x4;
-    class SIMDBool8x16Lib;
-    class JavascriptSIMDBool8x16;
-    class SIMDBool16x8Lib;
-    class JavascriptSIMDBool16x8;
-#endif // #ifdef ENABLE_SIMDJS
-
     class RecyclableObject;
     class JavascriptRegExp;
     class JavascriptRegularExpressionResult;
@@ -202,6 +176,7 @@ namespace Js
     class JavascriptGeneratorFunction;
     class JavascriptAsyncFunction;
     class AsmJsScriptFunction;
+    class WasmScriptFunction;
     class JavascriptRegExpConstructor;
     class JavascriptRegExpEnumerator;
     class BoundFunction;
@@ -252,7 +227,7 @@ namespace Js
     class EntryPointInfo;
     struct LoopHeader;
     class InternalString;
-    /* enum */ struct JavascriptHint;
+    enum class JavascriptHint;
     /* enum */ struct BuiltinFunction;
     class EnterScriptObject;
     class PropertyRecord;
@@ -260,6 +235,8 @@ namespace Js
     class EntryPointInfo;
     class PolymorphicInlineCacheInfo;
     class PropertyGuard;
+
+    class DetachedStateBase;
 
     // asm.js
     namespace ArrayBufferView
@@ -303,7 +280,13 @@ namespace Js
     class AsmJSByteCodeGenerator;
     enum AsmJSMathBuiltinFunction: int;
     //////////////////////////////////////////////////////////////////////////
-    typedef JsUtil::WeakReferenceDictionary<PropertyId, PropertyString, PrimeSizePolicy> PropertyStringCacheMap;
+#if ENABLE_WEAK_REFERENCE_REGIONS
+    template <typename T> using WeakPropertyIdMap = JsUtil::WeakReferenceRegionDictionary<PropertyId, T*, PrimeSizePolicy>;
+#else
+    template <typename T> using WeakPropertyIdMap = JsUtil::WeakReferenceDictionary<PropertyId, T, PrimeSizePolicy>;
+#endif
+    typedef WeakPropertyIdMap<PropertyString> PropertyStringCacheMap;
+    typedef WeakPropertyIdMap<JavascriptSymbol> SymbolCacheMap;
 
     extern const FrameDisplay NullFrameDisplay;
     extern const FrameDisplay StrictNullFrameDisplay;
@@ -352,10 +335,20 @@ class SourceContextInfo;
 
 #if defined(ENABLE_SCRIPT_DEBUGGING) && defined(_WIN32)
 #include "activdbg100.h"
+#else
+#define SCRIPT_E_RECORDED                _HRESULT_TYPEDEF_(0x86664004L)
+#define NEED_DEBUG_EVENT_INFO_TYPE
 #endif
 
 #ifndef NTDDI_WIN10
 // These are only defined for the Win10 SDK and above
+#define NEED_DEBUG_EVENT_INFO_TYPE
+#define SDO_ENABLE_LIBRARY_STACK_FRAME ((SCRIPT_DEBUGGER_OPTIONS)0x8)
+#define DBGPROP_ATTRIB_VALUE_IS_RETURN_VALUE 0x8000000
+#define DBGPROP_ATTRIB_VALUE_PENDING_MUTATION 0x10000000
+#endif
+
+#ifdef NEED_DEBUG_EVENT_INFO_TYPE
 // Consider: Refactor to avoid needing these?
 typedef
 enum tagDEBUG_EVENT_INFO_TYPE
@@ -365,16 +358,13 @@ enum tagDEBUG_EVENT_INFO_TYPE
     DEIT_ASMJS_SUCCEEDED = (DEIT_ASMJS_IN_DEBUGGING + 1),
     DEIT_ASMJS_FAILED = (DEIT_ASMJS_SUCCEEDED + 1)
 } DEBUG_EVENT_INFO_TYPE;
-
-#define SDO_ENABLE_LIBRARY_STACK_FRAME ((SCRIPT_DEBUGGER_OPTIONS)0x8)
-#define DBGPROP_ATTRIB_VALUE_IS_RETURN_VALUE 0x8000000
-#define DBGPROP_ATTRIB_VALUE_PENDING_MUTATION 0x10000000
 #endif
 
 #include "../JITIDL/JITTypes.h"
 #include "../JITClient/JITManager.h"
 
 #include "Base/SourceHolder.h"
+#include "Base/LineOffsetCache.h"
 #include "Base/Utf8SourceInfo.h"
 #include "Base/PropertyRecord.h"
 #ifdef ENABLE_GLOBALIZATION
@@ -384,10 +374,10 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Language/ExecutionMode.h"
 #include "Types/TypeId.h"
 
-#include "BackendApi.h"
-#include "DetachedStateBase.h"
-
 #include "Base/Constants.h"
+#include "BackendApi.h"
+#include "Language/PropertyGuard.h"
+#include "Language/ConstructorCache.h"
 #include "ByteCode/OpLayoutsCommon.h"
 #include "ByteCode/OpLayouts.h"
 #include "ByteCode/OpLayoutsAsmJs.h"
@@ -416,7 +406,7 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Base/TempArenaAllocatorObject.h"
 #include "Language/ValueType.h"
 #include "Language/DynamicProfileInfo.h"
-#include "Debug/SourceContextInfo.h"
+#include "Base/SourceContextInfo.h"
 #include "Language/InlineCache.h"
 #include "Language/InlineCachePointerArray.h"
 #include "Base/FunctionInfo.h"
@@ -440,6 +430,7 @@ enum tagDEBUG_EVENT_INFO_TYPE
 
 #include "Base/CharStringCache.h"
 
+#include "Language/PrototypeChainCache.h"
 #include "Library/JavascriptObject.h"
 #include "Library/BuiltInFlags.h"
 #include "Types/DynamicObjectPropertyEnumerator.h"
@@ -475,12 +466,13 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Base/Entropy.h"
 #ifdef ENABLE_BASIC_TELEMETRY
 #include "DirectCall.h"
-#include "LanguageTelemetry.h"
+#include "ScriptContext/ScriptContextTelemetry.h"
 #else
 #define CHAKRATEL_LANGSTATS_INC_BUILTINCOUNT(builtin)
-#define CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(feature, m_scriptContext)
-#define CHAKRATEL_LANGSTATS_INC_DATACOUNT(feature)
+#define CHAKRATEL_LANGSTATS_INC_LANGFEATURECOUNT(esVersion, feature, m_scriptContext)
 #endif
+
+#include "Library/DelayFreeArrayBufferHelper.h"
 #include "Base/ThreadContext.h"
 
 #include "Base/StackProber.h"
@@ -504,6 +496,7 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Library/LiteralString.h"
 #include "Library/ConcatString.h"
 #include "Library/CompoundString.h"
+#include "Library/PropertyRecordUsageCache.h"
 #include "Library/PropertyString.h"
 #include "Library/SingleCharString.h"
 
@@ -511,8 +504,10 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Library/SparseArraySegment.h"
 #include "Library/JavascriptError.h"
 #include "Library/JavascriptArray.h"
+#include "Library/JavascriptSymbol.h"
 
 #include "Library/AtomicsObject.h"
+#include "DetachedStateBase.h"
 #include "Library/ArrayBuffer.h"
 #include "Library/SharedArrayBuffer.h"
 #include "Library/TypedArray.h"
@@ -552,6 +547,8 @@ enum tagDEBUG_EVENT_INFO_TYPE
 #include "Language/AsmJsTypes.h"
 #include "Language/AsmJsModule.h"
 #include "Language/AsmJs.h"
+
+#include "Core/JitHelperUtils.h"
 
 //
 // .inl files

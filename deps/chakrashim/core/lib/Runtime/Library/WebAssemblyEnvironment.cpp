@@ -25,7 +25,7 @@ WebAssemblyEnvironment::WebAssemblyEnvironment(WebAssemblyModule* module):
     this->table = this->start + module->GetTableEnvironmentOffset();
     this->globals = this->start + module->GetGlobalOffset();
 
-    uint32 globalsSize = WAsmJs::ConvertToJsVarOffset<byte>(module->GetGlobalsByteSize());
+    uint32 globalsSize = WAsmJs::ConvertOffset<byte, Js::Var>(module->GetGlobalsByteSize());
     // Assumes globals are last
     Assert(globals > table && globals > functions && globals > imports && globals > memory);
     if (globals < start ||
@@ -41,7 +41,7 @@ WebAssemblyEnvironment::WebAssemblyEnvironment(WebAssemblyModule* module):
 }
 
 template<typename T>
-void Js::WebAssemblyEnvironment::CheckPtrIsValid(intptr_t ptr) const
+void WebAssemblyEnvironment::CheckPtrIsValid(intptr_t ptr) const
 {
     if (ptr < (intptr_t)PointerValue(start) || (intptr_t)(ptr + sizeof(T)) > (intptr_t)PointerValue(end))
     {
@@ -50,7 +50,7 @@ void Js::WebAssemblyEnvironment::CheckPtrIsValid(intptr_t ptr) const
 }
 
 template<typename T>
-T* Js::WebAssemblyEnvironment::GetVarElement(Field(Var)* ptr, uint32 index, uint32 maxCount) const
+T* WebAssemblyEnvironment::GetVarElement(Field(Var)* ptr, uint32 index, uint32 maxCount) const
 {
     if (index >= maxCount)
     {
@@ -72,7 +72,7 @@ T* Js::WebAssemblyEnvironment::GetVarElement(Field(Var)* ptr, uint32 index, uint
 }
 
 template<typename T>
-void Js::WebAssemblyEnvironment::SetVarElement(Field(Var)* ptr, T* val, uint32 index, uint32 maxCount)
+void WebAssemblyEnvironment::SetVarElement(Field(Var)* ptr, T* val, uint32 index, uint32 maxCount)
 {
     if (index >= maxCount ||
         !T::Is(val))
@@ -82,29 +82,28 @@ void Js::WebAssemblyEnvironment::SetVarElement(Field(Var)* ptr, T* val, uint32 i
 
     Field(Var)* dst = ptr + index;
     CheckPtrIsValid<Var>((intptr_t)dst);
-    AssertMsg(*(T**)dst == nullptr, "We shouln't overwrite anything on the environment once it is set");
+    AssertMsg(*dst == nullptr, "We shouldn't overwrite anything on the environment once it is set");
     *dst = val;
 }
 
-AsmJsScriptFunction* WebAssemblyEnvironment::GetWasmFunction(uint32 index) const
+WasmScriptFunction* WebAssemblyEnvironment::GetWasmFunction(uint32 index) const
 {
     if (!(module->GetFunctionIndexType(index) == Wasm::FunctionIndexTypes::Function ||
           module->GetFunctionIndexType(index) == Wasm::FunctionIndexTypes::ImportThunk))
     {
         Js::Throw::InternalError();
     }
-    return GetVarElement<AsmJsScriptFunction>(functions, index, module->GetWasmFunctionCount());
+    return GetVarElement<WasmScriptFunction>(functions, index, module->GetWasmFunctionCount());
 }
 
-void WebAssemblyEnvironment::SetWasmFunction(uint32 index, AsmJsScriptFunction* func)
+void WebAssemblyEnvironment::SetWasmFunction(uint32 index, WasmScriptFunction* func)
 {
     if (!(module->GetFunctionIndexType(index) == Wasm::FunctionIndexTypes::Function ||
-          module->GetFunctionIndexType(index) == Wasm::FunctionIndexTypes::ImportThunk) ||
-        !AsmJsScriptFunction::IsWasmScriptFunction(func))
+          module->GetFunctionIndexType(index) == Wasm::FunctionIndexTypes::ImportThunk))
     {
         Js::Throw::InternalError();
     }
-    SetVarElement<AsmJsScriptFunction>(functions, func, index, module->GetWasmFunctionCount());
+    SetVarElement<WasmScriptFunction>(functions, func, index, module->GetWasmFunctionCount());
 }
 
 void WebAssemblyEnvironment::SetImportedFunction(uint32 index, Var importedFunc)
@@ -145,16 +144,13 @@ void WebAssemblyEnvironment::SetGlobalInternal(uint32 offset, T val)
 {
     Field(T)* ptr = (Field(T)*)PointerValue(start) + offset;
     CheckPtrIsValid<T>((intptr_t)PointerValue(ptr));
-    AssertMsg(*ptr == 0, "We shouln't overwrite anything on the environment once it is set");
+    AssertMsg(*ptr == 0, "We shouldn't overwrite anything on the environment once it is set");
     *ptr = val;
 }
 
 Wasm::WasmConstLitNode WebAssemblyEnvironment::GetGlobalValue(Wasm::WasmGlobal* global) const
 {
-    if (!global)
-    {
-        Js::Throw::InternalError();
-    }
+    AssertOrFailFast(global);
     Wasm::WasmConstLitNode cnst;
     uint32 offset = module->GetOffsetForGlobal(global);
 
@@ -164,18 +160,18 @@ Wasm::WasmConstLitNode WebAssemblyEnvironment::GetGlobalValue(Wasm::WasmGlobal* 
     case Wasm::WasmTypes::I64: cnst.i64 = GetGlobalInternal<int64>(offset); break;
     case Wasm::WasmTypes::F32: cnst.f32 = GetGlobalInternal<float>(offset); break;
     case Wasm::WasmTypes::F64: cnst.f64 = GetGlobalInternal<double>(offset); break;
+#ifdef ENABLE_WASM_SIMD
+    case Wasm::WasmTypes::M128: AssertOrFailFastMsg(UNREACHED, "Wasm.Simd globals not supported");
+#endif
     default:
-        Js::Throw::InternalError();
+        Wasm::WasmTypes::CompileAssertCases<Wasm::WasmTypes::I32, Wasm::WasmTypes::I64, Wasm::WasmTypes::F32, Wasm::WasmTypes::F64, WASM_M128_CHECK_TYPE>();
     }
     return cnst;
 }
 
 void WebAssemblyEnvironment::SetGlobalValue(Wasm::WasmGlobal* global, Wasm::WasmConstLitNode cnst)
 {
-    if (!global)
-    {
-        Js::Throw::InternalError();
-    }
+    AssertOrFailFast(global);
     uint32 offset = module->GetOffsetForGlobal(global);
 
     switch (global->GetType())
@@ -184,8 +180,11 @@ void WebAssemblyEnvironment::SetGlobalValue(Wasm::WasmGlobal* global, Wasm::Wasm
     case Wasm::WasmTypes::I64: SetGlobalInternal<int64>(offset, cnst.i64); break;
     case Wasm::WasmTypes::F32: SetGlobalInternal<float>(offset, cnst.f32); break;
     case Wasm::WasmTypes::F64: SetGlobalInternal<double>(offset, cnst.f64); break;
+#ifdef ENABLE_WASM_SIMD
+    case Wasm::WasmTypes::M128: AssertOrFailFastMsg(UNREACHED, "Wasm.Simd globals not supported");
+#endif
     default:
-        Js::Throw::InternalError();
+        Wasm::WasmTypes::CompileAssertCases<Wasm::WasmTypes::I32, Wasm::WasmTypes::I64, Wasm::WasmTypes::F32, Wasm::WasmTypes::F64, WASM_M128_CHECK_TYPE>();
     }
 }
 
@@ -212,7 +211,7 @@ void WebAssemblyEnvironment::CalculateOffsets(WebAssemblyTable* table, WebAssemb
         this->elementSegmentOffsets[elementsIndex] = offset;
     }
 
-    ArrayBuffer * buffer = memory->GetBuffer();
+    ArrayBufferBase* buffer = memory->GetBuffer();
     Assert(!buffer->IsDetached());
     hCode = WASMERR_DataSegOutOfRange;
     for (uint32 iSeg = 0; iSeg < module->GetDataSegCount(); ++iSeg)

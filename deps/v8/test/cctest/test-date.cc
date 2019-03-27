@@ -31,7 +31,8 @@
 #include "src/v8.h"
 #include "test/cctest/cctest.h"
 
-using namespace v8::internal;
+namespace v8 {
+namespace internal {
 
 class DateCacheMock: public DateCache {
  public:
@@ -49,17 +50,16 @@ class DateCacheMock: public DateCache {
     int year, month, day;
     YearMonthDayFromDays(days, &year, &month, &day);
     Rule* rule = FindRuleFor(year, month, day, time_in_day_sec);
-    return rule == NULL ? 0 : rule->offset_sec * 1000;
+    return rule == nullptr ? 0 : rule->offset_sec * 1000;
   }
 
-
-  virtual int GetLocalOffsetFromOS() {
-    return local_offset_;
+  virtual int GetLocalOffsetFromOS(int64_t time_sec, bool is_utc) {
+    return local_offset_ + GetDaylightSavingsOffsetFromOS(time_sec);
   }
 
  private:
   Rule* FindRuleFor(int year, int month, int day, int time_in_day_sec) {
-    Rule* result = NULL;
+    Rule* result = nullptr;
     for (int i = 0; i < rules_count_; i++)
       if (Match(&rules_[i], year, month, day, time_in_day_sec)) {
         result = &rules_[i];
@@ -112,8 +112,7 @@ static void CheckDST(int64_t time) {
   Isolate* isolate = CcTest::i_isolate();
   DateCache* date_cache = isolate->date_cache();
   int64_t actual = date_cache->ToLocal(time);
-  int64_t expected = time + date_cache->GetLocalOffsetFromOS() +
-                     date_cache->GetDaylightSavingsOffsetFromOS(time / 1000);
+  int64_t expected = time + date_cache->GetLocalOffsetFromOS(time, true);
   CHECK_EQ(actual, expected);
 }
 
@@ -216,3 +215,6 @@ TEST(DateCacheVersion) {
   CHECK_EQ(1.0, date_cache_version->NumberValue(context).FromMaybe(-1.0));
 }
 #endif  // V8_INTL_SUPPORT
+
+}  // namespace internal
+}  // namespace v8

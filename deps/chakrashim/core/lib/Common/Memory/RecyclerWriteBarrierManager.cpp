@@ -27,7 +27,7 @@ namespace Memory
 }
 #endif
 #ifdef RECYCLER_WRITE_BARRIER_BYTE
-#ifdef _M_X64_OR_ARM64
+#ifdef TARGET_64
 X64WriteBarrierCardTableManager RecyclerWriteBarrierManager::x64CardTableManager;
 X64WriteBarrierCardTableManager::CommittedSectionBitVector X64WriteBarrierCardTableManager::committedSections(&HeapAllocator::Instance);
 
@@ -46,7 +46,7 @@ DWORD RecyclerWriteBarrierManager::cardTable[1 * 1024 * 1024];
 #endif
 
 #ifdef RECYCLER_WRITE_BARRIER_BYTE
-#ifdef _M_X64_OR_ARM64
+#ifdef TARGET_64
 
 bool
 X64WriteBarrierCardTableManager::OnThreadInit()
@@ -54,8 +54,9 @@ X64WriteBarrierCardTableManager::OnThreadInit()
     // We page in the card table sections for the current threads stack reservation
     // So any writes to stack allocated vars can also have the write barrier set
 
+    // ToDo (SaAgarwa) __readgsqword is not on ARM64?
     // xplat-todo: Replace this on Windows too with GetCurrentThreadStackBounds
-#ifdef _WIN32
+#if defined(_WIN32) && defined(_M_X64) && !defined(_M_ARM64)
     // check StackProber.cpp for the stack pages layout information
     NT_TIB* teb = (NT_TIB*) ::NtCurrentTeb();
     char* stackBase = (char*) teb->StackBase;
@@ -66,12 +67,12 @@ X64WriteBarrierCardTableManager::OnThreadInit()
     VirtualQuery((LPCVOID)teb->StackLimit, &memInfo, sizeof(memInfo));
     Assert((char*)memInfo.AllocationBase == stackEnd);
     Assert(memInfo.AllocationProtect == PAGE_READWRITE);
-#endif
-#else
+#endif // DBG
+#else // defined(_WIN32) && defined(_M_X64) && !defined(_M_ARM64)
     ULONG_PTR stackBase = 0;
     ULONG_PTR stackEnd = 0;
     ::GetCurrentThreadStackLimits(&stackEnd, &stackBase);
-#endif
+#endif // defined(_WIN32) && defined(_M_X64) && !defined(_M_ARM64)
 
 #ifdef X64_WB_DIAG
     this->_stackbase = (char*)stackBase;
@@ -317,6 +318,11 @@ RecyclerWriteBarrierManager::OnSegmentFree(_In_ char* segmentAddress, size_t num
 void
 RecyclerWriteBarrierManager::WriteBarrier(void * address)
 {
+    if (IS_ASAN_FAKE_STACK_ADDR(address))
+    {
+        return;
+    }
+
 #ifdef RECYCLER_WRITE_BARRIER_BYTE
 #if ENABLE_DEBUG_CONFIG_OPTIONS
     VerifyIsBarrierAddress(address);
@@ -341,6 +347,11 @@ RecyclerWriteBarrierManager::WriteBarrier(void * address)
 void
 RecyclerWriteBarrierManager::WriteBarrier(void * address, size_t bytes)
 {
+    if (IS_ASAN_FAKE_STACK_ADDR(address))
+    {
+        return;
+    }
+
 #if ENABLE_DEBUG_CONFIG_OPTIONS
     VerifyIsBarrierAddress(address, bytes);
 #endif
@@ -403,7 +414,7 @@ RecyclerWriteBarrierManager::ToggleBarrier(void * address, size_t bytes, bool en
             }
         }
 
-        GlobalSwbVerboseTrace(_u("Enableing 0x%p (CIndex: %u-%u)\n"), address, startIndex, endIndex);
+        GlobalSwbVerboseTrace(_u("Enabling 0x%p (CIndex: %u-%u)\n"), address, startIndex, endIndex);
     }
 }
 

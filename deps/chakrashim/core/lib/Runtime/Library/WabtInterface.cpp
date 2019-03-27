@@ -18,11 +18,11 @@ struct Context
     ScriptContext* scriptContext;
 };
 
-char16* NarrowStringToWide(Context* ctx, const char* src, const size_t* srcSize = nullptr, size_t* dstSize = nullptr)
+char16* NarrowStringToWide(Context* ctx, const char* src, const size_t* srcSize = nullptr, charcount_t* dstSize = nullptr)
 {
     auto allocator = [&ctx](size_t size) {return (char16*)AnewArray(ctx->allocator, char16, size); };
     char16* dst = nullptr;
-    size_t size;
+    charcount_t size;
     HRESULT hr = utf8::NarrowStringToWide(allocator, src, srcSize ? *srcSize : strlen(src), &dst, &size);
     if (hr != S_OK)
     {
@@ -86,11 +86,11 @@ Js::Var Int64ToVar(int64 value, void* user_data)
 Js::Var StringToVar(const char* src, uint length, void* user_data)
 {
     Context* ctx = (Context*)user_data;
-    size_t bufSize = 0;
+    charcount_t bufSize = 0;
     size_t slength = (size_t)length;
     char16* buf = NarrowStringToWide(ctx, src, &slength, &bufSize);
     Assert(bufSize < UINT32_MAX);
-    return JavascriptString::NewCopyBuffer(buf, (charcount_t)bufSize, ctx->scriptContext);
+    return JavascriptString::NewCopyBuffer(buf, bufSize, ctx->scriptContext);
 }
 
 Js::Var CreateBuffer(const uint8* buf, uint size, void* user_data)
@@ -100,12 +100,6 @@ Js::Var CreateBuffer(const uint8* buf, uint size, void* user_data)
     js_memcpy_s(arrayBuffer->GetBuffer(), arrayBuffer->GetByteLength(), buf, size);
     return arrayBuffer;
 }
-
-void* Allocate(uint size, void* user_data)
-{
-    Context* ctx = (Context*)user_data;
-    return (void*)AnewArrayZ(ctx->allocator, byte, size);
-};
 
 Js::Var WabtInterface::EntryConvertWast2Wasm(RecyclableObject* function, CallInfo callInfo, ...)
 {
@@ -134,26 +128,33 @@ Js::Var WabtInterface::EntryConvertWast2Wasm(RecyclableObject* function, CallInf
         Js::Var isSpecVar = JavascriptOperators::OP_GetProperty(configObject, PropertyIds::spec, scriptContext);
         isSpecText = JavascriptConversion::ToBool(isSpecVar, scriptContext);
     }
-    JavascriptString* string = (JavascriptString*)args[1];
-    const char16* str = string->GetString();
+
     ArenaAllocator arena(_u("Wast2Wasm"), scriptContext->GetThreadContext()->GetPageAllocator(), Throw::OutOfMemory);
     Context context;
+    size_t wastSize;
+    char* wastBuffer = nullptr;
+
+    ENTER_PINNED_SCOPE(JavascriptString, string);
+    string = (JavascriptString*)args[1];
+    const char16* str = string->GetString();
     context.allocator = &arena;
     context.scriptContext = scriptContext;
 
     size_t origSize = string->GetLength();
-    size_t wastSize;
-    char* wastBuffer = nullptr;
     auto allocator = [&arena](size_t size) {return (utf8char_t*)AnewArray(&arena, byte, size);};
     utf8::WideStringToNarrow(allocator, str, origSize, &wastBuffer, &wastSize);
+    LEAVE_PINNED_SCOPE();   //  string
 
     try
     {
         ChakraWabt::SpecContext spec;
-        ChakraWabt::Context wabtCtx;
+        ChakraWabt::ChakraContext wabtCtx;
         wabtCtx.user_data = &context;
-        wabtCtx.allocator = Allocate;
         wabtCtx.createBuffer = CreateBuffer;
+        wabtCtx.features.sign_extends = CONFIG_FLAG(WasmSignExtends);
+        wabtCtx.features.threads = Wasm::Threads::IsEnabled();
+        wabtCtx.features.simd = Wasm::Simd::IsEnabled();
+        wabtCtx.features.sat_float_to_int = Wasm::WasmNontrapping::IsEnabled();
         if (isSpecText)
         {
             wabtCtx.spec = &spec;

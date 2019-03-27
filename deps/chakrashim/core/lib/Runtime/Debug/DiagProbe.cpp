@@ -3,6 +3,8 @@
 // Licensed under the MIT license. See LICENSE.txt file in the project root for full license information.
 //-------------------------------------------------------------------------------------------------------
 #include "RuntimeDebugPch.h"
+
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Language/InterpreterStackFrame.h"
 
 #define InvalidScriptId 0xFFFFFFFF
@@ -20,7 +22,7 @@ namespace Js
         stringBuilder(nullptr),
         activeMutationBP(_activeMutationBP)
     {
-        Assert(executingFunction || (stopType == STOP_EXCEPTIONTHROW || stopType == STOP_MUTATIONBREAKPOINT));
+        Assert(executingFunction || (stopType == STOP_EXCEPTIONTHROW || stopType == STOP_MUTATIONBREAKPOINT || stopType == STOP_DOMMUTATIONBREAKPOINT));
     }
 
     FunctionBody* InterpreterHaltState::GetFunction()
@@ -384,3 +386,4 @@ namespace Js
         }
     }
 }
+#endif

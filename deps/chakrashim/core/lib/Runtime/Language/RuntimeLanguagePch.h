@@ -5,9 +5,9 @@
 #pragma once
 
 #include "Parser.h"
-#include "WasmReader.h"
 
 #include "Runtime.h"
+#include "WasmReader.h"
 
 #include "Language/AsmJsUtils.h"
 #include "Language/AsmJsLink.h"
@@ -26,6 +26,7 @@
 #include "Language/DynamicProfileStorage.h"
 #endif
 #include "Language/SourceDynamicProfileManager.h"
+#include "Language/SimpleDataCacheWrapper.h"
 
 #include "Base/EtwTrace.h"
 
@@ -34,7 +35,6 @@
 #include "Types/TypePropertyCache.h"
 #include "Library/JavascriptVariantDate.h"
 #include "Library/JavascriptProxy.h"
-#include "Library/JavascriptSymbol.h"
 #include "Library/JavascriptSymbolObject.h"
 #include "Library/JavascriptGenerator.h"
 #include "Library/StackScriptFunction.h"
@@ -46,19 +46,16 @@
 #include "Debug/MutationBreakpoint.h"
 #endif
 
-// SIMD_JS
-#include "Library/SimdLib.h"
+// SIMD
 #include "Language/SimdOps.h"
 #include "Language/SimdUtils.h"
 
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "Debug/DebuggingFlags.h"
 #include "Debug/DiagProbe.h"
 #include "Debug/DebugManager.h"
 #include "Debug/ProbeContainer.h"
 #include "Debug/DebugContext.h"
-
-#ifdef ENABLE_BASIC_TELEMETRY
-#include "ScriptContextTelemetry.h"
 #endif
 
 // .inl files

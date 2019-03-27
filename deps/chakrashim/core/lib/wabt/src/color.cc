@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "color.h"
+#include "src/color.h"
 
 #include <cstdlib>
 
-#include "common.h"
+#include "src/common.h"
 
 #if _WIN32
 #include <io.h>
@@ -54,7 +54,7 @@ bool Color::SupportsColor(FILE* file) {
     }
     DWORD mode;
     if (!_isatty(_fileno(file)) || !GetConsoleMode(handle, &mode) ||
-        !SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+        !SetConsoleMode(handle, mode | 0x4)) { // ENABLE_VIRTUAL_TERMINAL_PROCESSING not defined in some kits on win7
       return false;
     }
     return true;

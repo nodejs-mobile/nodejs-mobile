@@ -53,6 +53,9 @@ public:
     static const uint TickCountFinishCollection = 45;                                       // 45 milliseconds
     static const uint TickCountDoDispose = 300;                                             // Allow for 300 milliseconds of script before attempting dispose
                                                                                             // This heuristic is currently used for dispose on stack probes
+    static const uint TickCountIdleCollectRepeatTimer = 500;                                // This heuristic is for in case the first idle task call back didn't finish the GC
+                                                                                            // We schedule another timer task to check the collection progress
+
     void ConfigureBaseFactor(uint baseFactor);
 
 #if ENABLE_CONCURRENT_GC
@@ -61,6 +64,16 @@ public:
     // If we rescan at least 128 pages in the first background repeat mark,
     // then trigger a second repeat mark pass.
     static const uint BackgroundSecondRepeatMarkThreshold = 128;
+
+#if ENABLE_ALLOCATIONS_DURING_CONCURRENT_SWEEP
+    // Number of blocks a heap bucket needs to have before allocations during concurrent sweep feature kicks-in.
+#if DBG
+    // We would want the feature to kick-in more frequently in debug builds so we excercise the code.
+    static const uint AllocDuringConcurrentSweepHeapBlockThreshold = 100;
+#else
+    static const uint AllocDuringConcurrentSweepHeapBlockThreshold = 60000;
+#endif
+#endif
 #endif
 private:
 

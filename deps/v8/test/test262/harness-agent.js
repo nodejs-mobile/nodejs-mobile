@@ -56,13 +56,17 @@ function workerScript(script) {
         },
 
         report(msg) {
-          postMessage(msg);
+          postMessage(String(msg));
           Atomics.add(i32a, ${WORKER_REPORT_LOC} + index, 1);
         },
 
         sleep(s) { Atomics.wait(i32a, ${SLEEP_LOC}, 0, s); },
 
-        leaving() {}
+        leaving() {},
+
+        monotonicNow() {
+          return performance.now();
+        }
       }
     };`;
 }
@@ -79,6 +83,10 @@ var agent = {
   },
 
   broadcast(sab, id) {
+    if (!(sab instanceof SharedArrayBuffer)) {
+      throw new TypeError('sab must be a SharedArrayBuffer.');
+    }
+
     Atomics.store(i32a, BROADCAST_LOC, 0);
 
     for (var w of workers) {
@@ -99,7 +107,11 @@ var agent = {
     return pendingReports.shift() || null;
   },
 
-  sleep(s) { Atomics.wait(i32a, SLEEP_LOC, 0, s); }
+  sleep(s) { Atomics.wait(i32a, SLEEP_LOC, 0, s); },
+
+  monotonicNow() {
+    return performance.now();
+  }
 };
 return agent;
 

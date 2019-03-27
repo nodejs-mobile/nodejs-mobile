@@ -20,12 +20,14 @@ public:
     uint GetInlineeCount() const;
     bool IsLdFldInlineePresent() const;
 
+    const FunctionJITTimeInfo * GetCallbackInlinee(Js::ProfileId profileId) const;
     const FunctionJITTimeInfo * GetLdFldInlinee(Js::InlineCacheIndex inlineCacheIndex) const;
     const FunctionJITTimeInfo * GetInlinee(Js::ProfileId profileId) const;
     const FunctionJITTimeInfo * GetNext() const;
     JITTimeFunctionBody * GetBody() const;
     bool IsPolymorphicCallSite(Js::ProfileId profiledCallSiteId) const;
     intptr_t GetFunctionInfoAddr() const;
+    intptr_t GetEntryPointInfoAddr() const;
     intptr_t GetWeakFuncRef() const;
     uint GetLocalFunctionId() const;
     uint GetSourceContextId() const;
@@ -41,9 +43,12 @@ public:
     const FunctionJITRuntimeInfo * GetInlineeForTargetInlineeRuntimeData(const Js::ProfileId profiledCallSiteId, intptr_t inlineeFuncBodyAddr) const;
     const FunctionJITRuntimeInfo *GetInlineeRuntimeData(const Js::ProfileId profiledCallSiteId) const;
     const FunctionJITRuntimeInfo *GetLdFldInlineeRuntimeData(const Js::InlineCacheIndex inlineCacheIndex) const;
+    const FunctionJITRuntimeInfo * GetCallbackInlineeRuntimeData(const Js::ProfileId profiledCallSiteId) const;
+    const FunctionJITRuntimeInfo * GetInlineeForCallbackInlineeRuntimeData(const Js::ProfileId profiledCallSiteId, intptr_t inlineeFuncBodyAddr) const;
     bool ForceJITLoopBody() const;
     bool HasSharedPropertyGuards() const;
     bool HasSharedPropertyGuard(Js::PropertyId id) const;
+    bool IsJsBuiltInForceInline() const;
 
     char16* GetDisplayName() const;
     char16* GetDebugNumberSet(wchar(&bufferToWriteTo)[MAX_FUNCTION_BODY_DEBUG_STRING_SIZE]) const;

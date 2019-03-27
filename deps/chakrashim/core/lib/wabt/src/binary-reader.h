@@ -20,11 +20,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "binary.h"
-#include "common.h"
-#include "feature.h"
-#include "opcode.h"
-#include "string-view.h"
+#include "src/binary.h"
+#include "src/common.h"
+#include "src/feature.h"
+#include "src/opcode.h"
+#include "src/string-view.h"
 
 namespace wabt {
 
@@ -34,14 +34,20 @@ struct ReadBinaryOptions {
   ReadBinaryOptions() = default;
   ReadBinaryOptions(const Features& features,
                     Stream* log_stream,
-                    bool read_debug_names)
+                    bool read_debug_names,
+                    bool stop_on_first_error,
+                    bool fail_on_custom_section_error)
       : features(features),
         log_stream(log_stream),
-        read_debug_names(read_debug_names) {}
+        read_debug_names(read_debug_names),
+        stop_on_first_error(stop_on_first_error),
+        fail_on_custom_section_error(fail_on_custom_section_error) {}
 
   Features features;
   Stream* log_stream = nullptr;
   bool read_debug_names = false;
+  bool stop_on_first_error = true;
+  bool fail_on_custom_section_error = true;
 };
 
 class BinaryReaderDelegate {
@@ -57,7 +63,7 @@ class BinaryReaderDelegate {
 
   virtual ~BinaryReaderDelegate() {}
 
-  virtual bool OnError(const char* message) = 0;
+  virtual bool OnError(ErrorLevel, const char* message) = 0;
   virtual void OnSetState(const State* s) { state = s; }
 
   /* Module */
@@ -175,9 +181,28 @@ class BinaryReaderDelegate {
   virtual Result OnOpcodeUint64(uint64_t value) = 0;
   virtual Result OnOpcodeF32(uint32_t value) = 0;
   virtual Result OnOpcodeF64(uint64_t value) = 0;
-  virtual Result OnOpcodeBlockSig(Index num_types, Type* sig_types) = 0;
+  virtual Result OnOpcodeV128(v128 value) = 0;
+  virtual Result OnOpcodeBlockSig(Type sig_type) = 0;
+  virtual Result OnAtomicLoadExpr(Opcode opcode,
+                                  uint32_t alignment_log2,
+                                  Address offset) = 0;
+  virtual Result OnAtomicStoreExpr(Opcode opcode,
+                                   uint32_t alignment_log2,
+                                   Address offset) = 0;
+  virtual Result OnAtomicRmwExpr(Opcode opcode,
+                                 uint32_t alignment_log2,
+                                 Address offset) = 0;
+  virtual Result OnAtomicRmwCmpxchgExpr(Opcode opcode,
+                                        uint32_t alignment_log2,
+                                        Address offset) = 0;
+  virtual Result OnAtomicWaitExpr(Opcode opcode,
+                                  uint32_t alignment_log2,
+                                  Address offset) = 0;
+  virtual Result OnAtomicWakeExpr(Opcode opcode,
+                                  uint32_t alignment_log2,
+                                  Address offset) = 0;
   virtual Result OnBinaryExpr(Opcode opcode) = 0;
-  virtual Result OnBlockExpr(Index num_types, Type* sig_types) = 0;
+  virtual Result OnBlockExpr(Type sig_type) = 0;
   virtual Result OnBrExpr(Index depth) = 0;
   virtual Result OnBrIfExpr(Index depth) = 0;
   virtual Result OnBrTableExpr(Index num_targets,
@@ -185,29 +210,30 @@ class BinaryReaderDelegate {
                                Index default_target_depth) = 0;
   virtual Result OnCallExpr(Index func_index) = 0;
   virtual Result OnCallIndirectExpr(Index sig_index) = 0;
-  virtual Result OnCatchExpr(Index except_index) = 0;
-  virtual Result OnCatchAllExpr() = 0;
+  virtual Result OnCatchExpr() = 0;
   virtual Result OnCompareExpr(Opcode opcode) = 0;
   virtual Result OnConvertExpr(Opcode opcode) = 0;
-  virtual Result OnCurrentMemoryExpr() = 0;
   virtual Result OnDropExpr() = 0;
   virtual Result OnElseExpr() = 0;
   virtual Result OnEndExpr() = 0;
   virtual Result OnEndFunc() = 0;
   virtual Result OnF32ConstExpr(uint32_t value_bits) = 0;
   virtual Result OnF64ConstExpr(uint64_t value_bits) = 0;
+  virtual Result OnV128ConstExpr(v128 value_bits) = 0;
   virtual Result OnGetGlobalExpr(Index global_index) = 0;
   virtual Result OnGetLocalExpr(Index local_index) = 0;
-  virtual Result OnGrowMemoryExpr() = 0;
   virtual Result OnI32ConstExpr(uint32_t value) = 0;
   virtual Result OnI64ConstExpr(uint64_t value) = 0;
-  virtual Result OnIfExpr(Index num_types, Type* sig_types) = 0;
+  virtual Result OnIfExpr(Type sig_type) = 0;
+  virtual Result OnIfExceptExpr(Type sig_type, Index except_index) = 0;
   virtual Result OnLoadExpr(Opcode opcode,
                             uint32_t alignment_log2,
                             Address offset) = 0;
-  virtual Result OnLoopExpr(Index num_types, Type* sig_types) = 0;
+  virtual Result OnLoopExpr(Type sig_type) = 0;
+  virtual Result OnMemoryGrowExpr() = 0;
+  virtual Result OnMemorySizeExpr() = 0;
   virtual Result OnNopExpr() = 0;
-  virtual Result OnRethrowExpr(Index depth) = 0;
+  virtual Result OnRethrowExpr() = 0;
   virtual Result OnReturnExpr() = 0;
   virtual Result OnSelectExpr() = 0;
   virtual Result OnSetGlobalExpr(Index global_index) = 0;
@@ -217,12 +243,17 @@ class BinaryReaderDelegate {
                              Address offset) = 0;
   virtual Result OnTeeLocalExpr(Index local_index) = 0;
   virtual Result OnThrowExpr(Index except_index) = 0;
-  virtual Result OnTryExpr(Index num_types, Type* sig_types) = 0;
+  virtual Result OnTryExpr(Type sig_type) = 0;
 
   virtual Result OnUnaryExpr(Opcode opcode) = 0;
+  virtual Result OnTernaryExpr(Opcode opcode) = 0;
   virtual Result OnUnreachableExpr() = 0;
   virtual Result EndFunctionBody(Index index) = 0;
   virtual Result EndCodeSection() = 0;
+
+  /* Simd instructions with Lane Imm operand*/
+  virtual Result OnSimdLaneOpExpr(Opcode opcode, uint64_t value) = 0;
+  virtual Result OnSimdShuffleOpExpr(Opcode opcode, v128 value) = 0;
 
   /* Elem section */
   virtual Result BeginElemSection(Offset size) = 0;
@@ -250,6 +281,10 @@ class BinaryReaderDelegate {
 
   /* Names section */
   virtual Result BeginNamesSection(Offset size) = 0;
+  virtual Result OnModuleNameSubsection(Index index,
+                                        uint32_t name_type,
+                                        Offset subsection_size) = 0;
+  virtual Result OnModuleName(string_view name) = 0;
   virtual Result OnFunctionNameSubsection(Index index,
                                           uint32_t name_type,
                                           Offset subsection_size) = 0;
@@ -270,8 +305,7 @@ class BinaryReaderDelegate {
   /* Reloc section */
   virtual Result BeginRelocSection(Offset size) = 0;
   virtual Result OnRelocCount(Index count,
-                              BinarySection section_code,
-                              string_view section_name) = 0;
+                              Index section_index) = 0;
   virtual Result OnReloc(RelocType type,
                          Offset offset,
                          Index index,
@@ -280,9 +314,32 @@ class BinaryReaderDelegate {
 
   /* Linking section */
   virtual Result BeginLinkingSection(Offset size) = 0;
-  virtual Result OnStackGlobal(Index stack_global) = 0;
-  virtual Result OnSymbolInfoCount(Index count) = 0;
-  virtual Result OnSymbolInfo(string_view name, uint32_t flags) = 0;
+  virtual Result OnSymbolCount(Index count) = 0;
+  virtual Result OnSymbol(Index index, SymbolType type, uint32_t flags) = 0;
+  virtual Result OnDataSymbol(Index index,
+                              uint32_t flags,
+                              string_view name,
+                              Index segment,
+                              uint32_t offset,
+                              uint32_t size) = 0;
+  virtual Result OnFunctionSymbol(Index index,
+                                  uint32_t flags,
+                                  string_view name,
+                                  Index function_index) = 0;
+  virtual Result OnGlobalSymbol(Index index,
+                                uint32_t flags,
+                                string_view name,
+                                Index global_index) = 0;
+  virtual Result OnSectionSymbol(Index index,
+                                 uint32_t flags,
+                                 Index section_index) = 0;
+  virtual Result OnSegmentInfoCount(Index count) = 0;
+  virtual Result OnSegmentInfo(Index index,
+                               string_view name,
+                               uint32_t alignment,
+                               uint32_t flags) = 0;
+  virtual Result OnInitFunctionCount(Index count) = 0;
+  virtual Result OnInitFunction(uint32_t priority, Index function_index) = 0;
   virtual Result EndLinkingSection() = 0;
 
   /* Exception section */
@@ -295,6 +352,7 @@ class BinaryReaderDelegate {
    * only called between calls to Begin*InitExpr and End*InitExpr */
   virtual Result OnInitExprF32ConstExpr(Index index, uint32_t value) = 0;
   virtual Result OnInitExprF64ConstExpr(Index index, uint64_t value) = 0;
+  virtual Result OnInitExprV128ConstExpr(Index index, v128 value) = 0;
   virtual Result OnInitExprGetGlobalExpr(Index index, Index global_index) = 0;
   virtual Result OnInitExprI32ConstExpr(Index index, uint32_t value) = 0;
   virtual Result OnInitExprI64ConstExpr(Index index, uint64_t value) = 0;

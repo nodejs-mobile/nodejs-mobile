@@ -5,13 +5,31 @@
 
 #pragma once
 
+#if ENABLE_OOP_NATIVE_CODEGEN
+class ProcessContext
+{
+private:
+    uint refCount;
+
+public:
+    HANDLE processHandle;
+    intptr_t chakraBaseAddress;
+    intptr_t crtBaseAddress;
+
+    ProcessContext(HANDLE processHandle, intptr_t chakraBaseAddress, intptr_t crtBaseAddress);
+    ~ProcessContext();
+    void AddRef();
+    void Release();
+    bool HasRef();
+
+};
+
 class ServerThreadContext : public ThreadContextInfo
 {
-#if ENABLE_OOP_NATIVE_CODEGEN
 public:
     typedef BVSparseNode<JitArenaAllocator> BVSparseNode;
 
-    ServerThreadContext(ThreadContextDataIDL * data, HANDLE processHandle);
+    ServerThreadContext(ThreadContextDataIDL * data, ProcessContext* processContext);
     ~ServerThreadContext();
 
     virtual HANDLE GetProcessHandle() const override;
@@ -22,7 +40,7 @@ public:
 
     virtual intptr_t GetThreadStackLimitAddr() const override;
 
-#if defined(ENABLE_SIMDJS) && (defined(_M_IX86) || defined(_M_X64))
+#ifdef ENABLE_WASM_SIMD
     virtual intptr_t GetSimdTempAreaAddr(uint8 tempIndex) const override;
 #endif
 
@@ -37,8 +55,7 @@ public:
     virtual ptrdiff_t GetChakraBaseAddressDifference() const override;
     virtual ptrdiff_t GetCRTBaseAddressDifference() const override;
 
-    OOPCodeGenAllocators * GetCodeGenAllocators();
-#if defined(_CONTROL_FLOW_GUARD) && (_M_IX86 || _M_X64)
+#if defined(_CONTROL_FLOW_GUARD) && !defined(_M_ARM)
     OOPJITThunkEmitter * GetJITThunkEmitter();
 #endif
     CustomHeap::OOPCodePageAllocators * GetThunkPageAllocators();
@@ -50,18 +67,16 @@ public:
     void Release();
     void Close();
     PageAllocator * GetForegroundPageAllocator();
-#ifdef STACK_BACK_TRACE
     DWORD GetRuntimePid() { return m_pid; }
-#endif
 
     intptr_t GetRuntimeChakraBaseAddress() const;
     intptr_t GetRuntimeCRTBaseAddress() const;
-
+    bool CanCreatePreReservedSegment() const;
+    void SetCanCreatePreReservedSegment(bool value);
     static intptr_t GetJITCRTBaseAddress();
 
 private:
-
-    AutoCloseHandle m_autoProcessHandle;
+    ProcessContext* processContext;
 
     BVSparse<HeapAllocator> * m_numericPropertyBV;
 
@@ -69,18 +84,17 @@ private:
     SectionAllocWrapper m_sectionAllocator;
     CustomHeap::OOPCodePageAllocators m_thunkPageAllocators;
     CustomHeap::OOPCodePageAllocators  m_codePageAllocators;
-#if defined(_CONTROL_FLOW_GUARD) && (_M_IX86 || _M_X64)
+#if defined(_CONTROL_FLOW_GUARD) && !defined(_M_ARM)
     OOPJITThunkEmitter m_jitThunkEmitter;
 #endif
-    OOPCodeGenAllocators m_codeGenAlloc;
     // only allocate with this from foreground calls (never from CodeGen calls)
     PageAllocator m_pageAlloc;
-
     ThreadContextDataIDL m_threadContextData;
 
     DWORD m_pid; //save client process id for easier diagnose
 
     CriticalSection m_cs;
     uint m_refCount;
-#endif
+    bool m_canCreatePreReservedSegment;
 };
+#endif

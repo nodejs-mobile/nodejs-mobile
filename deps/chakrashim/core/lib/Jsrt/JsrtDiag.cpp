@@ -4,6 +4,7 @@
 //-------------------------------------------------------------------------------------------------------
 
 #include "JsrtPch.h"
+#ifdef ENABLE_SCRIPT_DEBUGGING
 #include "JsrtInternal.h"
 #include "RuntimeDebugPch.h"
 #include "ThreadContextTlsEntry.h"
@@ -40,12 +41,16 @@
     { \
         return JsErrorWrongThread; \
     }
+#endif
 
 CHAKRA_API JsDiagStartDebugging(
     _In_ JsRuntimeHandle runtimeHandle,
     _In_ JsDiagDebugEventCallback debugEventCallback,
     _In_opt_ void* callbackState)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
 
         VALIDATE_INCOMING_RUNTIME_HANDLE(runtimeHandle);
@@ -90,30 +95,39 @@ CHAKRA_API JsDiagStartDebugging(
             HRESULT hr;
             if (FAILED(hr = scriptContext->OnDebuggerAttached()))
             {
-                Debugger_AttachDetach_fatal_error(hr); // Inconsistent state, we can't continue from here
+                Debugger_AttachDetach_unrecoverable_error(hr); // Inconsistent state, we can't continue from here
                 return JsErrorFatal;
             }
 
-            Js::ProbeContainer* probeContainer = debugContext->GetProbeContainer();
-            probeContainer->InitializeInlineBreakEngine(jsrtDebugManager);
-            probeContainer->InitializeDebuggerScriptOptionCallback(jsrtDebugManager);
+            // ScriptContext might get closed in OnDebuggerAttached
+            if (!scriptContext->IsClosed())
+            {
+                Js::ProbeContainer* probeContainer = debugContext->GetProbeContainer();
+                probeContainer->InitializeInlineBreakEngine(jsrtDebugManager);
+                probeContainer->InitializeDebuggerScriptOptionCallback(jsrtDebugManager);
+            }
         }
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagStopDebugging(
     _In_ JsRuntimeHandle runtimeHandle,
-    _Out_ void** callbackState)
+    _Out_opt_ void** callbackState)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
 
         VALIDATE_INCOMING_RUNTIME_HANDLE(runtimeHandle);
 
-        PARAM_NOT_NULL(callbackState);
-
-        *callbackState = nullptr;
+        if (callbackState != nullptr)
+        {
+            *callbackState = nullptr;
+        }
 
         JsrtRuntime * runtime = JsrtRuntime::FromHandle(runtimeHandle);
         ThreadContext * threadContext = runtime->GetThreadContext();
@@ -133,7 +147,7 @@ CHAKRA_API JsDiagStopDebugging(
             HRESULT hr;
             if (FAILED(hr = scriptContext->OnDebuggerDetached()))
             {
-                Debugger_AttachDetach_fatal_error(hr); // Inconsistent state, we can't continue from here
+                Debugger_AttachDetach_unrecoverable_error(hr); // Inconsistent state, we can't continue from here
                 return JsErrorFatal;
             }
 
@@ -146,15 +160,24 @@ CHAKRA_API JsDiagStopDebugging(
             jsrtDebugManager->ClearBreakpointDebugDocumentDictionary();
         }
 
-        *callbackState = jsrtDebugManager->GetAndClearCallbackState();
+        void* cbState = jsrtDebugManager->GetAndClearCallbackState();
+
+        if (callbackState != nullptr)
+        {
+            *callbackState = cbState;
+        }
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetScripts(
     _Out_ JsValueRef *scriptsArray)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(scriptsArray);
@@ -177,12 +200,16 @@ CHAKRA_API JsDiagGetScripts(
 
         return JsErrorDiagUnableToPerformAction;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetSource(
     _In_ unsigned int scriptId,
     _Out_ JsValueRef *source)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(source);
@@ -205,11 +232,15 @@ CHAKRA_API JsDiagGetSource(
 
         return JsErrorInvalidArgument;
     });
+#endif
 }
 
 CHAKRA_API JsDiagRequestAsyncBreak(
     _In_ JsRuntimeHandle runtimeHandle)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
 
         VALIDATE_INCOMING_RUNTIME_HANDLE(runtimeHandle);
@@ -229,22 +260,21 @@ CHAKRA_API JsDiagRequestAsyncBreak(
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetBreakpoints(
     _Out_ JsValueRef *breakpoints)
 {
-    return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
-
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
+    return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext* scriptContext) -> JsErrorCode {
         PARAM_NOT_NULL(breakpoints);
-
         *breakpoints = JS_INVALID_REFERENCE;
 
-        JsrtContext *currentContext = JsrtContext::GetCurrent();
-
-        Js::JavascriptArray* bpsArray = currentContext->GetScriptContext()->GetLibrary()->CreateArray();
-
-        JsrtRuntime * runtime = currentContext->GetRuntime();
+        JsrtContext* currentContext = JsrtContext::GetCurrent();
+        JsrtRuntime* runtime = currentContext->GetRuntime();
 
         ThreadContextScope scope(runtime->GetThreadContext());
 
@@ -254,20 +284,21 @@ CHAKRA_API JsDiagGetBreakpoints(
         }
 
         JsrtDebugManager* jsrtDebugManager = runtime->GetJsrtDebugManager();
-
         VALIDATE_IS_DEBUGGING(jsrtDebugManager);
 
-        for (Js::ScriptContext *scriptContext = runtime->GetThreadContext()->GetScriptContextList();
-        scriptContext != nullptr && !scriptContext->IsClosed();
-            scriptContext = scriptContext->next)
+        Js::JavascriptArray* bpsArray = currentContext->GetScriptContext()->GetLibrary()->CreateArray();
+
+        for (Js::ScriptContext* currentScriptContext = runtime->GetThreadContext()->GetScriptContextList();
+            currentScriptContext != nullptr && !currentScriptContext->IsClosed();
+            currentScriptContext = currentScriptContext->next)
         {
-            jsrtDebugManager->GetBreakpoints(&bpsArray, scriptContext);
+            jsrtDebugManager->GetBreakpoints(&bpsArray, currentScriptContext);
         }
 
         *breakpoints = bpsArray;
-
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagSetBreakpoint(
@@ -276,15 +307,15 @@ CHAKRA_API JsDiagSetBreakpoint(
     _In_ unsigned int columnNumber,
     _Out_ JsValueRef *breakpoint)
 {
-    return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
-
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
+    return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext* scriptContext) -> JsErrorCode {
         PARAM_NOT_NULL(breakpoint);
-
         *breakpoint = JS_INVALID_REFERENCE;
 
-        JsrtContext *currentContext = JsrtContext::GetCurrent();
-
-        JsrtRuntime * runtime = currentContext->GetRuntime();
+        JsrtContext* currentContext = JsrtContext::GetCurrent();
+        JsrtRuntime* runtime = currentContext->GetRuntime();
 
         ThreadContextScope scope(runtime->GetThreadContext());
 
@@ -297,11 +328,11 @@ CHAKRA_API JsDiagSetBreakpoint(
 
         Js::Utf8SourceInfo* utf8SourceInfo = nullptr;
 
-        for (Js::ScriptContext *scriptContext = runtime->GetThreadContext()->GetScriptContextList();
-        scriptContext != nullptr && utf8SourceInfo == nullptr && !scriptContext->IsClosed();
-            scriptContext = scriptContext->next)
+        for (Js::ScriptContext* currentScriptContext = runtime->GetThreadContext()->GetScriptContextList();
+            currentScriptContext != nullptr && utf8SourceInfo == nullptr && !currentScriptContext->IsClosed();
+            currentScriptContext = currentScriptContext->next)
         {
-            scriptContext->MapScript([&](Js::Utf8SourceInfo* sourceInfo) -> bool
+            currentScriptContext->MapScript([&](Js::Utf8SourceInfo* sourceInfo) -> bool
             {
                 if (sourceInfo->GetSourceInfoId() == scriptId)
                 {
@@ -315,7 +346,6 @@ CHAKRA_API JsDiagSetBreakpoint(
         if (utf8SourceInfo != nullptr && utf8SourceInfo->HasDebugDocument())
         {
             JsrtDebugManager* jsrtDebugManager = runtime->GetJsrtDebugManager();
-
             Js::DynamicObject* bpObject = jsrtDebugManager->SetBreakPoint(currentContext->GetScriptContext(), utf8SourceInfo, lineNumber, columnNumber);
 
             if(bpObject != nullptr)
@@ -329,15 +359,17 @@ CHAKRA_API JsDiagSetBreakpoint(
 
         return JsErrorDiagObjectNotFound;
     });
+#endif
 }
 
 CHAKRA_API JsDiagRemoveBreakpoint(
     _In_ unsigned int breakpointId)
 {
-    return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
-
-        JsrtContext *currentContext = JsrtContext::GetCurrent();
-
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
+    return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext* scriptContext) -> JsErrorCode {
+        JsrtContext* currentContext = JsrtContext::GetCurrent();
         JsrtRuntime* runtime = currentContext->GetRuntime();
 
         ThreadContextScope scope(runtime->GetThreadContext());
@@ -348,7 +380,6 @@ CHAKRA_API JsDiagRemoveBreakpoint(
         }
 
         JsrtDebugManager* jsrtDebugManager = runtime->GetJsrtDebugManager();
-
         VALIDATE_IS_DEBUGGING(jsrtDebugManager);
 
         if (!jsrtDebugManager->RemoveBreakpoint(breakpointId))
@@ -358,12 +389,16 @@ CHAKRA_API JsDiagRemoveBreakpoint(
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagSetBreakOnException(
     _In_ JsRuntimeHandle runtimeHandle,
     _In_ JsDiagBreakOnExceptionAttributes exceptionAttributes)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
 
         VALIDATE_INCOMING_RUNTIME_HANDLE(runtimeHandle);
@@ -378,12 +413,16 @@ CHAKRA_API JsDiagSetBreakOnException(
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetBreakOnException(
     _In_ JsRuntimeHandle runtimeHandle,
     _Out_ JsDiagBreakOnExceptionAttributes* exceptionAttributes)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return GlobalAPIWrapper_NoRecord([&]() -> JsErrorCode {
 
         VALIDATE_INCOMING_RUNTIME_HANDLE(runtimeHandle);
@@ -402,11 +441,15 @@ CHAKRA_API JsDiagGetBreakOnException(
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagSetStepType(
     _In_ JsDiagStepType stepType)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<true>([&](Js::ScriptContext * scriptContext) -> JsErrorCode {
 
         JsrtContext *currentContext = JsrtContext::GetCurrent();
@@ -424,7 +467,7 @@ CHAKRA_API JsDiagSetStepType(
         }
         else if (stepType == JsDiagStepTypeStepOut)
         {
-            jsrtDebugManager->SetResumeType(BREAKRESUMEACTION_STEP_OUT);
+           jsrtDebugManager->SetResumeType(BREAKRESUMEACTION_STEP_OUT);
         }
         else if (stepType == JsDiagStepTypeStepOver)
         {
@@ -479,12 +522,43 @@ CHAKRA_API JsDiagSetStepType(
 
         return JsNoError;
     });
+#endif
+}
+
+CHAKRA_API JsTTDDiagWriteLog(_In_reads_(uriLength) const char* uri, _In_ size_t uriLength)
+{
+#if !ENABLE_TTD
+    return JsErrorCategoryUsage;
+#else
+    return ContextAPIWrapper_NoRecord<true>([&](Js::ScriptContext * scriptContext) -> JsErrorCode {
+        if (!scriptContext->GetThreadContext()->IsRuntimeInTTDMode() || !scriptContext->GetThreadContext()->TTDLog->CanWriteInnerLoopTrace())
+        {
+            return JsErrorDiagUnableToPerformAction;
+        }
+
+        JsrtContext *currentContext = JsrtContext::GetCurrent();
+        JsrtRuntime* runtime = currentContext->GetRuntime();
+
+        VALIDATE_RUNTIME_IS_AT_BREAK(runtime);
+
+        JsrtDebugManager* jsrtDebugManager = runtime->GetJsrtDebugManager();
+
+        TTD::TTDebuggerSourceLocation cloc;
+        jsrtDebugManager->GetThreadContext()->TTDExecutionInfo->GetTimeAndPositionForDebugger(cloc);
+        jsrtDebugManager->GetThreadContext()->TTDLog->InnerLoopEmitLog(cloc, uri, uriLength);
+
+        return JsNoError;
+    });
+#endif
 }
 
 CHAKRA_API JsDiagGetFunctionPosition(
     _In_ JsValueRef function,
     _Out_ JsValueRef *functionPosition)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         VALIDATE_INCOMING_REFERENCE(function, scriptContext);
@@ -543,11 +617,15 @@ CHAKRA_API JsDiagGetFunctionPosition(
 
         return JsErrorDiagObjectNotFound;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetStackTrace(
     _Out_ JsValueRef *stackTrace)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(stackTrace);
@@ -567,12 +645,16 @@ CHAKRA_API JsDiagGetStackTrace(
 
         return JsNoError;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetStackProperties(
     _In_ unsigned int stackFrameIndex,
     _Out_ JsValueRef *properties)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(properties);
@@ -604,6 +686,7 @@ CHAKRA_API JsDiagGetStackProperties(
 
         return JsErrorDiagUnableToPerformAction;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetProperties(
@@ -612,7 +695,9 @@ CHAKRA_API JsDiagGetProperties(
     _In_ unsigned int totalCount,
     _Out_ JsValueRef *propertiesObject)
 {
-
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(propertiesObject);
@@ -644,12 +729,16 @@ CHAKRA_API JsDiagGetProperties(
 
         return JsErrorDiagUnableToPerformAction;
     });
+#endif
 }
 
 CHAKRA_API JsDiagGetObjectFromHandle(
     _In_ unsigned int objectHandle,
     _Out_ JsValueRef *handleObject)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPIWrapper_NoRecord<false>([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(handleObject);
@@ -681,6 +770,7 @@ CHAKRA_API JsDiagGetObjectFromHandle(
 
         return JsErrorDiagUnableToPerformAction;
     });
+#endif
 }
 
 CHAKRA_API JsDiagEvaluate(
@@ -690,6 +780,9 @@ CHAKRA_API JsDiagEvaluate(
     _In_ bool forceSetValueProp,
     _Out_ JsValueRef *evalResult)
 {
+#ifndef ENABLE_SCRIPT_DEBUGGING
+    return JsErrorCategoryUsage;
+#else
     return ContextAPINoScriptWrapper_NoRecord([&](Js::ScriptContext *scriptContext) -> JsErrorCode {
 
         PARAM_NOT_NULL(expressionVal);
@@ -765,4 +858,5 @@ CHAKRA_API JsDiagEvaluate(
         return success ? JsNoError : JsErrorScriptException;
 
     }, false /*allowInObjectBeforeCollectCallback*/, true /*scriptExceptionAllowed*/);
+#endif
 }

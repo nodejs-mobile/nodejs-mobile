@@ -8,9 +8,14 @@
 static const char16 * const SymbolTypeNames[] = { _u("Function"), _u("Variable"), _u("MemberName"), _u("Formal"), _u("Unknown") };
 #endif
 
-bool Symbol::GetIsArguments() const
+bool Symbol::IsArguments() const
 {
     return decl != nullptr && (decl->grfpn & PNodeFlags::fpnArguments);
+}
+
+bool Symbol::IsSpecialSymbol() const
+{
+    return decl != nullptr && (decl->grfpn & PNodeFlags::fpnSpecialSymbol);
 }
 
 Js::PropertyId Symbol::EnsurePosition(ByteCodeGenerator* byteCodeGenerator)
@@ -47,7 +52,7 @@ void Symbol::SaveToPropIdArray(Symbol *sym, Js::PropertyIdArray *propIds, ByteCo
         {
             Assert((uint32)slot < propIds->count);
             propIds->elements[slot] = sym->EnsurePosition(byteCodeGenerator);
-            if (pFirstSlot && !sym->GetIsArguments())
+            if (pFirstSlot && !sym->IsArguments())
             {
                 if (*pFirstSlot == Js::Constants::NoProperty ||
                     *pFirstSlot > slot)
@@ -59,18 +64,18 @@ void Symbol::SaveToPropIdArray(Symbol *sym, Js::PropertyIdArray *propIds, ByteCo
     }
 }
 
-bool Symbol::NeedsSlotAlloc(FuncInfo *funcInfo)
+bool Symbol::NeedsSlotAlloc(ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
 {
-    return IsInSlot(funcInfo, true);
+    return IsInSlot(byteCodeGenerator, funcInfo, true);
 }
 
-bool Symbol::IsInSlot(FuncInfo *funcInfo, bool ensureSlotAlloc)
+bool Symbol::IsInSlot(ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo, bool ensureSlotAlloc)
 {
     if (this->GetIsGlobal() || this->GetIsModuleExportStorage())
     {
         return false;
     }
-    if (funcInfo->GetHasHeapArguments() && this->GetIsFormal() && ByteCodeGenerator::NeedScopeObjectForArguments(funcInfo, funcInfo->root))
+    if (funcInfo->GetHasHeapArguments() && this->GetIsFormal() && byteCodeGenerator->NeedScopeObjectForArguments(funcInfo, funcInfo->root))
     {
         return true;
     }
@@ -95,9 +100,9 @@ bool Symbol::GetIsCommittedToSlot() const
     return isCommittedToSlot || this->scope->GetFunc()->GetCallsEval() || this->scope->GetFunc()->GetChildCallsEval();
 }
 
-Js::PropertyId Symbol::EnsureScopeSlot(FuncInfo *funcInfo)
+Js::PropertyId Symbol::EnsureScopeSlot(ByteCodeGenerator *byteCodeGenerator, FuncInfo *funcInfo)
 {
-    if (this->NeedsSlotAlloc(funcInfo) && this->scopeSlot == Js::Constants::NoProperty)
+    if (this->NeedsSlotAlloc(byteCodeGenerator, funcInfo) && this->scopeSlot == Js::Constants::NoProperty)
     {
         this->scopeSlot = this->scope->AddScopeSlot();
     }
