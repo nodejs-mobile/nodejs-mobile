@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.2.0">0.2.0</a><br/>
 <a href="#0.1.9">0.1.9</a><br/>
 <a href="#0.1.8">0.1.8</a><br/>
 <a href="#0.1.7">0.1.7</a><br/>
@@ -20,8 +21,39 @@
 </tr>
 </table>
 
+<a id="0.2.0"></a>
+## 2019-04-03, Version 0.2.0 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to Node 10.13 LTS.
+
+### Commits
+
+* [[`62d0e98e4a`](https://github.com/janeasystems/nodejs-mobile/commit/62d0e98e4ada1f0dc63cd85a82018101f9e2ccb9)] - Node.js on Mobile v0.2.0 (Jaime Bernardo)
+* [[`ab4ab84d8f`](https://github.com/janeasystems/nodejs-mobile/commit/ab4ab84d8ff2860e18d21294873cf6658211568b)] - test,android: increase delay in performance test (Jaime Bernardo)
+* [[`cde2d9c35b`](https://github.com/janeasystems/nodejs-mobile/commit/cde2d9c35b1b9773613d0ee796d448d1aebf48ea)] - test: fix sequential/test-performance delay (Jaime Bernardo)
+* [[`4179ccaa60`](https://github.com/janeasystems/nodejs-mobile/commit/4179ccaa60c7b604b323baa6992ed714a8f7bf52)] - test,android: set stdout and stderr line buffered (Jaime Bernardo)
+* [[`e4ac4b6375`](https://github.com/janeasystems/nodejs-mobile/commit/e4ac4b63752a8cb042d99d229f6e98812a15ab79)] - test,android: adapt node v10.13 tests for mobile (Jaime Bernardo)
+* [[`278a6ee23f`](https://github.com/janeasystems/nodejs-mobile/commit/278a6ee23f044437c4a6273f837eb894e1611f02)] - test,android: fix output strings in v10.13 tests (Jaime Bernardo)
+* [[`1ccea686a7`](https://github.com/janeasystems/nodejs-mobile/commit/1ccea686a711677c4cec3bb32c3dc0c27d869603)] - test,ios: adapt node v10.13 tests for mobile (Jaime Bernardo)
+* [[`df751614d4`](https://github.com/janeasystems/nodejs-mobile/commit/df751614d4bf204f60d3f3bf6032ff3265a398c2)] - test,android: skip tests for unsupported features (Jaime Bernardo)
+* [[`116e521aad`](https://github.com/janeasystems/nodejs-mobile/commit/116e521aadd3c7f62c7fb90e8620bbf9a4ad14d3)] - test,ios: skip tests for unsupported features (Jaime Bernardo)
+* [[`8a7689c814`](https://github.com/janeasystems/nodejs-mobile/commit/8a7689c8144f498278d737627cbeb7931dd0f8f8)] - android: select the correct openssl gyp file (Jaime Bernardo)
+* [[`a7a909dce6`](https://github.com/janeasystems/nodejs-mobile/commit/a7a909dce6b22094c5f6c8f9f1d8045d6b956bdf)] - android,ios: don't build openssl-cli project (Jaime Bernardo)
+* [[`786d06994d`](https://github.com/janeasystems/nodejs-mobile/commit/786d06994d590ff62e4955fbb4f20ded76e4fc89)] - android: add -lpthread for building in linux host (Jaime Bernardo)
+* [[`004987c4ab`](https://github.com/janeasystems/nodejs-mobile/commit/004987c4abd89761b711f3d578b631bef3a89943)] - android: configure project with cross-compiling (Jaime Bernardo)
+* [[`1a427eca29`](https://github.com/janeasystems/nodejs-mobile/commit/1a427eca29f1f3fc721d6053d92fc980840fdf21)] - android: include missing ares_android.h file (Jaime Bernardo)
+* [[`af284844d6`](https://github.com/janeasystems/nodejs-mobile/commit/af284844d661adf77df01d6fde13c746db7e3acb)] - ios: 8-byte align cclock mutexPtr (Jaime Bernardo)
+* [[`5d8380ea30`](https://github.com/janeasystems/nodejs-mobile/commit/5d8380ea30a032a205a4afc4453911df967ae776)] - ios: Update iOS arm64_CallFunction with upstream (Jaime Bernardo)
+* [[`0dca331e9a`](https://github.com/janeasystems/nodejs-mobile/commit/0dca331e9a82933103e25cf79cb19acbd82ade54)] - ios: set CLANG_CXX_LANGUAGE_STANDARD to gnu++1y (Jaime Bernardo)
+* [[`cd03287e70`](https://github.com/janeasystems/nodejs-mobile/commit/cd03287e70820219435e621ba35db1ca8cd070bd)] - ios,chakra: use asm arm64_GET_CURRENT_FRAME (Jaime Bernardo)
+* [[`815abe6bd1`](https://github.com/janeasystems/nodejs-mobile/commit/815abe6bd137021f840cbc48560a70dbb232acea)] - ios,chakra: replace GetTotalRam with direct call (Jaime Bernardo)
+* [[`18d291d811`](https://github.com/janeasystems/nodejs-mobile/commit/18d291d8110c59ab7a5d3ef66f672f93deafe97a)] - Merge node-chakracore-v10.13.0 (Jaime Bernardo)
+* [[`a7102a2d41`](https://github.com/janeasystems/nodejs-mobile/commit/a7102a2d4132af96bfab82405317e61e724eba9f)] - Working on Node.js for Mobile Apps v0.2.0 (Jaime Bernardo)
+
 <a id="0.1.9"></a>
-## 2019-02-07, Version 0.1.9 (Current)
+## 2019-02-07, Version 0.1.9
 
 ### Notable Changes
 
