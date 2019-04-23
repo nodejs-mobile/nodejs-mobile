@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.2.1">0.2.1</a><br/>
 <a href="#0.2.0">0.2.0</a><br/>
 <a href="#0.1.9">0.1.9</a><br/>
 <a href="#0.1.8">0.1.8</a><br/>
@@ -21,8 +22,21 @@
 </tr>
 </table>
 
+<a id="0.2.1"></a>
+## 2019-04-23, Version 0.2.1 (Current)
+
+### Notable Changes
+
+* Fixes an App Store submission error.
+
+### Commits
+
+* [[`45c86168a1`](https://github.com/janeasystems/nodejs-mobile/commit/45c86168a1dae6d32ce58c3e4667460dccf1eefb)] - Node.js on Mobile v0.2.1 (Jaime Bernardo)
+* [[`25346a472e`](https://github.com/janeasystems/nodejs-mobile/commit/25346a472e2c0cd432daad2734850bf6b5b80842)] - ios,deps: remove private API symbols from openssl (Jaime Bernardo)
+* [[`5513cc8855`](https://github.com/janeasystems/nodejs-mobile/commit/5513cc885562983d8ed5c042e99e17948c3fa0d2)] - Working on Node.js for Mobile Apps v0.2.1 (Jaime Bernardo)
+
 <a id="0.2.0"></a>
-## 2019-04-03, Version 0.2.0 (Current)
+## 2019-04-03, Version 0.2.0
 
 ### Notable Changes
 
