@@ -1145,6 +1145,25 @@
           }],
         ],
       }],
+      ['OS=="ios"', {
+        'target_conditions': [
+          ['_toolset=="host" and host_os=="mac"', {
+            'xcode_settings': {
+              'SDKROOT': '',
+              'IPHONEOS_DEPLOYMENT_TARGET': '',
+              'MACOSX_DEPLOYMENT_TARGET': '10.10',
+            },
+            'conditions':[
+              ['target_arch=="arm64"', {
+                'xcode_settings': {
+                  'ARCHS!': ['arm64'],
+                  'ARCHS': ['x86_64'],
+                },
+              }],
+            ],
+          }],
+        ]
+      }],
     ],  # conditions
     'configurations': {
       'Debug': {

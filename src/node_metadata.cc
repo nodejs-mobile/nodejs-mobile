@@ -19,6 +19,10 @@
 #include <unicode/uversion.h>
 #endif  // NODE_HAVE_I18N_SUPPORT
 
+#ifdef NODE_MOBILE
+#include "node_mobile_version.h"
+#endif // NODE_MOBILE
+
 namespace node {
 
 namespace per_process {
@@ -74,6 +78,9 @@ Metadata::Versions::Versions() {
   napi = NODE_STRINGIFY(NAPI_VERSION);
   llhttp = per_process::llhttp_version;
   http_parser = per_process::http_parser_version;
+#ifdef NODE_MOBILE
+  mobile = NODE_MOBILE_VERSION_STRING;
+#endif  // NODE_MOBILE
 
   brotli =
     std::to_string(BrotliEncoderVersion() >> 24) +
