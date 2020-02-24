@@ -49,10 +49,18 @@ namespace node {
 #define NODE_VERSIONS_KEY_INTL(V)
 #endif  // NODE_HAVE_I18N_SUPPORT
 
+#ifdef NODE_MOBILE
+#define NODE_VERSIONS_KEY_MOBILE(V)                                            \
+  V(mobile)
+#else
+#define NODE_VERSIONS_KEY_MOBILE(V)
+#endif  //NODE_MOBILE
+
 #define NODE_VERSIONS_KEYS(V)                                                  \
   NODE_VERSIONS_KEYS_BASE(V)                                                   \
   NODE_VERSIONS_KEY_CRYPTO(V)                                                  \
-  NODE_VERSIONS_KEY_INTL(V)
+  NODE_VERSIONS_KEY_INTL(V)                                                    \
+  NODE_VERSIONS_KEY_MOBILE(V)
 
 class Metadata {
  public:

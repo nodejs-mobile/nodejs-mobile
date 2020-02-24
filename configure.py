@@ -47,7 +47,7 @@ from fetch_deps import FetchDeps
 parser = optparse.OptionParser()
 
 valid_os = ('win', 'mac', 'solaris', 'freebsd', 'openbsd', 'linux',
-            'android', 'aix', 'cloudabi')
+            'android', 'aix', 'cloudabi', 'ios')
 valid_arch = ('arm', 'arm64', 'ia32', 'mips', 'mipsel', 'mips64el', 'ppc',
               'ppc64', 'x32','x64', 'x86', 'x86_64', 's390x')
 valid_arm_float_abi = ('soft', 'softfp', 'hard')
@@ -1032,6 +1032,8 @@ def gcc_version_ge(version_checked):
 
 
 def configure_node(o):
+  if options.dest_os == 'ios':
+    o['variables']['OS'] = 'ios'
   if options.dest_os == 'android':
     o['variables']['OS'] = 'android'
   o['variables']['node_prefix'] = options.prefix
@@ -1057,7 +1059,7 @@ def configure_node(o):
                      else target_arch != host_arch)
   want_snapshots = not options.without_snapshot
   o['variables']['want_separate_host_toolset'] = int(
-      cross_compiling and want_snapshots)
+      cross_compiling)
 
   if options.without_node_snapshot or options.node_builtin_modules_path:
     o['variables']['node_use_node_snapshot'] = 'false'
