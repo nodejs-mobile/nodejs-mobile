@@ -646,6 +646,8 @@ void ResetStdio() {
       CHECK_NE(err, -1);
     }
 
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+    // tcsetattr is not working on iOS devices.
     if (s.isatty) {
       sigset_t sa;
       int err;
@@ -662,6 +664,7 @@ void ResetStdio() {
       CHECK_EQ(0, pthread_sigmask(SIG_UNBLOCK, &sa, nullptr));
       CHECK_EQ(0, err);
     }
+#endif  // !(defined(__APPLE__) && TARGET_OS_IPHONE)
   }
 #endif  // __POSIX__
 }
