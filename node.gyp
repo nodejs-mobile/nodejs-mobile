@@ -1164,8 +1164,8 @@
         ['OS=="solaris"', {
           'ldflags': [ '-I<(SHARED_INTERMEDIATE_DIR)' ]
         }],
-        # Skip cctest while building shared lib node for Windows
-        [ 'OS=="win" and node_shared=="true"', {
+        # Skip cctest while building shared lib node for Windows and mobile
+        [ 'OS in ("win", "android") and node_shared=="true"', {
           'type': 'none',
         }],
         [ 'node_shared=="true"', {

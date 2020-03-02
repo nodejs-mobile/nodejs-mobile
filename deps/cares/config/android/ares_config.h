@@ -128,7 +128,9 @@
 #define HAVE_GETNAMEINFO 1
 
 /* Define to 1 if you have the getservbyport_r function. */
+#ifndef __ANDROID__
 #define HAVE_GETSERVBYPORT_R 1
+#endif
 
 /* Define to 1 if you have the `gettimeofday' function. */
 #define HAVE_GETTIMEOFDAY 1

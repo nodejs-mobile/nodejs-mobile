@@ -19,18 +19,27 @@ CC_VER="4.9"
 case $ARCH in
     arm)
         DEST_CPU="$ARCH"
+        V8_ARCH="$ARCH"
         SUFFIX="$ARCH-linux-androideabi"
         TOOLCHAIN_NAME="$SUFFIX"
         ;;
     x86)
         DEST_CPU="ia32"
+        V8_ARCH="ia32"
         SUFFIX="i686-linux-android"
         TOOLCHAIN_NAME="$ARCH"
         ;;
     x86_64)
-        DEST_CPU="ia32"
+        DEST_CPU="x64"
+        V8_ARCH="x64"
         SUFFIX="$ARCH-linux-android"
         TOOLCHAIN_NAME="$ARCH"
+        ;;
+    arm64)
+        DEST_CPU="arm64"
+        V8_ARCH="arm64"
+        SUFFIX="aarch64-linux-android"
+        TOOLCHAIN_NAME="aarch64"
         ;;
     *)
         echo "Unsupported architecture provided: $ARCH"
@@ -44,6 +53,8 @@ function make_toolchain {
          --toolchain=$TOOLCHAIN_NAME-$CC_VER \
         --arch=$ARCH \
         --install-dir=$TOOLCHAIN \
+        --stl=libc++ \
+        --force \
         --platform=android-21
 }
 
@@ -58,16 +69,22 @@ if [ -d "$TOOLCHAIN" ]; then
 else
     make_toolchain
 fi
-export PATH=$TOOLCHAIN/bin:$PATH
+
+export AR_host="$(which ar)"
 export AR=$TOOLCHAIN/bin/$SUFFIX-ar
-export CC=$TOOLCHAIN/bin/$SUFFIX-gcc
-export CXX=$TOOLCHAIN/bin/$SUFFIX-g++
-export LINK=$TOOLCHAIN/bin/$SUFFIX-g++
+export AR_target=$TOOLCHAIN/bin/$SUFFIX-ar
+export CC_target=$TOOLCHAIN/bin/$SUFFIX-gcc
+export CXX_target=$TOOLCHAIN/bin/$SUFFIX-g++
+export LINK_target=$TOOLCHAIN/bin/$SUFFIX-g++
 
 GYP_DEFINES="target_arch=$ARCH"
-GYP_DEFINES+=" v8_target_arch=$ARCH"
+GYP_DEFINES+=" v8_target_arch=$V8_ARCH"
 GYP_DEFINES+=" android_target_arch=$ARCH"
-GYP_DEFINES+=" host_os=linux OS=android"
+if [ "$(uname -s)" == "Darwin" ]; then
+    GYP_DEFINES+=" host_os=mac target_os=android"
+else
+    GYP_DEFINES+=" host_os=linux target_os=android"
+fi
 export GYP_DEFINES
 
 if [ -f "configure" ]; then
@@ -75,5 +92,9 @@ if [ -f "configure" ]; then
         --dest-cpu=$DEST_CPU \
         --dest-os=android \
         --without-snapshot \
-        --openssl-no-asm
+        --without-node-code-cache \
+        --openssl-no-asm \
+        --with-intl=none \
+        --cross-compiling \
+        --shared
 fi
