@@ -19,7 +19,7 @@
       'includes': ['config/archs/linux-aarch64/no-asm/openssl.gypi'],
     }, 'target_arch=="ia32" and OS=="freebsd"', {
       'includes': ['config/archs/BSD-x86/no-asm/openssl.gypi'],
-    }, 'target_arch=="ia32" and OS=="linux"', {
+    }, 'target_arch=="ia32" and OS in ("linux", "android")', {
       'includes': ['config/archs/linux-elf/no-asm/openssl.gypi'],
     }, 'target_arch=="ia32" and OS=="mac"', {
       'includes': ['config/archs/darwin-i386-cc/no-asm/openssl.gypi'],
@@ -42,7 +42,7 @@
       'includes': ['config/archs/VC-WIN64A/no-asm/openssl.gypi'],
     }, 'target_arch=="arm64" and OS=="win"', {
       'includes': ['config/archs/VC-WIN64-ARM/no-asm/openssl.gypi'],
-    }, 'target_arch=="x64" and OS=="linux"', {
+    }, 'target_arch=="x64" and OS in ("linux", "android")', {
       'includes': ['config/archs/linux-x86_64/no-asm/openssl.gypi'],
     }, 'target_arch=="mips64el" and OS=="linux"', {
       'includes': ['config/archs/linux64-mips64/no-asm/openssl.gypi'],
