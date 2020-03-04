@@ -110,6 +110,8 @@ const isFreeBSD = process.platform === 'freebsd';
 const isOpenBSD = process.platform === 'openbsd';
 const isLinux = process.platform === 'linux';
 const isOSX = process.platform === 'darwin';
+const isAndroid = process.platform === 'android';
+const isIOS = process.platform === 'ios';
 
 const rootDir = isWindows ? 'c:\\' : '/';
 
@@ -758,7 +760,9 @@ module.exports = {
   invalidArgTypeHelper,
   isAIX,
   isAlive,
+  isAndroid,
   isFreeBSD,
+  isIOS,
   isLinux,
   isMainThread,
   isOpenBSD,
@@ -784,8 +788,13 @@ module.exports = {
   skipIfWorker,
 
   get enoughTestCPU() {
-    const cpus = require('os').cpus();
-    return Array.isArray(cpus) && (cpus.length > 1 || cpus[0].speed > 999);
+    if(isAndroid || isIOS) {
+      // On mobile platforms, CPU information might be unavailable.
+      return true;
+    } else {
+      const cpus = require('os').cpus();
+      return Array.isArray(cpus) && (cpus.length > 1 || cpus[0].speed > 999);
+    }
   },
 
   get enoughTestMem() {
