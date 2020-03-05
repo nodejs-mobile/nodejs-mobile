@@ -43,6 +43,9 @@ int main(int argc, char * argv[]) {
             {
                 //If the argument starts with the prefix, it needs to be translated into a Documents path.
                 str = [NSString stringWithFormat:@"%@/%@", dstTestsPath, [str substringFromIndex:[file_replace_prefix length]]];
+            } else if([str hasPrefix:@"./test/"]) {
+                // Some arguments are passed as a relative path to where the node binary is supposed to be while testing. Translate into a Documents path.
+                str = [NSString stringWithFormat:@"%@/%@", dstTestsPath, [str substringFromIndex:[@"./test" length]]];
             }
             [arguments addObject:str];
         }
