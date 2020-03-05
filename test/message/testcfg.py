@@ -123,10 +123,11 @@ class MessageTestConfiguration(test.TestConfiguration):
     for tst in all_tests:
       if self.Contains(path, tst):
         file_path = join(self.root, reduce(join, tst[1:], ''))
+        test_name = tst[:-1] + [os.path.splitext(tst[-1])[0]]
         output_path = file_path[:file_path.rfind('.')] + '.out'
         if not exists(output_path):
           raise Exception("Could not find %s" % output_path)
-        result.append(MessageTestCase(tst, file_path, output_path,
+        result.append(MessageTestCase(test_name, file_path, output_path,
                                       arch, mode, self.context, self))
     return result
 
