@@ -2,6 +2,9 @@
 
 const common = require('../common');
 
+if (common.isOSX || common.isIOS)
+  common.skip('because of 17894467 Apple bug');
+
 const assert = require('assert');
 const dgram = require('dgram');
 
