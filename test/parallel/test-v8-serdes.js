@@ -12,7 +12,7 @@ const os = require('os');
 const circular = {};
 circular.circular = circular;
 
-const wasmModule = new WebAssembly.Module(fixtures.readSync('simple.wasm'));
+const wasmModule = common.isIOS ? null : new WebAssembly.Module(fixtures.readSync('simple.wasm'));
 
 const objects = [
   { foo: 'bar' },
@@ -23,9 +23,8 @@ const objects = [
   undefined,
   null,
   42,
-  circular,
-  wasmModule
-];
+  circular
+].concat(common.isIOS ? [] : [wasmModule]);
 
 const hostObject = new (internalBinding('js_stream').JSStream)();
 
@@ -237,6 +236,7 @@ const deserializerTypeError =
   );
 }
 
+if(!common.isIOS)
 {
   const deserializedWasmModule = v8.deserialize(v8.serialize(wasmModule));
   const instance = new WebAssembly.Instance(deserializedWasmModule);
