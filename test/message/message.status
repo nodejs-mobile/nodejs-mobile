@@ -17,3 +17,25 @@ prefix message
 [$system==freebsd]
 
 [$system==aix]
+
+[$system==android]
+#
+# Tests that require child process that currently is not supported on mobile
+#
+async_error_eval_cjs: SKIP
+async_error_eval_esm: SKIP
+eval_messages: SKIP
+stdin_messages: SKIP
+
+[$system==ios]
+#
+# Tests that require child process that currently is not supported on mobile
+#
+async_error_eval_cjs: SKIP
+async_error_eval_esm: SKIP
+eval_messages: SKIP
+stdin_messages: SKIP
+#
+# Tests that require WebAssembly, not supported in JIT-less V8
+#
+v8_warning: SKIP
