@@ -5,6 +5,9 @@ const assert = require('assert');
 const expected_keys = ['ares', 'brotli', 'modules', 'node',
                        'uv', 'v8', 'zlib', 'nghttp2', 'napi',
                        'http_parser', 'llhttp'];
+if (common.isAndroid || common.isIOS) {
+  expected_keys.push('mobile');
+}
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');

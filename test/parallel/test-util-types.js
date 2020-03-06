@@ -1,6 +1,6 @@
 // Flags: --experimental-vm-modules --expose-internals
 'use strict';
-require('../common');
+const common = require('../common');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
 const { types, inspect } = require('util');
@@ -50,8 +50,7 @@ for (const [ value, _method ] of [
   [ new DataView(new ArrayBuffer()) ],
   [ new SharedArrayBuffer() ],
   [ new Proxy({}, {}), 'isProxy' ],
-  [ new WebAssembly.Module(wasmBuffer), 'isWebAssemblyCompiledModule' ],
-]) {
+].concat(common.isIOS ? [] : [[ new WebAssembly.Module(wasmBuffer), 'isWebAssemblyCompiledModule' ]])) {
   const method = _method || `is${value.constructor.name}`;
   assert(method in types, `Missing ${method} for ${inspect(value)}`);
   assert(types[method](value), `Want ${inspect(value)} to match ${method}`);

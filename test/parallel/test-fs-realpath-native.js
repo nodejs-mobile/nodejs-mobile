@@ -2,8 +2,15 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 
 const filename = __filename.toLowerCase();
+
+if(common.isIOS || common.isAndroid) {
+  // Change the working dir for what would be expected of the test framework
+  //running in a Desktop environment.
+  process.chdir(path.join(__dirname,'..','..'));
+}
 
 assert.strictEqual(
   fs.realpathSync.native('./test/parallel/test-fs-realpath-native.js')
