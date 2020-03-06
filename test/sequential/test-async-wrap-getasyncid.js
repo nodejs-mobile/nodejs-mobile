@@ -52,6 +52,12 @@ const { getSystemErrorName } = require('util');
     delete providers.HTTPINCOMINGMESSAGE;
     delete providers.ELDHISTOGRAM;
 
+    if (common.isIOS) {
+      // These providers are not tested on iOS.
+      delete providers.PIPECONNECTWRAP;
+      delete providers.PIPESERVERWRAP;
+    }
+
     const objKeys = Object.keys(providers);
     if (objKeys.length > 0)
       process._rawDebug(objKeys);
@@ -171,7 +177,9 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   testInitialized(handle, 'Pipe');
 }
 
+if(!common.isIOS)
 {
+  // Fails with EADDRINUSE on iOS.
   tmpdir.refresh();
 
   const server = net.createServer(common.mustCall((socket) => {
