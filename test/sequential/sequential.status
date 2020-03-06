@@ -31,3 +31,83 @@ test-buffer-creation-regression: SKIP
 test-perf-hooks: SKIP
 
 [$arch==arm]
+
+[$system==android]
+#
+# Tests that require child process that currently is not supported on mobile
+#
+test-child-process-*: SKIP
+test-cli-syntax-*: SKIP
+test-cluster-*: SKIP
+test-deprecation-flags: SKIP
+test-dgram-bind-shared-ports: SKIP
+test-fs-stat-sync-overflow: SKIP
+test-heapdump-flag: SKIP
+test-init: SKIP
+test-net-GH-5504: SKIP
+test-net-listen-shared-ports: SKIP
+test-net-response-size: SKIP
+test-next-tick-error-spin: SKIP
+test-process-warnings: SKIP
+test-repl-timeout-throw: SKIP
+test-set-http-max-http-headers: SKIP
+test-stream2-stderr-sync: SKIP
+test-util-debug: SKIP
+test-vm-timeout-rethrow: SKIP
+test-worker-prof: SKIP
+#
+# Tests that require the inspector, not included in the build
+#
+test-cpu-prof-*: SKIP
+test-debug*: SKIP
+test-heap-prof: SKIP
+test-inspector*: SKIP
+test-resolution-inspect-brk: SKIP
+#
+# Tests that require OpenSSL CLI that is not available on mobile
+#
+test-tls-psk-client: SKIP
+test-tls-securepair-client: SKIP
+test-tls-session-timeout: SKIP
+
+[$system==ios]
+#
+# Tests that require child process that currently is not supported on mobile
+#
+test-child-process-*: SKIP
+test-cli-syntax-*: SKIP
+test-cluster-*: SKIP
+test-deprecation-flags: SKIP
+test-dgram-bind-shared-ports: SKIP
+test-fs-stat-sync-overflow: SKIP
+test-heapdump-flag: SKIP
+test-init: SKIP
+test-net-GH-5504: SKIP
+test-net-listen-shared-ports: SKIP
+test-net-response-size: SKIP
+test-next-tick-error-spin: SKIP
+test-process-warnings: SKIP
+test-repl-timeout-throw: SKIP
+test-set-http-max-http-headers: SKIP
+test-stream2-stderr-sync: SKIP
+test-util-debug: SKIP
+test-vm-timeout-rethrow: SKIP
+test-worker-prof: SKIP
+#
+# Tests that require the inspector, not included in the build
+#
+test-cpu-prof-*: SKIP
+test-debug*: SKIP
+test-heap-prof: SKIP
+test-inspector*: SKIP
+test-resolution-inspect-brk: SKIP
+#
+# Tests that require OpenSSL CLI that is not available on mobile
+#
+test-tls-psk-client: SKIP
+test-tls-securepair-client: SKIP
+test-tls-session-timeout: SKIP
+#
+# Tests that uses fs.watch, which is inconsistent on iOS
+#
+test-fs-watch: SKIP
