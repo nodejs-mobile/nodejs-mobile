@@ -12,6 +12,8 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#include <cstdio>
+#include <cstring>
 #endif
 
 namespace node {
@@ -431,7 +433,39 @@ void PrintErrorString(const char* format, ...) {
   CHECK_GT(n, 0);
   WriteConsoleW(stderr_handle, wbuf.data(), n - 1, nullptr, nullptr);
 #elif defined(__ANDROID__)
-  __android_log_vprint(ANDROID_LOG_ERROR, "nodejs", format, ap);
+  // Android log implementations will truncate log messages to 1023 length.
+  const int maxLength = 1023;
+
+  va_list apCopy;
+  va_copy(apCopy, ap);
+  // Check final size of format printing the arguments.
+  int n = vsnprintf(NULL, 0, format, apCopy);
+  va_end(apCopy);
+
+  if (n <= maxLength) {
+    __android_log_vprint(ANDROID_LOG_ERROR, "nodejs", format, ap);
+  } else {
+    // Divide the output in lines with length < maxLength.
+    std::vector<char> out(n + 1);
+    vsnprintf(out.data(), n + 1, format, ap);
+    std::vector<char> line(maxLength+1);
+    const char* sep = "\n";
+    char* token = out.data();
+    while (*token) {
+      int tokenLen = std::strcspn(token, sep);
+      if (tokenLen > maxLength) {
+        tokenLen = maxLength;
+      }
+      std::strncpy(line.data(), token, tokenLen);
+      line.data()[tokenLen]='\0';
+      __android_log_write(ANDROID_LOG_ERROR, "nodejs", line.data());
+      token += tokenLen;
+      if (*token == '\n') {
+        // __android_log_write will introduce the line break.
+        token++;
+      }
+    }
+  }
 #else
   vfprintf(stderr, format, ap);
 #endif
