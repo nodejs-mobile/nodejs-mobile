@@ -30,7 +30,7 @@ parseLogcat() {
 RESULT=$(parseLogcat)
 
 # Echo the raw stdout and stderr
-adb $TARGET shell 'logcat -d -b main -v raw -s TestNode:I | sed -E ''s/^RESULT:[A-Z]*//'' '
+adb $TARGET shell 'logcat -d -b main -v raw -s TestNode:I -s nodejs | sed -E ''s/^RESULT:[A-Z]*//'' '
 
 if [ $RESULT -eq 1 ]; then
   exit $RESULT

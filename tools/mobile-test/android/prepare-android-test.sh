@@ -15,6 +15,14 @@ NODEJS_BASE_DIR="$( cd "$( dirname "$0" )" && cd .. && cd .. && cd .. && pwd )"
 TEST_APP_BASE_DIR="$( cd "$( dirname "$0" )" && cd testnode/ && pwd )"
 TEST_PROXY_TARGETDIR="$( cd "$NODEJS_BASE_DIR" && mkdir -p ./out/android.release/ && cd ./out/android.release/ && pwd )"
 
+# Remove symbolic links, which might make the Android package invalid.
+set +e
+unlink "$NODEJS_BASE_DIR/test/fixtures/wasi/subdir/input_link.txt"
+unlink "$NODEJS_BASE_DIR/test/fixtures/wasi/subdir/loop1"
+unlink "$NODEJS_BASE_DIR/test/fixtures/wasi/subdir/loop2"
+unlink "$NODEJS_BASE_DIR/test/fixtures/wasi/subdir/outside.txt"
+set -e
+
 # Build the Android test app
 ( cd "$TEST_APP_BASE_DIR" && ./gradlew assembleDebug )
 
@@ -41,7 +49,7 @@ parseLogcat() {
 RESULT=$(parseLogcat)
 
 # Echo the raw stdout and stderr
-adb $TARGET shell 'logcat -d -b main -v raw -s TestNode:V'
+adb $TARGET shell 'logcat -d -b main -v raw -s TestNode:V -s nodejs'
 
 if [ $RESULT -eq 1 ]; then
   exit $RESULT

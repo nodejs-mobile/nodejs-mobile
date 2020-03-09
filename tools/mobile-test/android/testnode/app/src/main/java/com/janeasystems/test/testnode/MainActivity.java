@@ -54,6 +54,8 @@ public class MainActivity extends Activity {
             for (int i = 0; i < ( parts.length ); i++) {
                 if (nodeSubstituteDir == null) {
                     newArgs += parts[i] + " ";
+                } else if(parts[i].startsWith("./test/")) {
+                    newArgs += parts[i].replace("./test/",testFolderPath) + " ";
                 } else {
                     //if there is a dir to substitute in the node arguments, do it.
                     newArgs += parts[i].replace(nodeSubstituteDir,testFolderPath) + " ";
