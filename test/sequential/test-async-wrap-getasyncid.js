@@ -12,6 +12,7 @@ const providers = { ...internalBinding('async_wrap').Providers };
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const { getSystemErrorName } = require('util');
+const path = require('path');
 
 // Make sure that all Providers are tested.
 {
@@ -318,6 +319,6 @@ if (process.features.inspector && common.isMainThread) {
 // DIRHANDLE
 {
   const dirBinding = internalBinding('fs_dir');
-  const handle = dirBinding.opendir('./', 'utf8', undefined, {});
+  const handle = dirBinding.opendir(common.isAndroid ? __dirname : './', 'utf8', undefined, {});
   testInitialized(handle, 'DirHandle');
 }
