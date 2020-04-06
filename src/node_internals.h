@@ -283,7 +283,7 @@ class ThreadPoolWork {
 
 // Functions defined in node.cc that are exposed via the bootstrapper object
 
-#if defined(__POSIX__) && !defined(__ANDROID__) && !defined(__CloudABI__)
+#if defined(__POSIX__) && !(defined(__ANDROID__) && __ANDROID_API__ < 21) && !defined(__CloudABI__)
 #define NODE_IMPLEMENTS_POSIX_CREDENTIALS 1
 #endif  // __POSIX__ && !defined(__ANDROID__) && !defined(__CloudABI__)
 
