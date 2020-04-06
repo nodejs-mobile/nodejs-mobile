@@ -56,7 +56,14 @@ assert(inited < 15000);
 assert.strictEqual(performance.nodeTiming.name, 'node');
 assert.strictEqual(performance.nodeTiming.entryType, 'node');
 
-const delay = 250;
+let delay = 250;
+
+if (common.isAndroid) {
+  // Use a more generous initial delay on Android, taking into account
+  // Application and Activity start time.
+  delay = 2000;
+}
+
 function checkNodeTiming(props) {
   console.log(props);
 
