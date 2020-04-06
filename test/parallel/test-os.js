@@ -92,17 +92,20 @@ if (!common.isIBMi) {
   assert.ok(uptime > 0);
 }
 
-const cpus = os.cpus();
-is.array(cpus);
-assert.ok(cpus.length > 0);
-for (const cpu of cpus) {
-  assert.strictEqual(typeof cpu.model, 'string');
-  assert.strictEqual(typeof cpu.speed, 'number');
-  assert.strictEqual(typeof cpu.times.user, 'number');
-  assert.strictEqual(typeof cpu.times.nice, 'number');
-  assert.strictEqual(typeof cpu.times.sys, 'number');
-  assert.strictEqual(typeof cpu.times.idle, 'number');
-  assert.strictEqual(typeof cpu.times.irq, 'number');
+if (!common.isAndroid && !common.isIOS) {
+  // API is inconsistent on mobile.
+  const cpus = os.cpus();
+  is.array(cpus);
+  assert.ok(cpus.length > 0);
+  for (const cpu of cpus) {
+    assert.strictEqual(typeof cpu.model, 'string');
+    assert.strictEqual(typeof cpu.speed, 'number');
+    assert.strictEqual(typeof cpu.times.user, 'number');
+    assert.strictEqual(typeof cpu.times.nice, 'number');
+    assert.strictEqual(typeof cpu.times.sys, 'number');
+    assert.strictEqual(typeof cpu.times.idle, 'number');
+    assert.strictEqual(typeof cpu.times.irq, 'number');
+  }
 }
 
 const type = os.type();

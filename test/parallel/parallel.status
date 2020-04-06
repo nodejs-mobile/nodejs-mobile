@@ -106,6 +106,7 @@ test-listen-fd-detached: SKIP
 test-listen-fd-detached-inherit: SKIP
 test-listen-fd-server: SKIP
 test-math-random: SKIP
+test-module-loading-globalpaths: SKIP
 test-module-main-extension-lookup: SKIP
 test-module-main-fail: SKIP
 test-module-main-preserve-symlinks-fail: SKIP
@@ -170,9 +171,11 @@ test-stdin-from-file: SKIP
 test-stdin-pipe-large: SKIP
 test-stdin-pipe-resume: SKIP
 test-stdin-resume-pause: SKIP
+test-stdin-script-child: SKIP
 test-stdin-script-child-option: SKIP
 test-stdio-closed: SKIP
 test-stdio-pipe-redirect: SKIP
+test-stdio-pipe-stderr: SKIP
 test-stdout-cannot-be-closed-child-process-pipe: SKIP
 test-stdout-close-catch: SKIP
 test-stdout-close-unref: SKIP
@@ -271,6 +274,11 @@ test-module-readonly: SKIP
 test-windows-abort-exitcode: SKIP
 test-windows-failed-heap-allocation: SKIP
 #
+# Tests that require _LARGEFILE_SOURCE, which is a no-op on SDK API 21.
+#
+test-fs-promises-file-handle-read: SKIP
+test-fs-read: SKIP
+#
 # Tests that run on Linux only
 #
 test-fs-read-file-sync-hostname : SKIP
@@ -297,6 +305,26 @@ test-whatwg-url-custom-setters: SKIP
 test-whatwg-url-origin: SKIP
 test-whatwg-url-setters: SKIP
 test-whatwg-url-toascii: SKIP
+#
+# Tests using APIs not available on Android
+#
+test-process-euid-egid: SKIP # process.seteuid is not a function
+test-process-setgroups: SKIP # process.setgroups is not a function
+test-process-uid-gid: SKIP # process.setuid is not a function
+#
+# Test requires hard links, not fully supported on Android.
+#
+test-fs-link: SKIP
+#
+# Tests that enter in conflict with the test app.
+#
+test-listen-fd-ebadf: SKIP # uses stderr as a socket, which the test app redirects.
+test-process-exit-recursive: SKIP # catches exit codes, like the test app does to output to logcat.
+#
+# Tests that required zipped files, which the Android build system uncompresses to include in the APK.
+#
+test-zlib-from-concatenated-gzip: SKIP
+test-zlib-from-gzip: SKIP
 
 [$system==ios]
 #
@@ -355,6 +383,7 @@ test-listen-fd-detached: SKIP
 test-listen-fd-detached-inherit: SKIP
 test-listen-fd-server: SKIP
 test-math-random: SKIP
+test-module-loading-globalpaths: SKIP
 test-module-main-extension-lookup: SKIP
 test-module-main-fail: SKIP
 test-module-main-preserve-symlinks-fail: SKIP
@@ -419,9 +448,11 @@ test-stdin-from-file: SKIP
 test-stdin-pipe-large: SKIP
 test-stdin-pipe-resume: SKIP
 test-stdin-resume-pause: SKIP
+test-stdin-script-child: SKIP
 test-stdin-script-child-option: SKIP
 test-stdio-closed: SKIP
 test-stdio-pipe-redirect: SKIP
+test-stdio-pipe-stderr: SKIP
 test-stdout-cannot-be-closed-child-process-pipe: SKIP
 test-stdout-close-catch: SKIP
 test-stdout-close-unref: SKIP

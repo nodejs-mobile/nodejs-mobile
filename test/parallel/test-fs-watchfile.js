@@ -86,7 +86,7 @@ watcher.start();  // Starting a started watcher should be a noop
 
 // Watch events should callback with a filename on supported systems.
 // Omitting AIX. It works but not reliably.
-if (common.isLinux || common.isOSX || common.isWindows) {
+if (common.isLinux || common.isOSX || common.isWindows || common.isAndroid) {
   const dir = path.join(tmpdir.path, 'watch');
 
   fs.mkdir(dir, common.mustCall(function(err) {

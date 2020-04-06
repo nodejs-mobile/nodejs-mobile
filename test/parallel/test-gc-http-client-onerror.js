@@ -6,7 +6,13 @@
 const common = require('../common');
 const onGC = require('../common/ongc');
 
-const cpus = require('os').cpus().length;
+let cpus;
+if (common.isAndroid) {
+  // Unable to get os.cpus() on Android.
+  cpus = 4;
+} else {
+  cpus = require('os').cpus().length;
+}
 
 function serverHandler(req, res) {
   req.resume();

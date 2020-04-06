@@ -28,11 +28,17 @@ if (common.isWindows)
 if (!common.isMainThread)
   common.skip('Signal handling in Workers is not supported');
 
+let SIGUSRToTest = 'SIGUSR1';
+if (common.isAndroid) {
+// SIGUSR1 may be used to trigger garbage collection on Android
+  SIGUSRToTest = 'SIGUSR2';
+}
+
 console.log(`process.pid: ${process.pid}`);
 
-process.on('SIGUSR1', common.mustCall());
+process.on(SIGUSRToTest, common.mustCall());
 
-process.on('SIGUSR1', common.mustCall(function() {
+process.on(SIGUSRToTest, common.mustCall(function() {
   setTimeout(function() {
     console.log('End.');
     process.exit(0);
@@ -44,7 +50,7 @@ setInterval(function() {
   console.log(`running process...${++i}`);
 
   if (i === 5) {
-    process.kill(process.pid, 'SIGUSR1');
+    process.kill(process.pid, SIGUSRToTest);
   }
 }, 1);
 

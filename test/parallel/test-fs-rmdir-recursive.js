@@ -8,6 +8,12 @@ const path = require('path');
 const { validateRmdirOptions } = require('internal/fs/utils');
 let count = 0;
 
+if(common.isIOS || common.isAndroid) {
+  // Change the working dir for what would be expected of the test framework
+  //running in a Desktop environment.
+  process.chdir(path.join(__dirname,'..','..'));
+}
+
 tmpdir.refresh();
 
 function makeNonEmptyDirectory(depth, files, folders, dirname, createSymLinks) {

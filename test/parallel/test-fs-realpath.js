@@ -242,7 +242,12 @@ function test_cyclic_link_overprotection(realpath, realpathSync, callback) {
   const folder = `${cycles}/folder`;
   const link = `${folder}/cycles`;
   let testPath = cycles;
-  testPath += '/folder/cycles'.repeat(10);
+  if (common.isAndroid) {
+    // MAXSYMLINKS is defined as 8 in the NDK, so we can only test up to that value for Android.
+    testPath += '/folder/cycles'.repeat(8);
+  } else {
+    testPath += '/folder/cycles'.repeat(10);
+  }
   try { fs.unlinkSync(link); } catch {}
   fs.symlinkSync(cycles, link, 'dir');
   unlink.push(link);
