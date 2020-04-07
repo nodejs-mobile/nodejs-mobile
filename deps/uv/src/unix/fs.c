@@ -928,7 +928,9 @@ ok:
 
     return -1;
   }
-#elif defined(__APPLE__)           || \
+#elif (defined(__APPLE__) && \
+       !TARGET_OS_IPHONE \
+      )                            || \
       defined(__DragonFly__)       || \
       defined(__FreeBSD__)         || \
       defined(__FreeBSD_kernel__)
