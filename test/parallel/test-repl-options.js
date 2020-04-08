@@ -114,7 +114,11 @@ assert.strictEqual(r4._prompt, '> ');
 assert.strictEqual(r4.input, process.stdin);
 assert.strictEqual(r4.output, process.stdout);
 assert.strictEqual(r4.terminal, !!r4.output.isTTY);
-assert.strictEqual(r4.useColors, r4.terminal);
+if (common.isIOS) {
+  assert.equal(r4.useColors, r4.output.hasColors());
+} else {
+  assert.strictEqual(r4.useColors, r4.terminal);
+}
 assert.strictEqual(r4.useGlobal, false);
 assert.strictEqual(r4.ignoreUndefined, false);
 assert.strictEqual(r4.replMode, repl.REPL_MODE_SLOPPY);
