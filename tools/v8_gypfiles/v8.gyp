@@ -723,6 +723,17 @@
               ],
             }],
           ],
+          'target_conditions': [
+            ['_toolset == "host"', {
+              'target_conditions': [
+                ['host_os in ("mac", "linux")', {
+                  'sources': [
+                    '<!@pymod_do_main(GN-scraper "<(V8_ROOT)/BUILD.gn"  "\\"v8_base_without_compiler.*?is_linux.*?sources \+= ")',
+                  ],
+                }],
+              ],
+            }],
+          ],
         }],
         ['v8_target_arch=="arm"', {
           'sources': [  ### gcmole(arch:arm) ###
@@ -809,10 +820,23 @@
         }],
         # Platforms that don't have Compare-And-Swap (CAS) support need to link atomic library
         # to implement atomic memory access
-        ['v8_current_cpu in ["mips", "mipsel", "mips64", "mips64el", "ppc", "arm"]', {
+        ['v8_current_cpu in ["mips", "mipsel", "mips64", "mips64el", "ppc"]', {
           'link_settings': {
             'libraries': ['-latomic', ],
           },
+        }],
+        ['v8_current_cpu=="arm"', {
+          'target_conditions': [
+            ['_toolset == "host"', {
+              'target_conditions': [
+                ['host_os != "mac"', {
+                  'libraries': ['-latomic', ],
+                }],
+              ],
+            }, {
+              'libraries': ['-latomic', ],
+            }],
+          ]
         }],
       ],
     },  # v8_base_without_compiler
