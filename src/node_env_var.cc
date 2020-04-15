@@ -166,9 +166,11 @@ std::shared_ptr<KVStore> KVStore::Clone(v8::Isolate* isolate) const {
   for (uint32_t i = 0; i < keys_length; i++) {
     Local<Value> key = keys->Get(context, i).ToLocalChecked();
     CHECK(key->IsString());
-    copy->Set(isolate,
-              key.As<String>(),
-              Get(isolate, key.As<String>()).ToLocalChecked());
+    MaybeLocal<String> value_string = Get(isolate, key.As<String>());
+    if (!value_string.IsEmpty()) {
+      // On Android, it's possible that some environment variables get removed, such as LD_PRELOAD.
+      copy->Set(isolate, key.As<String>(), value_string.ToLocalChecked());
+    }
   }
   return copy;
 }
