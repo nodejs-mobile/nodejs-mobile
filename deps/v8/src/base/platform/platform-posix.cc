@@ -200,7 +200,7 @@ void* OS::GetRandomMmapAddr() {
     GetPlatformRandomNumberGenerator()->NextBytes(&raw_addr, sizeof(raw_addr));
   }
 #if defined(__APPLE__)
-#if V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 && V8_OS_IOS
   DCHECK_EQ(1 << 14, AllocatePageSize());
   raw_addr = RoundDown(raw_addr, 1 << 14);
 #endif
