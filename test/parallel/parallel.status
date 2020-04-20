@@ -194,7 +194,6 @@ test-tls-env-extra-ca-no-crypto: SKIP
 test-tls-handshake-exception: SKIP
 test-tls-ticket-cluster: SKIP
 test-trace-events-all: SKIP
-test-trace-events-async-hooks: SKIP
 test-trace-events-binding: SKIP
 test-trace-events-bootstrap: SKIP
 test-trace-events-category-used: SKIP
@@ -229,6 +228,7 @@ test-worker-process-env: SKIP
 test-benchmark-cli: SKIP
 test-icu-minimum-version: SKIP
 test-npm-version: SKIP
+test-process-config: SKIP
 test-process-env-allowed-flags-are-documented: SKIP
 test-release-npm: SKIP
 #
@@ -237,7 +237,13 @@ test-release-npm: SKIP
 test-crypto-sign-verify: SKIP
 test-https-client-renegotiation-limit: SKIP
 test-https-foafssl: SKIP
+test-tls-alert: SKIP
+test-tls-alert-handling: SKIP
 test-tls-client-renegotiation-limit: SKIP
+test-tls-dhe: SKIP
+test-tls-ecdh: SKIP
+test-tls-ecdh-auto: SKIP
+test-tls-ecdh-multiple: SKIP
 test-tls-no-sslv3: SKIP
 test-tls-ocsp-callback: SKIP
 test-tls-psk-server: SKIP
@@ -271,6 +277,8 @@ test-fs-readfilesync-enoent: SKIP
 test-fs-realpath-on-substed-drive: SKIP
 test-fs-write-file-invalid-path: SKIP
 test-module-readonly: SKIP
+test-require-long-path: SKIP
+test-spawn-cmd-named-pipe: SKIP
 test-windows-abort-exitcode: SKIP
 test-windows-failed-heap-allocation: SKIP
 #
@@ -288,12 +296,19 @@ test-fs-readdir-ucs2: SKIP
 #
 test-fs-watch-recursive: SKIP
 #
+# Tests that run on macOS only
+#
+test-fs-lchmod: SKIP
+#
 # Tests that require Intl, not included in the build
 #
 test-icu-data-dir: SKIP
 test-icu-punycode: SKIP
 test-icu-stringwidth: SKIP
 test-icu-transcode: SKIP
+test-intl-v8BreakIterator: SKIP
+test-url-domain-ascii-unicode: SKIP
+test-url-format-whatwg: SKIP
 test-whatwg-encoding-custom-fatal-streaming: SKIP
 test-whatwg-encoding-custom-textdecoder-fatal: SKIP
 test-whatwg-encoding-custom-textdecoder-utf16-surrogates: SKIP
@@ -325,6 +340,13 @@ test-process-exit-recursive: SKIP # catches exit codes, like the test app does t
 #
 test-zlib-from-concatenated-gzip: SKIP
 test-zlib-from-gzip: SKIP
+#
+# Tests that require trace events, not included in the build
+#
+test-trace-events-api: SKIP
+test-trace-events-async-hooks: SKIP
+test-trace-events-async-hooks-dynamic: SKIP
+test-trace-events-async-hooks-worker: SKIP
 
 [$system==ios]
 #
@@ -471,7 +493,6 @@ test-tls-env-extra-ca-no-crypto: SKIP
 test-tls-handshake-exception: SKIP
 test-tls-ticket-cluster: SKIP
 test-trace-events-all: SKIP
-test-trace-events-async-hooks: SKIP
 test-trace-events-binding: SKIP
 test-trace-events-bootstrap: SKIP
 test-trace-events-category-used: SKIP
@@ -506,6 +527,7 @@ test-worker-process-env: SKIP
 test-benchmark-cli: SKIP
 test-icu-minimum-version: SKIP
 test-npm-version: SKIP
+test-process-config: SKIP
 test-process-env-allowed-flags-are-documented: SKIP
 test-release-npm: SKIP
 #
@@ -514,7 +536,13 @@ test-release-npm: SKIP
 test-crypto-sign-verify: SKIP
 test-https-client-renegotiation-limit: SKIP
 test-https-foafssl: SKIP
+test-tls-alert: SKIP
+test-tls-alert-handling: SKIP
 test-tls-client-renegotiation-limit: SKIP
+test-tls-dhe: SKIP
+test-tls-ecdh: SKIP
+test-tls-ecdh-auto: SKIP
+test-tls-ecdh-multiple: SKIP
 test-tls-no-sslv3: SKIP
 test-tls-ocsp-callback: SKIP
 test-tls-psk-server: SKIP
@@ -556,6 +584,8 @@ test-fs-readfilesync-enoent: SKIP
 test-fs-realpath-on-substed-drive: SKIP
 test-fs-write-file-invalid-path: SKIP
 test-module-readonly: SKIP
+test-require-long-path: SKIP
+test-spawn-cmd-named-pipe: SKIP
 test-windows-abort-exitcode: SKIP
 test-windows-failed-heap-allocation: SKIP
 #
@@ -599,7 +629,9 @@ test-tls-wrap-econnreset-pipe: SKIP
 #
 # Tests that require MultiLocalhost
 #
-test-https-localaddress : SKIP
+test-https-localaddress: SKIP
+test-http-localaddress: SKIP
+test-http2-connect-options: SKIP
 #
 # Tests that require Intl, not included in the build
 #
@@ -607,6 +639,9 @@ test-icu-data-dir: SKIP
 test-icu-punycode: SKIP
 test-icu-stringwidth: SKIP
 test-icu-transcode: SKIP
+test-intl-v8BreakIterator: SKIP
+test-url-domain-ascii-unicode: SKIP
+test-url-format-whatwg: SKIP
 test-whatwg-encoding-custom-fatal-streaming: SKIP
 test-whatwg-encoding-custom-textdecoder-fatal: SKIP
 test-whatwg-encoding-custom-textdecoder-utf16-surrogates: SKIP
@@ -632,6 +667,7 @@ test-util-sigint-watchdog : SKIP #signal SIGINT
 #
 # Tests that require trace events, not included in the build
 #
+test-trace-events-api: SKIP
 test-trace-events-async-hooks: SKIP
 test-trace-events-async-hooks-dynamic: SKIP
 test-trace-events-async-hooks-worker: SKIP
