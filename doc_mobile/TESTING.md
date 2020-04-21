@@ -17,11 +17,11 @@ iOS tests depend on the [`ios-deploy` tool](https://github.com/phonegap/ios-depl
 npm install -g ios-deploy@1.10.0
 ```
 
-You'll need to build nodejs-mobile, so [its prerequisites should also be installed on your system.](https://github.com/janeasystems/nodejs-mobile#prerequisites-to-build-the-ios-framework-library-on-macos)
+You'll need to build nodejs-mobile, so [its prerequisites should also be installed on your system.](../README.md#prerequisites-to-build-the-ios-framework-library-on-macos)
 
 ### Build and install the iOS test app
 
-Build nodejs-mobile [for iOS](https://github.com/janeasystems/nodejs-mobile#building-the-ios-framework-library-on-macos):
+Build nodejs-mobile [for iOS](../README.md#building-the-ios-framework-library-on-macos):
 ```sh
 ./tools/ios_framework_prepare.sh
 ```
@@ -76,11 +76,11 @@ You'll need [Android Studio](https://developer.android.com/studio/install.html) 
 
 You should set the Environment variables required to build Android Applications from the command line: the `ANDROID_HOME` variable pointing to your `android-sdk` path and the `ANDROID_NDK_HOME` variable pointing to the installed NDK path (it usually is `$ANDROID_HOME/ndk-bundle`) . You should also add `$ANDROID_HOME/platform-tools`, `$ANDROID_HOME/tools` and `$ANDROID_HOME/tools/bin` to the `PATH` environment variable.
 
-You'll need to build nodejs-mobile, so [its prerequisites should also be installed on your system.](https://github.com/janeasystems/nodejs-mobile#prerequisites-to-build-the-android-library-on-linux-ubuntudebian)
+You'll need to build nodejs-mobile, so [its prerequisites should also be installed on your system.](../README.md#prerequisites-to-build-the-android-library-on-linux-ubuntudebian)
 
 ### Build and install the Android test app
 
-Build nodejs-mobile [for Android](https://github.com/janeasystems/nodejs-mobile#building-the-android-library-on-linux-or-macos):
+Build nodejs-mobile [for Android](../README.md#building-the-android-library-on-linux-or-macos):
 ```sh
 ./tools/android_build.sh "$ANDROID_NDK_HOME"
 ```
