@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.3.0">0.3.0</a><br/>
 <a href="#0.2.2">0.2.2</a><br/>
 <a href="#0.2.1">0.2.1</a><br/>
 <a href="#0.2.0">0.2.0</a><br/>
@@ -23,9 +24,53 @@
 </tr>
 </table>
 
+<a id="0.3.0"></a>
+## 2020-04-27, Version 0.3.0 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 12.16.0 LTS.
+* Rebased on top of upstream nodejs/node instead of nodejs/node-chakracore.
+* Uses V8 on iOS instead of ChakraCore.
+* Uses V8 snapshots on Android.
+
+### Commits
+* [[`358217dfc1`](https://github.com/janeasystems/nodejs-mobile/commit/358217dfc1f55e2883264ea561902446ab41972b)] - Node.js on Mobile v0.3.0 (Jaime Bernardo)
+* [[`7c94e290e4`](https://github.com/janeasystems/nodejs-mobile/commit/7c94e290e41992678ab8f0616f3e6f1b6a8bdeeb)] - ios: add podspec to enable use with CocoaPods (Igor Makarov)
+* [[`dbaedc97f8`](https://github.com/janeasystems/nodejs-mobile/commit/dbaedc97f8963b1356e4fc8c70f463d2092b6a89)] - doc: update docs to V8 on iOS changes (Jaime Bernardo)
+* [[`30b32a9d6d`](https://github.com/janeasystems/nodejs-mobile/commit/30b32a9d6d30c729223aacdaf1d0339225dc1b49)] - doc: apply mobile documentation (Jaime Bernardo)
+* [[`54e0552bae`](https://github.com/janeasystems/nodejs-mobile/commit/54e0552baea3b7847772fbddb57bee7962ec3a49)] - test,mobile: skip tests that do a runtime skip (Jaime Bernardo)
+* [[`82ddd0b588`](https://github.com/janeasystems/nodejs-mobile/commit/82ddd0b588c35a25bf43136221aa457b2deb83df)] - android: link native modules with libnode.so (Jaime Bernardo)
+* [[`ef3a2ca43d`](https://github.com/janeasystems/nodejs-mobile/commit/ef3a2ca43df1059cebbcee5e9c0b8a458bf534d6)] - android: allow arm64 debug builds (Jaime Bernardo)
+* [[`2537f3bbe1`](https://github.com/janeasystems/nodejs-mobile/commit/2537f3bbe168f0fed729cb26cf91b5ce43c40d24)] - android: don't crash when cloning empty env vars (Jaime Bernardo)
+* [[`08dfd6a82b`](https://github.com/janeasystems/nodejs-mobile/commit/08dfd6a82b98f1951f0ee8ad83d72c0abefb24df)] - android: build with v8 snapshots (Jaime Bernardo)
+* [[`4e3f6a1a67`](https://github.com/janeasystems/nodejs-mobile/commit/4e3f6a1a67d2781b1bdb1a28f1989425129c9a79)] - test,ios: fix tests that fail due to tty settings (Jaime Bernardo)
+* [[`24604ca7c0`](https://github.com/janeasystems/nodejs-mobile/commit/24604ca7c0cd7e26fb9cbb7c9a106c07bed98fa9)] - deps,libuv,ios: use sendfile_emul fallback (Jaime Bernardo)
+* [[`161480e275`](https://github.com/janeasystems/nodejs-mobile/commit/161480e27551be913e5467ad99e709430d89be0c)] - test,android: fix worker tests that exit workers (Jaime Bernardo)
+* [[`7ae4dd7187`](https://github.com/janeasystems/nodejs-mobile/commit/7ae4dd7187a1005822989ec645b99eea7b32ee2f)] - android: include posix credential gets (Jaime Bernardo)
+* [[`13c61053ac`](https://github.com/janeasystems/nodejs-mobile/commit/13c61053ac1a00115813e5eba3ae0d7f9fb71330)] - test,android: fix parallel tests for Android (Jaime Bernardo)
+* [[`15e0eee2be`](https://github.com/janeasystems/nodejs-mobile/commit/15e0eee2bef1e1f2059d82f688a6693aa9e5e5f5)] - test,android: fix sequential tests for Android (Jaime Bernardo)
+* [[`33abd48a58`](https://github.com/janeasystems/nodejs-mobile/commit/33abd48a58fbfe8a9e17d2193dc85a557955107f)] - deps,uv: fix android-ifaddrs regression (Jaime Bernardo)
+* [[`bee9812f91`](https://github.com/janeasystems/nodejs-mobile/commit/bee9812f91a5cc4b5e054f11dd572d29faf666e7)] - android: add -lpthread for building in linux host (Jaime Bernardo)
+* [[`1275fb48e6`](https://github.com/janeasystems/nodejs-mobile/commit/1275fb48e60164a2a1968c3845587968829447ab)] - android,test: adapt test framework for 12.x (Jaime Bernardo)
+* [[`c0614a4172`](https://github.com/janeasystems/nodejs-mobile/commit/c0614a4172db8a173706b985889c14f78598252b)] - android,src: divide error message by many calls (Jaime Bernardo)
+* [[`6431c43374`](https://github.com/janeasystems/nodejs-mobile/commit/6431c4337424c8c63b5ecebdc52199ca9f4fc27e)] - test,ios: fix parallel tests to run on iOS (Jaime Bernardo)
+* [[`d850d5d206`](https://github.com/janeasystems/nodejs-mobile/commit/d850d5d206b1ea88dec6a4c037d88d2481d7255d)] - test: skip not supported mobile parallel tests (Jaime Bernardo)
+* [[`5e163d5448`](https://github.com/janeasystems/nodejs-mobile/commit/5e163d5448e132715ede698e2eabc3ef3fa9de44)] - test,ios: fix sequential tests to run on iOS (Jaime Bernardo)
+* [[`d866203da1`](https://github.com/janeasystems/nodejs-mobile/commit/d866203da137d5db3c7543954cecc00b3ce37e99)] - test: skip not supported mobile sequential tests (Jaime Bernardo)
+* [[`168773f053`](https://github.com/janeasystems/nodejs-mobile/commit/168773f0537137a0b0a7f3a92ce1b45f8d172ce9)] - test: skip not supported mobile message tests (Jaime Bernardo)
+* [[`bc40c797ec`](https://github.com/janeasystems/nodejs-mobile/commit/bc40c797ecb53c97d9a186abe26bf891cef2782d)] - test,ios: skip tests that send empty UDP packets (Jaime Bernardo)
+* [[`58fd015eba`](https://github.com/janeasystems/nodejs-mobile/commit/58fd015ebae34cbeab956dd699f71b4afb9a1fdf)] - test: fix bug preventing message.status applying (Jaime Bernardo)
+* [[`97e4400c4c`](https://github.com/janeasystems/nodejs-mobile/commit/97e4400c4ce3355432f55b78046c8f8e0a9165c8)] - test,ios: convert additional test arguments paths (Jaime Bernardo)
+* [[`951054fde2`](https://github.com/janeasystems/nodejs-mobile/commit/951054fde2c20785cfb84db24cdb340fd91491d1)] - test: make base test files support android and ios (Jaime Bernardo)
+* [[`fa14eac9a3`](https://github.com/janeasystems/nodejs-mobile/commit/fa14eac9a39358f45379825833c80e1e608308d7)] - test: add iOS and Android test app projects (Jaime Bernardo)
+* [[`2f2e796cb4`](https://github.com/janeasystems/nodejs-mobile/commit/2f2e796cb44d66b155f80ccd8a73d1933a827a24)] - android,build: compile for Android (Jaime Bernardo)
+* [[`e7f4466db8`](https://github.com/janeasystems/nodejs-mobile/commit/e7f4466db891c3c9ac5146c1c237fb7fa5f1f530)] - ios: don't call tcsetattr on application exit (Jaime Bernardo)
+* [[`efcbc2edec`](https://github.com/janeasystems/nodejs-mobile/commit/efcbc2edec86011fada9173f69c471e51f5cb6ee)] - ios,build: compile for ios (Jaime Bernardo)
+* [[`d090eb8d6b`](https://github.com/janeasystems/nodejs-mobile/commit/d090eb8d6b2e5bd9d410a2666991324f32efa945)] - Working on Node.js for Mobile Apps v0.3.0 (Jaime Bernardo)
 
 <a id="0.2.2"></a>
-## 2020-02-10, Version 0.2.2 (Current)
+## 2020-02-10, Version 0.2.2
 
 ### Notable Changes
 
