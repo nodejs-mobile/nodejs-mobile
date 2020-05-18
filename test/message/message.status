@@ -26,6 +26,10 @@ async_error_eval_cjs: SKIP
 async_error_eval_esm: SKIP
 eval_messages: SKIP
 stdin_messages: SKIP
+#
+# Tests that require printing '\0' to stderr, which logcat won't show
+#
+error_with_nul: SKIP
 
 [$system==ios]
 #
@@ -39,3 +43,7 @@ stdin_messages: SKIP
 # Tests that require WebAssembly, not supported in JIT-less V8
 #
 v8_warning: SKIP
+#
+# Tests that require printing '\0' to stderr, which Xcode doesn't support
+#
+error_with_nul: SKIP

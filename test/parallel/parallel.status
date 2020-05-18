@@ -109,6 +109,7 @@ test-listen-fd-cluster: SKIP
 test-listen-fd-detached: SKIP
 test-listen-fd-detached-inherit: SKIP
 test-listen-fd-server: SKIP
+test-macos-signed-deps: SKIP
 test-math-random: SKIP
 test-module-loading-globalpaths: SKIP
 test-module-main-extension-lookup: SKIP
@@ -147,6 +148,7 @@ test-process-really-exit: SKIP
 test-process-redirect-warnings: SKIP
 test-process-redirect-warnings-env: SKIP
 test-process-remove-all-signal-listeners: SKIP
+test-process-title: SKIP
 test-process-wrap: SKIP
 test-promise-reject-callback-exception: SKIP
 test-promise-unhandled-flag: SKIP
@@ -194,8 +196,10 @@ test-tls-enable-trace: SKIP
 test-tls-enable-trace-cli: SKIP
 test-tls-env-bad-extra-ca: SKIP
 test-tls-env-extra-ca: SKIP
+test-tls-env-extra-ca-file-load: SKIP
 test-tls-env-extra-ca-no-crypto: SKIP
 test-tls-handshake-exception: SKIP
+test-tls-root-certificates: SKIP
 test-tls-ticket-cluster: SKIP
 test-trace-events-all: SKIP
 test-trace-events-binding: SKIP
@@ -224,7 +228,9 @@ test-vm-sigint: SKIP
 test-vm-sigint-existing-handler: SKIP
 test-vm-syntax-error-message: SKIP
 test-vm-syntax-error-stderr: SKIP
+test-worker-init-failure: SKIP
 test-worker-message-type-unknown: SKIP
+test-worker-on-process-exit: SKIP
 test-worker-process-env: SKIP
 #
 # Tests that try to access the 'test' parent folder, currently not supported on mobile
@@ -408,6 +414,7 @@ test-listen-fd-cluster: SKIP
 test-listen-fd-detached: SKIP
 test-listen-fd-detached-inherit: SKIP
 test-listen-fd-server: SKIP
+test-macos-signed-deps: SKIP
 test-math-random: SKIP
 test-module-loading-globalpaths: SKIP
 test-module-main-extension-lookup: SKIP
@@ -446,6 +453,7 @@ test-process-really-exit: SKIP
 test-process-redirect-warnings: SKIP
 test-process-redirect-warnings-env: SKIP
 test-process-remove-all-signal-listeners: SKIP
+test-process-title: SKIP
 test-process-wrap: SKIP
 test-promise-reject-callback-exception: SKIP
 test-promise-unhandled-flag: SKIP
@@ -493,8 +501,10 @@ test-tls-enable-trace: SKIP
 test-tls-enable-trace-cli: SKIP
 test-tls-env-bad-extra-ca: SKIP
 test-tls-env-extra-ca: SKIP
+test-tls-env-extra-ca-file-load: SKIP
 test-tls-env-extra-ca-no-crypto: SKIP
 test-tls-handshake-exception: SKIP
+test-tls-root-certificates: SKIP
 test-tls-ticket-cluster: SKIP
 test-trace-events-all: SKIP
 test-trace-events-binding: SKIP
@@ -523,7 +533,9 @@ test-vm-sigint: SKIP
 test-vm-sigint-existing-handler: SKIP
 test-vm-syntax-error-message: SKIP
 test-vm-syntax-error-stderr: SKIP
+test-worker-init-failure: SKIP
 test-worker-message-type-unknown: SKIP
+test-worker-on-process-exit: SKIP
 test-worker-process-env: SKIP
 #
 # Tests that try to access the 'test' parent folder, currently not supported on mobile
