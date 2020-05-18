@@ -2665,6 +2665,21 @@ static inline Local<Value> BIOToStringOrBuffer(Environment* env,
   }
 }
 
+static MaybeLocal<Value> X509ToPEM(Environment* env, X509* cert) {
+  BIOPointer bio(BIO_new(BIO_s_mem()));
+  if (!bio) {
+    ThrowCryptoError(env, ERR_get_error(), "BIO_new");
+    return MaybeLocal<Value>();
+  }
+
+  if (PEM_write_bio_X509(bio.get(), cert) == 0) {
+    ThrowCryptoError(env, ERR_get_error(), "PEM_write_bio_X509");
+    return MaybeLocal<Value>();
+  }
+
+  return BIOToStringOrBuffer(env, bio.get(), kKeyFormatPEM);
+}
+
 static bool WritePublicKeyInner(EVP_PKEY* pkey,
                                 const BIOPointer& bio,
                                 const PublicKeyEncodingConfig& config) {
@@ -6751,6 +6766,36 @@ void ExportChallenge(const FunctionCallbackInfo<Value>& args) {
       Encode(env->isolate(), cert.get(), strlen(cert.get()), BUFFER);
 
   args.GetReturnValue().Set(outString);
+}
+
+
+void GetRootCertificates(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+
+  if (root_cert_store == nullptr)
+    root_cert_store = NewRootCertStore();
+
+  stack_st_X509_OBJECT* objs = X509_STORE_get0_objects(root_cert_store);
+  int num_objs = sk_X509_OBJECT_num(objs);
+
+  std::vector<Local<Value>> result;
+  result.reserve(num_objs);
+
+  for (int i = 0; i < num_objs; i++) {
+    X509_OBJECT* obj = sk_X509_OBJECT_value(objs, i);
+    if (X509_OBJECT_get_type(obj) == X509_LU_X509) {
+      X509* cert = X509_OBJECT_get0_X509(obj);
+
+      Local<Value> value;
+      if (!X509ToPEM(env, cert).ToLocal(&value))
+        return;
+
+      result.push_back(value);
+    }
+  }
+
+  args.GetReturnValue().Set(
+      Array::New(env->isolate(), result.data(), result.size()));
 }
 
 

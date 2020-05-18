@@ -747,7 +747,7 @@ const common = {
   skipIfInspectorDisabled,
   skipIfWorker,
 
-  get enoughTestCPU() {
+  get enoughTestCpu() {
     if(isAndroid || isIOS) {
       // On mobile platforms, CPU information might be unavailable.
       return true;

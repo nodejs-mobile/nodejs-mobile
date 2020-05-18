@@ -684,6 +684,44 @@ void DateTimePatternGenerator::getAllowedHourFormats(const Locale &locale, UErro
         }
     }
 
+    return allowedFormats;
+}
+
+void DateTimePatternGenerator::getAllowedHourFormats(const Locale &locale, UErrorCode &status) {
+    if (U_FAILURE(status)) { return; }
+
+    const char *language = locale.getLanguage();
+    const char *country = locale.getCountry();
+    Locale maxLocale;  // must be here for correct lifetime
+    if (*language == '\0' || *country == '\0') {
+        maxLocale = locale;
+        UErrorCode localStatus = U_ZERO_ERROR;
+        maxLocale.addLikelySubtags(localStatus);
+        if (U_SUCCESS(localStatus)) {
+            language = maxLocale.getLanguage();
+            country = maxLocale.getCountry();
+        }
+    }
+    if (*language == '\0') {
+        // Unexpected, but fail gracefully
+        language = "und";
+    }
+    if (*country == '\0') {
+        country = "001";
+    }
+
+    int32_t* allowedFormats = getAllowedHourFormatsLangCountry(language, country, status);
+
+    // Check if the region has an alias
+    if (allowedFormats == nullptr) {
+        UErrorCode localStatus = U_ZERO_ERROR;
+        const Region* region = Region::getInstance(country, localStatus);
+        if (U_SUCCESS(localStatus)) {
+            country = region->getRegionCode(); // the real region code
+            allowedFormats = getAllowedHourFormatsLangCountry(language, country, status);
+        }
+    }
+
     if (allowedFormats != nullptr) {  // Lookup is successful
         // Here allowedFormats points to a list consisting of key for preferredFormat,
         // followed by one or more keys for allowedFormats, then followed by ALLOWED_HOUR_FORMAT_UNKNOWN.

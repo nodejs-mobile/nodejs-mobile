@@ -12,6 +12,7 @@
 #endif /* _WIN32 */
 
 #define UVWASI__READDIR_NUM_ENTRIES 1
+#define UVWASI__MAX_SYMLINK_FOLLOWS 32
 
 #include "uvwasi.h"
 #include "uvwasi_alloc.h"
@@ -1963,7 +1964,6 @@ uvwasi_errno_t uvwasi_path_open(uvwasi_t* uvwasi,
   if (r < 0) {
     uvwasi__free(uvwasi, resolved_path);
     return uvwasi__translate_uv_error(r);
-  }
 
   /* Not all platforms support UV_FS_O_DIRECTORY, so get the file type and check
      it here. */

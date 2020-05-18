@@ -53,6 +53,7 @@ class U_I18N_API ConstrainedFieldPosition : public UMemory {
     /** @stable ICU 64 */
     ~ConstrainedFieldPosition();
 
+#ifndef U_HIDE_DRAFT_API
     /**
      * Resets this ConstrainedFieldPosition to its initial state, as if it were newly created:
      *
@@ -222,13 +223,18 @@ class U_I18N_API ConstrainedFieldPosition : public UMemory {
         int32_t field,
         int32_t start,
         int32_t limit);
+#endif  /* U_HIDE_DRAFT_API */
 
   private:
     int64_t fContext = 0LL;
     int32_t fField = 0;
     int32_t fStart = 0;
     int32_t fLimit = 0;
+#ifndef U_HIDE_DRAFT_API
     int32_t fCategory = UFIELD_CATEGORY_UNDEFINED;
+#else   /* U_HIDE_DRAFT_API */
+    int32_t fCategory = 0;
+#endif  /* U_HIDE_DRAFT_API */
     int8_t fConstraint = 0;
 };
 
