@@ -54,7 +54,7 @@ the next argument will be used as a script filename.
 
 ### `--abort-on-uncaught-exception`
 <!-- YAML
-added: v0.10
+added: v0.10.8
 -->
 
 Aborting instead of exiting causes a core file to be generated for post-mortem
@@ -156,12 +156,27 @@ Enable experimental Source Map V3 support for stack traces.
 Currently, overriding `Error.prepareStackTrace` is ignored when the
 `--enable-source-maps` flag is set.
 
+### `--experimental-import-meta-resolve`
+<!-- YAML
+added: v12.16.2
+-->
+
+Enable experimental `import.meta.resolve()` support.
+
 ### `--experimental-json-modules`
 <!-- YAML
 added: v12.9.0
 -->
 
 Enable experimental JSON support for the ES Module loader.
+
+### `--experimental-loader=module`
+<!-- YAML
+added: v9.0.0
+-->
+
+Specify the `module` of a custom [experimental ECMAScript Module loader][].
+`module` may be either a path to a file, or an ECMAScript Module name.
 
 ### `--experimental-modules`
 <!-- YAML
@@ -421,14 +436,6 @@ Specify ways of the inspector web socket url exposure.
 By default inspector websocket url is available in stderr and under `/json/list`
 endpoint on `http://host:port/json/list`.
 
-### `--experimental-loader=module`
-<!-- YAML
-added: v9.0.0
--->
-
-Specify the `module` of a custom [experimental ECMAScript Module loader][].
-`module` may be either a path to a file, or an ECMAScript Module name.
-
 ### `--insecure-http-parser`
 <!-- YAML
 added: v12.15.0
@@ -438,6 +445,18 @@ Use an insecure HTTP parser that accepts invalid HTTP headers. This may allow
 interoperability with non-conformant HTTP implementations. It may also allow
 request smuggling and other HTTP attacks that rely on invalid headers being
 accepted. Avoid using this option.
+
+### `--jitless`
+<!-- YAML
+added: v12.0.0
+-->
+
+Disable [runtime allocation of executable memory][jitless]. This may be
+required on some platforms for security reasons. It can also reduce attack
+surface on other platforms, but the performance impact may be severe.
+
+This flag is inherited from V8 and is subject to change upstream. It may
+disappear in a non-semver-major release.
 
 ### `--max-http-header-size=size`
 <!-- YAML
@@ -881,22 +900,6 @@ environment variables.
 
 See `SSL_CERT_DIR` and `SSL_CERT_FILE`.
 
-### `--use-largepages=mode`
-<!-- YAML
-added: v12.16.0
--->
-
-Re-map the Node.js static code to large memory pages at startup. If supported on
-the target system, this will cause the Node.js static code to be moved onto 2
-MiB pages instead of 4 KiB pages.
-
-The following values are valid for `mode`:
-* `off`: No mapping will be attempted. This is the default.
-* `on`: If supported by the OS, mapping will be attempted. Failure to map will
-  be ignored and a message will be printed to standard error.
-* `silent`: If supported by the OS, mapping will be attempted. Failure to map
-  will be ignored and will not be reported.
-
 ### `--v8-options`
 <!-- YAML
 added: v0.1.3
@@ -1089,6 +1092,7 @@ Node.js options that are allowed are:
 <!-- node-options-node start -->
 * `--enable-fips`
 * `--enable-source-maps`
+* `--experimental-import-meta-resolve`
 * `--experimental-json-modules`
 * `--experimental-loader`
 * `--experimental-modules`
@@ -1153,7 +1157,6 @@ Node.js options that are allowed are:
 * `--track-heap-objects`
 * `--unhandled-rejections`
 * `--use-bundled-ca`
-* `--use-largepages`
 * `--use-openssl-ca`
 * `--v8-pool-size`
 * `--zero-fill-buffers`
@@ -1164,6 +1167,7 @@ V8 options that are allowed are:
 * `--abort-on-uncaught-exception`
 * `--disallow-code-generation-from-strings`
 * `--interpreted-frames-native-stack`
+* `--jitless`
 * `--max-old-space-size`
 * `--perf-basic-prof-only-functions`
 * `--perf-basic-prof`
@@ -1171,6 +1175,9 @@ V8 options that are allowed are:
 * `--perf-prof`
 * `--stack-trace-limit`
 <!-- node-options-v8 end -->
+
+`--perf-basic-prof-only-functions`, `--perf-basic-prof`,
+`--perf-prof-unwinding-info`, and `--perf-prof` are only available on Linux.
 
 ### `NODE_PATH=path[:…]`
 <!-- YAML
@@ -1377,6 +1384,30 @@ threadpool by setting the `'UV_THREADPOOL_SIZE'` environment variable to a value
 greater than `4` (its current default value). For more information, see the
 [libuv threadpool documentation][].
 
+## Useful V8 options
+
+V8 has its own set of CLI options. Any V8 CLI option that is provided to `node`
+will be passed on to V8 to handle. V8's options have _no stability guarantee_.
+The V8 team themselves don't consider them to be part of their formal API,
+and reserve the right to change them at any time. Likewise, they are not
+covered by the Node.js stability guarantees. Many of the V8
+options are of interest only to V8 developers. Despite this, there is a small
+set of V8 options that are widely applicable to Node.js, and they are
+documented here:
+
+### `--max-old-space-size=SIZE` (in Mbytes)
+
+Sets the max memory size of V8's old memory section. As memory
+consumption approaches the limit, V8 will spend more time on
+garbage collection in an effort to free unused memory.
+
+On a machine with 2GB of memory, consider setting this to
+1536 (1.5GB) to leave some memory for other uses and avoid swapping.
+
+```console
+$ node --max-old-space-size=1536 index.js
+```
+
 [`--openssl-config`]: #cli_openssl_config_file
 [`Buffer`]: buffer.html#buffer_class_buffer
 [`SlowBuffer`]: buffer.html#buffer_class_slowbuffer
@@ -1396,5 +1427,6 @@ greater than `4` (its current default value). For more information, see the
 [debugging security implications]: https://nodejs.org/en/docs/guides/debugging-getting-started/#security-implications
 [emit_warning]: process.html#process_process_emitwarning_warning_type_code_ctor
 [experimental ECMAScript Module loader]: esm.html#esm_experimental_loaders
+[jitless]: https://v8.dev/blog/jitless
 [libuv threadpool documentation]: http://docs.libuv.org/en/latest/threadpool.html
 [remote code execution]: https://www.owasp.org/index.php/Code_Injection

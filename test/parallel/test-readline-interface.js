@@ -357,13 +357,13 @@ function isWarned(emitter) {
   // Constructor throws if completer is not a function or undefined
   {
     const fi = new FakeInput();
-    common.expectsError(function() {
+    assert.throws(() => {
       readline.createInterface({
         input: fi,
         completer: 'string is not valid'
       });
     }, {
-      type: TypeError,
+      name: 'TypeError',
       code: 'ERR_INVALID_OPT_VALUE'
     });
   }
@@ -371,30 +371,30 @@ function isWarned(emitter) {
   // Constructor throws if historySize is not a positive number
   {
     const fi = new FakeInput();
-    common.expectsError(function() {
+    assert.throws(() => {
       readline.createInterface({
         input: fi, historySize: 'not a number'
       });
     }, {
-      type: RangeError,
+      name: 'RangeError',
       code: 'ERR_INVALID_OPT_VALUE'
     });
 
-    common.expectsError(function() {
+    assert.throws(() => {
       readline.createInterface({
         input: fi, historySize: -1
       });
     }, {
-      type: RangeError,
+      name: 'RangeError',
       code: 'ERR_INVALID_OPT_VALUE'
     });
 
-    common.expectsError(function() {
+    assert.throws(() => {
       readline.createInterface({
         input: fi, historySize: NaN
       });
     }, {
-      type: RangeError,
+      name: 'RangeError',
       code: 'ERR_INVALID_OPT_VALUE'
     });
   }
@@ -501,15 +501,20 @@ function isWarned(emitter) {
       { input: fi, output: fi, terminal: true }
     );
     const keys = [];
+    const err = new Error('bad thing happened');
     fi.on('keypress', function(key) {
       keys.push(key);
       if (key === 'X') {
-        throw new Error('bad thing happened');
+        throw err;
       }
     });
-    try {
-      fi.emit('data', 'fooX');
-    } catch { }
+    assert.throws(
+      () => fi.emit('data', 'fooX'),
+      (e) => {
+        assert.strictEqual(e, err);
+        return true;
+      }
+    );
     fi.emit('data', 'bar');
     assert.strictEqual(keys.join(''), 'fooXbar');
     rli.close();

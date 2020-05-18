@@ -15,7 +15,7 @@ if (process.argv[2] === 'wasi-child') {
   tmpdir.refresh();
   const wasmDir = path.join(__dirname, 'wasm');
   const wasi = new WASI({
-    args: [],
+    args: ['foo', '-bar', '--baz=value'],
     env: process.env,
     preopens: {
       '/sandbox': fixtures.path('wasi'),
@@ -57,12 +57,23 @@ if (process.argv[2] === 'wasi-child') {
   }
 
   runWASI({ test: 'cant_dotdot' });
-  runWASI({ test: 'clock_getres' });
+
+  // Tests that are currently unsupported on IBM i PASE.
+  if (!common.isIBMi) {
+    runWASI({ test: 'clock_getres' });
+  }
   runWASI({ test: 'exitcode', exitCode: 120 });
   runWASI({ test: 'fd_prestat_get_refresh' });
+  runWASI({ test: 'freopen', stdout: `hello from input2.txt${EOL}` });
   runWASI({ test: 'getentropy' });
-  runWASI({ test: 'getrusage' });
+
+  // Tests that are currently unsupported on IBM i PASE.
+  if (!common.isIBMi) {
+    runWASI({ test: 'getrusage' });
+  }
   runWASI({ test: 'gettimeofday' });
+  runWASI({ test: 'link' });
+  runWASI({ test: 'main_args' });
   runWASI({ test: 'notdir' });
   // runWASI({ test: 'poll' });
   runWASI({ test: 'preopen_populates' });

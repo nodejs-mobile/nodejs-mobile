@@ -99,7 +99,7 @@
           '-Wno-unused-parameter',
           '-Wstrict-prototypes',
         ],
-        'OTHER_CFLAGS': [ '-g', '--std=gnu89', '-pedantic' ],
+        'OTHER_CFLAGS': [ '-g', '--std=gnu89' ],
       },
       'conditions': [
         [ 'OS=="win"', {
@@ -223,7 +223,6 @@
             '-fvisibility=hidden',
             '-g',
             '--std=gnu89',
-            '-pedantic',
             '-Wall',
             '-Wextra',
             '-Wno-unused-parameter',
@@ -268,6 +267,7 @@
             'src/unix/android-ifaddrs.c',
             'src/unix/procfs-exepath.c',
             'src/unix/random-getrandom.c',
+            'src/unix/random-getentropy.c',
             'src/unix/random-sysctl-linux.c',
             'src/unix/sysinfo-loadavg.c',
           ],

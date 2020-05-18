@@ -1,9 +1,14 @@
-#include "debug_utils.h"
+#include "debug_utils-inl.h"  // NOLINT(build/include)
 #include "env-inl.h"
+#include "node_internals.h"
 
 #ifdef __POSIX__
 #if defined(__linux__)
 #include <features.h>
+#endif
+
+#ifdef __ANDROID__
+#include <android/log.h>
 #endif
 
 #if defined(__linux__) && !defined(__GLIBC__) || \
@@ -49,6 +54,37 @@
 #endif  // _WIN32
 
 namespace node {
+namespace per_process {
+EnabledDebugList enabled_debug_list;
+}
+
+void EnabledDebugList::Parse(Environment* env) {
+  std::string cats;
+  credentials::SafeGetenv("NODE_DEBUG_NATIVE", &cats, env);
+  Parse(cats, true);
+}
+
+void EnabledDebugList::Parse(const std::string& cats, bool enabled) {
+  std::string debug_categories = cats;
+  while (!debug_categories.empty()) {
+    std::string::size_type comma_pos = debug_categories.find(',');
+    std::string wanted = ToLower(debug_categories.substr(0, comma_pos));
+
+#define V(name)                                                                \
+  {                                                                            \
+    static const std::string available_category = ToLower(#name);              \
+    if (available_category.find(wanted) != std::string::npos)                  \
+      set_enabled(DebugCategory::name, enabled);                               \
+  }
+
+    DEBUG_CATEGORY_NAMES(V)
+#undef V
+
+    if (comma_pos == std::string::npos) break;
+    // Use everything after the `,` as the list for the next iteration.
+    debug_categories = debug_categories.substr(comma_pos + 1);
+  }
+}
 
 #ifdef __POSIX__
 #if HAVE_EXECINFO_H
@@ -96,16 +132,14 @@ class PosixSymbolDebuggingContext final : public NativeSymbolDebuggingContext {
 
 std::unique_ptr<NativeSymbolDebuggingContext>
 NativeSymbolDebuggingContext::New() {
-  return std::unique_ptr<NativeSymbolDebuggingContext>(
-      new PosixSymbolDebuggingContext());
+  return std::make_unique<PosixSymbolDebuggingContext>();
 }
 
 #else  // HAVE_EXECINFO_H
 
 std::unique_ptr<NativeSymbolDebuggingContext>
 NativeSymbolDebuggingContext::New() {
-  return std::unique_ptr<NativeSymbolDebuggingContext>(
-      new NativeSymbolDebuggingContext());
+  return std::make_unique<NativeSymbolDebuggingContext>();
 }
 
 #endif  // HAVE_EXECINFO_H
@@ -437,6 +471,69 @@ std::vector<std::string> NativeSymbolDebuggingContext::GetLoadedLibraries() {
   return list;
 }
 
+void FWrite(FILE* file, const std::string& str) {
+  auto simple_fwrite = [&]() {
+    // The return value is ignored because there's no good way to handle it.
+    fwrite(str.data(), str.size(), 1, file);
+  };
+
+  if (file != stderr && file != stdout) {
+    simple_fwrite();
+    return;
+  }
+#ifdef _WIN32
+  HANDLE handle =
+      GetStdHandle(file == stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+
+  // Check if stderr is something other than a tty/console
+  if (handle == INVALID_HANDLE_VALUE || handle == nullptr ||
+      uv_guess_handle(_fileno(file)) != UV_TTY) {
+    simple_fwrite();
+    return;
+  }
+
+  // Get required wide buffer size
+  int n = MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), nullptr, 0);
+
+  std::vector<wchar_t> wbuf(n);
+  MultiByteToWideChar(CP_UTF8, 0, str.data(), str.size(), wbuf.data(), n);
+
+  WriteConsoleW(handle, wbuf.data(), n, nullptr, nullptr);
+  return;
+#elif defined(__ANDROID__)
+  if (file == stderr) {
+    // Android log implementations will truncate log messages to 1023 length.
+    const int maxLength = 1023;
+
+    int n = str.size();
+
+    if (n <= maxLength) {
+      __android_log_print(ANDROID_LOG_ERROR, "nodejs", "%s", str.data());
+    } else {
+      // Divide the output in lines with length < maxLength.
+      std::vector<char> line(maxLength+1);
+      const char* sep = "\n";
+      const char* token = str.c_str();
+      while (*token) {
+        int tokenLen = std::strcspn(token, sep);
+        if (tokenLen > maxLength) {
+          tokenLen = maxLength;
+        }
+        std::strncpy(line.data(), token, tokenLen);
+        line.data()[tokenLen]='\0';
+        __android_log_print(ANDROID_LOG_ERROR, "nodejs", "%s", line.data());
+        token += tokenLen;
+        if (*token == '\n') {
+          // __android_log_write will introduce the line break.
+          token++;
+        }
+      }
+    }
+    return;
+  }
+#endif
+  simple_fwrite();
+}
 
 }  // namespace node
 

@@ -241,3 +241,33 @@ void uvwasi__stat_to_filestat(const uv_stat_t* stat, uvwasi_filestat_t* fs) {
   fs->st_mtim = uvwasi__timespec_to_timestamp(&stat->st_mtim);
   fs->st_ctim = uvwasi__timespec_to_timestamp(&stat->st_ctim);
 }
+
+
+uvwasi_errno_t uvwasi__get_filetype_by_fd(uv_file fd, uvwasi_filetype_t* type) {
+  uv_fs_t req;
+  int r;
+
+  r = uv_fs_fstat(NULL, &req, fd, NULL);
+  if (r != 0) {
+    uv_fs_req_cleanup(&req);
+
+    /* Windows can't stat a TTY. */
+    if (uv_guess_handle(fd) == UV_TTY) {
+      *type = UVWASI_FILETYPE_CHARACTER_DEVICE;
+      return UVWASI_ESUCCESS;
+    }
+
+    *type = UVWASI_FILETYPE_UNKNOWN;
+    return uvwasi__translate_uv_error(r);
+  }
+
+  *type = uvwasi__stat_to_filetype(&req.statbuf);
+  uv_fs_req_cleanup(&req);
+
+  if (*type == UVWASI_FILETYPE_SOCKET_STREAM &&
+      uv_guess_handle(fd) == UV_UDP) {
+    *type = UVWASI_FILETYPE_SOCKET_DGRAM;
+  }
+
+  return UVWASI_ESUCCESS;
+}

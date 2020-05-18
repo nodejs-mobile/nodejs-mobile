@@ -29,16 +29,12 @@
 
     'openssl_fips%': '',
 
-    # Some STL containers (e.g. std::vector) do not preserve ABI compatibility
-    # between debug and non-debug mode.
-    'disable_glibcxx_debug': 1,
-
     # Don't use ICU data file (icudtl.dat) from V8, we use our own.
     'icu_use_data_file_flag%': 0,
 
     # Reset this number to 0 on major V8 upgrades.
     # Increment by one for each non-official patch applied to deps/v8.
-    'v8_embedder_string': '-node.31',
+    'v8_embedder_string': '-node.35',
 
     ##### V8 defaults for Node.js #####
 
@@ -135,6 +131,9 @@
       }],
       ['OS=="mac" or OS == "ios"', {
         'clang%': 1,
+      }],
+      ['target_arch in "ppc64 s390x"', {
+        'v8_enable_backtrace': 1,
       }],
     ],
   },
@@ -427,6 +426,15 @@
               '-Wl,-brtl',
             ],
           }, {                                             # else it's `AIX`
+            # Disable the following compiler warning:
+            #
+            #   warning: visibility attribute not supported in this
+            #   configuration; ignored [-Wattributes]
+            #
+            # This is gcc complaining about __attribute((visibility("default"))
+            # in static library builds. Legitimate but harmless and it drowns
+            # out more relevant warnings.
+            'cflags': [ '-Wno-attributes' ],
             'ldflags': [
               '-Wl,-blibpath:/usr/lib:/lib:/opt/freeware/lib/pthread/ppc64',
             ],

@@ -4,9 +4,9 @@
 
 > Stability: 2 - Stable
 
-The `util` module is primarily designed to support the needs of Node.js' own
-internal APIs. However, many of the utilities are useful for application and
-module developers as well. It can be accessed using:
+The `util` module supports the needs of Node.js internal APIs. Many of the
+utilities are useful for application and module developers as well. To access
+it:
 
 ```js
 const util = require('util');
@@ -992,10 +992,31 @@ throw an error.
 ### `util.promisify.custom`
 <!-- YAML
 added: v8.0.0
+changes:
+  - version: v12.16.2
+    pr-url: https://github.com/nodejs/node/pull/31672
+    description: This is now defined as a shared symbol.
 -->
 
 * {symbol} that can be used to declare custom promisified variants of functions,
 see [Custom promisified functions][].
+
+In addition to being accessible through `util.promisify.custom`, this
+symbol is [registered globally][global symbol registry] and can be
+accessed in any environment as `Symbol.for('nodejs.util.promisify.custom')`.
+
+For example, with a function that takes in
+`(foo, onSuccessCallback, onErrorCallback)`:
+
+```js
+const kCustomPromisifiedSymbol = Symbol.for('nodejs.util.promisify.custom');
+
+doSomething[kCustomPromisifiedSymbol] = (foo) => {
+  return new Promise((resolve, reject) => {
+    doSomething(foo, resolve, reject);
+  });
+};
+```
 
 ## Class: `util.TextDecoder`
 <!-- YAML
@@ -1391,6 +1412,41 @@ added: v10.0.0
 * Returns: {boolean}
 
 Returns `true` if the value is a native `External` value.
+
+A native `External` value is a special type of object that contains a
+raw C++ pointer (`void*`) for access from native code, and has no other
+properties. Such objects are created either by Node.js internals or native
+addons. In JavaScript, they are [frozen][`Object.freeze()`] objects with a
+`null` prototype.
+
+```c
+#include <js_native_api.h>
+#include <stdlib.h>
+napi_value result;
+static napi_value MyNapi(napi_env env, napi_callback_info info) {
+  int* raw = (int*) malloc(1024);
+  napi_status status = napi_create_external(env, (void*) raw, NULL, NULL, &result);
+  if (status != napi_ok) {
+    napi_throw_error(env, NULL, "napi_create_external failed");
+    return NULL;
+  }
+  return result;
+}
+...
+DECLARE_NAPI_PROPERTY("myNapi", MyNapi)
+...
+```
+
+```js
+const native = require('napi_addon.node');
+const data = native.myNapi();
+util.types.isExternal(data); // returns true
+util.types.isExternal(0); // returns false
+util.types.isExternal(new String('foo')); // returns false
+```
+
+For further information on `napi_create_external`, refer to
+[`napi_create_external()`][].
 
 ### `util.types.isFloat32Array(value)`
 <!-- YAML
@@ -2313,6 +2369,7 @@ util.log('Timestamped message.');
 [`Int8Array`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Int8Array
 [`Map`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Map
 [`Object.assign()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/assign
+[`Object.freeze()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/freeze
 [`Promise`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise
 [`Proxy`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy
 [`Set`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set
@@ -2350,5 +2407,6 @@ util.log('Timestamped message.');
 [default sort]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort
 [global symbol registry]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol/for
 [list of deprecated APIS]: deprecations.html#deprecations_list_of_deprecated_apis
+[`napi_create_external()`]: n-api.html#n_api_napi_create_external
 [semantically incompatible]: https://github.com/nodejs/node/issues/4179
 [util.inspect.custom]: #util_util_inspect_custom

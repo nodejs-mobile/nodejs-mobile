@@ -34,10 +34,8 @@ parallel/test-eslint-eslint-check: SLOW
 parallel/test-eslint-inspector-check: SLOW
 parallel/test-eslint-lowercase-name-for-primitive: SLOW
 parallel/test-eslint-no-unescaped-regexp-dot: SLOW
-parallel/test-eslint-number-isnan: SLOW
 parallel/test-eslint-prefer-assert-iferror: SLOW
 parallel/test-eslint-prefer-assert-methods: SLOW
-parallel/test-eslint-prefer-common-expectserror: SLOW
 parallel/test-eslint-prefer-common-mustnotcall: SLOW
 parallel/test-eslint-prefer-util-format-errors: SLOW
 parallel/test-eslint-require-buffer: SLOW
@@ -154,6 +152,7 @@ sequential/test-inspector-port-cluster: SLOW
 sequential/test-net-bytes-per-incoming-chunk-overhead: SLOW
 sequential/test-pipe: SLOW
 sequential/test-util-debug: SLOW
+sequential/test-worker-prof: SLOW
 
 [$type==coverage]
 async-hooks/test-callback-error: PASS,FAIL,CRASH

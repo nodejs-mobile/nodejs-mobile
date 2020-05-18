@@ -62,7 +62,7 @@
 // Map a new area and copy the original code there
 // Use mmap using the start address with MAP_FIXED so we get exactly the
 // same virtual address
-// Use madvise with MADV_HUGEPAGE to use Anonymous 2M Pages
+// Use madvise with MADV_HUGE_PAGE to use Anonymous 2M Pages
 // If successful copy the code there and unmap the original region.
 
 extern char __nodetext;
@@ -78,9 +78,12 @@ struct text_region {
 
 static const size_t hps = 2L * 1024 * 1024;
 
+static void PrintWarning(const char* warn) {
+  fprintf(stderr, "Hugepages WARNING: %s\n", warn);
+}
+
 static void PrintSystemError(int error) {
-  fprintf(stderr, "Hugepages WARNING: %s\n", strerror(error));
-  return;
+  PrintWarning(strerror(error));
 }
 
 inline uintptr_t hugepage_align_up(uintptr_t addr) {
@@ -94,9 +97,11 @@ inline uintptr_t hugepage_align_down(uintptr_t addr) {
 // The format of the maps file is the following
 // address           perms offset  dev   inode       pathname
 // 00400000-00452000 r-xp 00000000 08:02 173521      /usr/bin/dbus-daemon
-// This is also handling the case where the first line is not the binary
+// This is also handling the case where the first line is not the binary.
 
 static struct text_region FindNodeTextRegion() {
+  struct text_region nregion;
+  nregion.found_text_region = false;
 #if defined(__linux__)
   std::ifstream ifs;
   std::string map_line;
@@ -104,13 +109,10 @@ static struct text_region FindNodeTextRegion() {
   std::string dev;
   char dash;
   uintptr_t start, end, offset, inode;
-  struct text_region nregion;
-
-  nregion.found_text_region = false;
 
   ifs.open("/proc/self/maps");
   if (!ifs) {
-    fprintf(stderr, "Could not open /proc/self/maps\n");
+    PrintWarning("could not open /proc/self/maps");
     return nregion;
   }
 
@@ -158,9 +160,6 @@ static struct text_region FindNodeTextRegion() {
 
   ifs.close();
 #elif defined(__FreeBSD__)
-  struct text_region nregion;
-  nregion.found_text_region = false;
-
   std::string exename;
   {
     char selfexe[PATH_MAX];
@@ -178,7 +177,7 @@ static struct text_region FindNodeTextRegion() {
     return nregion;
   }
 
-  // for struct kinfo_vmentry
+  // Enough for struct kinfo_vmentry.
   numpg = numpg * 4 / 3;
   auto alg = std::vector<char>(numpg);
 
@@ -217,8 +216,6 @@ static struct text_region FindNodeTextRegion() {
     start += cursz;
   }
 #elif defined(__APPLE__)
-  struct text_region nregion;
-  nregion.found_text_region = false;
   struct vm_region_submap_info_64 map;
   mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
   vm_address_t addr = 0UL;
@@ -262,39 +259,29 @@ static bool IsTransparentHugePagesEnabled() {
 
   ifs.open("/sys/kernel/mm/transparent_hugepage/enabled");
   if (!ifs) {
-    fprintf(stderr, "Could not open file: " \
-                    "/sys/kernel/mm/transparent_hugepage/enabled\n");
+    PrintWarning("could not open /sys/kernel/mm/transparent_hugepage/enabled");
     return false;
   }
 
-  std::string always, madvise, never;
+  std::string always, madvise;
   if (ifs.is_open()) {
-    while (ifs >> always >> madvise >> never) {}
+    while (ifs >> always >> madvise) {}
   }
-
-  int ret_status = false;
-
-  if (always.compare("[always]") == 0)
-    ret_status = true;
-  else if (madvise.compare("[madvise]") == 0)
-    ret_status = true;
-  else if (never.compare("[never]") == 0)
-    ret_status = false;
-
   ifs.close();
-  return ret_status;
+
+  return always == "[always]" || madvise == "[madvise]";
 }
 #elif defined(__FreeBSD__)
 static bool IsSuperPagesEnabled() {
-  // It is enabled by default on amd64
+  // It is enabled by default on amd64.
   unsigned int super_pages = 0;
   size_t super_pages_length = sizeof(super_pages);
-  if (sysctlbyname("vm.pmap.pg_ps_enabled", &super_pages,
-      &super_pages_length, nullptr, 0) == -1 ||
-      super_pages < 1) {
-    return false;
-  }
-  return true;
+  return sysctlbyname("vm.pmap.pg_ps_enabled",
+                      &super_pages,
+                      &super_pages_length,
+                      nullptr,
+                      0) != -1 &&
+         super_pages >= 1;
 }
 #endif
 
@@ -308,7 +295,7 @@ static bool IsSuperPagesEnabled() {
 // a. map a new area and copy the original code there
 // b. mmap using the start address with MAP_FIXED so we get exactly
 //    the same virtual address (except on macOS).
-// c. madvise with MADV_HUGEPAGE
+// c. madvise with MADV_HUGE_PAGE
 // d. If successful copy the code there and unmap the original region
 int
 #if !defined(__APPLE__)
@@ -326,13 +313,16 @@ MoveTextRegionToLargePages(const text_region& r) {
   size_t size = r.to - r.from;
   void* start = r.from;
 
-  // Allocate temporary region preparing for copy
+  // Allocate temporary region preparing for copy.
   nmem = mmap(nullptr, size,
               PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (nmem == MAP_FAILED) {
     PrintSystemError(errno);
     return -1;
   }
+  OnScopeLeave munmap_on_return([nmem, size]() {
+    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
+  });
 
   memcpy(nmem, r.from, size);
 
@@ -349,14 +339,13 @@ MoveTextRegionToLargePages(const text_region& r) {
     return -1;
   }
 
-  ret = madvise(tmem, size, 14 /* MADV_HUGEPAGE */);
+  ret = madvise(tmem, size, MADV_HUGEPAGE);
   if (ret == -1) {
     PrintSystemError(errno);
     ret = munmap(tmem, size);
     if (ret == -1) {
       PrintSystemError(errno);
     }
-    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
     return -1;
   }
   memcpy(start, nmem, size);
@@ -367,7 +356,6 @@ MoveTextRegionToLargePages(const text_region& r) {
               MAP_ALIGNED_SUPER, -1 , 0);
   if (tmem == MAP_FAILED) {
     PrintSystemError(errno);
-    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
     return -1;
   }
 #elif defined(__APPLE__)
@@ -382,7 +370,6 @@ MoveTextRegionToLargePages(const text_region& r) {
               VM_FLAGS_SUPERPAGE_SIZE_2MB, 0);
   if (tmem == MAP_FAILED) {
     PrintSystemError(errno);
-    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
     return -1;
   }
   memcpy(tmem, nmem, size);
@@ -393,7 +380,6 @@ MoveTextRegionToLargePages(const text_region& r) {
     if (ret == -1) {
       PrintSystemError(errno);
     }
-    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
     return -1;
   }
   memcpy(start, tmem, size);
@@ -406,27 +392,25 @@ MoveTextRegionToLargePages(const text_region& r) {
     if (ret == -1) {
       PrintSystemError(errno);
     }
-    if (-1 == munmap(nmem, size)) PrintSystemError(errno);
     return -1;
   }
-  if (-1 == munmap(nmem, size)) PrintSystemError(errno);
   return ret;
 }
 
-// This is the primary API called from main
+// This is the primary API called from main.
 int MapStaticCodeToLargePages() {
   struct text_region r = FindNodeTextRegion();
   if (r.found_text_region == false) {
-    fprintf(stderr, "Hugepages WARNING: failed to find text region\n");
+    PrintWarning("failed to find text region");
     return -1;
   }
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
   if (r.from > reinterpret_cast<void*>(&MoveTextRegionToLargePages))
     return MoveTextRegionToLargePages(r);
 
   return -1;
-#elif defined(__APPLE__)
+#elif defined(__FreeBSD__) || defined(__APPLE__)
   return MoveTextRegionToLargePages(r);
 #endif
 }

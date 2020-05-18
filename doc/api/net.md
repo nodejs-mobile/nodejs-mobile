@@ -26,18 +26,16 @@ sockets on other operating systems.
 [`socket.connect()`][] take a `path` parameter to identify IPC endpoints.
 
 On Unix, the local domain is also known as the Unix domain. The path is a
-filesystem pathname. It gets truncated to a length of
-`sizeof(sockaddr_un.sun_path) - 1`, which varies 91 and 107 bytes depending on
-the operating system. The typical values are 107 on Linux and 103 on macOS. The
-path is subject to the same naming conventions and permissions checks as would
-be done on file creation. If the Unix domain socket (that is visible as a file
-system path) is created and used in conjunction with one of Node.js' API
-abstractions such as [`net.createServer()`][], it will be unlinked as part of
-[`server.close()`][]. On the other hand, if it is created and used outside of
-these abstractions, the user will need to manually remove it. The same applies
-when the path was created by a Node.js API but the program crashes abruptly.
-In short, a Unix domain socket once successfully created will be visible in the
-filesystem, and will persist until unlinked.
+filesystem pathname. It gets truncated to an OS-dependent length of
+`sizeof(sockaddr_un.sun_path) - 1`. Typical values are 107 bytes on Linux and
+103 bytes on macOS. If a Node.js API abstraction creates the Unix domain socket,
+it will unlink the Unix domain socket as well. For example,
+[`net.createServer()`][] may create a Unix domain socket and
+[`server.close()`][] will unlink it. But if a user creates the Unix domain
+socket outside of these abstractions, the user will need to remove it. The same
+applies when a Node.js API creates a Unix domain socket but the program then
+crashes. In short, a Unix domain socket will be visible in the filesystem and
+will persist until unlinked.
 
 On Windows, the local domain is implemented using a named pipe. The path *must*
 refer to an entry in `\\?\pipe\` or `\\.\pipe\`. Any characters are permitted,
@@ -116,7 +114,7 @@ Emitted when the server has been bound after calling [`server.listen()`][].
 added: v0.1.90
 -->
 
-* Returns: {Object|string}
+* Returns: {Object|string|null}
 
 Returns the bound `address`, the address `family` name, and `port` of the server
 as reported by the operating system if listening on an IP socket
@@ -140,7 +138,8 @@ server.listen(() => {
 });
 ```
 
-Don't call `server.address()` until the `'listening'` event has been emitted.
+`server.address()` returns `null` before the `'listening'` event has been
+emitted or after calling `server.close()`.
 
 ### `server.close([callback])`
 <!-- YAML
@@ -503,13 +502,13 @@ changes:
     description: The `host` parameter is supported now.
 -->
 
-Emitted after resolving the hostname but before connecting.
+Emitted after resolving the host name but before connecting.
 Not applicable to Unix sockets.
 
 * `err` {Error|null} The error object. See [`dns.lookup()`][].
 * `address` {string} The IP address.
 * `family` {string|null} The address type. See [`dns.lookup()`][].
-* `host` {string} The hostname.
+* `host` {string} The host name.
 
 ### Event: `'ready'`
 <!-- YAML
@@ -590,7 +589,7 @@ Possible signatures:
 * [`socket.connect(options[, connectListener])`][`socket.connect(options)`]
 * [`socket.connect(path[, connectListener])`][`socket.connect(path)`]
   for [IPC][] connections.
-* [`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`]
+* [`socket.connect(port[, host][, connectListener])`][`socket.connect(port)`]
   for TCP connections.
 * Returns: {net.Socket} The socket itself.
 
@@ -879,9 +878,16 @@ added: v0.1.90
 * `noDelay` {boolean} **Default:** `true`
 * Returns: {net.Socket} The socket itself.
 
-Disables the Nagle algorithm. By default TCP connections use the Nagle
-algorithm, they buffer data before sending it off. Setting `true` for
-`noDelay` will immediately fire off data each time `socket.write()` is called.
+Enable/disable the use of Nagle's algorithm.
+
+When a TCP connection is created, it will have Nagle's algorithm enabled.
+
+Nagle's algorithm delays data before it is sent via the network. It attempts
+to optimize throughput at the expense of latency.
+
+Passing `true` for `noDelay` or not passing an argument will disable Nagle's
+algorithm for the socket. Passing `false` for `noDelay` will enable Nagle's
+algorithm.
 
 ### `socket.setTimeout(timeout[, callback])`
 <!-- YAML
@@ -934,7 +940,7 @@ added: v0.1.90
 * Returns: {boolean}
 
 Sends data on the socket. The second parameter specifies the encoding in the
-case of a string — it defaults to UTF8 encoding.
+case of a string. It defaults to UTF8 encoding.
 
 Returns `true` if the entire data was flushed successfully to the kernel
 buffer. Returns `false` if all or part of the data was queued in user memory.
@@ -1059,8 +1065,7 @@ client.on('end', () => {
 });
 ```
 
-To connect on the socket `/tmp/echo.sock` the second line would just be
-changed to:
+To connect on the socket `/tmp/echo.sock`:
 
 ```js
 const client = net.createConnection({ path: '/tmp/echo.sock' });
@@ -1093,21 +1098,21 @@ added: v0.1.90
 -->
 
 * `port` {number} Port the socket should connect to. Will be passed to
-  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`].
+  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port)`].
 * `host` {string} Host the socket should connect to. Will be passed to
-  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`].
+  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port)`].
    **Default:** `'localhost'`.
 * `connectListener` {Function} Common parameter of the
   [`net.createConnection()`][] functions, an "once" listener for the
   `'connect'` event on the initiating socket. Will be passed to
-  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`].
+  [`socket.connect(port[, host][, connectListener])`][`socket.connect(port)`].
 * Returns: {net.Socket} The newly created socket used to start the connection.
 
 Initiates a TCP connection.
 
 This function creates a new [`net.Socket`][] with all options set to default,
 immediately initiates connection with
-[`socket.connect(port[, host][, connectListener])`][`socket.connect(port, host)`],
+[`socket.connect(port[, host][, connectListener])`][`socket.connect(port)`],
 then returns the `net.Socket` that starts the connection.
 
 ## `net.createServer([options][, connectionListener])`
@@ -1169,8 +1174,7 @@ Test this by using `telnet`:
 $ telnet localhost 8124
 ```
 
-To listen on the socket `/tmp/echo.sock` the third line from the last would
-just be changed to:
+To listen on the socket `/tmp/echo.sock`:
 
 ```js
 server.listen('/tmp/echo.sock', () => {
@@ -1255,7 +1259,7 @@ Returns `true` if input is a version 6 IP address, otherwise returns `false`.
 [`socket.connect()`]: #net_socket_connect
 [`socket.connect(options)`]: #net_socket_connect_options_connectlistener
 [`socket.connect(path)`]: #net_socket_connect_path_connectlistener
-[`socket.connect(port, host)`]: #net_socket_connect_port_host_connectlistener
+[`socket.connect(port)`]: #net_socket_connect_port_host_connectlistener
 [`socket.connecting`]: #net_socket_connecting
 [`socket.destroy()`]: #net_socket_destroy_exception
 [`socket.end()`]: #net_socket_end_data_encoding_callback

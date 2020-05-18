@@ -242,14 +242,6 @@ inline bool ImmediateInfo::has_outstanding() const {
   return fields_[kHasOutstanding] == 1;
 }
 
-inline void ImmediateInfo::count_inc(uint32_t increment) {
-  fields_[kCount] += increment;
-}
-
-inline void ImmediateInfo::count_dec(uint32_t decrement) {
-  fields_[kCount] -= decrement;
-}
-
 inline void ImmediateInfo::ref_count_inc(uint32_t increment) {
   fields_[kRefCount] += increment;
 }
@@ -598,20 +590,6 @@ inline void Environment::set_http2_state(
   http2_state_ = std::move(buffer);
 }
 
-bool Environment::debug_enabled(DebugCategory category) const {
-  DCHECK_GE(static_cast<int>(category), 0);
-  DCHECK_LT(static_cast<int>(category),
-           static_cast<int>(DebugCategory::CATEGORY_COUNT));
-  return debug_enabled_[static_cast<int>(category)];
-}
-
-void Environment::set_debug_enabled(DebugCategory category, bool enabled) {
-  DCHECK_GE(static_cast<int>(category), 0);
-  DCHECK_LT(static_cast<int>(category),
-           static_cast<int>(DebugCategory::CATEGORY_COUNT));
-  debug_enabled_[static_cast<int>(category)] = enabled;
-}
-
 inline AliasedFloat64Array* Environment::fs_stats_field_array() {
   return &fs_stats_field_array_;
 }
@@ -732,7 +710,8 @@ inline uint64_t Environment::heap_prof_interval() const {
 
 #endif  // HAVE_INSPECTOR
 
-inline std::shared_ptr<HostPort> Environment::inspector_host_port() {
+inline
+std::shared_ptr<ExclusiveAccess<HostPort>> Environment::inspector_host_port() {
   return inspector_host_port_;
 }
 
@@ -745,28 +724,56 @@ inline void IsolateData::set_options(
   options_ = std::move(options);
 }
 
-template <typename Fn>
-void Environment::CreateImmediate(Fn&& cb,
-                                  v8::Local<v8::Object> keep_alive,
-                                  bool ref) {
-  auto callback = std::make_unique<NativeImmediateCallbackImpl<Fn>>(
-      std::move(cb),
-      v8::Global<v8::Object>(isolate(), keep_alive),
-      ref);
-  NativeImmediateCallback* prev_tail = native_immediate_callbacks_tail_;
+std::unique_ptr<Environment::NativeImmediateCallback>
+Environment::NativeImmediateQueue::Shift() {
+  std::unique_ptr<Environment::NativeImmediateCallback> ret = std::move(head_);
+  if (ret) {
+    head_ = ret->get_next();
+    if (!head_)
+      tail_ = nullptr;  // The queue is now empty.
+  }
+  size_--;
+  return ret;
+}
 
-  native_immediate_callbacks_tail_ = callback.get();
+void Environment::NativeImmediateQueue::Push(
+    std::unique_ptr<Environment::NativeImmediateCallback> cb) {
+  NativeImmediateCallback* prev_tail = tail_;
+
+  size_++;
+  tail_ = cb.get();
   if (prev_tail != nullptr)
-    prev_tail->set_next(std::move(callback));
+    prev_tail->set_next(std::move(cb));
   else
-    native_immediate_callbacks_head_ = std::move(callback);
+    head_ = std::move(cb);
+}
 
-  immediate_info()->count_inc(1);
+void Environment::NativeImmediateQueue::ConcatMove(
+    NativeImmediateQueue&& other) {
+  size_ += other.size_;
+  if (tail_ != nullptr)
+    tail_->set_next(std::move(other.head_));
+  else
+    head_ = std::move(other.head_);
+  tail_ = other.tail_;
+  other.tail_ = nullptr;
+  other.size_ = 0;
+}
+
+size_t Environment::NativeImmediateQueue::size() const {
+  return size_.load();
 }
 
 template <typename Fn>
-void Environment::SetImmediate(Fn&& cb, v8::Local<v8::Object> keep_alive) {
-  CreateImmediate(std::move(cb), keep_alive, true);
+void Environment::CreateImmediate(Fn&& cb, bool ref) {
+  auto callback = std::make_unique<NativeImmediateCallbackImpl<Fn>>(
+      std::move(cb), ref);
+  native_immediates_.Push(std::move(callback));
+}
+
+template <typename Fn>
+void Environment::SetImmediate(Fn&& cb) {
+  CreateImmediate(std::move(cb), true);
 
   if (immediate_info()->ref_count() == 0)
     ToggleImmediateRef(true);
@@ -774,8 +781,31 @@ void Environment::SetImmediate(Fn&& cb, v8::Local<v8::Object> keep_alive) {
 }
 
 template <typename Fn>
-void Environment::SetUnrefImmediate(Fn&& cb, v8::Local<v8::Object> keep_alive) {
-  CreateImmediate(std::move(cb), keep_alive, false);
+void Environment::SetUnrefImmediate(Fn&& cb) {
+  CreateImmediate(std::move(cb), false);
+}
+
+template <typename Fn>
+void Environment::SetImmediateThreadsafe(Fn&& cb) {
+  auto callback = std::make_unique<NativeImmediateCallbackImpl<Fn>>(
+      std::move(cb), false);
+  {
+    Mutex::ScopedLock lock(native_immediates_threadsafe_mutex_);
+    native_immediates_threadsafe_.Push(std::move(callback));
+  }
+  uv_async_send(&task_queues_async_);
+}
+
+template <typename Fn>
+void Environment::RequestInterrupt(Fn&& cb) {
+  auto callback = std::make_unique<NativeImmediateCallbackImpl<Fn>>(
+      std::move(cb), false);
+  {
+    Mutex::ScopedLock lock(native_immediates_threadsafe_mutex_);
+    native_immediates_interrupts_.Push(std::move(callback));
+  }
+  uv_async_send(&task_queues_async_);
+  RequestInterruptFromV8();
 }
 
 Environment::NativeImmediateCallback::NativeImmediateCallback(bool refed)
@@ -797,10 +827,9 @@ void Environment::NativeImmediateCallback::set_next(
 
 template <typename Fn>
 Environment::NativeImmediateCallbackImpl<Fn>::NativeImmediateCallbackImpl(
-    Fn&& callback, v8::Global<v8::Object>&& keep_alive, bool refed)
+    Fn&& callback, bool refed)
   : NativeImmediateCallback(refed),
-    callback_(std::move(callback)),
-    keep_alive_(std::move(keep_alive)) {}
+    callback_(std::move(callback)) {}
 
 template <typename Fn>
 void Environment::NativeImmediateCallbackImpl<Fn>::Call(Environment* env) {
@@ -864,8 +893,26 @@ inline void Environment::remove_sub_worker_context(worker::Worker* context) {
   sub_worker_contexts_.erase(context);
 }
 
+template <typename Fn>
+inline void Environment::ForEachWorker(Fn&& iterator) {
+  for (worker::Worker* w : sub_worker_contexts_) iterator(w);
+}
+
+inline void Environment::add_refs(int64_t diff) {
+  task_queues_async_refs_ += diff;
+  CHECK_GE(task_queues_async_refs_, 0);
+  if (task_queues_async_refs_ == 0)
+    uv_unref(reinterpret_cast<uv_handle_t*>(&task_queues_async_));
+  else
+    uv_ref(reinterpret_cast<uv_handle_t*>(&task_queues_async_));
+}
+
 inline bool Environment::is_stopping() const {
-  return thread_stopper_.is_stopped();
+  return is_stopping_.load();
+}
+
+inline void Environment::set_stopping(bool value) {
+  is_stopping_.store(value);
 }
 
 inline std::list<node_module>* Environment::extra_linked_bindings() {
@@ -881,7 +928,7 @@ inline const Mutex& Environment::extra_linked_bindings_mutex() const {
   return extra_linked_bindings_mutex_;
 }
 
-inline performance::performance_state* Environment::performance_state() {
+inline performance::PerformanceState* Environment::performance_state() {
   return performance_state_.get();
 }
 
@@ -1138,7 +1185,7 @@ void Environment::RemoveCleanupHook(void (*fn)(void*), void* arg) {
 inline void Environment::RegisterFinalizationGroupForCleanup(
     v8::Local<v8::FinalizationGroup> group) {
   cleanup_finalization_groups_.emplace_back(isolate(), group);
-  uv_async_send(&cleanup_finalization_groups_async_);
+  uv_async_send(&task_queues_async_);
 }
 
 size_t CleanupHookCallback::Hash::operator()(
@@ -1167,12 +1214,12 @@ void Environment::ForEachBaseObject(T&& iterator) {
   }
 }
 
-bool AsyncRequest::is_stopped() const {
-  return stopped_.load();
+void Environment::modify_base_object_count(int64_t delta) {
+  base_object_count_ += delta;
 }
 
-void AsyncRequest::set_stopped(bool flag) {
-  stopped_.store(flag);
+int64_t Environment::base_object_count() const {
+  return base_object_count_;
 }
 
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
@@ -1180,9 +1227,8 @@ void AsyncRequest::set_stopped(bool flag) {
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
 #define V(TypeName, PropertyName)                                             \
   inline                                                                      \
-  v8::Local<TypeName> IsolateData::PropertyName(v8::Isolate* isolate) const { \
-    /* Strings are immutable so casting away const-ness here is okay. */      \
-    return const_cast<IsolateData*>(this)->PropertyName ## _.Get(isolate);    \
+  v8::Local<TypeName> IsolateData::PropertyName() const {                     \
+    return PropertyName ## _ .Get(isolate_);                                  \
   }
   PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
@@ -1197,7 +1243,7 @@ void AsyncRequest::set_stopped(bool flag) {
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
 #define V(TypeName, PropertyName)                                             \
   inline v8::Local<TypeName> Environment::PropertyName() const {              \
-    return isolate_data()->PropertyName(isolate());                           \
+    return isolate_data()->PropertyName();                                    \
   }
   PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)

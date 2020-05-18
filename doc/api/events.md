@@ -155,18 +155,6 @@ myEmitter.emit('error', new Error('whoops!'));
 // Prints: whoops! there was an error
 ```
 
-It is possible to monitor `'error'` events without consuming the emitted error
-by installing a listener using the symbol `errorMonitor`.
-
-```js
-const myEmitter = new MyEmitter();
-myEmitter.on(EventEmitter.errorMonitor, (err) => {
-  MyMonitoringTool.log(err);
-});
-myEmitter.emit('error', new Error('whoops!'));
-// Still throws and crashes Node.js
-```
-
 ## Capture Rejections of Promises
 
 > Stability: 1 - captureRejections is experimental.
@@ -359,19 +347,6 @@ have the additional `emitter`, `type` and `count` properties, referring to
 the event emitter instance, the event’s name and the number of attached
 listeners, respectively.
 Its `name` property is set to `'MaxListenersExceededWarning'`.
-
-### `EventEmitter.errorMonitor`
-<!-- YAML
-added: v12.16.0
--->
-
-This symbol shall be used to install a listener for only monitoring `'error'`
-events. Listeners installed using this symbol are called before the regular
-`'error'` listeners are called.
-
-Installing a listener using this symbol does not change the behavior once an
-`'error'` event is emitted, therefore the process will still crash if no
-regular `'error'` listener is installed.
 
 ### `emitter.addListener(eventName, listener)`
 <!-- YAML
@@ -740,10 +715,9 @@ added: v0.3.5
 
 By default `EventEmitter`s will print a warning if more than `10` listeners are
 added for a particular event. This is a useful default that helps finding
-memory leaks. Obviously, not all events should be limited to just 10 listeners.
-The `emitter.setMaxListeners()` method allows the limit to be modified for this
-specific `EventEmitter` instance. The value can be set to `Infinity` (or `0`)
-to indicate an unlimited number of listeners.
+memory leaks. The `emitter.setMaxListeners()` method allows the limit to be
+modified for this specific `EventEmitter` instance. The value can be set to
+`Infinity` (or `0`) to indicate an unlimited number of listeners.
 
 Returns a reference to the `EventEmitter`, so that calls can be chained.
 
@@ -913,6 +887,7 @@ const { on, EventEmitter } = require('events');
     // if concurrent execution is required.
     console.log(event); // prints ['bar'] [42]
   }
+  // Unreachable here
 })();
 ```
 

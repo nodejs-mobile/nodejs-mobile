@@ -1614,7 +1614,9 @@ failure, this can cause event listener leaks and swallowed errors.
 
 ### `stream.Readable.from(iterable, [options])`
 <!-- YAML
-added: v12.3.0
+added:
+  - v12.3.0
+  - v10.17.0
 -->
 
 * `iterable` {Iterable} Object implementing the `Symbol.asyncIterator` or
@@ -1882,8 +1884,8 @@ methods only.
 
 The `writable._writev()` method may be implemented in addition or alternatively
 to `writable._write()` in stream implementations that are capable of processing
-multiple chunks of data at once. If implemented, the method will be called with
-all chunks of data currently buffered in the write queue.
+multiple chunks of data at once. If implemented and if there is buffered data
+from previous writes, `_writev()` will be called instead of `_write()`.
 
 The `writable._writev()` method is prefixed with an underscore because it is
 internal to the class that defines it, and should never be called directly by
@@ -2639,15 +2641,33 @@ const finished = util.promisify(stream.finished);
 
 const writable = fs.createWriteStream('./file');
 
-(async function() {
-  for await (const chunk of iterator) {
+function drain(writable) {
+  if (writable.destroyed) {
+    return Promise.reject(new Error('premature close'));
+  }
+  return Promise.race([
+    once(writable, 'drain'),
+    once(writable, 'close')
+      .then(() => Promise.reject(new Error('premature close')))
+  ]);
+}
+
+async function pump(iterable, writable) {
+  for await (const chunk of iterable) {
     // Handle backpressure on write().
-    if (!writable.write(chunk))
-      await once(writable, 'drain');
+    if (!writable.write(chunk)) {
+      await drain(writable);
+    }
   }
   writable.end();
+}
+
+(async function() {
   // Ensure completion without errors.
-  await finished(writable);
+  await Promise.all([
+    pump(iterable, writable),
+    finished(writable)
+  ]);
 })();
 ```
 
@@ -2669,7 +2689,7 @@ const finished = util.promisify(stream.finished);
 const writable = fs.createWriteStream('./file');
 
 (async function() {
-  const readable = Readable.from(iterator);
+  const readable = Readable.from(iterable);
   readable.pipe(writable);
   // Ensure completion without errors.
   await finished(writable);
@@ -2684,7 +2704,7 @@ const pipeline = util.promisify(stream.pipeline);
 const writable = fs.createWriteStream('./file');
 
 (async function() {
-  const readable = Readable.from(iterator);
+  const readable = Readable.from(iterable);
   await pipeline(readable, writable);
 })();
 ```

@@ -313,23 +313,8 @@ Environment* CreateEnvironment(IsolateData* isolate_data,
                                       Environment::kOwnsProcessState |
                                       Environment::kOwnsInspector));
   env->InitializeLibuv(per_process::v8_is_profiling);
-  if (env->RunBootstrapping().IsEmpty()) {
+  if (env->RunBootstrapping().IsEmpty())
     return nullptr;
-  }
-
-  std::vector<Local<String>> parameters = {
-      env->require_string(),
-      FIXED_ONE_BYTE_STRING(env->isolate(), "markBootstrapComplete")};
-  std::vector<Local<Value>> arguments = {
-      env->native_module_require(),
-      env->NewFunctionTemplate(MarkBootstrapComplete)
-          ->GetFunction(env->context())
-          .ToLocalChecked()};
-  if (ExecuteBootstrapper(
-          env, "internal/bootstrap/environment", &parameters, &arguments)
-          .IsEmpty()) {
-    return nullptr;
-  }
   return env;
 }
 
@@ -350,11 +335,6 @@ MultiIsolatePlatform* CreatePlatform(
     int thread_pool_size,
     node::tracing::TracingController* tracing_controller) {
   return new NodePlatform(thread_pool_size, tracing_controller);
-}
-
-MultiIsolatePlatform* InitializeV8Platform(int thread_pool_size) {
-  per_process::v8_platform.Initialize(thread_pool_size);
-  return per_process::v8_platform.Platform();
 }
 
 void FreePlatform(MultiIsolatePlatform* platform) {
@@ -453,6 +433,7 @@ bool InitializeContextForSnapshot(Local<Context> context) {
 
     static const char* context_files[] = {"internal/per_context/primordials",
                                           "internal/per_context/domexception",
+                                          "internal/per_context/messageport",
                                           nullptr};
 
     for (const char** module = context_files; *module != nullptr; module++) {

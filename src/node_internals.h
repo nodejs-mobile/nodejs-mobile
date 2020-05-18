@@ -98,8 +98,8 @@ void RegisterSignalHandler(int signal,
                            bool reset_handler = false);
 #endif
 
+std::string GetProcessTitle(const char* default_title);
 std::string GetHumanReadableProcessName();
-void GetHumanReadableProcessName(char (*name)[1024]);
 
 void InitializeContextRuntime(v8::Local<v8::Context>);
 
@@ -266,6 +266,8 @@ class ThreadPoolWork {
 
   virtual void DoThreadPoolWork() = 0;
   virtual void AfterThreadPoolWork(int status) = 0;
+
+  Environment* env() const { return env_; }
 
  private:
   Environment* env_;

@@ -15,7 +15,7 @@ const {
 
 function doTrace(n, trace) {
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     trace(kBeforeEvent, 'foo', 'test', 0, 'test');
   }
   bench.end(n);
@@ -23,7 +23,7 @@ function doTrace(n, trace) {
 
 function doIsTraceCategoryEnabled(n, isTraceCategoryEnabled) {
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     isTraceCategoryEnabled('foo');
     isTraceCategoryEnabled('bar');
   }
@@ -37,7 +37,6 @@ function main({ n, method }) {
   } = common.binding('trace_events');
 
   switch (method) {
-    case '':
     case 'trace':
       doTrace(n, trace);
       break;

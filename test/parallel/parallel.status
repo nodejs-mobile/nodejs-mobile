@@ -5,10 +5,6 @@ prefix parallel
 # sample-test                        : PASS,FLAKY
 
 [true] # This section applies to all platforms
-# https://github.com/nodejs/node/issues/24593
-test-fs-stat-bigint: PASS,FLAKY
-# https://github.com/nodejs/node/issues/23207
-test-net-connect-options-port: PASS,FLAKY
 
 [$system==win32]
 # https://github.com/nodejs/node/issues/20750
@@ -21,6 +17,10 @@ test-http2-compat-client-upload-reject: PASS,FLAKY
 test-http2-multistream-destroy-on-read-tls: PASS,FLAKY
 # https://github.com/nodejs/node/issues/20750
 test-http2-pipe: PASS,FLAKY
+# https://github.com/nodejs/node/issues/20750
+test-stream-pipeline-http2: PASS,FLAKY
+# https://github.com/nodejs/node/issues/24497
+test-timers-immediate-queue: PASS,FLAKY
 # https://github.com/nodejs/node/issues/23277
 test-worker-memory: PASS,FLAKY
 # https://github.com/nodejs/node/issues/30846
@@ -37,6 +37,10 @@ test-async-hooks-http-parser-destroy: PASS,FLAKY
 [$system==solaris] # Also applies to SmartOS
 
 [$system==freebsd]
+# https://github.com/nodejs/node/issues/31727
+test-fs-stat-bigint: PASS,FLAKY
+# https://github.com/nodejs/node/issues/29802
+test-http2-reset-flood: PASS,FLAKY
 
 [$system==aix]
 

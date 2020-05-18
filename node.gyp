@@ -35,6 +35,7 @@
       'lib/internal/bootstrap/switches/is_not_main_thread.js',
       'lib/internal/per_context/primordials.js',
       'lib/internal/per_context/domexception.js',
+      'lib/internal/per_context/messageport.js',
       'lib/async_hooks.js',
       'lib/assert.js',
       'lib/buffer.js',
@@ -136,6 +137,7 @@
       'lib/internal/fs/utils.js',
       'lib/internal/fs/watchers.js',
       'lib/internal/http.js',
+      'lib/internal/histogram.js',
       'lib/internal/idna.js',
       'lib/internal/inspector_async_hook.js',
       'lib/internal/js_stream_socket.js',
@@ -526,7 +528,6 @@
         'src/api/exceptions.cc',
         'src/api/hooks.cc',
         'src/api/utils.cc',
-
         'src/async_wrap.cc',
         'src/cares_wrap.cc',
         'src/connect_wrap.cc',
@@ -536,6 +537,7 @@
         'src/fs_event_wrap.cc',
         'src/handle_wrap.cc',
         'src/heap_utils.cc',
+        'src/histogram.cc',
         'src/js_native_api.h',
         'src/js_native_api_types.h',
         'src/js_native_api_v8.cc',
@@ -617,6 +619,7 @@
         'src/connect_wrap.h',
         'src/connection_wrap.h',
         'src/debug_utils.h',
+        'src/debug_utils-inl.h',
         'src/env.h',
         'src/env-inl.h',
         'src/handle_wrap.h',
@@ -830,9 +833,11 @@
         [ 'node_use_openssl=="true"', {
           'sources': [
             'src/node_crypto.cc',
+            'src/node_crypto_common.cc',
             'src/node_crypto_bio.cc',
             'src/node_crypto_clienthello.cc',
             'src/node_crypto.h',
+            'src/node_crypto_common.h',
             'src/node_crypto_bio.h',
             'src/node_crypto_clienthello.h',
             'src/node_crypto_clienthello-inl.h',
@@ -858,9 +863,10 @@
             }],
           ],
         }],
-        [ 'OS in "linux freebsd mac ios" and '
-          'target_arch=="x64"', {
+        [ 'node_use_large_pages=="true" and OS in "linux freebsd mac ios"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
+          # The current implementation of Large Pages is under Linux.
+          # Other implementations are possible but not currently supported.
           'sources': [
             'src/large_pages/node_large_page.cc',
             'src/large_pages/node_large_page.h'
@@ -1126,6 +1132,7 @@
         'test/cctest/node_test_fixture.h',
         'test/cctest/test_aliased_buffer.cc',
         'test/cctest/test_base64.cc',
+        'test/cctest/test_base_object_ptr.cc',
         'test/cctest/test_node_postmortem_metadata.cc',
         'test/cctest/test_environment.cc',
         'test/cctest/test_linked_binding.cc',
@@ -1243,6 +1250,16 @@
             'src/node_code_cache_stub.cc',
           ]
         }],
+        [ 'node_use_openssl=="true"', {
+          'defines': [
+            'HAVE_OPENSSL=1',
+          ],
+        }],
+        ['v8_enable_inspector==1', {
+          'defines': [
+            'HAVE_INSPECTOR=1',
+          ],
+        }],
         ['OS=="win"', {
           'libraries': [
             'dbghelp.lib',
@@ -1290,6 +1307,16 @@
             'src/node_snapshot_stub.cc',
             'src/node_code_cache_stub.cc',
           ]
+        }],
+        [ 'node_use_openssl=="true"', {
+          'defines': [
+            'HAVE_OPENSSL=1',
+          ],
+        }],
+        ['v8_enable_inspector==1', {
+          'defines': [
+            'HAVE_INSPECTOR=1',
+          ],
         }],
         ['OS=="win"', {
           'libraries': [

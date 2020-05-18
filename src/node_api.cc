@@ -26,7 +26,7 @@ struct node_napi_env__ : public napi_env__ {
   }
 
   v8::Maybe<bool> mark_arraybuffer_as_untransferable(
-      v8::Local<v8::ArrayBuffer> ab) const {
+      v8::Local<v8::ArrayBuffer> ab) const override {
     return ab->SetPrivate(
         context(),
         node_env()->arraybuffer_untransferable_private_symbol(),
@@ -471,8 +471,7 @@ void napi_module_register_by_symbol(v8::Local<v8::Object> exports,
     return;
   }
 
-  // Create a new napi_env for this module or reference one if a pre-existing
-  // one is found.
+  // Create a new napi_env for this specific module.
   napi_env env = v8impl::NewEnv(context);
 
   napi_value _exports;

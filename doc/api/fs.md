@@ -152,8 +152,8 @@ fs.open(Buffer.from('/open/some/file.txt'), 'r', (err, fd) => {
 
 On Windows, Node.js follows the concept of per-drive working directory. This
 behavior can be observed when using a drive path without a backslash. For
-example `fs.readdirSync('c:\\')` can potentially return a different result than
-`fs.readdirSync('c:')`. For more information, see
+example `fs.readdirSync('C:\\')` can potentially return a different result than
+`fs.readdirSync('C:')`. For more information, see
 [this MSDN page][MSDN-Rel-Path].
 
 ### URL object support
@@ -175,9 +175,9 @@ fs.readFileSync(fileUrl);
 
 Using WHATWG [`URL`][] objects might introduce platform-specific behaviors.
 
-On Windows, `file:` URLs with a hostname convert to UNC paths, while `file:`
+On Windows, `file:` URLs with a host name convert to UNC paths, while `file:`
 URLs with drive letters convert to local absolute paths. `file:` URLs without a
-hostname nor a drive letter will result in a throw:
+host name nor a drive letter will result in a throw:
 
 ```js
 // On Windows :
@@ -199,7 +199,7 @@ fs.readFileSync(new URL('file:///c/p/a/t/h/file'));
 `file:` URLs with drive letters must use `:` as a separator just after
 the drive letter. Using another separator will result in a throw.
 
-On all other platforms, `file:` URLs with a hostname are unsupported and will
+On all other platforms, `file:` URLs with a host name are unsupported and will
 result in a throw:
 
 ```js
@@ -1940,7 +1940,7 @@ Node.js callbacks. `fs.existsSync()` does not use a callback.
 
 ```js
 if (fs.existsSync('/etc/passwd')) {
-  console.log('The file exists.');
+  console.log('The path exists.');
 }
 ```
 
@@ -2735,7 +2735,7 @@ changes:
 
 Read data from the file specified by `fd`.
 
-`buffer` is the buffer that the data will be written to.
+`buffer` is the buffer that the data (read from the fd) will be written to.
 
 `offset` is the offset in the buffer to start writing at.
 
@@ -3758,6 +3758,9 @@ unavailable in some situations.
 
 The recursive option is only supported on macOS and Windows.
 
+On Windows, no events will be emitted if the watched directory is moved or
+renamed. An `EPERM` error is reported when the watched directory is deleted.
+
 #### Availability
 
 <!--type=misc-->
@@ -3774,10 +3777,10 @@ to be notified of filesystem changes.
 * On Aix systems, this feature depends on [`AHAFS`][], which must be enabled.
 
 If the underlying functionality is not available for some reason, then
-`fs.watch` will not be able to function. For example, watching files or
-directories can be unreliable, and in some cases impossible, on network file
-systems (NFS, SMB, etc), or host file systems when using virtualization software
-such as Vagrant, Docker, etc.
+`fs.watch()` will not be able to function and may thrown an exception.
+For example, watching files or directories can be unreliable, and in some
+cases impossible, on network file systems (NFS, SMB, etc) or host file systems
+when using virtualization software such as Vagrant or Docker.
 
 It is still possible to use `fs.watchFile()`, which uses stat polling, but
 this method is slower and less reliable.
@@ -3820,6 +3823,9 @@ fs.watch('somedir', (eventType, filename) => {
 <!-- YAML
 added: v0.1.31
 changes:
+  - version: v10.5.0
+    pr-url: https://github.com/nodejs/node/pull/20220
+    description: The `bigint` option is now supported.
   - version: v7.6.0
     pr-url: https://github.com/nodejs/node/pull/10739
     description: The `filename` parameter can be a WHATWG `URL` object using
@@ -3828,6 +3834,7 @@ changes:
 
 * `filename` {string|Buffer|URL}
 * `options` {Object}
+  * `bigint` {boolean} **Default:** `false`
   * `persistent` {boolean} **Default:** `true`
   * `interval` {integer} **Default:** `5007`
 * `listener` {Function}
@@ -3853,7 +3860,8 @@ fs.watchFile('message.text', (curr, prev) => {
 });
 ```
 
-These stat objects are instances of `fs.Stat`.
+These stat objects are instances of `fs.Stat`. If the `bigint` option is `true`,
+the numeric values in these objects are specified as `BigInt`s.
 
 To be notified when the file was modified, not just accessed, it is necessary
 to compare `curr.mtime` and `prev.mtime`.
@@ -4233,17 +4241,13 @@ added: v10.0.0
 * `data` {string|Buffer}
 * `options` {Object|string}
   * `encoding` {string|null} **Default:** `'utf8'`
-  * `mode` {integer} **Default:** `0o666`
-  * `flag` {string} See [support of file system `flags`][]. **Default:** `'a'`.
 * Returns: {Promise}
 
-Asynchronously append data to this file, creating the file if it does not yet
-exist. `data` can be a string or a [`Buffer`][]. The `Promise` will be
-resolved with no arguments upon success.
+Alias of [`filehandle.writeFile()`][].
 
-If `options` is a string, then it specifies the encoding.
-
-The `FileHandle` must have been opened for appending.
+When operating on file handles, the mode cannot be changed from what it was set
+to with [`fsPromises.open()`][]. Therefore, this is equivalent to
+[`filehandle.writeFile()`][].
 
 #### `filehandle.chmod(mode)`
 <!-- YAML
@@ -4344,7 +4348,6 @@ added: v10.0.0
 
 * `options` {Object|string}
   * `encoding` {string|null} **Default:** `null`
-  * `flag` {string} See [support of file system `flags`][]. **Default:** `'r'`.
 * Returns: {Promise}
 
 Asynchronously reads the entire contents of a file.
@@ -4354,11 +4357,6 @@ specified (using `options.encoding`), the data is returned as a `Buffer`
 object. Otherwise, the data will be a string.
 
 If `options` is a string, then it specifies the encoding.
-
-When the `path` is a directory, the behavior of `fsPromises.readFile()` is
-platform-specific. On macOS, Linux, and Windows, the promise will be rejected
-with an error. On FreeBSD, a representation of the directory's contents will be
-returned.
 
 The `FileHandle` has to support reading.
 
@@ -4549,8 +4547,6 @@ added: v10.0.0
 * `data` {string|Buffer|Uint8Array}
 * `options` {Object|string}
   * `encoding` {string|null} **Default:** `'utf8'`
-  * `mode` {integer} **Default:** `0o666`
-  * `flag` {string} See [support of file system `flags`][]. **Default:** `'w'`.
 * Returns: {Promise}
 
 Asynchronously writes data to a file, replacing the file if it already exists.
@@ -4932,6 +4928,18 @@ will be passed as `Buffer` objects.
 
 If `options.withFileTypes` is set to `true`, the resolved array will contain
 [`fs.Dirent`][] objects.
+
+```js
+const fs = require('fs');
+
+async function print(path) {
+  const files = await fs.promises.readdir(path);
+  for (const file of files) {
+    console.log(file);
+  }
+}
+print('./').catch(console.error);
+```
 
 ### `fsPromises.readFile(path[, options])`
 <!-- YAML
@@ -5524,6 +5532,7 @@ the file contents.
 [`UV_THREADPOOL_SIZE`]: cli.html#cli_uv_threadpool_size_size
 [`WriteStream`]: #fs_class_fs_writestream
 [`event ports`]: https://illumos.org/man/port_create
+[`filehandle.writeFile()`]: #fs_filehandle_writefile_data_options
 [`fs.Dir`]: #fs_class_fs_dir
 [`fs.Dirent`]: #fs_class_fs_dirent
 [`fs.FSWatcher`]: #fs_class_fs_fswatcher
@@ -5558,6 +5567,7 @@ the file contents.
 [`fs.write(fd, string...)`]: #fs_fs_write_fd_string_position_encoding_callback
 [`fs.writeFile()`]: #fs_fs_writefile_file_data_options_callback
 [`fs.writev()`]: #fs_fs_writev_fd_buffers_position_callback
+[`fsPromises.open()`]: #fs_fspromises_open_path_flags_mode
 [`fsPromises.opendir()`]: #fs_fspromises_opendir_path_options
 [`inotify(7)`]: http://man7.org/linux/man-pages/man7/inotify.7.html
 [`kqueue(2)`]: https://www.freebsd.org/cgi/man.cgi?query=kqueue&sektion=2

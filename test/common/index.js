@@ -48,7 +48,8 @@ if (isMainThread)
 
 const noop = () => {};
 
-const hasCrypto = Boolean(process.versions.openssl);
+const hasCrypto = Boolean(process.versions.openssl) &&
+                  !process.env.NODE_SKIP_CRYPTO;
 
 // Check for flags. Skip this for workers (both, the `cluster` module and
 // `worker_threads`) and child processes.
@@ -527,92 +528,22 @@ function expectWarning(nameOrMap, expected, code) {
   }
 }
 
-class Comparison {
-  constructor(obj, keys) {
-    for (const key of keys) {
-      if (key in obj)
-        this[key] = obj[key];
-    }
-  }
-}
-
 // Useful for testing expected internal/error objects
-function expectsError(fn, settings, exact) {
-  if (typeof fn !== 'function') {
-    exact = settings;
-    settings = fn;
-    fn = undefined;
-  }
-
-  function innerFn(error) {
-    if (arguments.length !== 1) {
+function expectsError(validator, exact) {
+  return mustCall((...args) => {
+    if (args.length !== 1) {
       // Do not use `assert.strictEqual()` to prevent `util.inspect` from
       // always being called.
-      assert.fail(`Expected one argument, got ${util.inspect(arguments)}`);
+      assert.fail(`Expected one argument, got ${util.inspect(args)}`);
     }
+    const error = args.pop();
     const descriptor = Object.getOwnPropertyDescriptor(error, 'message');
     // The error message should be non-enumerable
     assert.strictEqual(descriptor.enumerable, false);
 
-    let innerSettings = settings;
-    if ('type' in settings) {
-      const type = settings.type;
-      if (type !== Error && !Error.isPrototypeOf(type)) {
-        throw new TypeError('`settings.type` must inherit from `Error`');
-      }
-      let constructor = error.constructor;
-      if (constructor.name === 'NodeError' && type.name !== 'NodeError') {
-        constructor = Object.getPrototypeOf(error.constructor);
-      }
-      // Add the `type` to the error to properly compare and visualize it.
-      if (!('type' in error))
-        error.type = constructor;
-    }
-
-    if ('message' in settings &&
-        typeof settings.message === 'object' &&
-        settings.message.test(error.message)) {
-      // Make a copy so we are able to modify the settings.
-      innerSettings = Object.create(
-        settings, Object.getOwnPropertyDescriptors(settings));
-      // Visualize the message as identical in case of other errors.
-      innerSettings.message = error.message;
-    }
-
-    // Check all error properties.
-    const keys = Object.keys(settings);
-    for (const key of keys) {
-      if (!util.isDeepStrictEqual(error[key], innerSettings[key])) {
-        // Create placeholder objects to create a nice output.
-        const a = new Comparison(error, keys);
-        const b = new Comparison(innerSettings, keys);
-
-        const tmpLimit = Error.stackTraceLimit;
-        Error.stackTraceLimit = 0;
-        const err = new assert.AssertionError({
-          actual: a,
-          expected: b,
-          operator: 'strictEqual',
-          stackStartFn: assert.throws
-        });
-        Error.stackTraceLimit = tmpLimit;
-
-        throw new assert.AssertionError({
-          actual: error,
-          expected: settings,
-          operator: 'common.expectsError',
-          message: err.message
-        });
-      }
-
-    }
+    assert.throws(() => { throw error; }, validator);
     return true;
-  }
-  if (fn) {
-    assert.throws(fn, innerFn);
-    return;
-  }
-  return mustCall(innerFn, exact);
+  }, exact);
 }
 
 const suffix = 'This is caused by either a bug in Node.js ' +
@@ -740,7 +671,7 @@ function invalidArgTypeHelper(input) {
   return ` Received type ${typeof input} (${inspected})`;
 }
 
-module.exports = {
+const common = {
   allowGlobals,
   buildType,
   canCreateSymLink,
@@ -787,7 +718,7 @@ module.exports = {
   skipIfReportDisabled,
   skipIfWorker,
 
-  get enoughTestCPU() {
+  get enoughTestCpu() {
     if(isAndroid || isIOS) {
       // On mobile platforms, CPU information might be unavailable.
       return true;
@@ -890,3 +821,12 @@ module.exports = {
   }
 
 };
+
+const validProperties = new Set(Object.keys(common));
+module.exports = new Proxy(common, {
+  get(obj, prop) {
+    if (!validProperties.has(prop))
+      throw new Error(`Using invalid common property: '${prop}'`);
+    return obj[prop];
+  }
+});

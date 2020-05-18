@@ -7,16 +7,14 @@
 # include <unistd.h>
 # include <dirent.h>
 # include <time.h>
-# define SLASH '/'
-# define SLASH_STR "/"
 # define IS_SLASH(c) ((c) == '/')
 #else
-# define SLASH '\\'
-# define SLASH_STR "\\"
+# include <io.h>
 # define IS_SLASH(c) ((c) == '/' || (c) == '\\')
 #endif /* _WIN32 */
 
 #define UVWASI__READDIR_NUM_ENTRIES 1
+#define UVWASI__MAX_SYMLINK_FOLLOWS 32
 
 #include "uvwasi.h"
 #include "uvwasi_alloc.h"
@@ -24,6 +22,7 @@
 #include "uv_mapping.h"
 #include "fd_table.h"
 #include "clocks.h"
+#include "wasi_rights.h"
 
 /* TODO(cjihrig): PATH_MAX_BYTES shouldn't be stack allocated. On Windows, paths
    can be 32k long, and this PATH_MAX_BYTES is an artificial limitation. */
@@ -33,6 +32,11 @@
 #else
 # include <limits.h>
 # define PATH_MAX_BYTES (PATH_MAX)
+#endif
+
+/* IBMi PASE does not support posix_fadvise() */
+#ifdef __PASE__
+# undef POSIX_FADV_NORMAL
 #endif
 
 static void* default_malloc(size_t size, void* mem_user_data) {
@@ -86,120 +90,312 @@ static int uvwasi__is_absolute_path(const char* path, size_t path_len) {
 }
 
 
+static char* uvwasi__strchr_slash(const char* s) {
+  /* strchr() that identifies /, as well as \ on Windows. */
+  do {
+    if (IS_SLASH(*s))
+      return (char*) s;
+  } while (*s++);
+
+  return NULL;
+}
+
+
+static uvwasi_errno_t uvwasi__normalize_path(const char* path,
+                                             size_t path_len,
+                                             char* normalized_path,
+                                             size_t normalized_len) {
+  const char* cur;
+  char* ptr;
+  char* next;
+  size_t cur_len;
+
+  if (path_len > normalized_len)
+    return UVWASI_ENOBUFS;
+
+  normalized_path[0] = '\0';
+  ptr = normalized_path;
+  for (cur = path; cur != NULL; cur = next + 1) {
+    next = uvwasi__strchr_slash(cur);
+    cur_len = (next == NULL) ? strlen(cur) : (size_t) (next - cur);
+
+    if (cur_len == 0 || (cur_len == 1 && cur[0] == '.'))
+      continue;
+
+    if (cur_len == 2 && cur[0] == '.' && cur[1] == '.') {
+      while (!IS_SLASH(*ptr) && ptr != normalized_path)
+        ptr--;
+      *ptr = '\0';
+      continue;
+    }
+
+    *ptr = '/';
+    ptr++;
+    memcpy(ptr, cur, cur_len);
+    ptr += cur_len;
+    *ptr = '\0';
+
+    if (next == NULL)
+      break;
+  }
+
+  return UVWASI_ESUCCESS;
+}
+
+
+static uvwasi_errno_t uvwasi__resolve_path_to_host(
+                                              const uvwasi_t* uvwasi,
+                                              const struct uvwasi_fd_wrap_t* fd,
+                                              const char* path,
+                                              size_t path_len,
+                                              char** resolved_path,
+                                              size_t* resolved_len
+                                            ) {
+  /* Return the normalized path, but resolved to the host's real path. */
+  int real_path_len;
+  int fake_path_len;
+#ifdef _WIN32
+  size_t i;
+#endif /* _WIN32 */
+
+  real_path_len = strlen(fd->real_path);
+  fake_path_len = strlen(fd->path);
+  *resolved_len = path_len - fake_path_len + real_path_len;
+  *resolved_path = uvwasi__malloc(uvwasi, *resolved_len + 1);
+
+  if (*resolved_path == NULL)
+    return UVWASI_ENOMEM;
+
+  memcpy(*resolved_path, fd->real_path, real_path_len);
+  memcpy(*resolved_path + real_path_len,
+         path + fake_path_len,
+         path_len - fake_path_len + 1);
+
+#ifdef _WIN32
+  /* Replace / with \ on Windows. */
+  for (i = real_path_len; i < *resolved_len; i++) {
+    if ((*resolved_path)[i] == '/')
+      (*resolved_path)[i] = '\\';
+  }
+#endif /* _WIN32 */
+
+  return UVWASI_ESUCCESS;
+}
+
+
+static uvwasi_errno_t uvwasi__normalize_absolute_path(
+                                              const uvwasi_t* uvwasi,
+                                              const struct uvwasi_fd_wrap_t* fd,
+                                              const char* path,
+                                              size_t path_len,
+                                              char** normalized_path,
+                                              size_t* normalized_len
+                                            ) {
+  uvwasi_errno_t err;
+  char* abs_path;
+  int abs_size;
+
+  *normalized_path = NULL;
+  *normalized_len = 0;
+  abs_size = path_len + 1;
+  abs_path = uvwasi__malloc(uvwasi, abs_size);
+  if (abs_path == NULL) {
+    err = UVWASI_ENOMEM;
+    goto exit;
+  }
+
+  /* Normalize the input path first. */
+  err = uvwasi__normalize_path(path,
+                               path_len,
+                               abs_path,
+                               path_len);
+  if (err != UVWASI_ESUCCESS)
+    goto exit;
+
+  /* Once the input is normalized, ensure that it is still sandboxed. */
+  if (abs_path != strstr(abs_path, fd->path)) {
+    err = UVWASI_ENOTCAPABLE;
+    goto exit;
+  }
+
+  *normalized_path = abs_path;
+  *normalized_len = abs_size - 1;
+  return UVWASI_ESUCCESS;
+
+exit:
+  uvwasi__free(uvwasi, abs_path);
+  return err;
+}
+
+
+static uvwasi_errno_t uvwasi__normalize_relative_path(
+                                              const uvwasi_t* uvwasi,
+                                              const struct uvwasi_fd_wrap_t* fd,
+                                              const char* path,
+                                              size_t path_len,
+                                              char** normalized_path,
+                                              size_t* normalized_len
+                                            ) {
+  uvwasi_errno_t err;
+  char* abs_path;
+  int abs_size;
+  int r;
+
+  *normalized_path = NULL;
+  *normalized_len = 0;
+  abs_size = path_len + strlen(fd->path) + 2;
+  abs_path = uvwasi__malloc(uvwasi, abs_size);
+  if (abs_path == NULL) {
+    err = UVWASI_ENOMEM;
+    goto exit;
+  }
+
+  /* Resolve the relative path to an absolute path based on fd's fake path. */
+  r = snprintf(abs_path, abs_size, "%s/%s", fd->path, path);
+  if (r <= 0) {
+    err = uvwasi__translate_uv_error(uv_translate_sys_error(errno));
+    goto exit;
+  }
+
+  err = uvwasi__normalize_absolute_path(uvwasi,
+                                        fd,
+                                        abs_path,
+                                        abs_size - 1,
+                                        normalized_path,
+                                        normalized_len);
+exit:
+  uvwasi__free(uvwasi, abs_path);
+  return err;
+}
+
+
 static uvwasi_errno_t uvwasi__resolve_path(const uvwasi_t* uvwasi,
                                            const struct uvwasi_fd_wrap_t* fd,
                                            const char* path,
                                            size_t path_len,
                                            char* resolved_path,
                                            uvwasi_lookupflags_t flags) {
-  uv_fs_t realpath_req;
+  uv_fs_t req;
   uvwasi_errno_t err;
-  char* abs_path;
-  char* tok;
-  char* ptr;
-  int realpath_size;
-  int abs_size;
-  int input_is_absolute;
+  const char* input;
+  char* host_path;
+  char* normalized_path;
+  char* link_target;
+  size_t input_len;
+  size_t host_path_len;
+  size_t normalized_len;
+  int follow_count;
   int r;
-#ifdef _WIN32
-  int i;
-#endif /* _WIN32 */
 
+  input = path;
+  input_len = path_len;
+  link_target = NULL;
+  follow_count = 0;
+  host_path = NULL;
+
+start:
+  normalized_path = NULL;
   err = UVWASI_ESUCCESS;
-  input_is_absolute = uvwasi__is_absolute_path(path, path_len);
 
-  if (1 == input_is_absolute) {
-    /* TODO(cjihrig): Revisit this. Copying is probably not necessary here. */
-    abs_size = path_len;
-    abs_path = uvwasi__malloc(uvwasi, abs_size);
-    if (abs_path == NULL) {
-      err = UVWASI_ENOMEM;
-      goto exit;
-    }
-
-    memcpy(abs_path, path, abs_size);
+  if (1 == uvwasi__is_absolute_path(input, input_len)) {
+    err = uvwasi__normalize_absolute_path(uvwasi,
+                                          fd,
+                                          input,
+                                          input_len,
+                                          &normalized_path,
+                                          &normalized_len);
   } else {
-    /* Resolve the relative path to fd's real path. */
-    abs_size = path_len + strlen(fd->real_path) + 2;
-    abs_path = uvwasi__malloc(uvwasi, abs_size);
-    if (abs_path == NULL) {
-      err = UVWASI_ENOMEM;
-      goto exit;
-    }
-
-    r = snprintf(abs_path, abs_size, "%s/%s", fd->real_path, path);
-    if (r <= 0) {
-      err = uvwasi__translate_uv_error(uv_translate_sys_error(errno));
-      goto exit;
-    }
+    err = uvwasi__normalize_relative_path(uvwasi,
+                                          fd,
+                                          input,
+                                          input_len,
+                                          &normalized_path,
+                                          &normalized_len);
   }
 
-#ifdef _WIN32
-  /* On Windows, convert slashes to backslashes. */
-  for (i = 0; i < abs_size; ++i) {
-    if (abs_path[i] == '/')
-      abs_path[i] = SLASH;
-  }
-#endif /* _WIN32 */
+  if (err != UVWASI_ESUCCESS)
+    goto exit;
 
-  ptr = resolved_path;
-  tok = strtok(abs_path, SLASH_STR);
-  for (; tok != NULL; tok = strtok(NULL, SLASH_STR)) {
-    if (0 == strcmp(tok, "."))
-      continue;
+  uvwasi__free(uvwasi, host_path);
+  err = uvwasi__resolve_path_to_host(uvwasi,
+                                     fd,
+                                     normalized_path,
+                                     normalized_len,
+                                     &host_path,
+                                     &host_path_len);
+  if (err != UVWASI_ESUCCESS)
+    goto exit;
 
-    if (0 == strcmp(tok, "..")) {
-      while (*ptr != SLASH && ptr != resolved_path)
-        ptr--;
-      *ptr = '\0';
-      continue;
-    }
-
-#ifdef _WIN32
-    /* On Windows, prevent a leading slash in the path. */
-    if (ptr == resolved_path)
-      r = sprintf(ptr, "%s", tok);
-    else
-#endif /* _WIN32 */
-    r = sprintf(ptr, "%c%s", SLASH, tok);
-
-    if (r < 1) { /* At least one character should have been written. */
-      err = uvwasi__translate_uv_error(uv_translate_sys_error(errno));
-      goto exit;
-    }
-
-    ptr += r;
-  }
-
-  if ((flags & UVWASI_LOOKUP_SYMLINK_FOLLOW) == UVWASI_LOOKUP_SYMLINK_FOLLOW) {
-    r = uv_fs_realpath(NULL, &realpath_req, resolved_path, NULL);
-    if (r == 0) {
-      realpath_size = strlen(realpath_req.ptr) + 1;
-      if (realpath_size > PATH_MAX_BYTES) {
-        err = UVWASI_ENOBUFS;
-        uv_fs_req_cleanup(&realpath_req);
-        goto exit;
-      }
-
-      memcpy(resolved_path, realpath_req.ptr, realpath_size);
-    } else if (r != UV_ENOENT) {
-      /* Report errors except ENOENT. */
-      err = uvwasi__translate_uv_error(r);
-      uv_fs_req_cleanup(&realpath_req);
-      goto exit;
-    }
-
-    uv_fs_req_cleanup(&realpath_req);
-  }
-
-  /* Verify that the resolved path is still in the sandbox. */
-  if (resolved_path != strstr(resolved_path, fd->real_path)) {
-    err = UVWASI_ENOTCAPABLE;
+  /* TODO(cjihrig): Currently performing a bounds check here. The TODO is to
+     stop allocating resolved_path in every caller and instead return the
+     path allocated in this function. */
+  if (host_path_len > PATH_MAX_BYTES) {
+    err = UVWASI_ENOBUFS;
     goto exit;
   }
 
+  if ((flags & UVWASI_LOOKUP_SYMLINK_FOLLOW) == UVWASI_LOOKUP_SYMLINK_FOLLOW) {
+    r = uv_fs_readlink(NULL, &req, host_path, NULL);
+
+    if (r != 0) {
+#ifdef _WIN32
+      /* uv_fs_readlink() returns UV__UNKNOWN on Windows. Try to get a better
+         error using uv_fs_stat(). */
+      if (r == UV__UNKNOWN) {
+        uv_fs_req_cleanup(&req);
+        r = uv_fs_stat(NULL, &req, host_path, NULL);
+
+        if (r == 0) {
+          if (uvwasi__stat_to_filetype(&req.statbuf) !=
+              UVWASI_FILETYPE_SYMBOLIC_LINK) {
+            r = UV_EINVAL;
+          }
+        }
+
+        // Fall through.
+      }
+#endif /* _WIN32 */
+
+      /* Don't report UV_EINVAL or UV_ENOENT. They mean that either the file
+          does not exist, or it is not a symlink. Both are OK. */
+      if (r != UV_EINVAL && r != UV_ENOENT)
+        err = uvwasi__translate_uv_error(r);
+
+      uv_fs_req_cleanup(&req);
+      goto exit;
+    }
+
+    /* Clean up memory and follow the link, unless it's time to return ELOOP. */
+    follow_count++;
+    if (follow_count >= UVWASI__MAX_SYMLINK_FOLLOWS) {
+      uv_fs_req_cleanup(&req);
+      err = UVWASI_ELOOP;
+      goto exit;
+    }
+
+    input_len = strlen(req.ptr);
+    uvwasi__free(uvwasi, link_target);
+    link_target = uvwasi__malloc(uvwasi, input_len + 1);
+    if (link_target == NULL) {
+      uv_fs_req_cleanup(&req);
+      err = UVWASI_ENOMEM;
+      goto exit;
+    }
+
+    memcpy(link_target, req.ptr, input_len + 1);
+    input = link_target;
+    uvwasi__free(uvwasi, normalized_path);
+    uv_fs_req_cleanup(&req);
+    goto start;
+  }
+
 exit:
-  uvwasi__free(uvwasi, abs_path);
+  if (err == UVWASI_ESUCCESS)
+    memcpy(resolved_path, host_path, host_path_len + 1);
+
+  uvwasi__free(uvwasi, link_target);
+  uvwasi__free(uvwasi, normalized_path);
+  uvwasi__free(uvwasi, host_path);
   return err;
 }
 
@@ -378,7 +574,7 @@ uvwasi_errno_t uvwasi_init(uvwasi_t* uvwasi, uvwasi_options_t* options) {
     }
   }
 
-  err = uvwasi_fd_table_init(uvwasi, &uvwasi->fds, options->fd_table_size);
+  err = uvwasi_fd_table_init(uvwasi, options);
   if (err != UVWASI_ESUCCESS)
     goto exit;
 
@@ -687,18 +883,26 @@ uvwasi_errno_t uvwasi_fd_close(uvwasi_t* uvwasi, uvwasi_fd_t fd) {
   if (uvwasi == NULL)
     return UVWASI_EINVAL;
 
-  err = uvwasi_fd_table_get(&uvwasi->fds, fd, &wrap, 0, 0);
+  uvwasi_fd_table_lock(&uvwasi->fds);
+
+  err = uvwasi_fd_table_get_nolock(&uvwasi->fds, fd, &wrap, 0, 0);
   if (err != UVWASI_ESUCCESS)
-    return err;
+    goto exit;
 
   r = uv_fs_close(NULL, &req, wrap->fd, NULL);
   uv_mutex_unlock(&wrap->mutex);
   uv_fs_req_cleanup(&req);
 
-  if (r != 0)
-    return uvwasi__translate_uv_error(r);
+  if (r != 0) {
+    err = uvwasi__translate_uv_error(r);
+    goto exit;
+  }
 
-  return uvwasi_fd_table_remove(uvwasi, &uvwasi->fds, fd);
+  err = uvwasi_fd_table_remove_nolock(uvwasi, &uvwasi->fds, fd);
+
+exit:
+  uvwasi_fd_table_unlock(&uvwasi->fds);
+  return err;
 }
 
 
@@ -1297,41 +1501,10 @@ exit:
 uvwasi_errno_t uvwasi_fd_renumber(uvwasi_t* uvwasi,
                                   uvwasi_fd_t from,
                                   uvwasi_fd_t to) {
-  struct uvwasi_fd_wrap_t* to_wrap;
-  struct uvwasi_fd_wrap_t* from_wrap;
-  uv_fs_t req;
-  uvwasi_errno_t err;
-  int r;
-
   if (uvwasi == NULL)
     return UVWASI_EINVAL;
 
-  if (from == to)
-    return UVWASI_ESUCCESS;
-
-  err = uvwasi_fd_table_get(&uvwasi->fds, from, &from_wrap, 0, 0);
-  if (err != UVWASI_ESUCCESS)
-    return err;
-
-  err = uvwasi_fd_table_get(&uvwasi->fds, to, &to_wrap, 0, 0);
-  if (err != UVWASI_ESUCCESS) {
-    uv_mutex_unlock(&from_wrap->mutex);
-    return err;
-  }
-
-  r = uv_fs_close(NULL, &req, to_wrap->fd, NULL);
-  uv_fs_req_cleanup(&req);
-  if (r != 0) {
-    uv_mutex_unlock(&from_wrap->mutex);
-    uv_mutex_unlock(&to_wrap->mutex);
-    return uvwasi__translate_uv_error(r);
-  }
-
-  memcpy(to_wrap, from_wrap, sizeof(*to_wrap));
-  to_wrap->id = to;
-  uv_mutex_unlock(&from_wrap->mutex);
-  uv_mutex_unlock(&to_wrap->mutex);
-  return uvwasi_fd_table_remove(uvwasi, &uvwasi->fds, from);
+  return uvwasi_fd_table_renumber(uvwasi, &uvwasi->fds, to, from);
 }
 
 
@@ -1605,36 +1778,40 @@ uvwasi_errno_t uvwasi_path_link(uvwasi_t* uvwasi,
   if (uvwasi == NULL || old_path == NULL || new_path == NULL)
     return UVWASI_EINVAL;
 
-  if (old_fd == new_fd) {
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              old_fd,
-                              &old_wrap,
-                              UVWASI_RIGHT_PATH_LINK_SOURCE |
-                              UVWASI_RIGHT_PATH_LINK_TARGET,
-                              0);
-    if (err != UVWASI_ESUCCESS)
-      return err;
+  uvwasi_fd_table_lock(&uvwasi->fds);
 
+  if (old_fd == new_fd) {
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     old_fd,
+                                     &old_wrap,
+                                     UVWASI_RIGHT_PATH_LINK_SOURCE |
+                                     UVWASI_RIGHT_PATH_LINK_TARGET,
+                                     0);
     new_wrap = old_wrap;
   } else {
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              old_fd,
-                              &old_wrap,
-                              UVWASI_RIGHT_PATH_LINK_SOURCE,
-                              0);
-    if (err != UVWASI_ESUCCESS)
-      return err;
-
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              new_fd,
-                              &new_wrap,
-                              UVWASI_RIGHT_PATH_LINK_TARGET,
-                              0);
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     old_fd,
+                                     &old_wrap,
+                                     UVWASI_RIGHT_PATH_LINK_SOURCE,
+                                     0);
     if (err != UVWASI_ESUCCESS) {
-      uv_mutex_unlock(&old_wrap->mutex);
+      uvwasi_fd_table_unlock(&uvwasi->fds);
       return err;
     }
+
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     new_fd,
+                                     &new_wrap,
+                                     UVWASI_RIGHT_PATH_LINK_TARGET,
+                                     0);
+    if (err != UVWASI_ESUCCESS)
+      uv_mutex_unlock(&old_wrap->mutex);
   }
+
+  uvwasi_fd_table_unlock(&uvwasi->fds);
+
+  if (err != UVWASI_ESUCCESS)
+    return err;
 
   err = uvwasi__resolve_path(uvwasi,
                              old_wrap,
@@ -1663,9 +1840,9 @@ uvwasi_errno_t uvwasi_path_link(uvwasi_t* uvwasi,
 
   err = UVWASI_ESUCCESS;
 exit:
-  uv_mutex_unlock(&old_wrap->mutex);
+  uv_mutex_unlock(&new_wrap->mutex);
   if (old_fd != new_fd)
-    uv_mutex_unlock(&new_wrap->mutex);
+    uv_mutex_unlock(&old_wrap->mutex);
   return err;
 }
 
@@ -1683,8 +1860,11 @@ uvwasi_errno_t uvwasi_path_open(uvwasi_t* uvwasi,
   char resolved_path[PATH_MAX_BYTES];
   uvwasi_rights_t needed_inheriting;
   uvwasi_rights_t needed_base;
+  uvwasi_rights_t max_base;
+  uvwasi_rights_t max_inheriting;
   struct uvwasi_fd_wrap_t* dirfd_wrap;
-  struct uvwasi_fd_wrap_t wrap;
+  struct uvwasi_fd_wrap_t *wrap;
+  uvwasi_filetype_t filetype;
   uvwasi_errno_t err;
   uv_fs_t req;
   int flags;
@@ -1761,37 +1941,43 @@ uvwasi_errno_t uvwasi_path_open(uvwasi_t* uvwasi,
   }
 
   r = uv_fs_open(NULL, &req, resolved_path, flags, 0666, NULL);
+  uv_mutex_unlock(&dirfd_wrap->mutex);
   uv_fs_req_cleanup(&req);
 
-  if (r < 0) {
-    uv_mutex_unlock(&dirfd_wrap->mutex);
+  if (r < 0)
     return uvwasi__translate_uv_error(r);
-  }
 
-  err = uvwasi_fd_table_insert_fd(uvwasi,
-                                  &uvwasi->fds,
-                                  r,
-                                  flags,
-                                  resolved_path,
-                                  fs_rights_base,
-                                  fs_rights_inheriting,
-                                  &wrap);
-  if (err != UVWASI_ESUCCESS) {
-    uv_mutex_unlock(&dirfd_wrap->mutex);
+  /* Not all platforms support UV_FS_O_DIRECTORY, so get the file type and check
+     it here. */
+  err = uvwasi__get_filetype_by_fd(r, &filetype);
+  if (err != UVWASI_ESUCCESS)
     goto close_file_and_error_exit;
-  }
 
-  /* Not all platforms support UV_FS_O_DIRECTORY, so enforce it here as well. */
   if ((o_flags & UVWASI_O_DIRECTORY) != 0 &&
-      wrap.type != UVWASI_FILETYPE_DIRECTORY) {
-    uv_mutex_unlock(&dirfd_wrap->mutex);
-    uvwasi_fd_table_remove(uvwasi, &uvwasi->fds, wrap.id);
+      filetype != UVWASI_FILETYPE_DIRECTORY) {
     err = UVWASI_ENOTDIR;
     goto close_file_and_error_exit;
   }
 
-  *fd = wrap.id;
-  uv_mutex_unlock(&dirfd_wrap->mutex);
+  err = uvwasi__get_rights(r, flags, filetype, &max_base, &max_inheriting);
+  if (err != UVWASI_ESUCCESS)
+    goto close_file_and_error_exit;
+
+  err = uvwasi_fd_table_insert(uvwasi,
+                               &uvwasi->fds,
+                               r,
+                               resolved_path,
+                               resolved_path,
+                               filetype,
+                               fs_rights_base & max_base,
+                               fs_rights_inheriting & max_inheriting,
+                               0,
+                               &wrap);
+  if (err != UVWASI_ESUCCESS)
+    goto close_file_and_error_exit;
+
+  *fd = wrap->id;
+  uv_mutex_unlock(&wrap->mutex);
   return UVWASI_ESUCCESS;
 
 close_file_and_error_exit:
@@ -1909,35 +2095,40 @@ uvwasi_errno_t uvwasi_path_rename(uvwasi_t* uvwasi,
   if (uvwasi == NULL || old_path == NULL || new_path == NULL)
     return UVWASI_EINVAL;
 
+  uvwasi_fd_table_lock(&uvwasi->fds);
+
   if (old_fd == new_fd) {
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              old_fd,
-                              &old_wrap,
-                              UVWASI_RIGHT_PATH_RENAME_SOURCE |
-                              UVWASI_RIGHT_PATH_RENAME_TARGET,
-                              0);
-    if (err != UVWASI_ESUCCESS)
-      return err;
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     old_fd,
+                                     &old_wrap,
+                                     UVWASI_RIGHT_PATH_RENAME_SOURCE |
+                                     UVWASI_RIGHT_PATH_RENAME_TARGET,
+                                     0);
     new_wrap = old_wrap;
   } else {
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              old_fd,
-                              &old_wrap,
-                              UVWASI_RIGHT_PATH_RENAME_SOURCE,
-                              0);
-    if (err != UVWASI_ESUCCESS)
-      return err;
-
-    err = uvwasi_fd_table_get(&uvwasi->fds,
-                              new_fd,
-                              &new_wrap,
-                              UVWASI_RIGHT_PATH_RENAME_TARGET,
-                              0);
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     old_fd,
+                                     &old_wrap,
+                                     UVWASI_RIGHT_PATH_RENAME_SOURCE,
+                                     0);
     if (err != UVWASI_ESUCCESS) {
-      uv_mutex_unlock(&old_wrap->mutex);
+      uvwasi_fd_table_unlock(&uvwasi->fds);
       return err;
     }
+
+    err = uvwasi_fd_table_get_nolock(&uvwasi->fds,
+                                     new_fd,
+                                     &new_wrap,
+                                     UVWASI_RIGHT_PATH_RENAME_TARGET,
+                                     0);
+    if (err != UVWASI_ESUCCESS)
+      uv_mutex_unlock(&old_wrap->mutex);
   }
+
+  uvwasi_fd_table_unlock(&uvwasi->fds);
+
+  if (err != UVWASI_ESUCCESS)
+    return err;
 
   err = uvwasi__resolve_path(uvwasi,
                              old_wrap,
@@ -1966,9 +2157,9 @@ uvwasi_errno_t uvwasi_path_rename(uvwasi_t* uvwasi,
 
   err = UVWASI_ESUCCESS;
 exit:
-  uv_mutex_unlock(&old_wrap->mutex);
+  uv_mutex_unlock(&new_wrap->mutex);
   if (old_fd != new_fd)
-    uv_mutex_unlock(&new_wrap->mutex);
+    uv_mutex_unlock(&old_wrap->mutex);
 
   return err;
 }

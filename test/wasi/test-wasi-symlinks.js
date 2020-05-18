@@ -50,10 +50,12 @@ if (process.argv[2] === 'wasi-child') {
   fs.mkdirSync(sandboxedDir);
   fs.writeFileSync(sandboxedFile, 'hello from input.txt', 'utf8');
   fs.writeFileSync(externalFile, 'this should be inaccessible', 'utf8');
-  fs.symlinkSync(sandboxedFile, sandboxedSymlink, 'file');
-  fs.symlinkSync(externalFile, escapingSymlink, 'file');
-  fs.symlinkSync(loopSymlink2, loopSymlink1, 'file');
-  fs.symlinkSync(loopSymlink1, loopSymlink2, 'file');
+  fs.symlinkSync(path.join('.', 'input.txt'), sandboxedSymlink, 'file');
+  fs.symlinkSync(path.join('..', 'outside.txt'), escapingSymlink, 'file');
+  fs.symlinkSync(path.join('subdir', 'loop2'),
+                 loopSymlink1, 'file');
+  fs.symlinkSync(path.join('subdir', 'loop1'),
+                 loopSymlink2, 'file');
 
   function runWASI(options) {
     console.log('executing', options.test);
@@ -72,6 +74,7 @@ if (process.argv[2] === 'wasi-child') {
     assert.strictEqual(child.stdout.toString(), options.stdout || '');
   }
 
+  runWASI({ test: 'create_symlink', stdout: 'hello from input.txt' });
   runWASI({ test: 'follow_symlink', stdout: 'hello from input.txt' });
   runWASI({ test: 'symlink_escape' });
   runWASI({ test: 'symlink_loop' });

@@ -32,7 +32,6 @@
 #include "req_wrap-inl.h"
 #include "stream_base-inl.h"
 #include "string_bytes.h"
-#include "string_search.h"
 
 #include <fcntl.h>
 #include <sys/types.h>
@@ -53,7 +52,6 @@ namespace fs {
 
 using v8::Array;
 using v8::Context;
-using v8::DontDelete;
 using v8::EscapableHandleScope;
 using v8::Function;
 using v8::FunctionCallbackInfo;
@@ -68,8 +66,6 @@ using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
 using v8::Promise;
-using v8::PropertyAttribute;
-using v8::ReadOnly;
 using v8::String;
 using v8::Symbol;
 using v8::Uint32;
@@ -138,15 +134,6 @@ FileHandle* FileHandle::New(Environment* env, int fd, Local<Object> obj) {
                             .ToLocal(&obj)) {
     return nullptr;
   }
-  PropertyAttribute attr =
-      static_cast<PropertyAttribute>(ReadOnly | DontDelete);
-  if (obj->DefineOwnProperty(env->context(),
-                             env->fd_string(),
-                             Integer::New(env->isolate(), fd),
-                             attr)
-          .IsNothing()) {
-    return nullptr;
-  }
   return new FileHandle(env, obj, fd);
 }
 
@@ -190,11 +177,12 @@ inline void FileHandle::Close() {
   uv_fs_t req;
   int ret = uv_fs_close(env()->event_loop(), &req, fd_, nullptr);
   uv_fs_req_cleanup(&req);
-  AfterClose();
 
   struct err_detail { int ret; int fd; };
 
   err_detail detail { ret, fd_ };
+
+  AfterClose();
 
   if (ret < 0) {
     // Do not unref this
@@ -301,6 +289,7 @@ MaybeLocal<Promise> FileHandle::ClosePromise() {
       close->file_handle()->AfterClose();
       Isolate* isolate = close->env()->isolate();
       if (req->result < 0) {
+        HandleScope handle_scope(isolate);
         close->Reject(UVException(isolate, req->result, "close"));
       } else {
         close->Resolve();
@@ -339,6 +328,7 @@ void FileHandle::ReleaseFD(const FunctionCallbackInfo<Value>& args) {
 void FileHandle::AfterClose() {
   closing_ = false;
   closed_ = true;
+  fd_ = -1;
   if (reading_ && !persistent().IsEmpty())
     EmitRead(UV_EOF);
 }
@@ -379,7 +369,12 @@ int FileHandle::ReadStart() {
     if (freelist.size() > 0) {
       read_wrap = std::move(freelist.back());
       freelist.pop_back();
-      read_wrap->AsyncReset();
+      // Use a fresh async resource.
+      // Lifetime is ensured via AsyncWrap::resource_.
+      Local<Object> resource = Object::New(env()->isolate());
+      USE(resource->Set(
+          env()->context(), env()->handle_string(), read_wrap->object()));
+      read_wrap->AsyncReset(resource);
       read_wrap->file_handle_ = this;
     } else {
       Local<Object> wrap_obj;
@@ -709,16 +704,11 @@ void AfterScanDirWithTypes(uv_fs_t* req) {
     type_v.emplace_back(Integer::New(isolate, ent.type));
   }
 
-  Local<Array> result = Array::New(isolate, 2);
-  result->Set(env->context(),
-              0,
-              Array::New(isolate, name_v.data(),
-              name_v.size())).Check();
-  result->Set(env->context(),
-              1,
-              Array::New(isolate, type_v.data(),
-              type_v.size())).Check();
-  req_wrap->Resolve(result);
+  Local<Value> result[] = {
+    Array::New(isolate, name_v.data(), name_v.size()),
+    Array::New(isolate, type_v.data(), type_v.size())
+  };
+  req_wrap->Resolve(Array::New(isolate, result, arraysize(result)));
 }
 
 void Access(const FunctionCallbackInfo<Value>& args) {
@@ -828,20 +818,44 @@ static void InternalModuleReadJSON(const FunctionCallbackInfo<Value>& args) {
   }
 
   const size_t size = offset - start;
-  if (size == 0 || (
-    size == SearchString(&chars[start], size, "\"name\"") &&
-    size == SearchString(&chars[start], size, "\"main\"") &&
-    size == SearchString(&chars[start], size, "\"exports\"") &&
-    size == SearchString(&chars[start], size, "\"type\""))) {
-    args.GetReturnValue().Set(env->empty_object_string());
-  } else {
-    Local<String> chars_string =
+  char* p = &chars[start];
+  char* pe = &chars[size];
+  char* pos[2];
+  char** ppos = &pos[0];
+
+  while (p < pe) {
+    char c = *p++;
+    if (c == '\\' && p < pe && *p == '"') p++;
+    if (c != '"') continue;
+    *ppos++ = p;
+    if (ppos < &pos[2]) continue;
+    ppos = &pos[0];
+
+    char* s = &pos[0][0];
+    char* se = &pos[1][-1];  // Exclude quote.
+    size_t n = se - s;
+
+    if (n == 4) {
+      if (0 == memcmp(s, "main", 4)) break;
+      if (0 == memcmp(s, "name", 4)) break;
+      if (0 == memcmp(s, "type", 4)) break;
+    } else if (n == 7) {
+      if (0 == memcmp(s, "exports", 7)) break;
+    }
+  }
+
+  Local<String> return_value;
+  if (p < pe) {
+    return_value =
         String::NewFromUtf8(isolate,
                             &chars[start],
                             v8::NewStringType::kNormal,
                             size).ToLocalChecked();
-    args.GetReturnValue().Set(chars_string);
+  } else {
+    return_value = env->empty_object_string();
   }
+
+  args.GetReturnValue().Set(return_value);
 }
 
 // Used to speed up module loading.  Returns 0 if the path refers to
@@ -1209,11 +1223,18 @@ int MKDirpSync(uv_loop_t* loop,
     int err = uv_fs_mkdir(loop, req, next_path.c_str(), mode, nullptr);
     while (true) {
       switch (err) {
+        // Note: uv_fs_req_cleanup in terminal paths will be called by
+        // ~FSReqWrapSync():
         case 0:
           if (continuation_data.paths().size() == 0) {
             return 0;
           }
           break;
+        case UV_EACCES:
+        case UV_ENOTDIR:
+        case UV_EPERM: {
+          return err;
+        }
         case UV_ENOENT: {
           std::string dirname = next_path.substr(0,
                                         next_path.find_last_of(kPathSeparator));
@@ -1225,9 +1246,6 @@ int MKDirpSync(uv_loop_t* loop,
             continue;
           }
           break;
-        }
-        case UV_EPERM: {
-          return err;
         }
         default:
           uv_fs_req_cleanup(req);
@@ -1276,6 +1294,8 @@ int MKDirpAsync(uv_loop_t* loop,
 
     while (true) {
       switch (err) {
+        // Note: uv_fs_req_cleanup in terminal paths will be called by
+        // FSReqAfterScope::~FSReqAfterScope()
         case 0: {
           if (req_wrap->continuation_data()->paths().size() == 0) {
             req_wrap->continuation_data()->Done(0);
@@ -1284,6 +1304,12 @@ int MKDirpAsync(uv_loop_t* loop,
             MKDirpAsync(loop, req, path.c_str(),
                         req_wrap->continuation_data()->mode(), nullptr);
           }
+          break;
+        }
+        case UV_EACCES:
+        case UV_ENOTDIR:
+        case UV_EPERM: {
+          req_wrap->continuation_data()->Done(err);
           break;
         }
         case UV_ENOENT: {
@@ -1299,10 +1325,6 @@ int MKDirpAsync(uv_loop_t* loop,
           uv_fs_req_cleanup(req);
           MKDirpAsync(loop, req, path.c_str(),
                       req_wrap->continuation_data()->mode(), nullptr);
-          break;
-        }
-        case UV_EPERM: {
-          req_wrap->continuation_data()->Done(err);
           break;
         }
         default:
@@ -1328,7 +1350,6 @@ int MKDirpAsync(uv_loop_t* loop,
             }
             // verify that the path pointed to is actually a directory.
             if (err == 0 && !S_ISDIR(req->statbuf.st_mode)) err = UV_EEXIST;
-            uv_fs_req_cleanup(req);
             req_wrap->continuation_data()->Done(err);
           }});
           if (err < 0) req_wrap->continuation_data()->Done(err);
@@ -1495,13 +1516,11 @@ static void ReadDir(const FunctionCallbackInfo<Value>& args) {
 
     Local<Array> names = Array::New(isolate, name_v.data(), name_v.size());
     if (with_types) {
-      Local<Array> result = Array::New(isolate, 2);
-      result->Set(env->context(), 0, names).Check();
-      result->Set(env->context(),
-                  1,
-                  Array::New(isolate, type_v.data(),
-                             type_v.size())).Check();
-      args.GetReturnValue().Set(result);
+      Local<Value> result[] = {
+        names,
+        Array::New(isolate, type_v.data(), type_v.size())
+      };
+      args.GetReturnValue().Set(Array::New(isolate, result, arraysize(result)));
     } else {
       args.GetReturnValue().Set(names);
     }

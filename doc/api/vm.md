@@ -175,9 +175,8 @@ for (let i = 0; i < 10; ++i) {
   script.runInContext(context);
 }
 
-console.log(util.inspect(context));
-
-// { animal: 'cat', count: 12, name: 'kitty' }
+console.log(context);
+// Prints: { animal: 'cat', count: 12, name: 'kitty' }
 ```
 
 Using the `timeout` or `breakOnSigint` options will result in new event loops
@@ -246,9 +245,8 @@ contexts.forEach((context) => {
   script.runInNewContext(context);
 });
 
-console.log(util.inspect(contexts));
-
-// [{ globalVar: 'set' }, { globalVar: 'set' }, { globalVar: 'set' }]
+console.log(contexts);
+// Prints: [{ globalVar: 'set' }, { globalVar: 'set' }, { globalVar: 'set' }]
 ```
 
 ### `script.runInThisContext([options])`
@@ -314,9 +312,8 @@ specification.
 
 Unlike `vm.Script` however, every `vm.Module` object is bound to a context from
 its creation. Operations on `vm.Module` objects are intrinsically asynchronous,
-in contrast with the synchronous nature of `vm.Script` objects. With the help
-of async functions, however, manipulating `vm.Module` objects is fairly
-straightforward.
+in contrast with the synchronous nature of `vm.Script` objects. The use of
+'async' functions can help with manipulating `vm.Module` objects.
 
 Using a `vm.Module` object requires three distinct steps: creation/parsing,
 linking, and evaluation. These three steps are illustrated in the following
@@ -778,9 +775,11 @@ vm.createContext(context);
 
 vm.runInContext('globalVar *= 2;', context);
 
-console.log(util.inspect(context)); // { globalVar: 2 }
+console.log(context);
+// Prints: { globalVar: 2 }
 
-console.log(util.inspect(globalVar)); // 3
+console.log(global.globalVar);
+// Prints: 3
 ```
 
 If `contextObject` is omitted (or passed explicitly as `undefined`), a new,
@@ -880,9 +879,8 @@ vm.createContext(contextObject);
 for (let i = 0; i < 10; ++i) {
   vm.runInContext('globalVar *= 2;', contextObject);
 }
-console.log(util.inspect(contextObject));
-
-// { globalVar: 1024 }
+console.log(contextObject);
+// Prints: { globalVar: 1024 }
 ```
 
 ## `vm.runInNewContext(code[, contextObject[, options]])`
@@ -977,9 +975,8 @@ const contextObject = {
 };
 
 vm.runInNewContext('count += 1; name = "kitty"', contextObject);
-console.log(util.inspect(contextObject));
-
-// { animal: 'cat', count: 3, name: 'kitty' }
+console.log(contextObject);
+// Prints: { animal: 'cat', count: 3, name: 'kitty' }
 ```
 
 ## `vm.runInThisContext(code[, options])`
@@ -1049,15 +1046,12 @@ const vm = require('vm');
 let localVar = 'initial value';
 
 const vmResult = vm.runInThisContext('localVar = "vm";');
-console.log('vmResult:', vmResult);
-console.log('localVar:', localVar);
+console.log(`vmResult: '${vmResult}', localVar: '${localVar}'`);
+// Prints: vmResult: 'vm', localVar: 'initial value'
 
 const evalResult = eval('localVar = "eval";');
-console.log('evalResult:', evalResult);
-console.log('localVar:', localVar);
-
-// vmResult: 'vm', localVar: 'initial value'
-// evalResult: 'eval', localVar: 'eval'
+console.log(`evalResult: '${evalResult}', localVar: '${localVar}'`);
+// Prints: evalResult: 'eval', localVar: 'eval'
 ```
 
 Because `vm.runInThisContext()` does not have access to the local scope,

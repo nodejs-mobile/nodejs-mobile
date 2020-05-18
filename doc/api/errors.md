@@ -531,14 +531,14 @@ program. For a comprehensive list, see the [`errno`(3) man page][].
   `ulimit -n 2048` in the same shell that will run the Node.js process.
 
 * `ENOENT` (No such file or directory): Commonly raised by [`fs`][] operations
-  to indicate that a component of the specified pathname does not exist — no
+  to indicate that a component of the specified pathname does not exist. No
   entity (file or directory) could be found by the given path.
 
 * `ENOTDIR` (Not a directory): A component of the given pathname existed, but
   was not a directory as expected. Commonly raised by [`fs.readdir`][].
 
 * `ENOTEMPTY` (Directory not empty): A directory with entries was the target
-  of an operation that requires an empty directory — usually [`fs.unlink`][].
+  of an operation that requires an empty directory, usually [`fs.unlink`][].
 
 * `ENOTFOUND` (DNS lookup failed): Indicates a DNS failure of either
   `EAI_NODATA` or `EAI_NONAME`. This is not a standard POSIX error.
@@ -553,7 +553,7 @@ program. For a comprehensive list, see the [`errno`(3) man page][].
 
 * `ETIMEDOUT` (Operation timed out): A connect or send request failed because
   the connected party did not properly respond after a period of time. Usually
-  encountered by [`http`][] or [`net`][] — often a sign that a `socket.end()`
+  encountered by [`http`][] or [`net`][]. Often a sign that a `socket.end()`
   was not properly called.
 
 ## Class: `TypeError`
@@ -1166,7 +1166,7 @@ To fix the error, open an issue at https://github.com/nodejs/node/issues.
 <a id="ERR_INCOMPATIBLE_OPTION_PAIR"></a>
 ### `ERR_INCOMPATIBLE_OPTION_PAIR`
 
-An option pair is incompatible with each other and can not be used at the same
+An option pair is incompatible with each other and cannot be used at the same
 time.
 
 <a id="ERR_INPUT_TYPE_NOT_ALLOWED"></a>
@@ -1301,6 +1301,12 @@ An invalid HTTP token was supplied.
 
 An IP address is not valid.
 
+<a id="ERR_INVALID_MODULE_SPECIFIER"></a>
+### `ERR_INVALID_MODULE_SPECIFIER`
+
+The imported module string is an invalid URL, package name, or package subpath
+specifier.
+
 <a id="ERR_INVALID_OPT_VALUE"></a>
 ### `ERR_INVALID_OPT_VALUE`
 
@@ -1315,6 +1321,12 @@ An invalid or unknown file encoding was passed.
 ### `ERR_INVALID_PACKAGE_CONFIG`
 
 An invalid `package.json` file was found which failed parsing.
+
+<a id="ERR_INVALID_PACKAGE_TARGET"></a>
+### `ERR_INVALID_PACKAGE_TARGET`
+
+The `package.json` [exports][] field contains an invalid target mapping value
+for the attempted module resolution.
 
 <a id="ERR_INVALID_PERFORMANCE_MARK"></a>
 ### `ERR_INVALID_PERFORMANCE_MARK`
@@ -1616,6 +1628,13 @@ A non-context-aware native addon was loaded in a process that disallows them.
 
 A given value is out of the accepted range.
 
+<a id="ERR_PACKAGE_PATH_NOT_EXPORTED"></a>
+### `ERR_PACKAGE_PATH_NOT_EXPORTED`
+
+The `package.json` [exports][] field does not export the requested subpath.
+Because exports are encapsulated, private internal modules that are not exported
+cannot be imported through the package resolution, unless using an absolute URL.
+
 <a id="ERR_REQUIRE_ESM"></a>
 ### `ERR_REQUIRE_ESM`
 
@@ -1784,7 +1803,7 @@ additional details.
 <a id="ERR_TLS_CERT_ALTNAME_INVALID"></a>
 ### `ERR_TLS_CERT_ALTNAME_INVALID`
 
-While using TLS, the hostname/IP of the peer did not match any of the
+While using TLS, the host name/IP of the peer did not match any of the
 `subjectAltNames` in its certificate.
 
 <a id="ERR_TLS_DH_PARAM_SIZE"></a>
@@ -1801,8 +1820,8 @@ recommended to use 2048 bits or larger for stronger security.
 A TLS/SSL handshake timed out. In this case, the server must also abort the
 connection.
 
-<a id="ERR_TLS_INVALID_CONTEXT">
-### ERR_TLS_INVALID_CONTEXT
+<a id="ERR_TLS_INVALID_CONTEXT"></a>
+### `ERR_TLS_INVALID_CONTEXT`
 <!-- YAML
 added: v12.16.0
 -->
@@ -1835,7 +1854,7 @@ An attempt was made to renegotiate TLS on a socket instance with TLS disabled.
 ### `ERR_TLS_REQUIRED_SERVER_NAME`
 
 While using TLS, the `server.addContext()` method was called without providing
-a hostname in the first parameter.
+a host name in the first parameter.
 
 <a id="ERR_TLS_SESSION_ATTACK"></a>
 ### `ERR_TLS_SESSION_ATTACK`
@@ -2006,6 +2025,11 @@ meaning of the error depends on the specific function.
 ### `ERR_WASI_ALREADY_STARTED`
 
 The WASI instance has already started.
+
+<a id="ERR_WORKER_INIT_FAILED"></a>
+### `ERR_WORKER_INIT_FAILED`
+
+The `Worker` initialization failed.
 
 <a id="ERR_WORKER_INVALID_EXEC_ARGV"></a>
 ### `ERR_WORKER_INVALID_EXEC_ARGV`
@@ -2452,6 +2476,7 @@ such as `process.stdout.on('data')`.
 [crypto digest algorithm]: crypto.html#crypto_crypto_gethashes
 [domains]: domain.html
 [event emitter-based]: events.html#events_class_eventemitter
+[exports]: esm.html#esm_package_entry_points
 [file descriptors]: https://en.wikipedia.org/wiki/File_descriptor
 [policy]: policy.html
 [stream-based]: stream.html

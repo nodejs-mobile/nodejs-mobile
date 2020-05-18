@@ -13,10 +13,16 @@ rules:
       message: "Use `const { Array } = primordials;` instead of the global."
     - name: BigInt
       message: "Use `const { BigInt } = primordials;` instead of the global."
+    - name: BigInt64Array
+      message: "Use `const { BigInt64Array } = primordials;` instead of the global."
+    - name: BigUint64Array
+      message: "Use `const { BigUint64Array } = primordials;` instead of the global."
     - name: Boolean
       message: "Use `const { Boolean } = primordials;` instead of the global."
     - name: Error
       message: "Use `const { Error } = primordials;` instead of the global."
+    - name: Float32Array
+      message: "Use `const { Float32Array } = primordials;` instead of the global."
     - name: JSON
       message: "Use `const { JSON } = primordials;` instead of the global."
     - name: Map
@@ -31,10 +37,14 @@ rules:
       message: "Use `const { Promise } = primordials;` instead of the global."
     - name: Reflect
       message: "Use `const { Reflect } = primordials;` instead of the global."
+    - name: RegExp
+      message: "Use `const { RegExp } = primordials;` instead of the global."
     - name: Set
       message: "Use `const { Set } = primordials;` instead of the global."
     - name: Symbol
       message: "Use `const { Symbol } = primordials;` instead of the global."
+    - name: Uint16Array
+      message: "Use `const { Uint16Array } = primordials;` instead of the global."
     - name: WeakMap
       message: "Use `const { WeakMap } = primordials;` instead of the global."
     - name: WeakSet
@@ -57,6 +67,8 @@ rules:
       message: "Please use `require('internal/errors').hideStackFrames()` instead."
     - selector: "AssignmentExpression:matches([left.name='prepareStackTrace'], [left.property.name='prepareStackTrace'])"
       message: "Use 'overrideStackTrace' from 'lib/internal/errors.js' instead of 'Error.prepareStackTrace'."
+    - selector: "CallExpression[callee.name='isNaN']"
+      message: "Use NumberIsNaN() primordial instead of the global isNaN() function."
   # Custom rules in tools/eslint-rules
   node-core/lowercase-name-for-primitive: error
   node-core/non-ascii-character: error

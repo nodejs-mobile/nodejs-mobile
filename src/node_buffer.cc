@@ -151,7 +151,8 @@ void CallbackInfo::CleanupHook(void* data) {
     HandleScope handle_scope(self->env_->isolate());
     Local<ArrayBuffer> ab = self->persistent_.Get(self->env_->isolate());
     CHECK(!ab.IsEmpty());
-    ab->Detach();
+    if (ab->IsDetachable())
+      ab->Detach();
   }
 
   self->WeakCallback(self->env_->isolate());
@@ -162,7 +163,6 @@ void CallbackInfo::WeakCallback(
     const WeakCallbackInfo<CallbackInfo>& data) {
   CallbackInfo* self = data.GetParameter();
   self->WeakCallback(data.GetIsolate());
-  delete self;
 }
 
 
@@ -170,6 +170,7 @@ void CallbackInfo::WeakCallback(Isolate* isolate) {
   callback_(data_, hint_);
   int64_t change_in_bytes = -static_cast<int64_t>(sizeof(*this));
   isolate->AdjustAmountOfExternalAllocatedMemory(change_in_bytes);
+  delete this;
 }
 
 
@@ -570,10 +571,11 @@ void Fill(const FunctionCallbackInfo<Value>& args) {
   THROW_AND_RETURN_UNLESS_BUFFER(env, args[0]);
   SPREAD_BUFFER_ARG(args[0], ts_obj);
 
-  uint32_t start;
-  if (!args[2]->Uint32Value(ctx).To(&start)) return;
-  uint32_t end;
-  if (!args[3]->Uint32Value(ctx).To(&end)) return;
+  size_t start;
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(env, args[2], 0, &start));
+  size_t end;
+  THROW_AND_RETURN_IF_OOB(ParseArrayIndex(env, args[3], 0, &end));
+
   size_t fill_length = end - start;
   Local<String> str_obj;
   size_t str_length;

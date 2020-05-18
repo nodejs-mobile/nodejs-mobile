@@ -1,7 +1,8 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 
+const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
@@ -16,10 +17,10 @@ function recurse() {
   recurse();
 }
 
-common.expectsError(
+assert.throws(
   () => recurse(),
   {
-    type: RangeError,
+    name: 'RangeError',
     message: 'Maximum call stack size exceeded'
   }
 );

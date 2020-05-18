@@ -28,11 +28,13 @@ file a new issue.
     * [Running Coverage](#running-coverage)
     * [Building the documentation](#building-the-documentation)
     * [Building a debug build](#building-a-debug-build)
+    * [Building an ASAN build](#building-an-asan-build)
+    * [Troubleshooting Unix and macOS builds](#troubleshooting-unix-and-macos-builds)
   * [Windows](#windows)
     * [Prerequisites](#prerequisites)
       * [Option 1: Manual install](#option-1-manual-install)
       * [Option 2: Automated install with Boxstarter](#option-2-automated-install-with-boxstarter)
-    * [Building Node.js](#building-nodejs-1)
+    * [Building Node.js](#building-nodejs-2)
   * [Android/Android-based devices (e.g. Firefox OS)](#androidandroid-based-devices-eg-firefox-os)
 * [`Intl` (ECMA-402) support](#intl-ecma-402-support)
   * [Default: `small-icu` (English only) support](#default-small-icu-english-only-support)
@@ -42,7 +44,7 @@ file a new issue.
   * [Building without Intl support](#building-without-intl-support)
     * [Unix/macOS](#unixmacos-1)
     * [Windows](#windows-2)
-  * [Use existing installed ICU (Unix/macOS only)](#use-existing-installed-icu-unixmacOS-only)
+  * [Use existing installed ICU (Unix/macOS only)](#use-existing-installed-icu-unixmacos-only)
   * [Build with a specific ICU](#build-with-a-specific-icu)
     * [Unix/macOS](#unixmacos-2)
     * [Windows](#windows-3)
@@ -164,7 +166,7 @@ Binaries at <https://nodejs.org/download/release/> are produced on:
 | Binary package        | Platform and Toolchain                                                   |
 | --------------------- | ------------------------------------------------------------------------ |
 | aix-ppc64             | AIX 7.1 TL05 on PPC64BE with GCC 6                                       |
-| darwin-x64 (and .pkg) | macOS 10.11, Xcode Command Line Tools 8 with -mmacosx-version-min=10.10  |
+| darwin-x64 (and .pkg) | macOS 10.15, Xcode Command Line Tools 11 with -mmacosx-version-min=10.10 |
 | linux-arm64           | CentOS 7 with devtoolset-6 / GCC 6                                       |
 | linux-armv7l          | Cross-compiled on Ubuntu 16.04 x64 with [custom GCC toolchain](https://github.com/rvagg/rpi-newer-crosstools)   |
 | linux-ppc64le         | CentOS 7 with devtoolset-6 / GCC 6 <sup>[7](#fn7)</sup>                  |
@@ -249,6 +251,7 @@ Installation via Linux package manager can be achieved with:
 * Fedora: `sudo dnf install python gcc-c++ make`
 * CentOS and RHEL: `sudo yum install python gcc-c++ make`
 * OpenSUSE: `sudo zypper install python gcc-c++ make`
+* Arch Linux, Manjaro: `sudo pacman -S python gcc make`
 
 FreeBSD and OpenBSD users may also need to install `libexecinfo`.
 
@@ -494,6 +497,33 @@ $ gdb /opt/node-debug/node core.node.8.1535359906
 $ backtrace
 ```
 
+#### Building an ASAN build
+
+[ASAN](https://github.com/google/sanitizers) can help detect various memory
+related bugs. ASAN builds are currently only supported on linux.
+If you want to check it on Windows or macOS or you want a consistent toolchain
+on Linux, you can try [Docker](https://www.docker.com/products/docker-desktop)
+ (using an image like `gengjiawen/node-build:2020-02-14`).
+
+The `--debug` is not necessary and will slow down build and testing, but it can
+show clear stacktrace if ASAN hits an issue.
+
+``` console
+$  ./configure --debug --enable-asan && make -j4
+$ make test-only
+```
+
+#### Troubleshooting Unix and macOS builds
+
+Stale builds can sometimes result in `file not found` errors while building.
+This and some other problems can be resolved with `make distclean`. The
+`distclean` recipe aggressively removes build artifacts. You will need to
+build again (`make -j4`). Since all build artifacts have been removed, this
+rebuild may take a lot more time than previous builds. Additionally,
+`distclean` removes the file that stores the results of `./configure`. If you
+ran `./configure` with non-default options (such as `--debug`), you will need
+to run it again before invoking `make -j4`.
+
 ### Windows
 
 #### Prerequisites
@@ -531,7 +561,6 @@ Optional requirements for compiling for Windows 10 on ARM (ARM64):
 * Windows 10 SDK 10.0.17763.0 or newer
 
 ##### Option 2: Automated install with Boxstarter
-<a name="boxstarter"></a>
 
 A [Boxstarter](https://boxstarter.org/) script can be used for easy setup of
 Windows systems with all the required prerequisites for Node.js development.
@@ -542,7 +571,7 @@ packages:
   Unix tools added to the `PATH`.
 * [Python 3.x](https://chocolatey.org/packages/python) and
   [legacy Python](https://chocolatey.org/packages/python2)
-* [Visual Studio 2017 Build Tools](https://chocolatey.org/packages/visualstudio2017buildtools)
+* [Visual Studio 2019 Build Tools](https://chocolatey.org/packages/visualstudio2019buildtools)
   with [Visual C++ workload](https://chocolatey.org/packages/visualstudio2017-workload-vctools)
 * [NetWide Assembler](https://chocolatey.org/packages/nasm)
 

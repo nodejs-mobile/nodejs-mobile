@@ -5,8 +5,87 @@
 > Stability: 2 - Stable
 
 The `assert` module provides a set of assertion functions for verifying
-invariants. The module provides a recommended [`strict` mode][] and a more
-lenient legacy mode.
+invariants.
+
+## Strict assertion mode
+<!-- YAML
+added: v9.9.0
+changes:
+  - version: v12.16.2
+    description: Changed "strict mode" to "strict assertion mode" and "legacy
+                 mode" to "legacy assertion mode" to avoid confusion with the
+                 more usual meaining of "strict mode".
+  - version: v9.9.0
+    pr-url: https://github.com/nodejs/node/pull/17615
+    description: Added error diffs to the strict assertion mode.
+  - version: v9.9.0
+    pr-url: https://github.com/nodejs/node/pull/17002
+    description: Added strict assertion mode to the assert module.
+-->
+
+In strict assertion mode, non-strict methods behave like their corresponding
+strict methods. For example, [`assert.deepEqual()`][] will behave like
+[`assert.deepStrictEqual()`][].
+
+In strict assertion mode, error messages for objects display a diff. In legacy
+assertion mode, error messages for objects display the objects, often truncated.
+
+To use strict assertion mode:
+
+```js
+const assert = require('assert').strict;
+```
+
+Example error diff:
+
+```js
+const assert = require('assert').strict;
+
+assert.deepEqual([[[1, 2, 3]], 4, 5], [[[1, 2, '3']], 4, 5]);
+// AssertionError: Expected inputs to be strictly deep-equal:
+// + actual - expected ... Lines skipped
+//
+//   [
+//     [
+// ...
+//       2,
+// +     3
+// -     '3'
+//     ],
+// ...
+//     5
+//   ]
+```
+
+To deactivate the colors, use the `NO_COLOR` or `NODE_DISABLE_COLORS`
+environment variables. This will also deactivate the colors in the REPL. For
+more on color support in terminal environments, read the tty
+[getColorDepth()](tty.html#tty_writestream_getcolordepth_env) documentation.
+
+## Legacy assertion mode
+
+Legacy assertion mode uses the [Abstract Equality Comparison][] in:
+
+* [`assert.deepEqual()`][]
+* [`assert.equal()`][]
+* [`assert.notDeepEqual()`][]
+* [`assert.notEqual()`][]
+
+To use legacy assertion mode:
+
+```js
+const assert = require('assert');
+```
+
+Whenever possible, use the [strict assertion mode][] instead. Otherwise, the
+[Abstract Equality Comparison][] may cause surprising results. This is
+especially true for [`assert.deepEqual()`][], where the comparison rules are
+lax:
+
+```js
+// WARNING: This does not throw an AssertionError!
+assert.deepEqual(/a/gi, new Date());
+```
 
 ## Class: assert.AssertionError
 
@@ -68,84 +147,6 @@ try {
 }
 ```
 
-## Strict mode
-<!-- YAML
-added: v9.9.0
-changes:
-  - version: v9.9.0
-    pr-url: https://github.com/nodejs/node/pull/17615
-    description: Added error diffs to the strict mode
-  - version: v9.9.0
-    pr-url: https://github.com/nodejs/node/pull/17002
-    description: Added strict mode to the assert module.
--->
-
-In `strict` mode (not to be confused with `"use strict"`), `assert` functions
-use the comparison in the corresponding strict functions. For example,
-[`assert.deepEqual()`][] will behave like [`assert.deepStrictEqual()`][].
-
-In `strict` mode, error messages for objects display a diff. In legacy mode,
-error messages for objects display the objects, often truncated.
-
-To use `strict` mode:
-
-```js
-const assert = require('assert').strict;
-```
-
-Example error diff:
-
-```js
-const assert = require('assert').strict;
-
-assert.deepEqual([[[1, 2, 3]], 4, 5], [[[1, 2, '3']], 4, 5]);
-// AssertionError: Expected inputs to be strictly deep-equal:
-// + actual - expected ... Lines skipped
-//
-//   [
-//     [
-// ...
-//       2,
-// +     3
-// -     '3'
-//     ],
-// ...
-//     5
-//   ]
-```
-
-To deactivate the colors, use the `NO_COLOR` or
-`NODE_DISABLE_COLORS` environment variable.
-This will also deactivate the colors in the REPL.
-
-For more on the color support in terminal environments, read
-the tty [getColorDepth()](tty.html#tty_writestream_getcolordepth_env) doc.
-
-## Legacy mode
-
-Legacy mode uses the [Abstract Equality Comparison][] in:
-
-* [`assert.deepEqual()`][]
-* [`assert.equal()`][]
-* [`assert.notDeepEqual()`][]
-* [`assert.notEqual()`][]
-
-To use legacy mode:
-
-```js
-const assert = require('assert');
-```
-
-Whenever possible, use the [`strict` mode][] instead. Otherwise, the
-[Abstract Equality Comparison][] may cause surprising results. This is
-especially true for [`assert.deepEqual()`][], where the comparison rules are
-lax:
-
-```js
-// WARNING: This does not throw an AssertionError!
-assert.deepEqual(/a/gi, new Date());
-```
-
 ## `assert(value[, message])`
 <!-- YAML
 added: v0.5.9
@@ -185,19 +186,19 @@ changes:
 * `expected` {any}
 * `message` {string|Error}
 
-**Strict mode**
+**Strict assertion mode**
 
 An alias of [`assert.deepStrictEqual()`][].
 
-**Legacy mode**
+**Legacy assertion mode**
 
 > Stability: 0 - Deprecated: Use [`assert.deepStrictEqual()`][] instead.
 
 Tests for deep equality between the `actual` and `expected` parameters. Consider
 using [`assert.deepStrictEqual()`][] instead. [`assert.deepEqual()`][] can have
-potentially surprising results.
+surprising results.
 
-"Deep" equality means that the enumerable "own" properties of child objects
+_Deep equality_ means that the enumerable "own" properties of child objects
 are also recursively evaluated by the following rules.
 
 ### Comparison details
@@ -596,11 +597,11 @@ added: v0.1.21
 * `expected` {any}
 * `message` {string|Error}
 
-**Strict mode**
+**Strict assertion mode**
 
 An alias of [`assert.strictEqual()`][].
 
-**Legacy mode**
+**Legacy assertion mode**
 
 > Stability: 0 - Deprecated: Use [`assert.strictEqual()`][] instead.
 
@@ -825,11 +826,11 @@ changes:
 * `expected` {any}
 * `message` {string|Error}
 
-**Strict mode**
+**Strict assertion mode**
 
 An alias of [`assert.notDeepStrictEqual()`][].
 
-**Legacy mode**
+**Legacy assertion mode**
 
 > Stability: 0 - Deprecated: Use [`assert.notDeepStrictEqual()`][] instead.
 
@@ -931,11 +932,11 @@ added: v0.1.21
 * `expected` {any}
 * `message` {string|Error}
 
-**Strict mode**
+**Strict assertion mode**
 
 An alias of [`assert.notStrictEqual()`][].
 
-**Legacy mode**
+**Legacy assertion mode**
 
 > Stability: 0 - Deprecated: Use [`assert.notStrictEqual()`][] instead.
 
@@ -1105,6 +1106,21 @@ if the `asyncFn` fails to reject.
     {
       name: 'TypeError',
       message: 'Wrong value'
+    }
+  );
+})();
+```
+
+```js
+(async () => {
+  await assert.rejects(
+    async () => {
+      throw new TypeError('Wrong value');
+    },
+    (err) => {
+      assert.strictEqual(err.name, 'TypeError');
+      assert.strictEqual(err.message, 'Wrong value');
+      return true;
     }
   );
 })();
@@ -1395,7 +1411,7 @@ argument.
 [`assert.ok()`]: #assert_assert_ok_value_message
 [`assert.strictEqual()`]: #assert_assert_strictequal_actual_expected_message
 [`assert.throws()`]: #assert_assert_throws_fn_error_message
-[`strict` mode]: #assert_strict_mode
+[strict assertion mode]: #assert_strict_assertion_mode
 [Abstract Equality Comparison]: https://tc39.github.io/ecma262/#sec-abstract-equality-comparison
 [Object wrappers]: https://developer.mozilla.org/en-US/docs/Glossary/Primitive#Primitive_wrapper_objects_in_JavaScript
 [Object.prototype.toString()]: https://tc39.github.io/ecma262/#sec-object.prototype.tostring

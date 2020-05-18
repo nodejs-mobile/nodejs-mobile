@@ -44,7 +44,7 @@ const uint64_t timeOrigin = PERFORMANCE_NOW();
 const double timeOriginTimestamp = GetCurrentTimeInMicroseconds();
 uint64_t performance_v8_start;
 
-void performance_state::Mark(enum PerformanceMilestone milestone,
+void PerformanceState::Mark(enum PerformanceMilestone milestone,
                              uint64_t ts) {
   this->milestones[milestone] = ts;
   TRACE_EVENT_INSTANT_WITH_TIMESTAMP0(
@@ -172,7 +172,6 @@ void Measure(const FunctionCallbackInfo<Value>& args) {
   HandleScope scope(env->isolate());
   Utf8Value name(env->isolate(), args[0]);
   Utf8Value startMark(env->isolate(), args[1]);
-  Utf8Value endMark(env->isolate(), args[2]);
 
   AliasedFloat64Array& milestones = env->performance_state()->milestones;
 
@@ -186,11 +185,17 @@ void Measure(const FunctionCallbackInfo<Value>& args) {
       startTimestamp = milestones[milestone];
   }
 
-  uint64_t endTimestamp = GetPerformanceMark(env, *endMark);
-  if (endTimestamp == 0) {
-    PerformanceMilestone milestone = ToPerformanceMilestoneEnum(*endMark);
-    if (milestone != NODE_PERFORMANCE_MILESTONE_INVALID)
-      endTimestamp = milestones[milestone];
+  uint64_t endTimestamp = 0;
+  if (args[2]->IsUndefined()) {
+    endTimestamp = PERFORMANCE_NOW();
+  } else {
+    Utf8Value endMark(env->isolate(), args[2]);
+    endTimestamp = GetPerformanceMark(env, *endMark);
+    if (endTimestamp == 0) {
+      PerformanceMilestone milestone = ToPerformanceMilestoneEnum(*endMark);
+      if (milestone != NODE_PERFORMANCE_MILESTONE_INVALID)
+        endTimestamp = milestones[milestone];
+    }
   }
 
   if (endTimestamp < startTimestamp)
@@ -263,7 +268,7 @@ void MarkGarbageCollectionEnd(Isolate* isolate,
                               GCCallbackFlags flags,
                               void* data) {
   Environment* env = static_cast<Environment*>(data);
-  performance_state* state = env->performance_state();
+  PerformanceState* state = env->performance_state();
   // If no one is listening to gc performance entries, do not create them.
   if (!state->observers[NODE_PERFORMANCE_ENTRY_TYPE_GC])
     return;
@@ -548,7 +553,7 @@ void Initialize(Local<Object> target,
                 void* priv) {
   Environment* env = Environment::GetCurrent(context);
   Isolate* isolate = env->isolate();
-  performance_state* state = env->performance_state();
+  PerformanceState* state = env->performance_state();
 
   target->Set(context,
               FIXED_ONE_BYTE_STRING(isolate, "observerCounts"),

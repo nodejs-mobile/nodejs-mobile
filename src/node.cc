@@ -23,7 +23,7 @@
 
 // ========== local headers ==========
 
-#include "debug_utils.h"
+#include "debug_utils-inl.h"
 #include "env-inl.h"
 #include "memory_tracker-inl.h"
 #include "node_binding.h"
@@ -98,9 +98,6 @@
 #include <unistd.h>        // STDIN_FILENO, STDERR_FILENO
 #endif
 
-#ifdef __PASE__
-#include <sys/ioctl.h>  // ioctl
-#endif
 // ========== global C++ headers ==========
 
 #include <cerrno>
@@ -309,48 +306,32 @@ MaybeLocal<Value> Environment::BootstrapNode() {
     return scope.EscapeMaybe(result);
   }
 
-  if (is_main_thread()) {
-    result = ExecuteBootstrapper(this,
-                                 "internal/bootstrap/switches/is_main_thread",
-                                 &node_params,
-                                 &node_args);
-  } else {
-    result =
-        ExecuteBootstrapper(this,
-                            "internal/bootstrap/switches/is_not_main_thread",
-                            &node_params,
-                            &node_args);
-  }
+  auto thread_switch_id =
+      is_main_thread() ? "internal/bootstrap/switches/is_main_thread"
+                       : "internal/bootstrap/switches/is_not_main_thread";
+  result =
+      ExecuteBootstrapper(this, thread_switch_id, &node_params, &node_args);
 
   if (result.IsEmpty()) {
     return scope.EscapeMaybe(result);
   }
 
-  if (owns_process_state()) {
-    result = ExecuteBootstrapper(
-        this,
-        "internal/bootstrap/switches/does_own_process_state",
-        &node_params,
-        &node_args);
-  } else {
-    result = ExecuteBootstrapper(
-        this,
-        "internal/bootstrap/switches/does_not_own_process_state",
-        &node_params,
-        &node_args);
-  }
+  auto process_state_switch_id =
+      owns_process_state()
+          ? "internal/bootstrap/switches/does_own_process_state"
+          : "internal/bootstrap/switches/does_not_own_process_state";
+  result = ExecuteBootstrapper(
+      this, process_state_switch_id, &node_params, &node_args);
 
   if (result.IsEmpty()) {
     return scope.EscapeMaybe(result);
   }
 
+  Local<String> env_string = FIXED_ONE_BYTE_STRING(isolate_, "env");
   Local<Object> env_var_proxy;
   if (!CreateEnvVarProxy(context(), isolate_, as_callback_data())
            .ToLocal(&env_var_proxy) ||
-      process_object()
-          ->Set(
-              context(), FIXED_ONE_BYTE_STRING(isolate_, "env"), env_var_proxy)
-          .IsNothing()) {
+      process_object()->Set(context(), env_string, env_var_proxy).IsNothing()) {
     return MaybeLocal<Value>();
   }
 
@@ -555,14 +536,7 @@ inline void PlatformInit() {
     while (s.flags == -1 && errno == EINTR);  // NOLINT
     CHECK_NE(s.flags, -1);
 
-#ifdef __PASE__
-    // On IBMi PASE isatty() always returns true for stdin, stdout and stderr.
-    // Use ioctl() instead to identify whether it's actually a TTY.
-    if (ioctl(fd, TXISATTY + 0x81, nullptr) == -1 && errno == ENOTTY)
-      continue;
-#else
-    if (!isatty(fd)) continue;
-#endif
+    if (uv_guess_handle(fd) != UV_TTY) continue;
     s.isatty = true;
 
     do
@@ -770,80 +744,19 @@ int InitializeNodeWithArgs(std::vector<std::string>* argv,
   V8::SetFlagsFromString(NODE_V8_OPTIONS, sizeof(NODE_V8_OPTIONS) - 1);
 #endif
 
-  std::shared_ptr<EnvironmentOptions> default_env_options =
-      per_process::cli_options->per_isolate->per_env;
-  {
-    std::string text;
-    default_env_options->pending_deprecation =
-        credentials::SafeGetenv("NODE_PENDING_DEPRECATION", &text) &&
-        text[0] == '1';
-  }
-
-  // Allow for environment set preserving symlinks.
-  {
-    std::string text;
-    default_env_options->preserve_symlinks =
-        credentials::SafeGetenv("NODE_PRESERVE_SYMLINKS", &text) &&
-        text[0] == '1';
-  }
-
-  {
-    std::string text;
-    default_env_options->preserve_symlinks_main =
-        credentials::SafeGetenv("NODE_PRESERVE_SYMLINKS_MAIN", &text) &&
-        text[0] == '1';
-  }
-
-  if (default_env_options->redirect_warnings.empty()) {
-    credentials::SafeGetenv("NODE_REDIRECT_WARNINGS",
-                            &default_env_options->redirect_warnings);
-  }
+  HandleEnvOptions(per_process::cli_options->per_isolate->per_env);
 
 #if !defined(NODE_WITHOUT_NODE_OPTIONS)
   std::string node_options;
 
   if (credentials::SafeGetenv("NODE_OPTIONS", &node_options)) {
-    std::vector<std::string> env_argv;
+    std::vector<std::string> env_argv =
+        ParseNodeOptionsEnvVar(node_options, errors);
+
+    if (!errors->empty()) return 9;
+
     // [0] is expected to be the program name, fill it in from the real argv.
-    env_argv.push_back(argv->at(0));
-
-    bool is_in_string = false;
-    bool will_start_new_arg = true;
-    for (std::string::size_type index = 0;
-         index < node_options.size();
-         ++index) {
-      char c = node_options.at(index);
-
-      // Backslashes escape the following character
-      if (c == '\\' && is_in_string) {
-        if (index + 1 == node_options.size()) {
-          errors->push_back("invalid value for NODE_OPTIONS "
-                            "(invalid escape)\n");
-          return 9;
-        } else {
-          c = node_options.at(++index);
-        }
-      } else if (c == ' ' && !is_in_string) {
-        will_start_new_arg = true;
-        continue;
-      } else if (c == '"') {
-        is_in_string = !is_in_string;
-        continue;
-      }
-
-      if (will_start_new_arg) {
-        env_argv.push_back(std::string(1, c));
-        will_start_new_arg = false;
-      } else {
-        env_argv.back() += c;
-      }
-    }
-
-    if (is_in_string) {
-      errors->push_back("invalid value for NODE_OPTIONS "
-                        "(unterminated string)\n");
-      return 9;
-    }
+    env_argv.insert(env_argv.begin(), argv->at(0));
 
     const int exit_code = ProcessGlobalArgs(&env_argv,
                                             nullptr,
@@ -952,10 +865,22 @@ void Init(int* argc,
 }
 
 InitializationResult InitializeOncePerProcess(int argc, char** argv) {
+  // Initialized the enabled list for Debug() calls with system
+  // environment variables.
+  per_process::enabled_debug_list.Parse(nullptr);
+
   atexit(ResetStdio);
   PlatformInit();
 
   CHECK_GT(argc, 0);
+
+#ifdef NODE_ENABLE_LARGE_CODE_PAGES
+  if (node::IsLargePagesEnabled()) {
+    if (node::MapStaticCodeToLargePages() != 0) {
+      fprintf(stderr, "Reverting to default page size\n");
+    }
+  }
+#endif
 
   // Hack around with the argv pointer. Used for process.title = "blah".
   argv = uv_setup_args(argc, argv);
@@ -975,26 +900,6 @@ InitializationResult InitializeOncePerProcess(int argc, char** argv) {
       return result;
     }
   }
-
-#if defined(NODE_ENABLE_LARGE_CODE_PAGES) && NODE_ENABLE_LARGE_CODE_PAGES
-  if (per_process::cli_options->use_largepages == "on" ||
-      per_process::cli_options->use_largepages == "silent") {
-    if (node::IsLargePagesEnabled()) {
-      if (node::MapStaticCodeToLargePages() != 0 &&
-          per_process::cli_options->use_largepages != "silent") {
-        fprintf(stderr,
-                "Mapping code to large pages failed. Reverting to default page "
-                "size.\n");
-      }
-    } else if (per_process::cli_options->use_largepages != "silent") {
-      fprintf(stderr, "Large pages are not enabled.\n");
-    }
-  }
-#else
-  if (per_process::cli_options->use_largepages == "on") {
-    fprintf(stderr, "Mapping to large pages is not supported.\n");
-  }
-#endif  // NODE_ENABLE_LARGE_CODE_PAGES
 
   if (per_process::cli_options->print_version) {
     printf("%s\n", NODE_VERSION);
@@ -1030,7 +935,8 @@ InitializationResult InitializeOncePerProcess(int argc, char** argv) {
   V8::SetEntropySource(crypto::EntropySource);
 #endif  // HAVE_OPENSSL
 
-  InitializeV8Platform(per_process::cli_options->v8_thread_pool_size);
+  per_process::v8_platform.Initialize(
+      per_process::cli_options->v8_thread_pool_size);
   V8::Initialize();
   performance::performance_v8_start = PERFORMANCE_NOW();
   per_process::v8_initialized = true;

@@ -73,8 +73,11 @@ function is passed a single `Error` object.
 added: v0.1.99
 -->
 
-The `'listening'` event is emitted whenever a socket begins listening for
-datagram messages. This occurs as soon as UDP sockets are created.
+The `'listening'` event is emitted once the `dgram.Socket` is addressable and
+can receive data. This happens either explicitly with `socket.bind()` or
+implicitly the first time data is sent using `socket.send()`.
+Until the `dgram.Socket` is listening, the underlying system resources do not
+exist and calls such as `socket.address()` and `socket.setTTL()` will fail.
 
 ### Event: `'message'`
 <!-- YAML
@@ -400,7 +403,7 @@ changes:
 * `offset` {integer} Offset in the buffer where the message starts.
 * `length` {integer} Number of bytes in the message.
 * `port` {integer} Destination port.
-* `address` {string} Destination hostname or IP address.
+* `address` {string} Destination host name or IP address.
 * `callback` {Function} Called when the message has been sent.
 
 Broadcasts a datagram on the socket.

@@ -106,6 +106,7 @@ class EnvironmentOptions : public Options {
   std::string experimental_specifier_resolution;
   std::string es_module_specifier_resolution;
   bool experimental_wasm_modules = false;
+  bool experimental_import_meta_resolve = false;
   std::string module_type;
   std::string experimental_policy;
   std::string experimental_policy_integrity;
@@ -238,7 +239,6 @@ class PerProcessOptions : public Options {
   bool force_fips_crypto = false;
 #endif
 #endif
-  std::string use_largepages = "off";
 
 #ifdef NODE_REPORT
   std::vector<std::string> cmdline;
@@ -457,6 +457,13 @@ extern Mutex cli_options_mutex;
 extern std::shared_ptr<PerProcessOptions> cli_options;
 
 }  // namespace per_process
+
+void HandleEnvOptions(std::shared_ptr<EnvironmentOptions> env_options);
+void HandleEnvOptions(std::shared_ptr<EnvironmentOptions> env_options,
+                      std::function<std::string(const char*)> opt_getter);
+
+std::vector<std::string> ParseNodeOptionsEnvVar(
+    const std::string& node_options, std::vector<std::string>* errors);
 }  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

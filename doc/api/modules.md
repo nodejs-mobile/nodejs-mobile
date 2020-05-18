@@ -82,7 +82,7 @@ by checking `require.main.filename`.
 
 <!-- type=misc -->
 
-The semantics of Node.js's `require()` function were designed to be general
+The semantics of the Node.js `require()` function were designed to be general
 enough to support reasonable directory structures. Package manager programs
 such as `dpkg`, `rpm`, and `npm` will hopefully find it possible to build
 native packages from Node.js modules without modification.
@@ -162,10 +162,10 @@ require(X) from module at path Y
    c. THROW "not found"
 4. LOAD_SELF_REFERENCE(X, dirname(Y))
 5. LOAD_NODE_MODULES(X, dirname(Y))
-7. THROW "not found"
+6. THROW "not found"
 
 LOAD_AS_FILE(X)
-1. If X is a file, load X as JavaScript text.  STOP
+1. If X is a file, load X as its file extension format.  STOP
 2. If X.js is a file, load X.js as JavaScript text.  STOP
 3. If X.json is a file, parse X.json to a JavaScript Object.  STOP
 4. If X.node is a file, load X.node as binary addon.  STOP
@@ -189,8 +189,9 @@ LOAD_AS_DIRECTORY(X)
 LOAD_NODE_MODULES(X, START)
 1. let DIRS = NODE_MODULES_PATHS(START)
 2. for each DIR in DIRS:
-   a. LOAD_AS_FILE(DIR/X)
-   b. LOAD_AS_DIRECTORY(DIR/X)
+   a. LOAD_PACKAGE_EXPORTS(DIR, X)
+   b. LOAD_AS_FILE(DIR/X)
+   c. LOAD_AS_DIRECTORY(DIR/X)
 
 NODE_MODULES_PATHS(START)
 1. let PARTS = path split(START)
@@ -208,49 +209,34 @@ LOAD_SELF_REFERENCE(X, START)
 2. If no scope was found, return.
 3. If the `package.json` has no "exports", return.
 4. If the name in `package.json` isn't a prefix of X, throw "not found".
-5. Otherwise, resolve the remainder of X relative to this package as if it
-   was loaded via `LOAD_NODE_MODULES` with a name in `package.json`.
-```
+5. Otherwise, load the remainder of X relative to this package as if it
+  was loaded via `LOAD_NODE_MODULES` with a name in `package.json`.
 
-Node.js allows packages loaded via
-`LOAD_NODE_MODULES` to explicitly declare which file paths to expose and how
-they should be interpreted. This expands on the control packages already had
-using the `main` field.
-
-With this feature enabled, the `LOAD_NODE_MODULES` changes are:
-
-```txt
-LOAD_NODE_MODULES(X, START)
-1. let DIRS = NODE_MODULES_PATHS(START)
-2. for each DIR in DIRS:
-   a. let FILE_PATH = RESOLVE_BARE_SPECIFIER(DIR, X)
-   b. LOAD_AS_FILE(FILE_PATH)
-   c. LOAD_AS_DIRECTORY(FILE_PATH)
-
-RESOLVE_BARE_SPECIFIER(DIR, X)
+LOAD_PACKAGE_EXPORTS(DIR, X)
 1. Try to interpret X as a combination of name and subpath where the name
    may have a @scope/ prefix and the subpath begins with a slash (`/`).
-2. If X matches this pattern and DIR/name/package.json is a file:
-   a. Parse DIR/name/package.json, and look for "exports" field.
-   b. If "exports" is null or undefined, GOTO 3.
-   c. If "exports" is an object with some keys starting with "." and some keys
-      not starting with ".", throw "invalid config".
-   d. If "exports" is a string, or object with no keys starting with ".", treat
-      it as having that value as its "." object property.
-   e. If subpath is "." and "exports" does not have a "." entry, GOTO 3.
-   f. Find the longest key in "exports" that the subpath starts with.
-   g. If no such key can be found, throw "not found".
-   h. let RESOLVED_URL =
-        PACKAGE_EXPORTS_TARGET_RESOLVE(pathToFileURL(DIR/name), exports[key],
-        subpath.slice(key.length), ["node", "require"]), as defined in the ESM
-        resolver.
-   i. return fileURLToPath(RESOLVED_URL)
-3. return DIR/X
+2. If X does not match this pattern or DIR/name/package.json is not a file,
+   return.
+3. Parse DIR/name/package.json, and look for "exports" field.
+4. If "exports" is null or undefined, return.
+5. If "exports" is an object with some keys starting with "." and some keys
+  not starting with ".", throw "invalid config".
+6. If "exports" is a string, or object with no keys starting with ".", treat
+  it as having that value as its "." object property.
+7. If subpath is "." and "exports" does not have a "." entry, return.
+8. Find the longest key in "exports" that the subpath starts with.
+9. If no such key can be found, throw "not found".
+10. let RESOLVED =
+    fileURLToPath(PACKAGE_EXPORTS_TARGET_RESOLVE(pathToFileURL(DIR/name),
+    exports[key], subpath.slice(key.length), ["node", "require"])), as defined
+    in the ESM resolver.
+11. If key ends with "/":
+    a. LOAD_AS_FILE(RESOLVED)
+    b. LOAD_AS_DIRECTORY(RESOLVED)
+12. Otherwise
+   a. If RESOLVED is a file, load it as its file extension format.  STOP
+13. Throw "not found"
 ```
-
-`"exports"` is only honored when loading a package "name" as defined above. Any
-`"exports"` values within nested directories and packages must be declared by
-the `package.json` responsible for the "name".
 
 ## Caching
 
@@ -290,7 +276,7 @@ irrespective of whether or not `./foo` and `./FOO` are the same file.
 Node.js has several modules compiled into the binary. These modules are
 described in greater detail elsewhere in this documentation.
 
-The core modules are defined within Node.js's source and are located in the
+The core modules are defined within the Node.js source and are located in the
 `lib/` folder.
 
 Core modules are always preferentially loaded if their identifier is
@@ -409,7 +395,7 @@ If this was in a folder at `./some-library`, then
 `require('./some-library')` would attempt to load
 `./some-library/lib/some-library.js`.
 
-This is the extent of Node.js's awareness of `package.json` files.
+This is the extent of the awareness of `package.json` files within Node.js.
 
 If there is no `package.json` file present in the directory, or if the
 `'main'` entry is missing or cannot be resolved, then Node.js
@@ -485,7 +471,7 @@ Additionally, Node.js will search in the following list of GLOBAL_FOLDERS:
 * 2: `$HOME/.node_libraries`
 * 3: `$PREFIX/lib/node`
 
-Where `$HOME` is the user's home directory, and `$PREFIX` is Node.js's
+Where `$HOME` is the user's home directory, and `$PREFIX` is the Node.js
 configured `node_prefix`.
 
 These are mostly for historic reasons.
@@ -618,10 +604,13 @@ Used to import modules, `JSON`, and local files. Modules can be imported
 from `node_modules`. Local modules and JSON files can be imported using
 a relative path (e.g. `./`, `./foo`, `./bar/baz`, `../foo`) that will be
 resolved against the directory named by [`__dirname`][] (if defined) or
-the current working directory.
+the current working directory. The relative paths of POSIX style are resolved
+in an OS independent fashion, meaning that the examples above will work on
+Windows in the same way they would on Unix systems.
 
 ```js
-// Importing a local module:
+// Importing a local module with a path relative to the `__dirname` or current
+// working directory. (On Windows, this would resolve to .\path\myLocalModule.)
 const myLocalModule = require('./path/myLocalModule');
 
 // Importing a JSON file:
@@ -732,6 +721,8 @@ changes:
 
 Use the internal `require()` machinery to look up the location of a module,
 but rather than loading the module, just return the resolved filename.
+
+If the module can not be found, a `MODULE_NOT_FOUND` error is thrown.
 
 ##### `require.resolve.paths(request)`
 <!-- YAML
@@ -942,7 +933,7 @@ added: v0.3.7
 * {Object}
 
 Provides general utility methods when interacting with instances of
-`Module` — the `module` variable often seen in file modules. Accessed
+`Module`, the `module` variable often seen in file modules. Accessed
 via `require('module')`.
 
 ### `module.builtinModules`

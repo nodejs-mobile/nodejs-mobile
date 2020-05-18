@@ -66,18 +66,18 @@ function nextdir() {
 // mkdirSync and mkdir require path to be a string, buffer or url.
 // Anything else generates an error.
 [false, 1, {}, [], null, undefined].forEach((i) => {
-  common.expectsError(
+  assert.throws(
     () => fs.mkdir(i, common.mustNotCall()),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError'
     }
   );
-  common.expectsError(
+  assert.throws(
     () => fs.mkdirSync(i),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError'
     }
   );
 });
@@ -148,6 +148,7 @@ function nextdir() {
       message: /ENOTDIR: .*mkdir/,
       name: 'Error',
       syscall: 'mkdir',
+      path: pathname // See: https://github.com/nodejs/node/issues/28015
     }
   );
 }
@@ -187,6 +188,11 @@ function nextdir() {
     assert.strictEqual(err.code, 'ENOTDIR');
     assert.strictEqual(err.syscall, 'mkdir');
     assert.strictEqual(fs.existsSync(pathname), false);
+    // See: https://github.com/nodejs/node/issues/28015
+    // The path field varies slightly in Windows errors, vs., other platforms
+    // see: https://github.com/libuv/libuv/issues/2661, for this reason we
+    // use startsWith() rather than comparing to the full "pathname".
+    assert(err.path.startsWith(filename));
   }));
 }
 
@@ -218,21 +224,21 @@ if (common.isMainThread && (common.isLinux || common.isOSX || common.isAndroid |
   const pathname = path.join(tmpdir.path, nextdir());
   ['', 1, {}, [], null, Symbol('test'), () => {}].forEach((recursive) => {
     const received = common.invalidArgTypeHelper(recursive);
-    common.expectsError(
+    assert.throws(
       () => fs.mkdir(pathname, { recursive }, common.mustNotCall()),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        type: TypeError,
-        message: 'The "recursive" argument must be of type boolean.' +
+        name: 'TypeError',
+        message: 'The "options.recursive" property must be of type boolean.' +
           received
       }
     );
-    common.expectsError(
+    assert.throws(
       () => fs.mkdirSync(pathname, { recursive }),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        type: TypeError,
-        message: 'The "recursive" argument must be of type boolean.' +
+        name: 'TypeError',
+        message: 'The "options.recursive" property must be of type boolean.' +
           received
       }
     );

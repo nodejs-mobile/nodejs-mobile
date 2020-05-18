@@ -40,7 +40,7 @@ involving knowledge of several components and APIs:
   other libraries are located in the `deps/` directory in the Node.js source
   tree. Only the libuv, OpenSSL, V8 and zlib symbols are purposefully
   re-exported by Node.js and may be used to various extents by Addons. See
-  [Linking to Node.js' own dependencies][] for additional information.
+  [Linking to libraries included with Node.js][] for additional information.
 
 All of the following examples are available for [download][] and may
 be used as the starting-point for an Addon.
@@ -155,18 +155,25 @@ they were created.
 
 The context-aware addon can be structured to avoid global static data by
 performing the following steps:
-
-* defining a class which will hold per-addon-instance data. Such
-a class should include a `v8::Global<v8::Object>` which will hold a weak
-reference to the addon's `exports` object. The callback associated with the weak
-reference will then destroy the instance of the class.
-* constructing an instance of this class in the addon initializer such that the
-`v8::Global<v8::Object>` is set to the `exports` object.
-* storing the instance of the class in a `v8::External`, and
-* passing the `v8::External` to all methods exposed to JavaScript by passing it
-to the `v8::FunctionTemplate` constructor which creates the native-backed
-JavaScript functions. The `v8::FunctionTemplate` constructor's third parameter
-accepts the `v8::External`.
+* Define a class which will hold per-addon-instance data and which has a static
+member of the form
+    ```C++
+    static void DeleteInstance(void* data) {
+      // Cast `data` to an instance of the class and delete it.
+    }
+    ```
+* Heap-allocate an instance of this class in the addon initializer. This can be
+accomplished using the `new` keyword.
+* Call `node::AddEnvironmentCleanupHook()`, passing it the above-created
+instance and a pointer to `DeleteInstance()`. This will ensure the instance is
+deleted when the environment is torn down.
+* Store the instance of the class in a `v8::External`, and
+* Pass the `v8::External` to all methods exposed to JavaScript by passing it
+to `v8::FunctionTemplate::New()` or `v8::Function::New()` which creates the
+native-backed JavaScript functions. The third parameter of
+`v8::FunctionTemplate::New()` or `v8::Function::New()`  accepts the
+`v8::External` and makes it available in the native callback using the
+`v8::FunctionCallbackInfo::Data()` method.
 
 This will ensure that the per-addon-instance data reaches each binding that can
 be called from JavaScript. The per-addon-instance data must also be passed into
@@ -181,25 +188,18 @@ using namespace v8;
 
 class AddonData {
  public:
-  AddonData(Isolate* isolate, Local<Object> exports):
+  explicit AddonData(Isolate* isolate):
       call_count(0) {
-    // Link the existence of this object instance to the existence of exports.
-    exports_.Reset(isolate, exports);
-    exports_.SetWeak(this, DeleteMe, WeakCallbackType::kParameter);
+    // Ensure this per-addon-instance data is deleted at environment cleanup.
+    node::AddEnvironmentCleanupHook(isolate, DeleteInstance, this);
   }
 
   // Per-addon data.
   int call_count;
 
- private:
-  // Method to call when "exports" is about to be garbage-collected.
-  static void DeleteMe(const WeakCallbackInfo<AddonData>& info) {
-    delete info.GetParameter();
+  static void DeleteInstance(void* data) {
+    delete static_cast<AddonData*>(data);
   }
-
-  // Weak handle to the "exports" object. An instance of this class will be
-  // destroyed along with the exports object to which it is weakly bound.
-  v8::Global<v8::Object> exports_;
 };
 
 static void Method(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -214,14 +214,17 @@ static void Method(const v8::FunctionCallbackInfo<v8::Value>& info) {
 NODE_MODULE_INIT(/* exports, module, context */) {
   Isolate* isolate = context->GetIsolate();
 
-  // Create a new instance of AddonData for this instance of the addon.
-  AddonData* data = new AddonData(isolate, exports);
-  // Wrap the data in a v8::External so we can pass it to the method we expose.
+  // Create a new instance of `AddonData` for this instance of the addon and
+  // tie its life cycle to that of the Node.js environment.
+  AddonData* data = new AddonData(isolate);
+
+  // Wrap the data in a `v8::External` so we can pass it to the method we
+  // expose.
   Local<External> external = External::New(isolate, data);
 
-  // Expose the method "Method" to JavaScript, and make sure it receives the
+  // Expose the method `Method` to JavaScript, and make sure it receives the
   // per-addon-instance data we created above by passing `external` as the
-  // third parameter to the FunctionTemplate constructor.
+  // third parameter to the `FunctionTemplate` constructor.
   exports->Set(context,
                String::NewFromUtf8(isolate, "method", NewStringType::kNormal)
                   .ToLocalChecked(),
@@ -313,7 +316,7 @@ require('./build/Release/addon');
 Once the source code has been written, it must be compiled into the binary
 `addon.node` file. To do so, create a file called `binding.gyp` in the
 top-level of the project describing the build configuration of the module
-using a JSON-like format. This file is used by [node-gyp][] — a tool written
+using a JSON-like format. This file is used by [node-gyp][], a tool written
 specifically to compile Node.js Addons.
 
 ```json
@@ -373,7 +376,7 @@ try {
 }
 ```
 
-### Linking to Node.js' own dependencies
+### Linking to libraries included with Node.js
 
 Node.js uses statically linked libraries such as V8, libuv and OpenSSL. All
 Addons are required to link to V8 and may link to any of the other dependencies
@@ -1361,7 +1364,7 @@ console.log(result);
 [`Worker`]: worker_threads.html#worker_threads_class_worker
 [Electron]: https://electronjs.org/
 [Embedder's Guide]: https://github.com/v8/v8/wiki/Embedder's%20Guide
-[Linking to Node.js' own dependencies]: #addons_linking_to_node_js_own_dependencies
+[Linking to libraries included with Node.js]: #addons_linking_to_libraries_included_with_node_js
 [Native Abstractions for Node.js]: https://github.com/nodejs/nan
 [bindings]: https://github.com/TooTallNate/node-bindings
 [download]: https://github.com/nodejs/node-addon-examples

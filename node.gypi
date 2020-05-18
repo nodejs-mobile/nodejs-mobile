@@ -272,6 +272,16 @@
         ],
       },
     }],
+    [ 'debug_node=="true"', {
+      'cflags!': [ '-O3' ],
+      'cflags': [ '-g', '-O0' ],
+      'defines': [ 'DEBUG' ],
+      'xcode_settings': {
+        'OTHER_CFLAGS': [
+          '-g', '-O0'
+        ],
+      },
+    }],
     [ 'coverage=="true" and node_shared=="false" and OS in "mac ios freebsd linux"', {
       'cflags!': [ '-O3' ],
       'ldflags': [ '--coverage',
@@ -309,18 +319,20 @@
     }],
     [ 'OS=="linux" and '
       'target_arch=="x64" and '
-      'llvm_version=="0.0"', {
+      'node_use_large_pages=="true" and '
+      'node_use_large_pages_script_lld=="false"', {
       'ldflags': [
         '-Wl,-T',
-        '<!(echo "$(pwd)/src/large_pages/ld.implicit.script")',
+        '<!(realpath src/large_pages/ld.implicit.script)',
       ]
     }],
     [ 'OS=="linux" and '
       'target_arch=="x64" and '
-      'llvm_version!="0.0"', {
+      'node_use_large_pages=="true" and '
+      'node_use_large_pages_script_lld=="true"', {
       'ldflags': [
         '-Wl,-T',
-        '<!(echo "$(pwd)/src/large_pages/ld.implicit.script.lld")',
+        '<!(realpath src/large_pages/ld.implicit.script.lld)',
       ]
     }],
     [ 'node_use_openssl=="true"', {
