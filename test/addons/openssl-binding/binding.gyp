@@ -3,6 +3,10 @@
     {
       'target_name': 'binding',
       'includes': ['../common.gypi'],
+      'variables': {
+        # Skip this building on IBM i.
+        'aix_variant_name': '<!(uname -s)',
+      },
       'conditions': [
         ['node_use_openssl=="true"', {
           'conditions': [

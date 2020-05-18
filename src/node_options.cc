@@ -65,11 +65,6 @@ void PerProcessOptions::CheckOptions(std::vector<std::string>* errors) {
                       "used, not both");
   }
 #endif
-  if (use_largepages != "off" &&
-      use_largepages != "on" &&
-      use_largepages != "silent") {
-    errors->push_back("invalid value for --use-largepages");
-  }
   per_isolate->CheckOptions(errors);
 }
 

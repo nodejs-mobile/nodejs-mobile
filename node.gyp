@@ -1367,6 +1367,7 @@
           'defines': [
             'HAVE_INSPECTOR=1',
           ],
+        }],
         ['OS=="win"', {
           'libraries': [
             'dbghelp.lib',
@@ -1424,6 +1425,7 @@
           'defines': [
             'HAVE_INSPECTOR=1',
           ],
+        }],
         ['OS=="win"', {
           'libraries': [
             'Dbghelp.lib',

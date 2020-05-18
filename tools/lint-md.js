@@ -15591,7 +15591,6 @@ var debug$7 = src('unified-engine:file-pipeline:stringify');
 
 
 
-
 var stringify_1 = stringify$2;
 
 // Stringify a tree.
@@ -17019,7 +17018,6 @@ convert$1.rgb.hsv = function (rgb) {
 		} else if (b === v) {
 			h = (2 / 3) + gdif - rdif;
 		}
-
 		if (h < 0) {
 			h += 1;
 		} else if (h > 1) {
@@ -17164,7 +17162,6 @@ convert$1.hsl.rgb = function (hsl) {
 		if (t3 < 0) {
 			t3++;
 		}
-
 		if (t3 > 1) {
 			t3--;
 		}
@@ -24924,7 +24921,6 @@ var textTable = function (rows_, opts) {
     var stringLength = opts.stringLength
         || function (s) { return String(s).length; }
     ;
-    
     var dotsizes = reduce(rows_, function (acc, row) {
         forEach(row, function (c, ix) {
             var n = dotindex(c);
@@ -24932,7 +24928,6 @@ var textTable = function (rows_, opts) {
         });
         return acc;
     }, []);
-    
     var rows = map$1(rows_, function (row) {
         return map$1(row, function (c_, ix) {
             var c = String(c_);
@@ -24946,7 +24941,6 @@ var textTable = function (rows_, opts) {
             else return c;
         });
     });
-    
     var sizes = reduce(rows, function (acc, row) {
         forEach(row, function (c, ix) {
             var n = stringLength(c);
@@ -24954,7 +24948,6 @@ var textTable = function (rows_, opts) {
         });
         return acc;
     }, []);
-    
     return map$1(rows, function (row) {
         return map$1(row, function (c, ix) {
             var n = (sizes[ix] - stringLength(c)) || 0;
@@ -24967,7 +24960,6 @@ var textTable = function (rows_, opts) {
                     + c + Array(Math.floor(n / 2 + 1)).join(' ')
                 ;
             }
-            
             return c + s;
         }).join(hsep).replace(/\s+$/, '');
     }).join('\n');

@@ -449,6 +449,7 @@ class U_I18N_API NumberRangeFormatterSettings {
      */
     Derived identityFallback(UNumberRangeIdentityFallback identityFallback) &&;
 
+#ifndef U_HIDE_DRAFT_API
     /**
      * Returns the current (Un)LocalizedNumberRangeFormatter as a LocalPointer
      * wrapping a heap-allocated copy of the current object.
@@ -470,6 +471,7 @@ class U_I18N_API NumberRangeFormatterSettings {
      * @stable ICU 64
      */
     LocalPointer<Derived> clone() &&;
+#endif  /* U_HIDE_DRAFT_API */
 
     /**
      * Sets the UErrorCode if an error occurred in the fluent chain.

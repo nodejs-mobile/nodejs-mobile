@@ -1,5 +1,5 @@
 ---
-section: cli-commands 
+section: cli-commands
 title: npm-link
 description: Symlink a package folder
 ---
@@ -88,5 +88,5 @@ npm link @myorg/privatepackage
 * [package.json](/configuring-npm/package-json)
 * [npm install](/cli-commands/npm-install)
 * [npm folders](/configuring-npm/folders)
-* [npm config](/cli-commands/npm-config)
+* [npm config](/cli-commands/config)
 * [npmrc](/configuring-npm/npmrc)

@@ -916,6 +916,14 @@ InitializationResult InitializeOncePerProcess(int argc, char** argv) {
 
   CHECK_GT(argc, 0);
 
+#ifdef NODE_ENABLE_LARGE_CODE_PAGES
+  if (node::IsLargePagesEnabled()) {
+    if (node::MapStaticCodeToLargePages() != 0) {
+      fprintf(stderr, "Reverting to default page size\n");
+    }
+  }
+#endif
+
   // Hack around with the argv pointer. Used for process.title = "blah".
   argv = uv_setup_args(argc, argv);
 

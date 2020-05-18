@@ -2095,6 +2095,7 @@ class U_I18N_API NumberFormatterSettings {
      */
     UnicodeString toSkeleton(UErrorCode& status) const;
 
+#ifndef U_HIDE_DRAFT_API
     /**
      * Returns the current (Un)LocalizedNumberFormatter as a LocalPointer
      * wrapping a heap-allocated copy of the current object.
@@ -2116,6 +2117,7 @@ class U_I18N_API NumberFormatterSettings {
      * @stable ICU 64
      */
     LocalPointer<Derived> clone() &&;
+#endif  /* U_HIDE_DRAFT_API */
 
     /**
      * Sets the UErrorCode if an error occurred in the fluent chain.
@@ -2426,12 +2428,15 @@ class U_I18N_API LocalizedNumberFormatter
 class U_I18N_API FormattedNumber : public UMemory, public FormattedValue {
   public:
 
+    // Default constructor cannot have #ifndef U_HIDE_DRAFT_API
+#ifndef U_FORCE_HIDE_DRAFT_API
     /**
      * Default constructor; makes an empty FormattedNumber.
      * @stable ICU 64
      */
     FormattedNumber()
         : fData(nullptr), fErrorCode(U_INVALID_STATE_ERROR) {}
+#endif  // U_FORCE_HIDE_DRAFT_API
 
     /**
      * Move constructor: Leaves the source FormattedNumber in an undefined state.
@@ -2605,6 +2610,7 @@ class U_I18N_API NumberFormatter final {
      */
     static UnlocalizedNumberFormatter forSkeleton(const UnicodeString& skeleton, UErrorCode& status);
 
+#ifndef U_HIDE_DRAFT_API
     /**
      * Call this method at the beginning of a NumberFormatter fluent chain to create an instance based
      * on a given number skeleton string.
@@ -2624,6 +2630,7 @@ class U_I18N_API NumberFormatter final {
      */
     static UnlocalizedNumberFormatter forSkeleton(const UnicodeString& skeleton,
                                                   UParseError& perror, UErrorCode& status);
+#endif
 
     /**
      * Use factory methods instead of the constructor to create a NumberFormatter.

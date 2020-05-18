@@ -94,4 +94,3 @@ module.exports = function (fromModel) {
 
 	return conversion;
 };
-
