@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.3.1">0.3.1</a><br/>
 <a href="#0.3.0">0.3.0</a><br/>
 <a href="#0.2.2">0.2.2</a><br/>
 <a href="#0.2.1">0.2.1</a><br/>
@@ -24,8 +25,28 @@
 </tr>
 </table>
 
+<a id="0.3.1"></a>
+## 2020-05-25, Version 0.3.1 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 12.16.3 LTS.
+* Released binaries are now built with ndk r21b on Android.
+* Fix error when building Android binaries on Linux.
+
+### Commits
+
+* [[`2085766259`](https://github.com/janeasystems/nodejs-mobile/commit/20857662598a6a258d65a52f89a60653a92724ac)] - Node.js on Mobile v0.3.1 (Jaime Bernardo)
+* [[`12751bc4e3`](https://github.com/janeasystems/nodejs-mobile/commit/12751bc4e37ef9c640dd9379a7b4a16a121e93ef)] - doc: use NDK r21b for building (Jaime Bernardo)
+* [[`5cea85f8bb`](https://github.com/janeasystems/nodejs-mobile/commit/5cea85f8bb6e1a2ba2cbccaaa5b61e491c1ecc9a)] - test: fix mobile tests for 12.16.3 (Jaime Bernardo)
+* [[`31f23350b9`](https://github.com/janeasystems/nodejs-mobile/commit/31f23350b946a25644f76804451be41b68c1a5bf)] - android,build: different host flags for linking (Jaime Bernardo)
+* [[`e6817bd72e`](https://github.com/janeasystems/nodejs-mobile/commit/e6817bd72e432828da01bed42a3f8ac2b22a92f6)] - Merge node v12.16.3 (Jaime Bernardo)
+* [[`eaaef04170`](https://github.com/janeasystems/nodejs-mobile/commit/eaaef04170923fbcdbbb05a94f986179df4fe264)] - test,ios: don't skip empty UDP packet tests (Jaime Bernardo)
+* [[`a3e9ae90d0`](https://github.com/janeasystems/nodejs-mobile/commit/a3e9ae90d0f33ef9540ef40592b892f705d785d2)] - android,build: fix linking when building for host (Jaime Bernardo)
+* [[`a39af27170`](https://github.com/janeasystems/nodejs-mobile/commit/a39af27170bc49e5ff97480c4118b2f6ac72ac5c)] - Working on Node.js for Mobile Apps v0.3.1 (Jaime Bernardo)
+
 <a id="0.3.0"></a>
-## 2020-04-27, Version 0.3.0 (Current)
+## 2020-04-27, Version 0.3.0
 
 ### Notable Changes
 
@@ -35,6 +56,7 @@
 * Uses V8 snapshots on Android.
 
 ### Commits
+
 * [[`358217dfc1`](https://github.com/janeasystems/nodejs-mobile/commit/358217dfc1f55e2883264ea561902446ab41972b)] - Node.js on Mobile v0.3.0 (Jaime Bernardo)
 * [[`7c94e290e4`](https://github.com/janeasystems/nodejs-mobile/commit/7c94e290e41992678ab8f0616f3e6f1b6a8bdeeb)] - ios: add podspec to enable use with CocoaPods (Igor Makarov)
 * [[`dbaedc97f8`](https://github.com/janeasystems/nodejs-mobile/commit/dbaedc97f8963b1356e4fc8c70f463d2092b6a89)] - doc: update docs to V8 on iOS changes (Jaime Bernardo)
