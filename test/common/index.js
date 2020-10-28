@@ -722,6 +722,7 @@ const common = {
   isAlive,
   isDumbTerminal,
   isAndroid,
+  isDumbTerminal,
   isFreeBSD,
   isIOS,
   isLinux,
