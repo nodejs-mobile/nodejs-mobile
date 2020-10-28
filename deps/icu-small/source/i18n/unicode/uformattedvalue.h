@@ -10,8 +10,6 @@
 
 #include "unicode/ufieldpositer.h"
 
-#ifndef U_HIDE_DRAFT_API
-
 /**
  * \file
  * \brief C API: Abstract operations for localized strings.

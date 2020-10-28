@@ -304,7 +304,7 @@ above.
 
 ### See Also
 
-* [npm run-script](/cli-commands/run-script)
+* [npm run-script](/cli-commands/npm-run-script)
 * [package.json](/configuring-npm/package-json)
 * [npm developers](/using-npm/developers)
-* [npm install](/cli-commands/install)
+* [npm install](/cli-commands/npm-install)

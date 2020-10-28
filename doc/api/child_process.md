@@ -1391,34 +1391,6 @@ the executable file.
 For [`child_process.exec()`][],  its value will be the name of the shell
 in which the child process is launched.
 
-### `subprocess.signalCode`
-
-* {integer}
-
-The `subprocess.signalCode` property indicates the signal number received by
-the child process if any, else `null`.
-
-### `subprocess.spawnargs`
-
-* {Array}
-
-The `subprocess.spawnargs` property represents the full list of command line
-arguments the child process was launched with.
-
-### `subprocess.spawnfile`
-
-* {string}
-
-The `subprocess.spawnfile` property indicates the executable file name of
-the child process that is launched.
-
-For [`child_process.fork()`][], its value will be equal to
-[`process.execPath`][].
-For [`child_process.spawn()`][], its value will be the name of
-the executable file.
-For [`child_process.exec()`][],  its value will be the name of the shell
-in which the child process is launched.
-
 ### `subprocess.stderr`
 <!-- YAML
 added: v0.1.90

@@ -95,14 +95,14 @@ common options: <span class="token punctuation">[</span>-P<span class="token ope
 <p>This command installs a package, and any packages that it depends on. If the
 package has a package-lock or shrinkwrap file, the installation of dependencies
 will be driven by that, with an <code class="language-text">npm-shrinkwrap.json</code> taking precedence if both
-files exist. See <a href="../../configuring-npm/package-lock-json">package-lock.json</a> and <a href="../../cli-commands/shrinkwrap"><code class="language-text">npm shrinkwrap</code></a>.</p>
+files exist. See <a href="../../configuring-npm/package-lock-json">package-lock.json</a> and <a href="../../cli-commands/npm-shrinkwrap"><code class="language-text">npm shrinkwrap</code></a>.</p>
 <p>A <code class="language-text">package</code> is:</p>
 <ul>
 <li>a) a folder containing a program described by a <a href="../../configuring-npm/package-json"><code class="language-text">package.json</code></a> file</li>
 <li>b) a gzipped tarball containing (a)</li>
 <li>c) a url that resolves to (b)</li>
 <li>d) a <code class="language-text">&lt;name&gt;@&lt;version&gt;</code> that is published on the registry (see <a href="../../using-npm/registry"><code class="language-text">registry</code></a>) with (c)</li>
-<li>e) a <code class="language-text">&lt;name&gt;@&lt;tag&gt;</code> (see <a href="../../cli-commands/dist-tag"><code class="language-text">npm dist-tag</code></a>) that points to (d)</li>
+<li>e) a <code class="language-text">&lt;name&gt;@&lt;tag&gt;</code> (see <a href="../../cli-commands/npm-dist-tag"><code class="language-text">npm dist-tag</code></a>) that points to (d)</li>
 <li>f) a <code class="language-text">&lt;name&gt;</code> that has a "latest" tag satisfying (e)</li>
 <li>g) a <code class="language-text">&lt;git remote url&gt;</code> that resolves to (a)</li>
 </ul>
@@ -447,19 +447,19 @@ affects a real use-case, it will be investigated.</p>
 <h3 id="see-also" style="position:relative;"><a href="#see-also" aria-label="see also permalink" class="header-link-class before"><svg aria-hidden="true" height="20" version="1.1" viewBox="0 0 16 16" width="20"><path fill-rule="evenodd" d="M4 9h1v1H4c-1.5 0-3-1.69-3-3.5S2.55 3 4 3h4c1.45 0 3 1.69 3 3.5 0 1.41-.91 2.72-2 3.25V8.59c.58-.45 1-1.27 1-2.09C10 5.22 8.98 4 8 4H4c-.98 0-2 1.22-2 2.5S3 9 4 9zm9-3h-1v1h1c1 0 2 1.22 2 2.5S13.98 12 13 12H9c-.98 0-2-1.22-2-2.5 0-.83.42-1.64 1-2.09V6.25c-1.09.53-2 1.84-2 3.25C6 11.31 7.55 13 9 13h4c1.45 0 3-1.69 3-3.5S14.5 6 13 6z"></path></svg></a>See Also</h3>
 <ul>
 <li><a href="../../configuring-npm/folders">npm folders</a></li>
-<li><a href="../../cli-commands/update">npm update</a></li>
-<li><a href="../../cli-commands/audit">npm audit</a></li>
-<li><a href="../../cli-commands/fund">npm fund</a></li>
-<li><a href="../../cli-commands/link">npm link</a></li>
-<li><a href="../../cli-commands/rebuild">npm rebuild</a></li>
+<li><a href="../../cli-commands/npm-update">npm update</a></li>
+<li><a href="../../cli-commands/npm-audit">npm audit</a></li>
+<li><a href="../../cli-commands/npm-fund">npm fund</a></li>
+<li><a href="../../cli-commands/npm-link">npm link</a></li>
+<li><a href="../../cli-commands/npm-rebuild">npm rebuild</a></li>
 <li><a href="../../using-npm/scripts">npm scripts</a></li>
-<li><a href="../../cli-commands/build">npm build</a></li>
-<li><a href="../../cli-commands/config">npm config</a></li>
+<li><a href="../../cli-commands/npm-build">npm build</a></li>
+<li><a href="../../cli-commands/npm-config">npm config</a></li>
 <li><a href="../../configuring-npm/npmrc">npmrc</a></li>
 <li><a href="../../using-npm/registry">npm registry</a></li>
-<li><a href="../../cli-commands/dist-tag">npm dist-tag</a></li>
-<li><a href="../../cli-commands/uninstall">npm uninstall</a></li>
-<li><a href="../../cli-commands/shrinkwrap">npm shrinkwrap</a></li>
+<li><a href="../../cli-commands/npm-dist-tag">npm dist-tag</a></li>
+<li><a href="../../cli-commands/npm-uninstall">npm uninstall</a></li>
+<li><a href="../../cli-commands/npm-shrinkwrap">npm shrinkwrap</a></li>
 <li><a href="../../configuring-npm/package-json">package.json</a></li>
 </ul></div><div class="FoundTypo__Container-sc-1e373sc-0 fMOzaj"><p><span role="img" aria-label="eyes-emoji">👀</span> Found a typo? <a href="https://github.com/npm/cli/">Let us know!</a></p><p>The current stable version of npm is <a href="https://github.com/npm/cli/">here</a>. To upgrade, run: <code class="language-text">npm install npm@latest -g</code></p><p>To report bugs or submit feature requests for the docs, please post <a href="https://npm.community/c/support/docs-needed">here</a>. Submit npm issues <a href="https://npm.community/c/bugs">here.</a></p></div><script>
           var anchors = document.querySelectorAll(".sidebar a, .documentation a")

@@ -295,7 +295,7 @@ v8:
 	tools/make-v8.sh $(V8_ARCH).$(BUILDTYPE_LOWER) $(V8_BUILD_OPTIONS)
 
 .PHONY: jstest
-jstest: build-addons build-abort-tests build-js-native-api-tests build-node-api-tests ## Runs addon tests and JS tests
+jstest: build-addons build-js-native-api-tests build-node-api-tests ## Runs addon tests and JS tests
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) --mode=$(BUILDTYPE_LOWER) \
 		--skip-tests=$(CI_SKIP_TESTS) \
 		$(JS_SUITES) \
@@ -319,7 +319,6 @@ test: all ## Runs default tests, linters, and builds docs.
 	$(MAKE) -s tooltest
 	$(MAKE) -s test-doc
 	$(MAKE) -s build-addons
-	$(MAKE) -s build-abort-tests
 	$(MAKE) -s build-js-native-api-tests
 	$(MAKE) -s build-node-api-tests
 	$(MAKE) -s cctest
@@ -328,7 +327,6 @@ test: all ## Runs default tests, linters, and builds docs.
 .PHONY: test-only
 test-only: all  ## For a quick test, does not run linter or build docs.
 	$(MAKE) build-addons
-	$(MAKE) build-abort-tests
 	$(MAKE) build-js-native-api-tests
 	$(MAKE) build-node-api-tests
 	$(MAKE) cctest
@@ -338,7 +336,6 @@ test-only: all  ## For a quick test, does not run linter or build docs.
 # Used by `make coverage-test`
 test-cov: all
 	$(MAKE) build-addons
-	$(MAKE) build-abort-tests
 	$(MAKE) build-js-native-api-tests
 	$(MAKE) build-node-api-tests
 	$(MAKE) cctest
@@ -458,31 +455,6 @@ test/node-api/.buildstamp: $(ADDONS_PREREQS) \
 # TODO(bnoordhuis) Force rebuild after gyp or node-gyp update.
 build-node-api-tests: | $(NODE_EXE) test/node-api/.buildstamp
 
-ABORT_BINDING_GYPS := \
-	$(filter-out test/abort/??_*/binding.gyp, \
-		$(wildcard test/abort/*/binding.gyp))
-
-ABORT_BINDING_SOURCES := \
-	$(filter-out test/abort/??_*/*.c, $(wildcard test/abort/*/*.c)) \
-	$(filter-out test/abort/??_*/*.cc, $(wildcard test/abort/*/*.cc)) \
-	$(filter-out test/abort/??_*/*.h, $(wildcard test/abort/*/*.h))
-
-# Implicitly depends on $(NODE_EXE), see the build-node-api-tests rule for rationale.
-test/abort/.buildstamp: $(ADDONS_PREREQS) \
-	$(ABORT_BINDING_GYPS) $(ABORT_BINDING_SOURCES) \
-	src/node_api.h src/node_api_types.h src/js_native_api.h \
-	src/js_native_api_types.h src/js_native_api_v8.h src/js_native_api_v8_internals.h
-	@$(call run_build_addons,"$$PWD/test/abort",$@)
-
-.PHONY: build-abort-tests
-# .buildstamp needs $(NODE_EXE) but cannot depend on it
-# directly because it calls make recursively.  The parent make cannot know
-# if the subprocess touched anything so it pessimistically assumes that
-# .buildstamp is out of date and need a rebuild.
-# Just goes to show that recursive make really is harmful...
-# TODO(bnoordhuis) Force rebuild after gyp or node-gyp update.
-build-abort-tests: | $(NODE_EXE) test/abort/.buildstamp
-
 BENCHMARK_NAPI_BINDING_GYPS := $(wildcard benchmark/napi/*/binding.gyp)
 
 BENCHMARK_NAPI_BINDING_SOURCES := \
@@ -503,13 +475,11 @@ clear-stalled:
 		echo $${PS_OUT} | xargs kill -9; \
 	fi
 
-test-build: | all build-addons build-abort-tests build-js-native-api-tests build-node-api-tests
+test-build: | all build-addons build-js-native-api-tests build-node-api-tests
 
 test-build-js-native-api: all build-js-native-api-tests
 
 test-build-node-api: all build-node-api-tests
-
-test-build-abort: all build-abort-tests
 
 .PHONY: test-all
 test-all: test-build ## Run default tests with both Debug and Release builds.
@@ -665,17 +635,8 @@ test-node-api-clean:
 	$(RM) -r test/node-api/*/build
 	$(RM) test/node-api/.buildstamp
 
-.PHONY: test-abort
-test-abort: test-build-abort
-	$(PYTHON) tools/test.py $(PARALLEL_ARGS) --mode=$(BUILDTYPE_LOWER) test-abort
-
-.PHONY: test-abort-clean
-test-abort-clean:
-	$(RM) -r test/abort/*/build
-	$(RM) test/abort/.buildstamp
-
 .PHONY: test-addons
-test-addons: test-build test-js-native-api test-node-api test-abort
+test-addons: test-build test-js-native-api test-node-api
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) --mode=$(BUILDTYPE_LOWER) addons
 
 .PHONY: test-addons-clean
@@ -685,7 +646,6 @@ test-addons-clean:
 	$(RM) test/addons/.buildstamp test/addons/.docbuildstamp
 	$(MAKE) test-js-native-api-clean
 	$(MAKE) test-node-api-clean
-	$(MAKE) test-abort-clean
 
 test-async-hooks:
 	$(PYTHON) tools/test.py $(PARALLEL_ARGS) --mode=$(BUILDTYPE_LOWER) async-hooks
@@ -694,7 +654,6 @@ test-with-async-hooks:
 	$(MAKE) build-addons
 	$(MAKE) build-js-native-api-tests
 	$(MAKE) build-node-api-tests
-	$(MAKE) build-abort-tests
 	$(MAKE) cctest
 	NODE_TEST_WITH_ASYNC_HOOKS=1 $(PYTHON) tools/test.py $(PARALLEL_ARGS) --mode=$(BUILDTYPE_LOWER) \
 		$(JS_SUITES) \

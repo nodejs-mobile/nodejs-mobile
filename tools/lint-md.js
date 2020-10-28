@@ -8258,174 +8258,109 @@ function encode (obj, opt) {
     opt = opt || {};
     opt.whitespace = opt.whitespace === true;
   }
-
-  var separator = opt.whitespace ? ' = ' : '=';
-
-  Object.keys(obj).forEach(function (k, _, __) {
-    var val = obj[k];
-    if (val && Array.isArray(val)) {
-      val.forEach(function (item) {
-        out += safe(k + '[]') + separator + safe(item) + '\n';
-      });
-    } else if (val && typeof val === 'object') {
-      children.push(k);
-    } else {
-      out += safe(k) + separator + safe(val) + eol;
-    }
-  });
-
-  if (opt.section && out.length) {
-    out = '[' + safe(opt.section) + ']' + eol + out;
+  get (key) {
+    return pudGet(this, key, true)
   }
-
-  children.forEach(function (k, _, __) {
-    var nk = dotSplit(k).join('\\.');
-    var section = (opt.section ? opt.section + '.' : '') + nk;
-    var child = encode(obj[k], {
-      section: section,
-      whitespace: opt.whitespace
+  get [Symbol.toStringTag] () { return 'FiggyPudding' }
+  forEach (fn, thisArg = this) {
+    for (let [key, value] of this.entries()) {
+      fn.call(thisArg, value, key, this);
+    }
+  }
+  toJSON () {
+    const obj = {};
+    this.forEach((val, key) => {
+      obj[key] = val;
     });
-    if (out.length && child.length) {
-      out += eol;
+    return obj
+  }
+  * entries (_matcher) {
+    for (let key of Object.keys(this.__specs)) {
+      yield [key, this.get(key)];
     }
-    out += child;
-  });
-
-  return out
-}
-
-function dotSplit (str) {
-  return str.replace(/\1/g, '\u0002LITERAL\\1LITERAL\u0002')
-    .replace(/\\\./g, '\u0001')
-    .split(/\./).map(function (part) {
-      return part.replace(/\1/g, '\\.')
-      .replace(/\2LITERAL\\1LITERAL\2/g, '\u0001')
-    })
-}
-
-function decode (str) {
-  var out = {};
-  var p = out;
-  var section = null;
-  //          section     |key      = value
-  var re = /^\[([^\]]*)\]$|^([^=]+)(=(.*))?$/i;
-  var lines = str.split(/[\r\n]+/g);
-
-  lines.forEach(function (line, _, __) {
-    if (!line || line.match(/^\s*[;#]/)) return
-    var match = line.match(re);
-    if (!match) return
-    if (match[1] !== undefined) {
-      section = unsafe(match[1]);
-      p = out[section] = out[section] || {};
-      return
-    }
-    var key = unsafe(match[2]);
-    var value = match[3] ? unsafe(match[4]) : true;
-    switch (value) {
-      case 'true':
-      case 'false':
-      case 'null': value = JSON.parse(value);
-    }
-
-    // Convert keys with '[]' suffix to an array
-    if (key.length > 2 && key.slice(-2) === '[]') {
-      key = key.substring(0, key.length - 2);
-      if (!p[key]) {
-        p[key] = [];
-      } else if (!Array.isArray(p[key])) {
-        p[key] = [p[key]];
-      }
-    }
-
-    // safeguard against resetting a previously defined
-    // array by accidentally forgetting the brackets
-    if (Array.isArray(p[key])) {
-      p[key].push(value);
-    } else {
-      p[key] = value;
-    }
-  });
-
-  // {a:{y:1},"a.b":{x:2}} --> {a:{y:1,b:{x:2}}}
-  // use a filter to return the keys that have to be deleted.
-  Object.keys(out).filter(function (k, _, __) {
-    if (!out[k] ||
-      typeof out[k] !== 'object' ||
-      Array.isArray(out[k])) {
-      return false
-    }
-    // see if the parent section is also an object.
-    // if so, add it to that, and mark this one for deletion
-    var parts = dotSplit(k);
-    var p = out;
-    var l = parts.pop();
-    var nl = l.replace(/\\\./g, '.');
-    parts.forEach(function (part, _, __) {
-      if (!p[part] || typeof p[part] !== 'object') p[part] = {};
-      p = p[part];
-    });
-    if (p === out && nl === l) {
-      return false
-    }
-    p[nl] = out[k];
-    return true
-  }).forEach(function (del, _, __) {
-    delete out[del];
-  });
-
-  return out
-}
-
-function isQuoted (val) {
-  return (val.charAt(0) === '"' && val.slice(-1) === '"') ||
-    (val.charAt(0) === "'" && val.slice(-1) === "'")
-}
-
-function safe (val) {
-  return (typeof val !== 'string' ||
-    val.match(/[=\r\n]/) ||
-    val.match(/^\[/) ||
-    (val.length > 1 &&
-     isQuoted(val)) ||
-    val !== val.trim())
-      ? JSON.stringify(val)
-      : val.replace(/;/g, '\\;').replace(/#/g, '\\#')
-}
-
-function unsafe (val, doUnesc) {
-  val = (val || '').trim();
-  if (isQuoted(val)) {
-    // remove the single quotes before calling JSON.parse
-    if (val.charAt(0) === "'") {
-      val = val.substr(1, val.length - 2);
-    }
-    try { val = JSON.parse(val); } catch (_) {}
-  } else {
-    // walk the val to find the first not-escaped ; character
-    var esc = false;
-    var unesc = '';
-    for (var i = 0, l = val.length; i < l; i++) {
-      var c = val.charAt(i);
-      if (esc) {
-        if ('\\;#'.indexOf(c) !== -1) {
-          unesc += c;
-        } else {
-          unesc += '\\' + c;
+    const matcher = _matcher || this.__opts.other;
+    if (matcher) {
+      const seen = new Set();
+      for (let p of this.__providers) {
+        const iter = p.entries ? p.entries(matcher) : entries(p);
+        for (let [key, val] of iter) {
+          if (matcher(key) && !seen.has(key)) {
+            seen.add(key);
+            yield [key, val];
+          }
         }
-        esc = false;
-      } else if (';#'.indexOf(c) !== -1) {
-        break
-      } else if (c === '\\') {
-        esc = true;
-      } else {
-        unesc += c;
       }
     }
-    if (esc) {
-      unesc += '\\';
+  }
+  * [Symbol.iterator] () {
+    for (let [key, value] of this.entries()) {
+      yield [key, value];
     }
-    return unesc.trim()
+  }
+  * keys () {
+    for (let [key] of this.entries()) {
+      yield key;
+    }
+  }
+  * values () {
+    for (let [, value] of this.entries()) {
+      yield value;
+    }
+  }
+  concat (...moreConfig) {
+    return new Proxy(new FiggyPudding(
+      this.__specs,
+      this.__opts,
+      reverse(this.__providers).concat(moreConfig)
+    ), proxyHandler)
+  }
+}
+try {
+  const util = util$2;
+  FiggyPudding.prototype[util.inspect.custom] = function (depth, opts) {
+    return (
+      this[Symbol.toStringTag] + ' '
+    ) + util.inspect(this.toJSON(), opts)
+  };
+} catch (e) {}
+
+function BadKeyError (key) {
+  throw Object.assign(new Error(
+    `invalid config key requested: ${key}`
+  ), {code: 'EBADKEY'})
+}
+
+function pudGet (pud, key, validate) {
+  let spec = pud.__specs[key];
+  if (validate && !spec && (!pud.__opts.other || !pud.__opts.other(key))) {
+    BadKeyError(key);
+  } else {
+    if (!spec) { spec = {}; }
+    let ret;
+    for (let p of pud.__providers) {
+      ret = tryGet(key, p);
+      if (ret === undefined && spec.aliases && spec.aliases.length) {
+        for (let alias of spec.aliases) {
+          if (alias === key) { continue }
+          ret = tryGet(alias, p);
+          if (ret !== undefined) {
+            break
+          }
+        }
+      }
+      if (ret !== undefined) {
+        break
+      }
+    }
+    if (ret === undefined && spec.default !== undefined) {
+      if (typeof spec.default === 'function') {
+        return spec.default(pud)
+      } else {
+        return spec.default
+      }
+    } else {
+      return ret
+    }
   }
   return val
 }
@@ -15591,6 +15526,7 @@ var debug$7 = src('unified-engine:file-pipeline:stringify');
 
 
 
+
 var stringify_1 = stringify$2;
 
 // Stringify a tree.
@@ -17018,6 +16954,7 @@ convert$1.rgb.hsv = function (rgb) {
 		} else if (b === v) {
 			h = (2 / 3) + gdif - rdif;
 		}
+
 		if (h < 0) {
 			h += 1;
 		} else if (h > 1) {
@@ -17162,6 +17099,7 @@ convert$1.hsl.rgb = function (hsl) {
 		if (t3 < 0) {
 			t3++;
 		}
+
 		if (t3 > 1) {
 			t3--;
 		}

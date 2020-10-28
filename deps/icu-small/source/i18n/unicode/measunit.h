@@ -1283,24 +1283,6 @@ class U_I18N_API MeasureUnit: public UObject {
     static MeasureUnit getDecade();
 #endif /* U_HIDE_DRAFT_API */
 
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of duration: decade.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getDecade()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createDecade(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of duration: decade.
-     * Also see {@link #createDecade()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getDecade();
-#endif /* U_HIDE_DRAFT_API */
-
     /**
      * Returns by pointer, unit of duration: hour.
      * Caller owns returned value and must free it.
@@ -1798,132 +1780,6 @@ class U_I18N_API MeasureUnit: public UObject {
      * @stable ICU 64
      */
     static MeasureUnit getMegahertz();
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: dot-per-centimeter.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getDotPerCentimeter()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createDotPerCentimeter(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: dot-per-centimeter.
-     * Also see {@link #createDotPerCentimeter()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getDotPerCentimeter();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: dot-per-inch.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getDotPerInch()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createDotPerInch(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: dot-per-inch.
-     * Also see {@link #createDotPerInch()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getDotPerInch();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: em.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getEm()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createEm(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: em.
-     * Also see {@link #createEm()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getEm();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: megapixel.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getMegapixel()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createMegapixel(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: megapixel.
-     * Also see {@link #createMegapixel()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getMegapixel();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: pixel.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getPixel()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createPixel(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: pixel.
-     * Also see {@link #createPixel()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getPixel();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: pixel-per-centimeter.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getPixelPerCentimeter()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createPixelPerCentimeter(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: pixel-per-centimeter.
-     * Also see {@link #createPixelPerCentimeter()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getPixelPerCentimeter();
-#endif /* U_HIDE_DRAFT_API */
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of graphics: pixel-per-inch.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getPixelPerInch()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createPixelPerInch(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of graphics: pixel-per-inch.
-     * Also see {@link #createPixelPerInch()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getPixelPerInch();
-#endif /* U_HIDE_DRAFT_API */
 
 #ifndef U_HIDE_DRAFT_API
     /**
@@ -2773,24 +2629,6 @@ class U_I18N_API MeasureUnit: public UObject {
     static MeasureUnit getBar();
 #endif /* U_HIDE_DRAFT_API */
 
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of pressure: bar.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getBar()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createBar(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of pressure: bar.
-     * Also see {@link #createBar()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getBar();
-#endif /* U_HIDE_DRAFT_API */
-
     /**
      * Returns by pointer, unit of pressure: hectopascal.
      * Caller owns returned value and must free it.
@@ -2886,24 +2724,6 @@ class U_I18N_API MeasureUnit: public UObject {
      * @stable ICU 64
      */
     static MeasureUnit getMillimeterOfMercury();
-
-#ifndef U_HIDE_DRAFT_API
-    /**
-     * Returns by pointer, unit of pressure: pascal.
-     * Caller owns returned value and must free it.
-     * Also see {@link #getPascal()}.
-     * @param status ICU error code.
-     * @draft ICU 65
-     */
-    static MeasureUnit *createPascal(UErrorCode &status);
-
-    /**
-     * Returns by value, unit of pressure: pascal.
-     * Also see {@link #createPascal()}.
-     * @draft ICU 65
-     */
-    static MeasureUnit getPascal();
-#endif /* U_HIDE_DRAFT_API */
 
 #ifndef U_HIDE_DRAFT_API
     /**

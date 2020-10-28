@@ -204,6 +204,7 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   i = 0;
   *count = numcpus;
 
+  which[1] = HW_CPUSPEED;
   size = sizeof(cpuspeed);
   if (sysctl(which, ARRAY_SIZE(which), &cpuspeed, &size, NULL, 0))
     goto error;

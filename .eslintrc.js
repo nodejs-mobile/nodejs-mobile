@@ -206,10 +206,6 @@ module.exports = {
         selector: "CallExpression[callee.name='isNaN']",
         message: 'Use Number.isNaN() instead of the global isNaN() function.',
       },
-      {
-        selector: "CallExpression[callee.name='isNaN']",
-        message: 'Use Number.isNaN() instead of the global isNaN() function.',
-      },
     ],
     /* eslint-enable max-len */
     'no-return-await': 'error',
