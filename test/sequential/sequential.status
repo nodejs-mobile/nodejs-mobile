@@ -52,6 +52,7 @@ test-net-GH-5504: SKIP
 test-net-listen-shared-ports: SKIP
 test-net-response-size: SKIP
 test-next-tick-error-spin: SKIP
+test-process-title: SKIP
 test-process-warnings: SKIP
 test-repl-timeout-throw: SKIP
 test-set-http-max-http-headers: SKIP
@@ -90,6 +91,7 @@ test-net-GH-5504: SKIP
 test-net-listen-shared-ports: SKIP
 test-net-response-size: SKIP
 test-next-tick-error-spin: SKIP
+test-process-title: SKIP
 test-process-warnings: SKIP
 test-repl-timeout-throw: SKIP
 test-set-http-max-http-headers: SKIP

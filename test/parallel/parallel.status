@@ -152,6 +152,7 @@ test-policy-integrity-flag: SKIP
 test-policy-parse-integrity: SKIP
 test-preload: SKIP
 test-preload-print-process-argv: SKIP
+test-preload-self-referential: SKIP
 test-process-argv-0: SKIP
 test-process-env: SKIP
 test-process-exec-argv: SKIP
@@ -168,6 +169,7 @@ test-process-redirect-warnings: SKIP
 test-process-redirect-warnings-env: SKIP
 test-process-remove-all-signal-listeners: SKIP
 test-process-title: SKIP
+test-process-uncaught-exception-monitor: SKIP
 test-process-wrap: SKIP
 test-promise-reject-callback-exception: SKIP
 test-promise-unhandled-flag: SKIP
@@ -177,6 +179,7 @@ test-repl-import-referrer: SKIP
 test-repl-inspect-defaults: SKIP
 test-repl-require-after-write: SKIP
 test-repl-require-context: SKIP
+test-repl-require-self-referential: SKIP
 test-repl-setprompt: SKIP
 test-repl-sigint: SKIP
 test-repl-sigint-nested-eval: SKIP
@@ -239,6 +242,7 @@ test-trace-events-worker-metadata: SKIP
 test-trace-exit: SKIP
 test-tracing-no-crash: SKIP
 test-unhandled-exception-rethrow-error: SKIP
+test-unicode-node-options: SKIP
 test-util-callbackify: SKIP
 test-v8-untrusted-code-mitigations: SKIP
 test-vm-api-handles-getter-errors: SKIP
@@ -457,6 +461,7 @@ test-policy-integrity-flag: SKIP
 test-policy-parse-integrity: SKIP
 test-preload: SKIP
 test-preload-print-process-argv: SKIP
+test-preload-self-referential: SKIP
 test-process-argv-0: SKIP
 test-process-env: SKIP
 test-process-exec-argv: SKIP
@@ -473,6 +478,7 @@ test-process-redirect-warnings: SKIP
 test-process-redirect-warnings-env: SKIP
 test-process-remove-all-signal-listeners: SKIP
 test-process-title: SKIP
+test-process-uncaught-exception-monitor: SKIP
 test-process-wrap: SKIP
 test-promise-reject-callback-exception: SKIP
 test-promise-unhandled-flag: SKIP
@@ -482,6 +488,7 @@ test-repl-import-referrer: SKIP
 test-repl-inspect-defaults: SKIP
 test-repl-require-after-write: SKIP
 test-repl-require-context: SKIP
+test-repl-require-self-referential: SKIP
 test-repl-setprompt: SKIP
 test-repl-sigint: SKIP
 test-repl-sigint-nested-eval: SKIP
@@ -544,6 +551,7 @@ test-trace-events-worker-metadata: SKIP
 test-trace-exit: SKIP
 test-tracing-no-crash: SKIP
 test-unhandled-exception-rethrow-error: SKIP
+test-unicode-node-options: SKIP
 test-util-callbackify: SKIP
 test-v8-untrusted-code-mitigations: SKIP
 test-vm-api-handles-getter-errors: SKIP
