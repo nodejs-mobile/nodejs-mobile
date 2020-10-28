@@ -24,12 +24,17 @@ prefix message
 #
 async_error_eval_cjs: SKIP
 async_error_eval_esm: SKIP
+esm_loader_not_found_cjs_hint_bare: SKIP
 eval_messages: SKIP
 stdin_messages: SKIP
 #
 # Tests that require printing '\0' to stderr, which logcat won't show
 #
 error_with_nul: SKIP
+#
+# Tests that try to access the 'test' parent folder, currently not supported on mobile
+#
+esm_loader_not_found_cjs_hint_relative: SKIP
 
 [$system==ios]
 #
@@ -37,6 +42,7 @@ error_with_nul: SKIP
 #
 async_error_eval_cjs: SKIP
 async_error_eval_esm: SKIP
+esm_loader_not_found_cjs_hint_bare: SKIP
 eval_messages: SKIP
 stdin_messages: SKIP
 #
@@ -47,3 +53,7 @@ v8_warning: SKIP
 # Tests that require printing '\0' to stderr, which Xcode doesn't support
 #
 error_with_nul: SKIP
+#
+# Tests that try to access the 'test' parent folder, currently not supported on mobile
+#
+esm_loader_not_found_cjs_hint_relative: SKIP
