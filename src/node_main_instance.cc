@@ -20,7 +20,6 @@ using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
 using v8::Locker;
-using v8::Object;
 using v8::SealHandleScope;
 
 NodeMainInstance::NodeMainInstance(Isolate* isolate,
@@ -39,8 +38,7 @@ NodeMainInstance::NodeMainInstance(Isolate* isolate,
   isolate_data_ =
       std::make_unique<IsolateData>(isolate_, event_loop, platform, nullptr);
 
-  IsolateSettings misc;
-  SetIsolateMiscHandlers(isolate_, misc);
+  SetIsolateMiscHandlers(isolate_, {});
 }
 
 std::unique_ptr<NodeMainInstance> NodeMainInstance::Create(
@@ -102,12 +100,8 @@ NodeMainInstance::~NodeMainInstance() {
   if (!owns_isolate_) {
     return;
   }
-  // TODO(addaleax): Reverse the order of these calls. The fact that we first
-  // dispose the Isolate is a temporary workaround for
-  // https://github.com/nodejs/node/issues/31752 -- V8 should not be posting
-  // platform tasks during Dispose(), but it does in some WASM edge cases.
-  isolate_->Dispose();
   platform_->UnregisterIsolate(isolate_);
+  isolate_->Dispose();
 }
 
 int NodeMainInstance::Run() {
@@ -116,21 +110,14 @@ int NodeMainInstance::Run() {
   HandleScope handle_scope(isolate_);
 
   int exit_code = 0;
-  std::unique_ptr<Environment> env = CreateMainEnvironment(&exit_code);
+  DeleteFnPtr<Environment, FreeEnvironment> env =
+      CreateMainEnvironment(&exit_code);
 
   CHECK_NOT_NULL(env);
   Context::Scope context_scope(env->context());
 
   if (exit_code == 0) {
-    {
-      InternalCallbackScope callback_scope(
-          env.get(),
-          Local<Object>(),
-          { 1, 0 },
-          InternalCallbackScope::kAllowEmptyResource |
-              InternalCallbackScope::kSkipAsyncHooks);
-      LoadEnvironment(env.get());
-    }
+    LoadEnvironment(env.get());
 
     env->set_trace_sync_io(env->options()->trace_sync_io);
 
@@ -163,10 +150,7 @@ int NodeMainInstance::Run() {
     exit_code = EmitExit(env.get());
   }
 
-  env->set_can_call_into_js(false);
-  env->stop_sub_worker_contexts();
   ResetStdio();
-  env->RunCleanup();
 
   // TODO(addaleax): Neither NODE_SHARED_MODE nor HAVE_INSPECTOR really
   // make sense here.
@@ -181,10 +165,6 @@ int NodeMainInstance::Run() {
   }
 #endif
 
-  RunAtExit(env.get());
-
-  per_process::v8_platform.DrainVMTasks(isolate_);
-
 #if defined(LEAK_SANITIZER)
   __lsan_do_leak_check();
 #endif
@@ -192,10 +172,8 @@ int NodeMainInstance::Run() {
   return exit_code;
 }
 
-// TODO(joyeecheung): align this with the CreateEnvironment exposed in node.h
-// and the environment creation routine in workers somehow.
-std::unique_ptr<Environment> NodeMainInstance::CreateMainEnvironment(
-    int* exit_code) {
+DeleteFnPtr<Environment, FreeEnvironment>
+NodeMainInstance::CreateMainEnvironment(int* exit_code) {
   *exit_code = 0;  // Reset the exit code to 0
 
   HandleScope handle_scope(isolate_);
@@ -211,8 +189,7 @@ std::unique_ptr<Environment> NodeMainInstance::CreateMainEnvironment(
     context =
         Context::FromSnapshot(isolate_, kNodeContextIndex).ToLocalChecked();
     InitializeContextRuntime(context);
-    IsolateSettings s;
-    SetIsolateErrorHandlers(isolate_, s);
+    SetIsolateErrorHandlers(isolate_, {});
   } else {
     context = NewContext(isolate_);
   }
@@ -220,27 +197,18 @@ std::unique_ptr<Environment> NodeMainInstance::CreateMainEnvironment(
   CHECK(!context.IsEmpty());
   Context::Scope context_scope(context);
 
-  std::unique_ptr<Environment> env = std::make_unique<Environment>(
+  DeleteFnPtr<Environment, FreeEnvironment> env { CreateEnvironment(
       isolate_data_.get(),
       context,
       args_,
       exec_args_,
-      static_cast<Environment::Flags>(Environment::kIsMainThread |
-                                      Environment::kOwnsProcessState |
-                                      Environment::kOwnsInspector));
-  env->InitializeLibuv(per_process::v8_is_profiling);
-  env->InitializeDiagnostics();
+      EnvironmentFlags::kDefaultFlags) };
 
-  // TODO(joyeecheung): when we snapshot the bootstrapped context,
-  // the inspector and diagnostics setup should after after deserialization.
-#if HAVE_INSPECTOR
-  *exit_code = env->InitializeInspector({});
-#endif
   if (*exit_code != 0) {
     return env;
   }
 
-  if (env->RunBootstrapping().IsEmpty()) {
+  if (env == nullptr) {
     *exit_code = 1;
   }
 

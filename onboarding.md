@@ -56,11 +56,15 @@ onboarding session.
   * Watching the main repo will flood your inbox (several hundred notifications
     on typical weekdays), so be prepared
 
-* `#node-dev` on [webchat.freenode.net](https://webchat.freenode.net/) is the
-  best place to interact with the TSC / other Collaborators
-  * If there are any questions after the session, a good place to ask is there!
-  * Presence is not mandatory, but please drop a note there if force-pushing to
-    `master`
+The project has two venues for real-time discussion:
+* [`#nodejs-dev`](https://openjs-foundation.slack.com/archives/C019Y2T6STH) on
+  the [OpenJS Foundation](https://slack-invite.openjsf.org/)
+* `#node-dev` on [webchat.freenode.net](https://webchat.freenode.net/) is a
+  great place to interact with the TSC and other Collaborators
+  * If there are any questions after the session, a good place to ask is
+    there!
+  * Presence is not mandatory, but please drop a note there if force-pushing
+    to `master`
 
 ## Project goals & values
 
@@ -165,7 +169,7 @@ onboarding session.
     * It is not automatically run. You need to start it manually.
   * Log in on CI is integrated with GitHub. Try to log in now!
   * You will be using `node-test-pull-request` most of the time. Go there now!
-    * Consider bookmarking it: https://ci.nodejs.org/job/node-test-pull-request/
+    * Consider bookmarking it: <https://ci.nodejs.org/job/node-test-pull-request/>
   * To get to the form to start a job, click on `Build with Parameters`. (If you
     don't see it, that probably means you are not logged in!) Click it now!
   * To start CI testing from this screen, you need to fill in two elements on
@@ -200,7 +204,7 @@ needs to be pointed out separately during the onboarding.
 ## Exercise: Make a PR adding yourself to the README
 
 * Example:
-  https://github.com/nodejs/node/commit/ce986de829457c39257cd205067602e765768fb0
+  <https://github.com/nodejs/node/commit/ce986de829457c39257cd205067602e765768fb0>
   * For raw commit message: `git log ce986de829457c39257cd205067602e765768fb0
     -1`
 * Collaborators are in alphabetical order by GitHub username.
@@ -210,6 +214,9 @@ needs to be pointed out separately during the onboarding.
 * Run CI on the PR. Use the `node-test-pull-request` CI task.
 * After two Collaborator approvals for the change and two Collaborator approvals
   for fast-tracking, land the PR.
+* Leave a comment in the PR: `Please 👍 this comment to approve fast-tracking`.
+* If there are not enough approvals within a reasonable time, consider the
+  single approval of the onboarding TSC member sufficient, and land the PR.
   * Be sure to add the `PR-URL: <full-pr-url>` and appropriate `Reviewed-By:`
     metadata.
   * [`node-core-utils`][] automates the generation of metadata and the landing

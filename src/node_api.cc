@@ -29,8 +29,19 @@ struct node_napi_env__ : public napi_env__ {
       v8::Local<v8::ArrayBuffer> ab) const override {
     return ab->SetPrivate(
         context(),
-        node_env()->arraybuffer_untransferable_private_symbol(),
+        node_env()->untransferable_object_private_symbol(),
         v8::True(isolate));
+  }
+
+  void CallFinalizer(napi_finalize cb, void* data, void* hint) override {
+    napi_env env = static_cast<napi_env>(this);
+    node_env()->SetImmediate([=](node::Environment* node_env) {
+      v8::HandleScope handle_scope(env->isolate);
+      v8::Context::Scope context_scope(env->context());
+      env->CallIntoModule([&](napi_env env) {
+        cb(env, data, hint);
+      });
+    });
   }
 };
 
@@ -57,7 +68,7 @@ class BufferFinalizer : private Finalizer {
       v8::HandleScope handle_scope(finalizer->_env->isolate);
       v8::Context::Scope context_scope(finalizer->_env->context());
 
-      finalizer->_env->CallIntoModuleThrow([&](napi_env env) {
+      finalizer->_env->CallIntoModule([&](napi_env env) {
         finalizer->_finalize_callback(
             env,
             finalizer->_finalize_data,
@@ -227,8 +238,8 @@ class ThreadSafeFunction : public node::AsyncResource {
       if (max_queue_size > 0) {
         cond = std::make_unique<node::ConditionVariable>();
       }
-      if ((max_queue_size == 0 || cond) &&
-          uv_idle_init(loop, &idle) == 0) {
+      if (max_queue_size == 0 || cond) {
+        CHECK_EQ(0, uv_idle_init(loop, &idle));
         return napi_ok;
       }
 
@@ -268,7 +279,6 @@ class ThreadSafeFunction : public node::AsyncResource {
   void DispatchOne() {
     void* data = nullptr;
     bool popped_value = false;
-    bool idle_stop_failed = false;
 
     {
       node::Mutex::ScopedLock lock(this->mutex);
@@ -294,43 +304,24 @@ class ThreadSafeFunction : public node::AsyncResource {
             }
             CloseHandlesAndMaybeDelete();
           } else {
-            if (uv_idle_stop(&idle) != 0) {
-              idle_stop_failed = true;
-            }
+            CHECK_EQ(0, uv_idle_stop(&idle));
           }
         }
       }
     }
 
-    if (popped_value || idle_stop_failed) {
+    if (popped_value) {
       v8::HandleScope scope(env->isolate);
       CallbackScope cb_scope(this);
-
-      if (idle_stop_failed) {
-        CHECK(napi_throw_error(env,
-                               "ERR_NAPI_TSFN_STOP_IDLE_LOOP",
-                               "Failed to stop the idle loop") == napi_ok);
-      } else {
-        napi_value js_callback = nullptr;
-        if (!ref.IsEmpty()) {
-          v8::Local<v8::Function> js_cb =
-            v8::Local<v8::Function>::New(env->isolate, ref);
-          js_callback = v8impl::JsValueFromV8LocalValue(js_cb);
-        }
-        env->CallIntoModuleThrow([&](napi_env env) {
-          call_js_cb(env, js_callback, context, data);
-        });
+      napi_value js_callback = nullptr;
+      if (!ref.IsEmpty()) {
+        v8::Local<v8::Function> js_cb =
+          v8::Local<v8::Function>::New(env->isolate, ref);
+        js_callback = v8impl::JsValueFromV8LocalValue(js_cb);
       }
-    }
-  }
-
-  void MaybeStartIdle() {
-    if (uv_idle_start(&idle, IdleCb) != 0) {
-      v8::HandleScope scope(env->isolate);
-      CallbackScope cb_scope(this);
-      CHECK(napi_throw_error(env,
-                             "ERR_NAPI_TSFN_START_IDLE_LOOP",
-                             "Failed to start the idle loop") == napi_ok);
+      env->CallIntoModule([&](napi_env env) {
+        call_js_cb(env, js_callback, context, data);
+      });
     }
   }
 
@@ -338,7 +329,7 @@ class ThreadSafeFunction : public node::AsyncResource {
     v8::HandleScope scope(env->isolate);
     if (finalize_cb) {
       CallbackScope cb_scope(this);
-      env->CallIntoModuleThrow([&](napi_env env) {
+      env->CallIntoModule([&](napi_env env) {
         finalize_cb(env, finalize_data, context);
       });
     }
@@ -412,7 +403,7 @@ class ThreadSafeFunction : public node::AsyncResource {
   static void AsyncCb(uv_async_t* async) {
     ThreadSafeFunction* ts_fn =
         node::ContainerOf(&ThreadSafeFunction::async, async);
-    ts_fn->MaybeStartIdle();
+    CHECK_EQ(0, uv_idle_start(&ts_fn->idle, IdleCb));
   }
 
   static void Cleanup(void* data) {
@@ -475,7 +466,7 @@ void napi_module_register_by_symbol(v8::Local<v8::Object> exports,
   napi_env env = v8impl::NewEnv(context);
 
   napi_value _exports;
-  env->CallIntoModuleThrow([&](napi_env env) {
+  env->CallIntoModule([&](napi_env env) {
     _exports = init(env, v8impl::JsValueFromV8LocalValue(exports));
   });
 
@@ -523,6 +514,71 @@ napi_status napi_remove_env_cleanup_hook(napi_env env,
   CHECK_ARG(env, fun);
 
   node::RemoveEnvironmentCleanupHook(env->isolate, fun, arg);
+
+  return napi_ok;
+}
+
+struct napi_async_cleanup_hook_handle__ {
+  napi_async_cleanup_hook_handle__(napi_env env,
+                                   napi_async_cleanup_hook user_hook,
+                                   void* user_data):
+      env_(env),
+      user_hook_(user_hook),
+      user_data_(user_data) {
+    handle_ = node::AddEnvironmentCleanupHook(env->isolate, Hook, this);
+    env->Ref();
+  }
+
+  ~napi_async_cleanup_hook_handle__() {
+    node::RemoveEnvironmentCleanupHook(std::move(handle_));
+    if (done_cb_ != nullptr)
+      done_cb_(done_data_);
+
+    // Release the `env` handle asynchronously since it would be surprising if
+    // a call to a N-API function would destroy `env` synchronously.
+    static_cast<node_napi_env>(env_)->node_env()
+        ->SetImmediate([env = env_](node::Environment*) { env->Unref(); });
+  }
+
+  static void Hook(void* data, void (*done_cb)(void*), void* done_data) {
+    auto handle = static_cast<napi_async_cleanup_hook_handle__*>(data);
+    handle->done_cb_ = done_cb;
+    handle->done_data_ = done_data;
+    handle->user_hook_(handle, handle->user_data_);
+  }
+
+  node::AsyncCleanupHookHandle handle_;
+  napi_env env_ = nullptr;
+  napi_async_cleanup_hook user_hook_ = nullptr;
+  void* user_data_ = nullptr;
+  void (*done_cb_)(void*) = nullptr;
+  void* done_data_ = nullptr;
+};
+
+napi_status napi_add_async_cleanup_hook(
+    napi_env env,
+    napi_async_cleanup_hook hook,
+    void* arg,
+    napi_async_cleanup_hook_handle* remove_handle) {
+  CHECK_ENV(env);
+  CHECK_ARG(env, hook);
+
+  napi_async_cleanup_hook_handle__* handle =
+    new napi_async_cleanup_hook_handle__(env, hook, arg);
+
+  if (remove_handle != nullptr)
+    *remove_handle = handle;
+
+  return napi_clear_last_error(env);
+}
+
+napi_status napi_remove_async_cleanup_hook(
+    napi_async_cleanup_hook_handle remove_handle) {
+
+  if (remove_handle == nullptr)
+    return napi_invalid_arg;
+
+  delete remove_handle;
 
   return napi_ok;
 }

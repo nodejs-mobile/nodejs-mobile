@@ -1,9 +1,9 @@
-# Diagnostic Report
+# Diagnostic report
 
 <!--introduced_in=v11.8.0-->
 <!-- type=misc -->
 
-> Stability: 1 - Experimental
+> Stability: 2 - Stable
 
 <!-- name=report -->
 
@@ -32,7 +32,6 @@ is provided below for reference.
     "cwd": "/home/nodeuser/project/node",
     "commandLine": [
       "/home/nodeuser/project/node/out/Release/node",
-      "--experimental-report",
       "--report-uncaught-exception",
       "/home/nodeuser/project/node/test/report/test-exception.js",
       "child"
@@ -393,13 +392,9 @@ is provided below for reference.
 ## Usage
 
 ```bash
-node --experimental-report --report-uncaught-exception \
-  --report-on-signal --report-on-fatalerror app.js
+node --report-uncaught-exception --report-on-signal \
+--report-on-fatalerror app.js
 ```
-
-* `--experimental-report` Enables the diagnostic report feature.
- In the absence of this flag, use of all other related options will result in
- an error.
 
 * `--report-uncaught-exception` Enables report to be generated on
 un-caught exceptions. Useful when inspecting JavaScript stack in conjunction
@@ -424,6 +419,10 @@ fatal errors (internal errors within the Node.js runtime, such as out of memory)
 that leads to termination of the application. Useful to inspect various
 diagnostic data elements such as heap, stack, event loop state, resource
 consumption etc. to reason about the fatal error.
+
+* `--report-compact` Write reports in a compact format, single-line JSON, more
+easily consumable by log processing systems than the default multi-line format
+designed for human consumption.
 
 * `--report-directory` Location at which the report will be
 generated.
@@ -505,7 +504,7 @@ containing `libuv` handle information and an OS platform information section
 showing CPU and memory usage and system limits. An example report can be
 triggered using the Node.js REPL:
 
-```raw
+```console
 $ node
 > process.report.writeReport();
 Writing Node.js report to file: report.20181126.091102.8480.0.001.json
@@ -570,7 +569,7 @@ Configuration on module initialization is also available via
 environment variables:
 
 ```bash
-NODE_OPTIONS="--experimental-report --report-uncaught-exception \
+NODE_OPTIONS="--report-uncaught-exception \
   --report-on-fatalerror --report-on-signal \
   --report-signal=SIGUSR2  --report-filename=./report.json \
   --report-directory=/home/nodeuser"
@@ -579,7 +578,7 @@ NODE_OPTIONS="--experimental-report --report-uncaught-exception \
 Specific API documentation can be found under
 [`process API documentation`][] section.
 
-## Interaction with Workers
+## Interaction with workers
 <!-- YAML
 changes:
   - version: v12.16.2

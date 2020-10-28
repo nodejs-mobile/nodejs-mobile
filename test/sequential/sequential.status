@@ -5,6 +5,8 @@ prefix sequential
 # sample-test                       : PASS,FLAKY
 
 [true] # This section applies to all platforms
+# https://github.com/nodejs/node/issues/27611#issuecomment-613100468
+test-cpu-prof-dir-worker: PASS, FLAKY
 
 [$system==win32]
 # https://github.com/nodejs/node/issues/22327
@@ -15,8 +17,6 @@ test-worker-prof: PASS, FLAKY
 [$system==linux]
 
 [$system==macos]
-# https://github.com/nodejs/node/issues/21781
-test-timers-blocking-callback: PASS, FLAKY
 
 [$system==solaris] # Also applies to SmartOS
 
@@ -33,6 +33,8 @@ test-buffer-creation-regression: SKIP
 test-perf-hooks: SKIP
 
 [$arch==arm]
+# https://github.com/nodejs/node/issues/26401#issuecomment-613095719
+test-worker-prof: PASS, FLAKY
 
 [$system==android]
 #

@@ -18,11 +18,14 @@ const expectedModules = new Set([
   'Internal Binding fs',
   'Internal Binding fs_dir',
   'Internal Binding inspector',
+  'Internal Binding messaging',
   'Internal Binding module_wrap',
   'Internal Binding native_module',
   'Internal Binding options',
   'Internal Binding process_methods',
+  'Internal Binding report',
   'Internal Binding string_decoder',
+  'Internal Binding symbols',
   'Internal Binding task_queue',
   'Internal Binding timers',
   'Internal Binding trace_events',
@@ -47,13 +50,25 @@ const expectedModules = new Set([
   'NativeModule internal/idna',
   'NativeModule internal/linkedlist',
   'NativeModule internal/modules/run_main',
+  'NativeModule internal/modules/package_json_reader',
   'NativeModule internal/modules/cjs/helpers',
   'NativeModule internal/modules/cjs/loader',
+  'NativeModule internal/modules/esm/create_dynamic_module',
+  'NativeModule internal/modules/esm/get_format',
+  'NativeModule internal/modules/esm/get_source',
+  'NativeModule internal/modules/esm/loader',
+  'NativeModule internal/modules/esm/module_job',
+  'NativeModule internal/modules/esm/module_map',
+  'NativeModule internal/modules/esm/resolve',
+  'NativeModule internal/modules/esm/transform_source',
+  'NativeModule internal/modules/esm/translators',
+  'NativeModule internal/process/esm_loader',
   'NativeModule internal/options',
   'NativeModule internal/priority_queue',
   'NativeModule internal/process/execution',
   'NativeModule internal/process/per_thread',
   'NativeModule internal/process/promises',
+  'NativeModule internal/process/report',
   'NativeModule internal/process/signal',
   'NativeModule internal/process/task_queues',
   'NativeModule internal/process/warning',
@@ -66,6 +81,8 @@ const expectedModules = new Set([
   'NativeModule internal/util/inspect',
   'NativeModule internal/util/types',
   'NativeModule internal/validators',
+  'NativeModule internal/vm/module',
+  'NativeModule internal/worker/js_transferable',
   'NativeModule path',
   'NativeModule timers',
   'NativeModule url',
@@ -81,7 +98,7 @@ if (!common.isMainThread) {
   expectedModules.add('NativeModule _stream_readable');
   expectedModules.add('NativeModule _stream_transform');
   expectedModules.add('NativeModule _stream_writable');
-  expectedModules.add('NativeModule internal/error-serdes');
+  expectedModules.add('NativeModule internal/error_serdes');
   expectedModules.add('NativeModule internal/process/worker_thread_only');
   expectedModules.add('NativeModule internal/streams/buffer_list');
   expectedModules.add('NativeModule internal/streams/destroy');

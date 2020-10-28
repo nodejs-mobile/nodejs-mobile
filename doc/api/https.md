@@ -4,6 +4,8 @@
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/https.js -->
+
 HTTPS is the HTTP protocol over TLS/SSL. In Node.js this is implemented as a
 separate module.
 
@@ -94,7 +96,7 @@ See [`server.close()`][`http.close()`] from the HTTP module for details.
 added: v11.3.0
 -->
 
-* {number} **Default:** `40000`
+* {number} **Default:** `60000`
 
 See [`http.Server#headersTimeout`][].
 
@@ -123,13 +125,9 @@ See [`http.Server#setTimeout()`][].
 ### `server.timeout`
 <!-- YAML
 added: v0.11.2
-changes:
-  - version: v13.0.0
-    pr-url: https://github.com/nodejs/node/pull/27558
-    description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* {number} **Default:** 0 (no timeout)
+* {number} **Default:** `120000` (2 minutes)
 
 See [`http.Server#timeout`][].
 
@@ -451,7 +449,7 @@ headers: max-age=0; pin-sha256="WoiWRyIOVNa9ihaBciRSC7XHjliYS9VwUGOIud4PB18="; p
 [`https.Agent`]: #https_class_https_agent
 [`https.request()`]: #https_https_request_options_callback
 [`net.Server`]: net.html#net_class_net_server
-[`new URL()`]: url.html#url_constructor_new_url_input_base
+[`new URL()`]: url.html#url_new_url_input_base
 [`server.listen()`]: net.html#net_server_listen
 [`tls.connect()`]: tls.html#tls_tls_connect_options_callback
 [`tls.createSecureContext()`]: tls.html#tls_tls_createsecurecontext_options

@@ -11,7 +11,6 @@
 namespace node {
 
 using errors::TryCatchScope;
-using v8::Array;
 using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
@@ -21,7 +20,6 @@ using v8::kPromiseRejectAfterResolved;
 using v8::kPromiseRejectWithNoHandler;
 using v8::kPromiseResolveAfterResolved;
 using v8::Local;
-using v8::Message;
 using v8::MicrotasksScope;
 using v8::Number;
 using v8::Object;

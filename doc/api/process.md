@@ -3,6 +3,8 @@
 <!-- introduced_in=v0.10.0 -->
 <!-- type=global -->
 
+<!-- source_link=lib/process.js -->
+
 The `process` object is a `global` that provides information about, and control
 over, the current Node.js process. As a global, it is always available to
 Node.js applications without using `require()`. It can also be explicitly
@@ -12,7 +14,7 @@ accessed using `require()`:
 const process = require('process');
 ```
 
-## Process Events
+## Process events
 
 The `process` object is an instance of [`EventEmitter`][].
 
@@ -122,7 +124,7 @@ not be the same as what is originally sent.
 If the `serialization` option was set to `advanced` used when spawning the
 process, the `message` argument can contain data that JSON is not able
 to represent.
-See [Advanced Serialization for `child_process`][] for more details.
+See [Advanced serialization for `child_process`][] for more details.
 
 ### Event: `'multipleResolves'`
 <!-- YAML
@@ -231,8 +233,9 @@ changes:
 
 * `err` {Error} The uncaught exception.
 * `origin` {string} Indicates if the exception originates from an unhandled
-  rejection or from synchronous errors. Can either be `'uncaughtException'` or
-  `'unhandledRejection'`.
+  rejection or from an synchronous error. Can either be `'uncaughtException'` or
+  `'unhandledRejection'`. The latter is only used in conjunction with the
+  [`--unhandled-rejections`][] flag set to `strict` and an unhandled rejection.
 
 The `'uncaughtException'` event is emitted when an uncaught JavaScript
 exception bubbles all the way back to the event loop. By default, Node.js
@@ -262,6 +265,10 @@ nonexistentFunc();
 console.log('This will not run.');
 ```
 
+It is possible to monitor `'uncaughtException'` events without overriding the
+default behavior to exit the process by installing a
+`'uncaughtExceptionMonitor'` listener.
+
 #### Warning: Using `'uncaughtException'` correctly
 
 `'uncaughtException'` is a crude mechanism for exception handling
@@ -288,6 +295,34 @@ To restart a crashed application in a more reliable way, whether
 `'uncaughtException'` is emitted or not, an external monitor should be employed
 in a separate process to detect application failures and recover or restart as
 needed.
+
+### Event: `'uncaughtExceptionMonitor'`
+<!-- YAML
+added: v12.17.0
+-->
+
+* `err` {Error} The uncaught exception.
+* `origin` {string} Indicates if the exception originates from an unhandled
+  rejection or from synchronous errors. Can either be `'uncaughtException'` or
+  `'unhandledRejection'`.
+
+The `'uncaughtExceptionMonitor'` event is emitted before an
+`'uncaughtException'` event is emitted or a hook installed via
+[`process.setUncaughtExceptionCaptureCallback()`][] is called.
+
+Installing an `'uncaughtExceptionMonitor'` listener does not change the behavior
+once an `'uncaughtException'` event is emitted. The process will
+still crash if no `'uncaughtException'` listener is installed.
+
+```js
+process.on('uncaughtExceptionMonitor', (err, origin) => {
+  MyMonitoringTool.logSync(err, origin);
+});
+
+// Intentionally cause an exception, but don't catch it.
+nonexistentFunc();
+// Still crashes Node.js
+```
 
 ### Event: `'unhandledRejection'`
 <!-- YAML
@@ -420,7 +455,7 @@ The `*-deprecation` command line flags only affect warnings that use the name
 See the [`process.emitWarning()`][process_emit_warning] method for issuing
 custom or application-specific warnings.
 
-### Signal Events
+### Signal events
 
 <!--type=event-->
 <!--name=SIGINT, SIGHUP, etc.-->
@@ -521,7 +556,7 @@ environment variable.
 
 `process.allowedNodeEnvironmentFlags` extends `Set`, but overrides
 `Set.prototype.has` to recognize several different possible flag
-representations.  `process.allowedNodeEnvironmentFlags.has()` will
+representations. `process.allowedNodeEnvironmentFlags.has()` will
 return `true` in the following cases:
 
 * Flags may omit leading single (`-`) or double (`--`) dashes; e.g.,
@@ -1456,6 +1491,9 @@ is no entry script.
 <!-- YAML
 added: v0.1.16
 changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/31550
+    description: Added `arrayBuffers` to the returned object.
   - version: v7.2.0
     pr-url: https://github.com/nodejs/node/pull/9587
     description: Added `external` to the returned object.
@@ -1466,6 +1504,7 @@ changes:
   * `heapTotal` {integer}
   * `heapUsed` {integer}
   * `external` {integer}
+  * `arrayBuffers` {integer}
 
 The `process.memoryUsage()` method returns an object describing the memory usage
 of the Node.js process measured in bytes.
@@ -1484,19 +1523,22 @@ Will generate:
   rss: 4935680,
   heapTotal: 1826816,
   heapUsed: 650472,
-  external: 49879
+  external: 49879,
+  arrayBuffers: 9386
 }
 ```
 
-`heapTotal` and `heapUsed` refer to V8's memory usage.
-`external` refers to the memory usage of C++ objects bound to JavaScript
-objects managed by V8. `rss`, Resident Set Size, is the amount of space
-occupied in the main memory device (that is a subset of the total allocated
-memory) for the process, which includes the _heap_, _code segment_ and _stack_.
-
-The _heap_ is where objects, strings, and closures are stored. Variables are
-stored in the _stack_ and the actual JavaScript code resides in the
-_code segment_.
+* `heapTotal` and `heapUsed` refer to V8's memory usage.
+* `external` refers to the memory usage of C++ objects bound to JavaScript
+  objects managed by V8.
+* `rss`, Resident Set Size, is the amount of space occupied in the main
+  memory device (that is a subset of the total allocated memory) for the
+  process, including all C++ and JavaScript objects and code.
+* `arrayBuffers` refers to memory allocated for `ArrayBuffer`s and
+  `SharedArrayBuffer`s, including all Node.js [`Buffer`][]s.
+  This is also included in the `external` value. When Node.js is used as an
+  embedded library, this value may be `0` because allocations for `ArrayBuffer`s
+  may not be tracked in that case.
 
 When using [`Worker`][] threads, `rss` will be a value that is valid for the
 entire process, while the other fields will only refer to the current thread.
@@ -1693,19 +1735,22 @@ tarball.
   builds of Node.js and will be missing on all other platforms._
 * `lts` {string} a string label identifying the [LTS][] label for this release.
   This property only exists for LTS releases and is `undefined` for all other
-  release types, including _Current_ releases. Currently the valid values are:
-  * `'Argon'` for the 4.x LTS line beginning with 4.2.0.
-  * `'Boron'` for the 6.x LTS line beginning with 6.9.0.
-  * `'Carbon'` for the 8.x LTS line beginning with 8.9.1.
+  release types, including _Current_ releases.
+  Valid values include the LTS Release Codenames (including those
+  that are no longer supported). A non-exhaustive example of
+  these codenames includes:
+  * `'Dubnium'` for the 10.x LTS line beginning with 10.13.0.
+  * `'Erbium'` for the 12.x LTS line beginning with 12.13.0.
+  For other LTS Release Codenames, see [Node.js Changelog Archive](https://github.com/nodejs/node/blob/master/doc/changelogs/CHANGELOG_ARCHIVE.md)
 
 <!-- eslint-skip -->
 ```js
 {
   name: 'node',
-  lts: 'Argon',
-  sourceUrl: 'https://nodejs.org/download/release/v4.4.5/node-v4.4.5.tar.gz',
-  headersUrl: 'https://nodejs.org/download/release/v4.4.5/node-v4.4.5-headers.tar.gz',
-  libUrl: 'https://nodejs.org/download/release/v4.4.5/win-x64/node.lib'
+  lts: 'Erbium',
+  sourceUrl: 'https://nodejs.org/download/release/v12.18.1/node-v12.18.1.tar.gz',
+  headersUrl: 'https://nodejs.org/download/release/v12.18.1/node-v12.18.1-headers.tar.gz',
+  libUrl: 'https://nodejs.org/download/release/v12.18.1/win-x64/node.lib'
 }
 ```
 
@@ -1716,9 +1761,11 @@ relied upon to exist.
 ## `process.report`
 <!-- YAML
 added: v11.8.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {Object}
 
@@ -1726,12 +1773,29 @@ added: v11.8.0
 reports for the current process. Additional documentation is available in the
 [report documentation][].
 
+### `process.report.compact`
+<!-- YAML
+added: v12.17.0
+-->
+
+* {boolean}
+
+Write reports in a compact format, single-line JSON, more easily consumable
+by log processing systems than the default multi-line format designed for
+human consumption.
+
+```js
+console.log(`Reports are compact? ${process.report.compact}`);
+```
+
 ### `process.report.directory`
 <!-- YAML
 added: v11.12.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {string}
 
@@ -1746,9 +1810,11 @@ console.log(`Report directory is ${process.report.directory}`);
 ### `process.report.filename`
 <!-- YAML
 added: v11.12.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {string}
 
@@ -1763,9 +1829,11 @@ console.log(`Report filename is ${process.report.filename}`);
 ### `process.report.getReport([err])`
 <!-- YAML
 added: v11.8.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * `err` {Error} A custom error used for reporting the JavaScript stack.
 * Returns: {Object}
@@ -1804,9 +1872,11 @@ console.log(`Report on fatal error: ${process.report.reportOnFatalError}`);
 ### `process.report.reportOnSignal`
 <!-- YAML
 added: v11.12.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {boolean}
 
@@ -1820,9 +1890,11 @@ console.log(`Report on signal: ${process.report.reportOnSignal}`);
 ### `process.report.reportOnUncaughtException`
 <!-- YAML
 added: v11.12.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {boolean}
 
@@ -1835,9 +1907,11 @@ console.log(`Report on exception: ${process.report.reportOnUncaughtException}`);
 ### `process.report.signal`
 <!-- YAML
 added: v11.12.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * {string}
 
@@ -1851,9 +1925,11 @@ console.log(`Report signal: ${process.report.signal}`);
 ### `process.report.writeReport([filename][, err])`
 <!-- YAML
 added: v11.8.0
+changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32242
+    description: This API is no longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 * `filename` {string} Name of the file where the report is written. This
   should be a relative path, that will be appended to the directory specified in
@@ -2153,21 +2229,7 @@ The `process.stdin` property returns a stream connected to
 stream) unless fd `0` refers to a file, in which case it is
 a [Readable][] stream.
 
-```js
-process.stdin.setEncoding('utf8');
-
-process.stdin.on('readable', () => {
-  let chunk;
-  // Use a loop to make sure we read all available data.
-  while ((chunk = process.stdin.read()) !== null) {
-    process.stdout.write(`data: ${chunk}`);
-  }
-});
-
-process.stdin.on('end', () => {
-  process.stdout.write('end');
-});
-```
+For details of how to read from `stdin` see [`readable.read()`][].
 
 As a [Duplex][] stream, `process.stdin` can also be used in "old" mode that
 is compatible with scripts written for Node.js prior to v0.10.
@@ -2225,7 +2287,7 @@ important ways:
    * Pipes (and sockets): *synchronous* on Windows, *asynchronous* on POSIX
 
 These behaviors are partly for historical reasons, as changing them would
-create backwards incompatibility, but they are also expected by some users.
+create backward incompatibility, but they are also expected by some users.
 
 Synchronous writes avoid problems such as output written with `console.log()` or
 `console.error()` being unexpectedly interleaved, or not written at all if
@@ -2309,6 +2371,10 @@ allowed for longer process title strings by also overwriting the `environ`
 memory but that was potentially insecure and confusing in some (rather obscure)
 cases.
 
+Assigning a value to `process.title` might not result in an accurate label
+within process manager applications such as macOS Activity Monitor or Windows
+Services Manager.
+
 ## `process.traceDeprecation`
 <!-- YAML
 added: v0.8.0
@@ -2322,17 +2388,35 @@ documentation for the [`'warning'` event][process_warning] and the
 [`emitWarning()` method][process_emit_warning] for more information about this
 flag's behavior.
 
-## `process.umask([mask])`
+## `process.umask()`
+<!-- YAML
+added: v0.1.19
+changes:
+  - version:
+    - v12.19.0
+    - v14.0.0
+    pr-url: https://github.com/nodejs/node/pull/32499
+    description: Calling `process.umask()` with no arguments is deprecated.
+
+-->
+
+> Stability: 0 - Deprecated. Calling `process.umask()` with no argument causes
+> the process-wide umask to be written twice. This introduces a race condition
+> between threads, and is a potential security vulnerability. There is no safe,
+> cross-platform alternative API.
+
+`process.umask()` returns the Node.js process's file mode creation mask. Child
+processes inherit the mask from the parent process.
+
+## `process.umask(mask)`
 <!-- YAML
 added: v0.1.19
 -->
 
 * `mask` {string|integer}
 
-The `process.umask()` method sets or returns the Node.js process's file mode
-creation mask. Child processes inherit the mask from the parent process. Invoked
-without an argument, the current mask is returned, otherwise the umask is set to
-the argument value and the previous mask is returned.
+`process.umask(mask)` sets the Node.js process's file mode creation mask. Child
+processes inherit the mask from the parent process. Returns the previous mask.
 
 ```js
 const newmask = 0o022;
@@ -2342,8 +2426,7 @@ console.log(
 );
 ```
 
-[`Worker`][] threads are able to read the umask, however attempting to set the
-umask will result in a thrown exception.
+In [`Worker`][] threads, `process.umask(mask)` will throw an exception.
 
 ## `process.uptime()`
 <!-- YAML
@@ -2365,11 +2448,15 @@ added: v0.1.3
 
 * {string}
 
-The `process.version` property returns the Node.js version string.
+The `process.version` property contains the Node.js version string.
 
 ```js
 console.log(`Version: ${process.version}`);
+// Version: v14.8.0
 ```
+
+To get the version string without the prepended _v_, use
+`process.versions.node`.
 
 ## `process.versions`
 <!-- YAML
@@ -2415,7 +2502,7 @@ Will generate an object similar to:
   unicode: '11.0' }
 ```
 
-## Exit Codes
+## Exit codes
 
 Node.js will normally exit with a `0` status code when no more async
 operations are pending. The following status codes are used in other
@@ -2465,6 +2552,8 @@ cases:
 [`'exit'`]: #process_event_exit
 [`'message'`]: child_process.html#child_process_event_message
 [`'uncaughtException'`]: #process_event_uncaughtexception
+[`--unhandled-rejections`]: cli.html#cli_unhandled_rejections_mode
+[`Buffer`]: buffer.html
 [`ChildProcess.disconnect()`]: child_process.html#child_process_subprocess_disconnect
 [`ChildProcess.send()`]: child_process.html#child_process_subprocess_send_message_sendhandle_options_callback
 [`ChildProcess`]: child_process.html#child_process_class_childprocess
@@ -2494,7 +2583,7 @@ cases:
 [`require.resolve()`]: modules.html#modules_require_resolve_request_options
 [`subprocess.kill()`]: child_process.html#child_process_subprocess_kill_signal
 [`v8.setFlagsFromString()`]: v8.html#v8_v8_setflagsfromstring_flags
-[Advanced Serialization for `child_process`]: child_process.html#child_process_advanced_serialization
+[Advanced serialization for `child_process`]: child_process.html#child_process_advanced_serialization
 [Android building]: https://github.com/nodejs/node/blob/master/BUILDING.md#androidandroid-based-devices-eg-firefox-os
 [Child Process]: child_process.html
 [Cluster]: cluster.html
@@ -2502,6 +2591,7 @@ cases:
 [Event Loop]: https://nodejs.org/en/docs/guides/event-loop-timers-and-nexttick/#process-nexttick
 [LTS]: https://github.com/nodejs/Release
 [Readable]: stream.html#stream_readable_streams
+[`readable.read()`]: stream.html#stream_readable_read_size
 [Signal Events]: #process_signal_events
 [Stream compatibility]: stream.html#stream_compatibility_with_older_node_js_versions
 [TTY]: tty.html#tty_tty
@@ -2513,6 +2603,6 @@ cases:
 [process_warning]: #process_event_warning
 [report documentation]: report.html
 [terminal raw mode]: tty.html#tty_readstream_setrawmode_mode
-[uv_rusage_t]: http://docs.libuv.org/en/v1.x/misc.html#c.uv_rusage_t
+[uv_rusage_t]: https://docs.libuv.org/en/v1.x/misc.html#c.uv_rusage_t
 [wikipedia_minor_fault]: https://en.wikipedia.org/wiki/Page_fault#Minor
 [wikipedia_major_fault]: https://en.wikipedia.org/wiki/Page_fault#Major

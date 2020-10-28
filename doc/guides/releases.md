@@ -25,13 +25,15 @@ official release builds for Node.js, hosted on <https://nodejs.org/>.
   * [10. Test the Build](#10-test-the-build)
   * [11. Tag and Sign the Release Commit](#11-tag-and-sign-the-release-commit)
   * [12. Set Up For the Next Release](#12-set-up-for-the-next-release)
-  * [13. Promote and Sign the Release Builds](#13-promote-and-sign-the-release-builds)
-  * [14. Check the Release](#14-check-the-release)
-  * [15. Create a Blog Post](#15-create-a-blog-post)
-  * [16. Create the release on GitHub](#16-create-the-release-on-github)
-  * [17. Cleanup](#17-cleanup)
-  * [18. Announce](#18-announce)
-  * [19. Celebrate](#19-celebrate)
+  * [13. Cherry-pick the Release Commit to `master`](#13-cherry-pick-the-release-commit-to-master)
+  * [14. Push the release tag](#14-push-the-release-tag)
+  * [15. Promote and Sign the Release Builds](#15-promote-and-sign-the-release-builds)
+  * [16. Check the Release](#16-check-the-release)
+  * [17. Create a Blog Post](#17-create-a-blog-post)
+  * [18. Create the release on GitHub](#18-create-the-release-on-github)
+  * [19. Cleanup](#19-cleanup)
+  * [20. Announce](#20-announce)
+  * [21. Celebrate](#21-celebrate)
 * [LTS Releases](#lts-releases)
 * [Major Releases](#major-releases)
 
@@ -281,7 +283,7 @@ in the release branch (e.g. a release for Node.js v4 would be added to the
 
 The new entry should take the following form:
 
-```md
+```markdown
 <a id="x.y.x"></a>
 ## YYYY-MM-DD, Version x.y.z (Release Type), @releaser
 
@@ -342,7 +344,7 @@ The `CHANGELOG.md`, `doc/changelogs/CHANGELOG_Vx.md`, `src/node_version.h`, and
 `REPLACEME` changes should be the final commit that will be tagged for the
 release. When committing these to git, use the following message format:
 
-```txt
+```text
 YYYY-MM-DD, Version x.y.z (Release Type)
 
 Notable changes:
@@ -355,7 +357,7 @@ For security releases, begin the commit message with the phrase
 [distribution indexer](https://github.com/nodejs/nodejs-dist-indexer) to
 identify it as such:
 
-```txt
+```text
 YYYY-MM-DD, Version x.y.z (Release Type)
 
 This is a security release.
@@ -491,7 +493,7 @@ $ git secure-tag <vx.y.z> <commit-sha> -sm "YYYY-MM-DD Node.js vx.y.z (<release-
 `release-type` is either "Current" or "LTS". For LTS releases, you should also
  include the release codename, for example:
 
-```txt
+```text
 2019-10-22 Node.js v10.17.0 'Dubnium' (LTS) Release
 ```
 
@@ -507,7 +509,7 @@ On release proposal branch, edit `src/node_version.h` again and:
 
 Commit this change with the following commit message format:
 
-```txt
+```text
 Working on vx.y.z # where 'z' is the incremented patch number
 
 PR-URL: <full URL to your release proposal PR>
@@ -528,15 +530,31 @@ $ git rebase v1.x
 $ git push upstream v1.x-staging
 ```
 
-Cherry-pick the release commit to `master`. After cherry-picking, edit
-`src/node_version.h` to ensure the version macros contain whatever values were
-previously on `master`. `NODE_VERSION_IS_RELEASE` should be `0`. **Do not**
-cherry-pick the "Working on vx.y.z" commit to `master`.
+### 13. Cherry-pick the Release Commit to `master`
 
-Run `make lint` before pushing to `master`, to make sure the Changelog
-formatting passes the lint rules on `master`.
+```console
+$ git checkout master
+$ git cherry-pick v1.x^
+```
 
-### 13. Push the release tag
+Git should stop to let you fix conflicts. Revert all changes that were made to
+`src/node_version.h`. If there are conflicts in `doc` due to updated `REPLACEME`
+placeholders (that happens when a change previously landed on another release
+branch), keep both version numbers. Convert the YAML field to an array if it is
+not already one.
+
+Then finish cherry-picking and push the commit upstream:
+
+```console
+$ git add src/node_version.h doc
+$ git cherry-pick --continue
+$ make lint
+$ git push upstream master
+```
+
+**Do not** cherry-pick the "Working on vx.y.z" commit to `master`.
+
+### 14. Push the release tag
 
 Push the tag to the repo before you promote the builds. If you haven't pushed
 your tag first, then build promotion won't work properly. Push the tag using the
@@ -549,7 +567,7 @@ $ git push <remote> <vx.y.z>
 *Note*: Please do not push the tag unless you are ready to complete the
 remainder of the release steps.
 
-### 14. Promote and Sign the Release Builds
+### 15. Promote and Sign the Release Builds
 
 **The same individual who signed the release tag must be the one
 to promote the builds as the `SHASUMS256.txt` file needs to be signed with the
@@ -558,7 +576,7 @@ same GPG key!**
 Use `tools/release.sh` to promote and sign the build. Before doing this, you'll
 need to ensure you've loaded the correct ssh key, or you'll see the following:
 
-```sh
+```console
 # Checking for releases ...
 Enter passphrase for key '/Users/<user>/.ssh/id_rsa':
 dist@direct.nodejs.org's password:
@@ -566,14 +584,14 @@ dist@direct.nodejs.org's password:
 
 The key can be loaded either with `ssh-add`:
 
-```sh
+```console
 # Substitute node_id_rsa with whatever you've named the key
 $ ssh-add ~/.ssh/node_id_rsa
 ```
 
 or at runtime with:
 
-```sh
+```console
 # Substitute node_id_rsa with whatever you've named the key
 $ ./tools/release.sh -i ~/.ssh/node_id_rsa
 ```
@@ -622,7 +640,7 @@ be prompted to re-sign `SHASUMS256.txt`.
 **It is possible to only sign a release by running `./tools/release.sh -s
 vX.Y.Z`.**
 
-### 15. Check the Release
+### 16. Check the Release
 
 Your release should be available at `https://nodejs.org/dist/vx.y.z/` and
 <https://nodejs.org/dist/latest/>. Check that the appropriate files are in
@@ -631,7 +649,7 @@ have the right internal version strings. Check that the API docs are available
 at <https://nodejs.org/api/>. Check that the release catalog files are correct
 at <https://nodejs.org/dist/index.tab> and <https://nodejs.org/dist/index.json>.
 
-### 16. Create a Blog Post
+### 17. Create a Blog Post
 
 There is an automatic build that is kicked off when you promote new builds, so
 within a few minutes nodejs.org will be listing your new version as the latest
@@ -664,7 +682,7 @@ This script will use the promoted builds and changelog to generate the post. Run
 * Changes to `master` on the [nodejs.org repository][] will trigger a new build
   of nodejs.org so your changes should appear a few minutes after pushing.
 
-### 17. Create the release on GitHub
+### 18. Create the release on GitHub
 
 * Go to the [New release page](https://github.com/nodejs/node/releases/new).
 * Select the tag version you pushed earlier.
@@ -672,17 +690,17 @@ This script will use the promoted builds and changelog to generate the post. Run
 * For the description, copy the rest of the changelog entry.
 * Click on the "Publish release" button.
 
-### 18. Cleanup
+### 19. Cleanup
 
 Close your release proposal PR and delete the proposal branch.
 
-### 19. Announce
+### 20. Announce
 
 The nodejs.org website will automatically rebuild and include the new version.
 To announce the build on Twitter through the official @nodejs account, email
 [pr@nodejs.org](mailto:pr@nodejs.org) with a message such as:
 
-> v5.8.0 of @nodejs is out: https://nodejs.org/en/blog/release/v5.8.0/
+> v5.8.0 of @nodejs is out: <https://nodejs.org/en/blog/release/v5.8.0/>
 > …
 > something here about notable changes
 
@@ -693,7 +711,7 @@ announcements.
 
 Ping the IRC ops and the other [Partner Communities][] liaisons.
 
-### 20. Celebrate
+### 21. Celebrate
 
 _In whatever form you do this..._
 
@@ -728,6 +746,14 @@ For example:
 ```
 
 The changes must be made as part of a new semver-minor release.
+
+### Update release labels
+
+The `lts-watch-vN.x` issue label must be created, with the same color as other
+existing labels for that release line, such as `vN.x`.
+
+If the release is transitioning from Active LTS to Maintenance, the
+`backport-requested-vN.x` label must be deleted.
 
 ## Major Releases
 
@@ -764,6 +790,21 @@ up until the date of release.
 One month or less before the release date, commits must be cherry-picked into
 the two branches. To land `SEMVER-MAJOR` at this time requires no objections
 from the TSC.
+
+### Create release labels
+
+The following issue labels must be created:
+
+* `vN.x`
+* `backport-blocked-vN.x`
+* `backport-open-vN.x`
+* `backport-requested-vN.x`
+* `backported-to-vN.x`
+* `dont-land-on-vN.x`
+
+The label description can be copied from existing labels of previous releases.
+The label color must be the same for all new labels, but different from the
+labels of previous releases.
 
 ### Release Proposal
 

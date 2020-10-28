@@ -102,14 +102,21 @@ server.listen(0, common.mustCall(function() {
     response.setHeader(real, expectedValue);
     const expectedHeaderNames = [real];
     assert.deepStrictEqual(response.getHeaderNames(), expectedHeaderNames);
-    const expectedHeaders = { [real]: expectedValue };
+    const expectedHeaders = Object.create(null);
+    expectedHeaders[real] = expectedValue;
     assert.deepStrictEqual(response.getHeaders(), expectedHeaders);
 
     response.getHeaders()[fake] = fake;
     assert.strictEqual(response.hasHeader(fake), false);
+    assert.strictEqual(Object.getPrototypeOf(response.getHeaders()), null);
 
     assert.strictEqual(response.sendDate, true);
     response.sendDate = false;
+    assert.strictEqual(response.sendDate, false);
+
+    response.sendDate = true;
+    assert.strictEqual(response.sendDate, true);
+    response.removeHeader('Date');
     assert.strictEqual(response.sendDate, false);
 
     response.on('finish', common.mustCall(function() {

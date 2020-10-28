@@ -1,5 +1,3 @@
-// Flags: --experimental-modules
-
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -10,15 +8,11 @@ const absolutePath = require.resolve('../fixtures/es-modules/test-esm-ok.mjs');
 const targetURL = new URL('file:///');
 targetURL.pathname = absolutePath;
 
-function expectErrorProperty(result, propertyKey, value) {
-  Promise.resolve(result)
-    .catch(common.mustCall((error) => {
-      assert.strictEqual(error[propertyKey], value);
-    }));
-}
-
-function expectModuleError(result, err) {
-  expectErrorProperty(result, 'code', err);
+function expectModuleError(result, code, message) {
+  Promise.resolve(result).catch(common.mustCall((error) => {
+    assert.strictEqual(error.code, code);
+    if (message) assert.strictEqual(error.message, message);
+  }));
 }
 
 function expectOkNamespace(result) {
@@ -44,6 +38,9 @@ function expectFsNamespace(result) {
 // For direct use of import expressions inside of CJS or ES modules, including
 // via eval, all kinds of specifiers should work without issue.
 (function testScriptOrModuleImport() {
+  common.expectWarning('ExperimentalWarning',
+                       'The ESM module loader is experimental.');
+
   // Importing another file, both direct & via eval
   // expectOkNamespace(import(relativePath));
   expectOkNamespace(eval(`import("${relativePath}")`));
@@ -62,4 +59,13 @@ function expectFsNamespace(result) {
                     'ERR_MODULE_NOT_FOUND');
   expectModuleError(import('http://example.com/foo.js'),
                     'ERR_UNSUPPORTED_ESM_URL_SCHEME');
+  if (common.isWindows) {
+    const msg =
+      'Only file and data URLs are supported by the default ESM loader. ' +
+      'On Windows, absolute paths must be valid file:// URLs. ' +
+      "Received protocol 'c:'";
+    expectModuleError(import('C:\\example\\foo.mjs'),
+                      'ERR_UNSUPPORTED_ESM_URL_SCHEME',
+                      msg);
+  }
 })();

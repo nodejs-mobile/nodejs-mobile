@@ -21,8 +21,14 @@ void FSContinuationData::PushPath(const std::string& path) {
   paths_.push_back(path);
 }
 
+void FSContinuationData::MaybeSetFirstPath(const std::string& path) {
+  if (first_path_.empty()) {
+    first_path_ = path;
+  }
+}
+
 std::string FSContinuationData::PopPath() {
-  CHECK_GT(paths_.size(), 0);
+  CHECK(!paths_.empty());
   std::string path = std::move(paths_.back());
   paths_.pop_back();
   return path;

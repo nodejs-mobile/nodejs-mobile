@@ -1,5 +1,6 @@
 # Domain
 <!-- YAML
+deprecated: v1.4.2
 changes:
   - version: v8.8.0
     description: Any `Promise`s created in VM contexts no longer have a
@@ -16,8 +17,10 @@ changes:
 
 > Stability: 0 - Deprecated
 
+<!-- source_link=lib/domain.js -->
+
 **This module is pending deprecation**. Once a replacement API has been
-finalized, this module will be fully deprecated. Most end users should
+finalized, this module will be fully deprecated. Most developers should
 **not** have cause to use this module. Users who absolutely must have
 the functionality that domains provide may rely on it for the time being
 but should expect to have to migrate to a different solution
@@ -30,7 +33,7 @@ will be notified, rather than losing the context of the error in the
 `process.on('uncaughtException')` handler, or causing the program to
 exit immediately with an error code.
 
-## Warning: Don't Ignore Errors!
+## Warning: Don't ignore errors!
 
 <!-- type=misc -->
 
@@ -199,7 +202,7 @@ are added to it.
 * `error.domainThrown` A boolean indicating whether the error was
   thrown, emitted, or passed to a bound callback function.
 
-## Implicit Binding
+## Implicit binding
 
 <!--type=misc-->
 
@@ -225,7 +228,7 @@ Implicit binding routes thrown errors and `'error'` events to the
 `Domain`.
 Implicit binding only takes care of thrown errors and `'error'` events.
 
-## Explicit Binding
+## Explicit binding
 
 <!--type=misc-->
 
@@ -432,9 +435,9 @@ d.run(() => {
 In this example, the `d.on('error')` handler will be triggered, rather
 than crashing the program.
 
-## Domains and Promises
+## Domains and promises
 
-As of Node.js 8.0.0, the handlers of Promises are run inside the domain in
+As of Node.js 8.0.0, the handlers of promises are run inside the domain in
 which the call to `.then()` or `.catch()` itself was made:
 
 ```js
@@ -472,7 +475,7 @@ d2.run(() => {
 ```
 
 Domains will not interfere with the error handling mechanisms for
-Promises. In other words, no `'error'` event will be emitted for unhandled
+promises. In other words, no `'error'` event will be emitted for unhandled
 `Promise` rejections.
 
 [`Error`]: errors.html#errors_class_error

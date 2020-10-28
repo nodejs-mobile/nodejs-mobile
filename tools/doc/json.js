@@ -436,7 +436,7 @@ const r = String.raw;
 const eventPrefix = '^Event: +';
 const classPrefix = '^[Cc]lass: +';
 const ctorPrefix = '^(?:[Cc]onstructor: +)?`?new +';
-const classMethodPrefix = '^Class Method: +';
+const classMethodPrefix = '^Static method: +';
 const maybeClassPropertyPrefix = '(?:Class Property: +)?';
 
 const maybeQuote = '[\'"]?';
@@ -455,8 +455,6 @@ const ancestors = r`(?:${id}\.?)+`;
 const maybeAncestors = r`(?:${id}\.?)*`;
 
 const callWithParams = r`\([^)]*\)`;
-
-const noCallOrProp = '(?![.[(])';
 
 const maybeExtends = `(?: +extends +${maybeAncestors}${classId})?`;
 
@@ -478,7 +476,7 @@ const headingExpressions = [
     `^${maybeBacktick}${maybeAncestors}(${id})${callWithParams}${maybeBacktick}$`, 'i') },
 
   { type: 'property', re: RegExp(
-    `^${maybeClassPropertyPrefix}${maybeBacktick}${ancestors}(${id})${maybeBacktick}${noCallOrProp}$`, 'i') },
+    `^${maybeClassPropertyPrefix}${maybeBacktick}${ancestors}(${id})${maybeBacktick}$`, 'i') },
 ];
 /* eslint-enable max-len */
 
@@ -508,8 +506,7 @@ function textJoin(nodes, file) {
       return `_${textJoin(node.children, file)}_`;
     } else if (node.children) {
       return textJoin(node.children, file);
-    } else {
-      return node.value;
     }
+    return node.value;
   }).join('');
 }

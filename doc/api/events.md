@@ -6,6 +6,8 @@
 
 <!--type=module-->
 
+<!-- source_link=lib/events.js -->
+
 Much of the Node.js core API is built around an idiomatic asynchronous
 event-driven architecture in which certain kinds of objects (called "emitters")
 emit named events that cause `Function` objects ("listeners") to be called.
@@ -74,7 +76,7 @@ myEmitter.on('event', (a, b) => {
 myEmitter.emit('event', 'a', 'b');
 ```
 
-## Asynchronous vs. Synchronous
+## Asynchronous vs. synchronous
 
 The `EventEmitter` calls all listeners synchronously in the order in which
 they were registered. This ensures the proper sequencing of
@@ -155,7 +157,19 @@ myEmitter.emit('error', new Error('whoops!'));
 // Prints: whoops! there was an error
 ```
 
-## Capture Rejections of Promises
+It is possible to monitor `'error'` events without consuming the emitted error
+by installing a listener using the symbol `errorMonitor`.
+
+```js
+const myEmitter = new MyEmitter();
+myEmitter.on(EventEmitter.errorMonitor, (err) => {
+  MyMonitoringTool.log(err);
+});
+myEmitter.emit('error', new Error('whoops!'));
+// Still throws and crashes Node.js
+```
+
+## Capture rejections of promises
 
 > Stability: 1 - captureRejections is experimental.
 
@@ -289,7 +303,7 @@ The `'removeListener'` event is emitted *after* the `listener` is removed.
 ### `EventEmitter.listenerCount(emitter, eventName)`
 <!-- YAML
 added: v0.9.12
-deprecated: v4.0.0
+deprecated: v3.2.0
 -->
 
 > Stability: 0 - Deprecated: Use [`emitter.listenerCount()`][] instead.
@@ -347,6 +361,19 @@ have the additional `emitter`, `type` and `count` properties, referring to
 the event emitter instance, the event’s name and the number of attached
 listeners, respectively.
 Its `name` property is set to `'MaxListenersExceededWarning'`.
+
+### `EventEmitter.errorMonitor`
+<!-- YAML
+added: v12.17.0
+-->
+
+This symbol shall be used to install a listener for only monitoring `'error'`
+events. Listeners installed using this symbol are called before the regular
+`'error'` listeners are called.
+
+Installing a listener using this symbol does not change the behavior once an
+`'error'` event is emitted, therefore the process will still crash if no
+regular `'error'` listener is installed.
 
 ### `emitter.addListener(eventName, listener)`
 <!-- YAML
@@ -802,7 +829,7 @@ added: v11.13.0
 * Returns: {Promise}
 
 Creates a `Promise` that is fulfilled when the `EventEmitter` emits the given
-event or that is rejected when the `EventEmitter` emits `'error'`.
+event or that is rejected if the `EventEmitter` emits `'error'` while waiting.
 The `Promise` will resolve with an array of all the arguments emitted to the
 given event.
 
@@ -838,7 +865,80 @@ async function run() {
 run();
 ```
 
-## events.captureRejections
+The special handling of the `'error'` event is only used when `events.once()`
+is used to wait for another event. If `events.once()` is used to wait for the
+'`error'` event itself, then it is treated as any other kind of event without
+special handling:
+
+```js
+const { EventEmitter, once } = require('events');
+
+const ee = new EventEmitter();
+
+once(ee, 'error')
+  .then(([err]) => console.log('ok', err.message))
+  .catch((err) => console.log('error', err.message));
+
+ee.emit('error', new Error('boom'));
+
+// Prints: ok boom
+```
+
+### Awaiting multiple events emitted on `process.nextTick()`
+
+There is an edge case worth noting when using the `events.once()` function
+to await multiple events emitted on in the same batch of `process.nextTick()`
+operations, or whenever multiple events are emitted synchronously. Specifically,
+because the `process.nextTick()` queue is drained before the `Promise` microtask
+queue, and because `EventEmitter` emits all events synchronously, it is possible
+for `events.once()` to miss an event.
+
+```js
+const { EventEmitter, once } = require('events');
+
+const myEE = new EventEmitter();
+
+async function foo() {
+  await once(myEE, 'bar');
+  console.log('bar');
+
+  // This Promise will never resolve because the 'foo' event will
+  // have already been emitted before the Promise is created.
+  await once(myEE, 'foo');
+  console.log('foo');
+}
+
+process.nextTick(() => {
+  myEE.emit('bar');
+  myEE.emit('foo');
+});
+
+foo().then(() => console.log('done'));
+```
+
+To catch both events, create each of the Promises *before* awaiting either
+of them, then it becomes possible to use `Promise.all()`, `Promise.race()`,
+or `Promise.allSettled()`:
+
+```js
+const { EventEmitter, once } = require('events');
+
+const myEE = new EventEmitter();
+
+async function foo() {
+  await Promise.all([once(myEE, 'bar'), once(myEE, 'foo')]);
+  console.log('foo', 'bar');
+}
+
+process.nextTick(() => {
+  myEE.emit('bar');
+  myEE.emit('foo');
+});
+
+foo().then(() => console.log('done'));
+```
+
+## `events.captureRejections`
 <!-- YAML
 added: v12.16.0
 -->

@@ -4,6 +4,8 @@
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/console.js -->
+
 The `console` module provides a simple debugging console that is similar to the
 JavaScript console mechanism provided by web browsers.
 
@@ -81,16 +83,19 @@ const { Console } = console;
 ### `new Console(options)`
 <!-- YAML
 changes:
-  - version: v8.0.0
-    pr-url: https://github.com/nodejs/node/pull/9744
-    description: The `ignoreErrors` option was introduced.
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32964
+    description: The `groupIndentation` option was introduced.
+  - version: v11.7.0
+    pr-url: https://github.com/nodejs/node/pull/24978
+    description: The `inspectOptions` option is introduced.
   - version: v10.0.0
     pr-url: https://github.com/nodejs/node/pull/19372
     description: The `Console` constructor now supports an `options` argument,
                  and the `colorMode` option was introduced.
-  - version: v11.7.0
-    pr-url: https://github.com/nodejs/node/pull/24978
-    description: The `inspectOptions` option is introduced.
+  - version: v8.0.0
+    pr-url: https://github.com/nodejs/node/pull/9744
+    description: The `ignoreErrors` option was introduced.
 -->
 
 * `options` {Object}
@@ -107,6 +112,8 @@ changes:
     **Default:** `'auto'`.
   * `inspectOptions` {Object} Specifies options that are passed along to
     [`util.inspect()`][].
+  * `groupIndentation` {number} Set group indentation.
+    **Default:** `2`.
 
 Creates a new `Console` with one or two writable stream instances. `stdout` is a
 writable stream to print log or info output. `stderr` is used for warning or
@@ -143,20 +150,22 @@ changes:
 * `value` {any} The value tested for being truthy.
 * `...message` {any} All arguments besides `value` are used as error message.
 
-A simple assertion test that verifies whether `value` is truthy. If it is not,
-`Assertion failed` is logged. If provided, the error `message` is formatted
-using [`util.format()`][] by passing along all message arguments. The output is
-used as the error message.
+`console.assert()` writes a message if `value` is [falsy][] or omitted. It only
+writes a message and does not otherwise affect execution. The output always
+starts with `"Assertion failed"`. If provided, `message` is formatted using
+[`util.format()`][].
+
+If `value` is [truthy][], nothing happens.
 
 ```js
 console.assert(true, 'does nothing');
-// OK
+
 console.assert(false, 'Whoops %s work', 'didn\'t');
 // Assertion failed: Whoops didn't work
-```
 
-Calling `console.assert()` with a falsy assertion will only cause the `message`
-to be printed to the console without interrupting execution of subsequent code.
+console.assert();
+// Assertion failed
+```
 
 ### `console.clear()`
 <!-- YAML
@@ -306,7 +315,8 @@ added: v8.5.0
 
 * `...label` {any}
 
-Increases indentation of subsequent lines by two spaces.
+Increases indentation of subsequent lines by spaces for `groupIndentation`
+length.
 
 If one or more `label`s are provided, those are printed first without the
 additional indentation.
@@ -323,7 +333,8 @@ An alias for [`console.group()`][].
 added: v8.5.0
 -->
 
-Decreases indentation of subsequent lines by two spaces.
+Decreases indentation of subsequent lines by spaces for `groupIndentation`
+length.
 
 ### `console.info([data][, ...args])`
 <!-- YAML
@@ -548,5 +559,7 @@ This method does not display anything unless used in the inspector. The
 [`util.format()`]: util.html#util_util_format_format_args
 [`util.inspect()`]: util.html#util_util_inspect_object_options
 [customizing `util.inspect()` colors]: util.html#util_customizing_util_inspect_colors
+[falsy]: https://developer.mozilla.org/en-US/docs/Glossary/Falsy
 [inspector]: debugger.html
 [note on process I/O]: process.html#process_a_note_on_process_i_o
+[truthy]: https://developer.mozilla.org/en-US/docs/Glossary/Truthy

@@ -3,7 +3,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
 #include "cache_builder.h"
 #include "debug_utils-inl.h"
@@ -49,8 +48,9 @@ int main(int argc, char* argv[]) {
 
   // Create a new Isolate and make it the current one.
   Isolate::CreateParams create_params;
-  create_params.array_buffer_allocator =
-      ArrayBuffer::Allocator::NewDefaultAllocator();
+  std::unique_ptr<ArrayBuffer::Allocator> array_buffer_allocator {
+      ArrayBuffer::Allocator::NewDefaultAllocator() };
+  create_params.array_buffer_allocator = array_buffer_allocator.get();
   Isolate* isolate = Isolate::New(create_params);
   {
     Isolate::Scope isolate_scope(isolate);
@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
     out << cache;
     out.close();
   }
+  isolate->Dispose();
 
   v8::V8::ShutdownPlatform();
   return 0;

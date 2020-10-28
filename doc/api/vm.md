@@ -1,10 +1,12 @@
-# VM (Executing JavaScript)
+# VM (executing JavaScript)
 
 <!--introduced_in=v0.10.0-->
 
 > Stability: 2 - Stable
 
 <!--name=vm-->
+
+<!-- source_link=lib/vm.js -->
 
 The `vm` module enables compiling and running code within V8 Virtual
 Machine contexts. **The `vm` module is not a security mechanism. Do
@@ -48,7 +50,7 @@ added: v0.3.1
 Instances of the `vm.Script` class contain precompiled scripts that can be
 executed in specific contexts.
 
-### Constructor: `new vm.Script(code[, options])`
+### `new vm.Script(code[, options])`
 <!-- YAML
 added: v0.3.1
 changes:
@@ -85,8 +87,8 @@ changes:
   * `importModuleDynamically` {Function} Called during evaluation of this module
     when `import()` is called. If this option is not specified, calls to
     `import()` will reject with [`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`][].
-    This option is part of the experimental API for the `--experimental-modules`
-    flag, and should not be considered stable.
+    This option is part of the experimental modules API, and should not be
+    considered stable.
     * `specifier` {string} specifier passed to `import()`
     * `module` {vm.Module}
     * Returns: {Module Namespace Object|vm.Module} Returning a `vm.Module` is
@@ -160,7 +162,6 @@ the value of another global variable, then execute the code multiple times.
 The globals are contained in the `context` object.
 
 ```js
-const util = require('util');
 const vm = require('vm');
 
 const context = {
@@ -235,7 +236,6 @@ the code multiple times in different contexts. The globals are set on and
 contained within each individual `context`.
 
 ```js
-const util = require('util');
 const vm = require('vm');
 
 const script = new vm.Script('globalVar = "set"');
@@ -320,7 +320,7 @@ linking, and evaluation. These three steps are illustrated in the following
 example.
 
 This implementation lies at a lower level than the [ECMAScript Module
-loader][]. There is also currently no way to interact with the Loader, though
+loader][]. There is also no way to interact with the Loader yet, though
 support is planned.
 
 ```js
@@ -556,13 +556,17 @@ flag enabled.*
 The `vm.SourceTextModule` class provides the [Source Text Module Record][] as
 defined in the ECMAScript specification.
 
-### Constructor: `new vm.SourceTextModule(code[, options])`
+### `new vm.SourceTextModule(code[, options])`
 
 * `code` {string} JavaScript Module code to parse
 * `options`
   * `identifier` {string} String used in stack traces.
     **Default:** `'vm:module(i)'` where `i` is a context-specific ascending
     index.
+  * `cachedData` {Buffer|TypedArray|DataView} Provides an optional `Buffer` or
+    `TypedArray`, or `DataView` with V8's code cache data for the supplied
+     source. The `code` must be the same as the module from which this
+     `cachedData` was created.
   * `context` {Object} The [contextified][] object as returned by the
     `vm.createContext()` method, to compile and evaluate this `Module` in.
   * `lineOffset` {integer} Specifies the line number offset that is displayed
@@ -618,6 +622,28 @@ const contextifiedObject = vm.createContext({ secret: 42 });
 })();
 ```
 
+### `sourceTextModule.createCachedData()`
+<!-- YAML
+added: v12.17.0
+-->
+
+* Returns: {Buffer}
+
+Creates a code cache that can be used with the SourceTextModule constructor's
+`cachedData` option. Returns a Buffer. This method may be called any number
+of times before the module has been evaluated.
+
+```js
+// Create an initial module
+const module = new vm.SourceTextModule('const a = 1;');
+
+// Create cached data from this module
+const cachedData = module.createCachedData();
+
+// Create a new module using the cached data. The code must be the same.
+const module2 = new vm.SourceTextModule('const a = 1;', { cachedData });
+```
+
 ## Class: `vm.SyntheticModule`
 <!-- YAML
 added: v12.16.0
@@ -647,7 +673,7 @@ const module = new vm.SyntheticModule(['default'], function() {
 // Use `module` in linking...
 ```
 
-### Constructor: `new vm.SyntheticModule(exportNames, evaluateCallback[, options])`
+### `new vm.SyntheticModule(exportNames, evaluateCallback[, options])`
 <!-- YAML
 added: v12.16.0
 -->
@@ -765,7 +791,6 @@ properties but also having the built-in objects and functions any standard
 will remain unchanged.
 
 ```js
-const util = require('util');
 const vm = require('vm');
 
 global.globalVar = 3;
@@ -850,8 +875,8 @@ changes:
   * `importModuleDynamically` {Function} Called during evaluation of this module
     when `import()` is called. If this option is not specified, calls to
     `import()` will reject with [`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`][].
-    This option is part of the experimental API for the `--experimental-modules`
-    flag, and should not be considered stable.
+    This option is part of the experimental modules API, and should not be
+    considered stable.
     * `specifier` {string} specifier passed to `import()`
     * `module` {vm.Module}
     * Returns: {Module Namespace Object|vm.Module} Returning a `vm.Module` is
@@ -870,7 +895,6 @@ The following example compiles and executes different scripts using a single
 [contextified][] object:
 
 ```js
-const util = require('util');
 const vm = require('vm');
 
 const contextObject = { globalVar: 1 };
@@ -946,8 +970,8 @@ changes:
   * `importModuleDynamically` {Function} Called during evaluation of this module
     when `import()` is called. If this option is not specified, calls to
     `import()` will reject with [`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`][].
-    This option is part of the experimental API for the `--experimental-modules`
-    flag, and should not be considered stable.
+    This option is part of the experimental modules API, and should not be
+    considered stable.
     * `specifier` {string} specifier passed to `import()`
     * `module` {vm.Module}
     * Returns: {Module Namespace Object|vm.Module} Returning a `vm.Module` is
@@ -966,7 +990,6 @@ The following example compiles and executes code that increments a global
 variable and sets a new one. These globals are contained in the `contextObject`.
 
 ```js
-const util = require('util');
 const vm = require('vm');
 
 const contextObject = {
@@ -1022,8 +1045,8 @@ changes:
   * `importModuleDynamically` {Function} Called during evaluation of this module
     when `import()` is called. If this option is not specified, calls to
     `import()` will reject with [`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`][].
-    This option is part of the experimental API for the `--experimental-modules`
-    flag, and should not be considered stable.
+    This option is part of the experimental modules API, and should not be
+    considered stable.
     * `specifier` {string} specifier passed to `import()`
     * `module` {vm.Module}
     * Returns: {Module Namespace Object|vm.Module} Returning a `vm.Module` is
@@ -1060,7 +1083,7 @@ local scope, so the value `localVar` is changed. In this way
 `vm.runInThisContext()` is much like an [indirect `eval()` call][], e.g.
 `(0,eval)('code')`.
 
-## Example: Running an HTTP Server within a VM
+## Example: Running an HTTP server within a VM
 
 When using either [`script.runInThisContext()`][] or
 [`vm.runInThisContext()`][], the code is executed within the current V8 global
@@ -1110,7 +1133,7 @@ within which it can operate. The process of creating the V8 Context and
 associating it with the `contextObject` is what this document refers to as
 "contextifying" the object.
 
-## Timeout limitations when using `process.nextTick()`, Promises, and `queueMicrotask()`
+## Timeout limitations when using `process.nextTick()`, promises, and `queueMicrotask()`
 
 Because of the internal mechanics of how the `process.nextTick()` queue and
 the microtask queue that underlies Promises are implemented within V8 and

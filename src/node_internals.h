@@ -102,6 +102,7 @@ std::string GetProcessTitle(const char* default_title);
 std::string GetHumanReadableProcessName();
 
 void InitializeContextRuntime(v8::Local<v8::Context>);
+bool InitializePrimordials(v8::Local<v8::Context> context);
 
 namespace task_queue {
 void PromiseRejectCallback(v8::PromiseRejectMessage message);
@@ -112,20 +113,24 @@ class NodeArrayBufferAllocator : public ArrayBufferAllocator {
   inline uint32_t* zero_fill_field() { return &zero_fill_field_; }
 
   void* Allocate(size_t size) override;  // Defined in src/node.cc
-  void* AllocateUninitialized(size_t size) override
-    { return node::UncheckedMalloc(size); }
-  void Free(void* data, size_t) override { free(data); }
-  virtual void* Reallocate(void* data, size_t old_size, size_t size) {
-    return static_cast<void*>(
-        UncheckedRealloc<char>(static_cast<char*>(data), size));
+  void* AllocateUninitialized(size_t size) override;
+  void Free(void* data, size_t size) override;
+  virtual void* Reallocate(void* data, size_t old_size, size_t size);
+  virtual void RegisterPointer(void* data, size_t size) {
+    total_mem_usage_.fetch_add(size, std::memory_order_relaxed);
   }
-  virtual void RegisterPointer(void* data, size_t size) {}
-  virtual void UnregisterPointer(void* data, size_t size) {}
+  virtual void UnregisterPointer(void* data, size_t size) {
+    total_mem_usage_.fetch_sub(size, std::memory_order_relaxed);
+  }
 
   NodeArrayBufferAllocator* GetImpl() final { return this; }
+  inline uint64_t total_mem_usage() const {
+    return total_mem_usage_.load(std::memory_order_relaxed);
+  }
 
  private:
   uint32_t zero_fill_field_ = 1;  // Boolean but exposed as uint32 to JS land.
+  std::atomic<size_t> total_mem_usage_ {0};
 };
 
 class DebuggingArrayBufferAllocator final : public NodeArrayBufferAllocator {
@@ -197,6 +202,7 @@ static v8::MaybeLocal<v8::Object> New(Environment* env,
 
 v8::MaybeLocal<v8::Value> InternalMakeCallback(
     Environment* env,
+    v8::Local<v8::Object> resource,
     v8::Local<v8::Object> recv,
     const v8::Local<v8::Function> callback,
     int argc,
@@ -207,15 +213,13 @@ class InternalCallbackScope {
  public:
   enum Flags {
     kNoFlags = 0,
-    // Tell the constructor whether its `object` parameter may be empty or not.
-    kAllowEmptyResource = 1,
     // Indicates whether 'before' and 'after' hooks should be skipped.
-    kSkipAsyncHooks = 2,
+    kSkipAsyncHooks = 1,
     // Indicates whether nextTick and microtask queues should be skipped.
     // This should only be used when there is no call into JS in this scope.
     // (The HTTP parser also uses it for some weird backwards
     // compatibility issues, but it shouldn't.)
-    kSkipTaskQueues = 4
+    kSkipTaskQueues = 2
   };
   InternalCallbackScope(Environment* env,
                         v8::Local<v8::Object> object,
@@ -242,9 +246,9 @@ class InternalCallbackScope {
 
 class DebugSealHandleScope {
  public:
-  explicit inline DebugSealHandleScope(v8::Isolate* isolate)
+  explicit inline DebugSealHandleScope(v8::Isolate* isolate = nullptr)
 #ifdef DEBUG
-    : actual_scope_(isolate)
+    : actual_scope_(isolate != nullptr ? isolate : v8::Isolate::GetCurrent())
 #endif
   {}
 
@@ -297,8 +301,10 @@ void DefineZlibConstants(v8::Local<v8::Object> target);
 v8::Isolate* NewIsolate(v8::Isolate::CreateParams* params,
                         uv_loop_t* event_loop,
                         MultiIsolatePlatform* platform);
+// This overload automatically picks the right 'main_script_id' if no callback
+// was provided by the embedder.
 v8::MaybeLocal<v8::Value> StartExecution(Environment* env,
-                                         const char* main_script_id);
+                                         StartExecutionCallback cb = nullptr);
 v8::MaybeLocal<v8::Object> GetPerContextExports(v8::Local<v8::Context> context);
 v8::MaybeLocal<v8::Value> ExecuteBootstrapper(
     Environment* env,
@@ -382,6 +388,20 @@ class TraceEventScope {
   const char* name_;
   void* id_;
 };
+
+namespace heap {
+
+void DeleteHeapSnapshot(const v8::HeapSnapshot* snapshot);
+using HeapSnapshotPointer =
+  DeleteFnPtr<const v8::HeapSnapshot, DeleteHeapSnapshot>;
+
+BaseObjectPtr<AsyncWrap> CreateHeapSnapshotStream(
+    Environment* env, HeapSnapshotPointer&& snapshot);
+}  // namespace heap
+
+namespace fs {
+std::string Basename(const std::string& str, const std::string& extension);
+}  // namespace fs
 
 }  // namespace node
 

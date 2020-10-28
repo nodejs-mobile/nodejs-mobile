@@ -27,7 +27,7 @@ const process = global.process;  // Some tests tamper with the process global.
 const assert = require('assert');
 const { exec, execSync, spawnSync } = require('child_process');
 const fs = require('fs');
-// Do not require 'os' until needed so that test-os-checked-fucnction can
+// Do not require 'os' until needed so that test-os-checked-function can
 // monkey patch it. If 'os' is required here, that test will fail.
 const path = require('path');
 const util = require('util');
@@ -114,7 +114,7 @@ const isOSX = process.platform === 'darwin';
 const isAndroid = process.platform === 'android';
 const isIOS = process.platform === 'ios';
 
-const rootDir = isWindows ? 'c:\\' : '/';
+const isDumbTerminal = process.env.TERM === 'dumb';
 
 const buildType = process.config.target_defaults ?
   process.config.target_defaults.default_configuration :
@@ -141,19 +141,22 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
       process._rawDebug();
       throw new Error(`same id added to destroy list twice (${id})`);
     }
-    destroyListList[id] = new Error().stack;
+    destroyListList[id] = util.inspect(new Error());
     _queueDestroyAsyncId(id);
   };
 
   require('async_hooks').createHook({
-    init(id, ty, tr, r) {
+    init(id, ty, tr, resource) {
       if (initHandles[id]) {
         process._rawDebug(
-          `Is same resource: ${r === initHandles[id].resource}`);
+          `Is same resource: ${resource === initHandles[id].resource}`);
         process._rawDebug(`Previous stack:\n${initHandles[id].stack}\n`);
         throw new Error(`init called twice for same id (${id})`);
       }
-      initHandles[id] = { resource: r, stack: new Error().stack.substr(6) };
+      initHandles[id] = {
+        resource,
+        stack: util.inspect(new Error()).substr(6)
+      };
     },
     before() { },
     after() { },
@@ -163,7 +166,7 @@ if (process.env.NODE_TEST_WITH_ASYNC_HOOKS) {
         process._rawDebug();
         throw new Error(`destroy called for same id (${id})`);
       }
-      destroydIdsList[id] = new Error().stack;
+      destroydIdsList[id] = util.inspect(new Error());
     },
   }).enable();
 }
@@ -306,10 +309,9 @@ function runCallChecks(exitCode) {
     if ('minimum' in context) {
       context.messageSegment = `at least ${context.minimum}`;
       return context.actual < context.minimum;
-    } else {
-      context.messageSegment = `exactly ${context.exact}`;
-      return context.actual !== context.exact;
     }
+    context.messageSegment = `exactly ${context.exact}`;
+    return context.actual !== context.exact;
   });
 
   failed.forEach(function(context) {
@@ -347,7 +349,7 @@ function _mustCallInner(fn, criteria = 1, field) {
   const context = {
     [field]: criteria,
     actual: 0,
-    stack: (new Error()).stack,
+    stack: util.inspect(new Error()),
     name: fn.name || '<anonymous>'
   };
 
@@ -415,9 +417,12 @@ function getCallSite(top) {
 
 function mustNotCall(msg) {
   const callSite = getCallSite(mustNotCall);
-  return function mustNotCall() {
+  return function mustNotCall(...args) {
+    const argsInfo = args.length > 0 ?
+      `\ncalled with arguments: ${args.map(util.inspect).join(', ')}` : '';
     assert.fail(
-      `${msg || 'function should not have been called'} at ${callSite}`);
+      `${msg || 'function should not have been called'} at ${callSite}` +
+      argsInfo);
   };
 }
 
@@ -462,9 +467,8 @@ function nodeProcessAborted(exitCode, signal) {
   // the expected exit codes or signals.
   if (signal !== null) {
     return expectedSignals.includes(signal);
-  } else {
-    return expectedExitCodes.includes(exitCode);
   }
+  return expectedExitCodes.includes(exitCode);
 }
 
 function isAlive(pid) {
@@ -532,7 +536,7 @@ function expectWarning(nameOrMap, expected, code) {
 function expectsError(validator, exact) {
   return mustCall((...args) => {
     if (args.length !== 1) {
-      // Do not use `assert.strictEqual()` to prevent `util.inspect` from
+      // Do not use `assert.strictEqual()` to prevent `inspect` from
       // always being called.
       assert.fail(`Expected one argument, got ${util.inspect(args)}`);
     }
@@ -562,12 +566,6 @@ function expectsInternalAssertion(fn, message) {
 function skipIfInspectorDisabled() {
   if (!process.features.inspector) {
     skip('V8 inspector is disabled');
-  }
-}
-
-function skipIfReportDisabled() {
-  if (!process.config.variables.node_report) {
-    skip('Diagnostic reporting is disabled');
   }
 }
 
@@ -671,6 +669,36 @@ function invalidArgTypeHelper(input) {
   return ` Received type ${typeof input} (${inspected})`;
 }
 
+function skipIfDumbTerminal() {
+  if (isDumbTerminal) {
+    skip('skipping - dumb terminal');
+  }
+}
+
+function gcUntil(name, condition) {
+  if (typeof name === 'function') {
+    condition = name;
+    name = undefined;
+  }
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    function gcAndCheck() {
+      setImmediate(() => {
+        count++;
+        global.gc();
+        if (condition()) {
+          resolve();
+        } else if (count < 10) {
+          gcAndCheck();
+        } else {
+          reject(name === undefined ? undefined : 'Test ' + name + ' failed');
+        }
+      });
+    }
+    gcAndCheck();
+  });
+}
+
 const common = {
   allowGlobals,
   buildType,
@@ -681,6 +709,7 @@ const common = {
   expectsError,
   expectsInternalAssertion,
   expectWarning,
+  gcUntil,
   getArrayBufferViews,
   getBufferSources,
   getCallSite,
@@ -692,6 +721,7 @@ const common = {
   isAIX,
   isAlive,
   isAndroid,
+  isDumbTerminal,
   isFreeBSD,
   isIOS,
   isLinux,
@@ -709,13 +739,12 @@ const common = {
   platformTimeout,
   printSkipMessage,
   pwdCommand,
-  rootDir,
   runWithInvalidFD,
   skip,
   skipIf32Bits,
+  skipIfDumbTerminal,
   skipIfEslintMissing,
   skipIfInspectorDisabled,
-  skipIfReportDisabled,
   skipIfWorker,
 
   get enoughTestCpu() {
@@ -788,8 +817,6 @@ const common = {
 
     return localhostIPv4;
   },
-
-  get localhostIPv6() { return '::1'; },
 
   // opensslCli defined lazily to reduce overhead of spawnSync
   get opensslCli() {

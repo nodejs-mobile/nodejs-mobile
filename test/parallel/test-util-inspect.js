@@ -146,8 +146,8 @@ assert.strictEqual(
   "[String: 'hello'] { [length]: 5, [Symbol(foo)]: 123 }"
 );
 
-assert.strictEqual(util.inspect((new JSStream())._externalStream),
-                   '[External]');
+assert.match(util.inspect((new JSStream())._externalStream),
+             /^\[External: [0-9a-f]+\]$/);
 
 {
   const regexp = /regexp/;
@@ -1968,6 +1968,88 @@ assert.strictEqual(util.inspect('"\'${a}'), "'\"\\'${a}'");
   );
 });
 
+// Verify that classes are properly inspected.
+[
+  /* eslint-disable spaced-comment, no-multi-spaces, brace-style */
+  // The whitespace is intentional.
+  [class   { }, '[class (anonymous)]'],
+  [class extends Error { log() {} }, '[class (anonymous) extends Error]'],
+  [class A { constructor(a) { this.a = a; } log() { return this.a; } },
+   '[class A]'],
+  [class
+  // Random { // comments /* */ are part of the toString() result
+  /* eslint-disable-next-line space-before-blocks */
+  äß/**/extends/*{*/TypeError{}, '[class äß extends TypeError]'],
+  /* The whitespace and new line is intended! */
+  // Foobar !!!
+  [class X   extends /****/ Error
+  // More comments
+  {}, '[class X extends Error]']
+  /* eslint-enable spaced-comment, no-multi-spaces, brace-style */
+].forEach(([clazz, string]) => {
+  const inspected = util.inspect(clazz);
+  assert.strictEqual(inspected, string);
+  Object.defineProperty(clazz, Symbol.toStringTag, {
+    value: 'Woohoo'
+  });
+  const parts = inspected.slice(0, -1).split(' ');
+  const [, name, ...rest] = parts;
+  rest.unshift('[Woohoo]');
+  if (rest.length) {
+    rest[rest.length - 1] += ']';
+  }
+  assert.strictEqual(
+    util.inspect(clazz),
+    ['[class', name, ...rest].join(' ')
+  );
+  if (rest.length) {
+    rest[rest.length - 1] = rest[rest.length - 1].slice(0, -1);
+    rest.length = 1;
+  }
+  Object.setPrototypeOf(clazz, null);
+  assert.strictEqual(
+    util.inspect(clazz),
+    ['[class', name, ...rest, 'extends [null prototype]]'].join(' ')
+  );
+  Object.defineProperty(clazz, 'name', { value: 'Foo' });
+  const res = ['[class', 'Foo', ...rest, 'extends [null prototype]]'].join(' ');
+  assert.strictEqual(util.inspect(clazz), res);
+  clazz.foo = true;
+  assert.strictEqual(util.inspect(clazz), `${res} { foo: true }`);
+});
+
+// "class" properties should not be detected as "class".
+{
+  // eslint-disable-next-line space-before-function-paren
+  let obj = { class () {} };
+  assert.strictEqual(
+    util.inspect(obj),
+    '{ class: [Function: class] }'
+  );
+  obj = { class: () => {} };
+  assert.strictEqual(
+    util.inspect(obj),
+    '{ class: [Function: class] }'
+  );
+  obj = { ['class Foo {}']() {} };
+  assert.strictEqual(
+    util.inspect(obj),
+    "{ 'class Foo {}': [Function: class Foo {}] }"
+  );
+  function Foo() {}
+  Object.defineProperty(Foo, 'toString', { value: () => 'class Foo {}' });
+  assert.strictEqual(
+    util.inspect(Foo),
+    '[Function: Foo]'
+  );
+  function fn() {}
+  Object.defineProperty(fn, 'name', { value: 'class Foo {}' });
+  assert.strictEqual(
+    util.inspect(fn),
+    '[Function: class Foo {}]'
+  );
+}
+
 // Verify that throwing in valueOf and toString still produces nice results.
 [
   [new String(55), "[String: '55']"],
@@ -2158,6 +2240,12 @@ assert.strictEqual(
     assert.deepStrictEqual(inspect.colors[bgColor], [40 + i, 49]);
     assert.deepStrictEqual(inspect.colors[`${bgColor}Bright`], [100 + i, 49]);
   });
+
+  // Unknown colors are handled gracefully:
+  const stringStyle = inspect.styles.string;
+  inspect.styles.string = 'UNKNOWN';
+  assert.strictEqual(inspect('foobar', { colors: true }), "'foobar'");
+  inspect.styles.string = stringStyle;
 }
 
 assert.strictEqual(
@@ -2437,6 +2525,26 @@ assert.strictEqual(
     '  1, 1,         1, 1,',
     '  1, 1, 123456789',
     ']'
+  ].join('\n');
+
+  assert.strictEqual(out, expected);
+
+  // Unicode support. あ has a length of one and a width of two.
+  obj = [
+    '123', '123', '123', '123', 'あああ',
+    '123', '123', '123', '123', 'あああ'
+  ];
+
+  out = util.inspect(obj, { compact: 3 });
+
+  expected = [
+    '[',
+    "  '123',    '123',",
+    "  '123',    '123',",
+    "  'あああ', '123',",
+    "  '123',    '123',",
+    "  '123',    'あああ'",
+    ']',
   ].join('\n');
 
   assert.strictEqual(out, expected);
@@ -2757,4 +2865,95 @@ assert.strictEqual(
   const undetectable = vm.runInThisContext('%GetUndetectable()');
   v8.setFlagsFromString('--no-allow-natives-syntax');
   assert.strictEqual(inspect(undetectable), '{}');
+}
+
+{
+  const x = 'a'.repeat(1e6);
+  assert.strictEqual(
+    util.inspect(x, { maxStringLength: 4 }),
+    "'aaaa'... 999996 more characters"
+  );
+}
+
+{
+  // Verify that util.inspect() invokes custom inspect functions on objects
+  // from other vm.Contexts but does not pass data from its own Context to that
+  // function.
+  const target = vm.runInNewContext(`
+    ({
+      [Symbol.for('nodejs.util.inspect.custom')](depth, ctx) {
+        this.depth = depth;
+        this.ctx = ctx;
+        try {
+          this.stylized = ctx.stylize('🐈');
+        } catch (e) {
+          this.stylizeException = e;
+        }
+        return this.stylized;
+      }
+    })
+  `, Object.create(null));
+  assert.strictEqual(target.ctx, undefined);
+
+  {
+    // Subtest 1: Just try to inspect the object with default options.
+    assert.strictEqual(util.inspect(target), '🐈');
+    assert.strictEqual(typeof target.ctx, 'object');
+    const objectGraph = fullObjectGraph(target);
+    assert(!objectGraph.has(Object));
+    assert(!objectGraph.has(Function));
+  }
+
+  {
+    // Subtest 2: Use a stylize function that returns a non-primitive.
+    const output = util.inspect(target, {
+      stylize: common.mustCall((str) => {
+        return {};
+      })
+    });
+    assert.strictEqual(output, '[object Object]');
+    assert.strictEqual(typeof target.ctx, 'object');
+    const objectGraph = fullObjectGraph(target);
+    assert(!objectGraph.has(Object));
+    assert(!objectGraph.has(Function));
+  }
+
+  {
+    // Subtest 3: Use a stylize function that throws an exception.
+    const output = util.inspect(target, {
+      stylize: common.mustCall((str) => {
+        throw new Error('oops');
+      })
+    });
+    assert.strictEqual(output, '🐈');
+    assert.strictEqual(typeof target.ctx, 'object');
+    const objectGraph = fullObjectGraph(target);
+    assert(!objectGraph.has(Object));
+    assert(!objectGraph.has(Function));
+  }
+
+  function fullObjectGraph(value) {
+    const graph = new Set([value]);
+
+    for (const entry of graph) {
+      if ((typeof entry !== 'object' && typeof entry !== 'function') ||
+          entry === null) {
+        continue;
+      }
+
+      graph.add(Object.getPrototypeOf(entry));
+      const descriptors = Object.values(
+        Object.getOwnPropertyDescriptors(entry));
+      for (const descriptor of descriptors) {
+        graph.add(descriptor.value);
+        graph.add(descriptor.set);
+        graph.add(descriptor.get);
+      }
+    }
+
+    return graph;
+  }
+
+  // Consistency check.
+  assert(fullObjectGraph(global).has(Function.prototype));
 }

@@ -17,12 +17,6 @@
 #define NODE_BUILTIN_ICU_MODULES(V)
 #endif
 
-#if NODE_REPORT
-#define NODE_BUILTIN_REPORT_MODULES(V) V(report)
-#else
-#define NODE_BUILTIN_REPORT_MODULES(V)
-#endif
-
 #if HAVE_INSPECTOR
 #define NODE_BUILTIN_PROFILER_MODULES(V) V(profiler)
 #else
@@ -48,7 +42,6 @@
   V(config)                                                                    \
   V(contextify)                                                                \
   V(credentials)                                                               \
-  V(domain)                                                                    \
   V(errors)                                                                    \
   V(fs)                                                                        \
   V(fs_dir)                                                                    \
@@ -59,6 +52,7 @@
   V(http_parser_llhttp)                                                        \
   V(inspector)                                                                 \
   V(js_stream)                                                                 \
+  V(js_udp_wrap)                                                               \
   V(messaging)                                                                 \
   V(module_wrap)                                                               \
   V(native_module)                                                             \
@@ -68,6 +62,7 @@
   V(pipe_wrap)                                                                 \
   V(process_wrap)                                                              \
   V(process_methods)                                                           \
+  V(report)                                                                    \
   V(serdes)                                                                    \
   V(signal_wrap)                                                               \
   V(spawn_sync)                                                                \
@@ -88,13 +83,13 @@
   V(v8)                                                                        \
   V(wasi)                                                                      \
   V(worker)                                                                    \
+  V(watchdog)                                                                  \
   V(zlib)
 
 #define NODE_BUILTIN_MODULES(V)                                                \
   NODE_BUILTIN_STANDARD_MODULES(V)                                             \
   NODE_BUILTIN_OPENSSL_MODULES(V)                                              \
   NODE_BUILTIN_ICU_MODULES(V)                                                  \
-  NODE_BUILTIN_REPORT_MODULES(V)                                               \
   NODE_BUILTIN_PROFILER_MODULES(V)                                             \
   NODE_BUILTIN_DTRACE_MODULES(V)
 
@@ -467,7 +462,7 @@ void DLOpen(const FunctionCallbackInfo<Value>& args) {
 
     if (mp != nullptr) {
       if (mp->nm_context_register_func == nullptr) {
-        if (env->options()->force_context_aware) {
+        if (env->force_context_aware()) {
           dlib->Close();
           THROW_ERR_NON_CONTEXT_AWARE_DISABLED(env);
           return false;

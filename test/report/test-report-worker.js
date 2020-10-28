@@ -1,7 +1,5 @@
-// Flags: --experimental-report
 'use strict';
 const common = require('../common');
-common.skipIfReportDisabled();
 const assert = require('assert');
 const { Worker } = require('worker_threads');
 const { once } = require('events');
@@ -23,6 +21,7 @@ async function basic() {
   helper.validateContent(report);
   assert.strictEqual(report.workers.length, 1);
   helper.validateContent(report.workers[0]);
+  assert.strictEqual(report.workers[0].header.threadId, w.threadId);
 
   w.postMessage({});
 

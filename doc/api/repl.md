@@ -4,6 +4,8 @@
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/repl.js -->
+
 The `repl` module provides a Read-Eval-Print-Loop (REPL) implementation that
 is available both as a standalone program or includible in other applications.
 It can be accessed using:
@@ -12,7 +14,7 @@ It can be accessed using:
 const repl = require('repl');
 ```
 
-## Design and Features
+## Design and features
 
 The `repl` module exports the [`repl.REPLServer`][] class. While running,
 instances of [`repl.REPLServer`][] will accept individual lines of user input,
@@ -21,11 +23,14 @@ result. Input and output may be from `stdin` and `stdout`, respectively, or may
 be connected to any Node.js [stream][].
 
 Instances of [`repl.REPLServer`][] support automatic completion of inputs,
-simplistic Emacs-style line editing, multi-line inputs, ANSI-styled output,
-saving and restoring current REPL session state, error recovery, and
-customizable evaluation functions.
+completion preview, simplistic Emacs-style line editing, multi-line inputs,
+[ZSH][]-like reverse-i-search, [ZSH][]-like substring-based history search,
+ANSI-styled output, saving and restoring current REPL session state, error
+recovery, and customizable evaluation functions. Terminals that do not support
+ANSI styles and Emacs-style line editing automatically fall back to a limited
+feature set.
 
-### Commands and Special Keys
+### Commands and special keys
 
 The following special commands are supported by all REPL instances:
 
@@ -33,7 +38,7 @@ The following special commands are supported by all REPL instances:
   the `.break` command (or pressing the `<ctrl>-C` key combination) will abort
   further input or processing of that expression.
 * `.clear`: Resets the REPL `context` to an empty object and clears any
-  multi-line expression currently being input.
+  multi-line expression being input.
 * `.exit`: Close the I/O stream, causing the REPL to exit.
 * `.help`: Show this list of special commands.
 * `.save`: Save the current REPL session to a file:
@@ -66,14 +71,17 @@ The following key combinations in the REPL have these special effects:
   variables. When pressed while entering other input, displays relevant
   autocompletion options.
 
-### Default Evaluation
+For key bindings related to the reverse-i-search, see [`reverse-i-search`][].
+For all other key bindings, see [TTY keybindings][].
+
+### Default evaluation
 
 By default, all instances of [`repl.REPLServer`][] use an evaluation function
 that evaluates JavaScript expressions and provides access to Node.js built-in
 modules. This default behavior can be overridden by passing in an alternative
 evaluation function when the [`repl.REPLServer`][] instance is created.
 
-#### JavaScript Expressions
+#### JavaScript expressions
 
 The default evaluator supports direct evaluation of JavaScript expressions:
 
@@ -90,7 +98,7 @@ Unless otherwise scoped within blocks or functions, variables declared
 either implicitly or using the `const`, `let`, or `var` keywords
 are declared at the global scope.
 
-#### Global and Local Scope
+#### Global and local scope
 
 The default evaluator provides access to any variables that exist in the global
 scope. It is possible to expose a variable to the REPL explicitly by assigning
@@ -126,7 +134,7 @@ Object.defineProperty(r.context, 'm', {
 });
 ```
 
-#### Accessing Core Node.js Modules
+#### Accessing core Node.js modules
 
 The default evaluator will automatically load Node.js core modules into the
 REPL environment when used. For instance, unless otherwise declared as a
@@ -137,7 +145,7 @@ global or scoped variable, the input `fs` will be evaluated on-demand as
 > fs.createReadStream('./some/file');
 ```
 
-#### Global Uncaught Exceptions
+#### Global uncaught exceptions
 <!-- YAML
 changes:
   - version: v12.3.0
@@ -232,7 +240,25 @@ undefined
 undefined
 ```
 
-### Custom Evaluation Functions
+### Reverse-i-search
+<!-- YAML
+added: v12.17.0
+-->
+
+The REPL supports bi-directional reverse-i-search similar to [ZSH][]. It is
+triggered with `<ctrl> + R` to search backward and `<ctrl> + S` to search
+forward.
+
+Duplicated history entires will be skipped.
+
+Entries are accepted as soon as any button is pressed that doesn't correspond
+with the reverse search. Cancelling is possible by pressing `escape` or
+`<ctrl> + C`.
+
+Changing the direction immediately searches for the next entry in the expected
+direction from the current position on.
+
+### Custom evaluation functions
 
 When a new [`repl.REPLServer`][] is created, a custom evaluation function may be
 provided. This can be used, for instance, to implement fully customized REPL
@@ -254,7 +280,7 @@ function myEval(cmd, context, filename, callback) {
 repl.start({ prompt: '> ', eval: myEval });
 ```
 
-#### Recoverable Errors
+#### Recoverable errors
 
 As a user is typing input into the REPL prompt, pressing the `<enter>` key will
 send the current line of input to the `eval` function. In order to support
@@ -282,7 +308,7 @@ function isRecoverableError(error) {
 }
 ```
 
-### Customizing REPL Output
+### Customizing REPL output
 
 By default, [`repl.REPLServer`][] instances format output using the
 [`util.inspect()`][] method before writing the output to the provided `Writable`
@@ -520,6 +546,9 @@ with REPL instances programmatically.
 <!-- YAML
 added: v0.1.91
 changes:
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/30811
+    description: The `preview` option is now available.
   - version: v12.0.0
     pr-url: https://github.com/nodejs/node/pull/26518
     description: The `terminal` option now follows the default description in
@@ -527,6 +556,9 @@ changes:
   - version: v10.0.0
     pr-url: https://github.com/nodejs/node/pull/19187
     description: The `REPL_MAGIC_MODE` `replMode` was removed.
+  - version: v6.3.0
+    pr-url: https://github.com/nodejs/node/pull/6635
+    description: The `breakEvalOnSigint` option is supported now.
   - version: v5.8.0
     pr-url: https://github.com/nodejs/node/pull/5388
     description: The `options` parameter is optional now.
@@ -572,6 +604,10 @@ changes:
   * `breakEvalOnSigint` {boolean} Stop evaluating the current piece of code when
     `SIGINT` is received, such as when `Ctrl+C` is pressed. This cannot be used
     together with a custom `eval` function. **Default:** `false`.
+  * `preview` {boolean} Defines if the repl prints autocomplete and output
+    previews or not. **Default:** `true` with the default eval function and
+    `false` in case a custom eval function is used. If `terminal` is falsy, then
+    there are no previews and the value of `preview` has no effect.
 * Returns: {repl.REPLServer}
 
 The `repl.start()` method creates and starts a [`repl.REPLServer`][] instance.
@@ -605,7 +641,7 @@ undefined
 3
 ```
 
-### Environment Variable Options
+### Environment variable options
 
 Various behaviors of the Node.js REPL can be customized using the following
 environment variables:
@@ -622,7 +658,7 @@ environment variables:
 * `NODE_REPL_MODE`: May be either `'sloppy'` or `'strict'`. **Default:**
   `'sloppy'`, which will allow non-strict mode code to be run.
 
-### Persistent History
+### Persistent history
 
 By default, the Node.js REPL will persist history between `node` REPL sessions
 by saving inputs to a `.node_repl_history` file located in the user's home
@@ -696,18 +732,21 @@ For an example of running a "full-featured" (`terminal`) REPL over
 a `net.Server` and `net.Socket` instance, see:
 <https://gist.github.com/TooTallNate/2209310>.
 
-For an example of running a REPL instance over [curl(1)][], see:
+For an example of running a REPL instance over [`curl(1)`][], see:
 <https://gist.github.com/TooTallNate/2053342>.
 
+[TTY keybindings]: readline.html#readline_tty_keybindings
+[ZSH]: https://en.wikipedia.org/wiki/Z_shell
 [`'uncaughtException'`]: process.html#process_event_uncaughtexception
 [`--experimental-repl-await`]: cli.html#cli_experimental_repl_await
 [`ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE`]: errors.html#errors_err_domain_cannot_set_uncaught_exception_capture
 [`ERR_INVALID_REPL_INPUT`]: errors.html#errors_err_invalid_repl_input
+[`curl(1)`]: https://curl.haxx.se/docs/manpage.html
 [`domain`]: domain.html
 [`process.setUncaughtExceptionCaptureCallback()`]: process.html#process_process_setuncaughtexceptioncapturecallback_fn
 [`readline.InterfaceCompleter`]: readline.html#readline_use_of_the_completer_function
 [`repl.ReplServer`]: #repl_class_replserver
 [`repl.start()`]: #repl_repl_start_options
+[`reverse-i-search`]: #repl_reverse_i_search
 [`util.inspect()`]: util.html#util_util_inspect_object_options
-[curl(1)]: https://curl.haxx.se/docs/manpage.html
 [stream]: stream.html

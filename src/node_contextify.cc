@@ -142,7 +142,7 @@ MaybeLocal<Object> ContextifyContext::CreateDataWrapper(Environment* env) {
     return MaybeLocal<Object>();
   }
 
-  wrapper->SetAlignedPointerInInternalField(0, this);
+  wrapper->SetAlignedPointerInInternalField(ContextifyContext::kSlot, this);
   return wrapper;
 }
 
@@ -185,8 +185,11 @@ MaybeLocal<Context> ContextifyContext::CreateV8Context(
 
   object_template->SetHandler(config);
   object_template->SetHandler(indexed_config);
-
-  Local<Context> ctx = NewContext(env->isolate(), object_template);
+  Local<Context> ctx = Context::New(env->isolate(), nullptr, object_template);
+  if (ctx.IsEmpty()) return MaybeLocal<Context>();
+  // Only partially initialize the context - the primordials are left out
+  // and only initialized when necessary.
+  InitializeContextRuntime(ctx);
 
   if (ctx.IsEmpty()) {
     return MaybeLocal<Context>();
@@ -226,7 +229,8 @@ MaybeLocal<Context> ContextifyContext::CreateV8Context(
 void ContextifyContext::Init(Environment* env, Local<Object> target) {
   Local<FunctionTemplate> function_template =
       FunctionTemplate::New(env->isolate());
-  function_template->InstanceTemplate()->SetInternalFieldCount(1);
+  function_template->InstanceTemplate()->SetInternalFieldCount(
+      ContextifyContext::kInternalFieldCount);
   env->set_script_data_constructor_function(
       function_template->GetFunction(env->context()).ToLocalChecked());
 
@@ -325,7 +329,8 @@ template <typename T>
 ContextifyContext* ContextifyContext::Get(const PropertyCallbackInfo<T>& args) {
   Local<Value> data = args.Data();
   return static_cast<ContextifyContext*>(
-      data.As<Object>()->GetAlignedPointerFromInternalField(0));
+      data.As<Object>()->GetAlignedPointerFromInternalField(
+          ContextifyContext::kSlot));
 }
 
 // static
@@ -414,7 +419,7 @@ void ContextifyContext::PropertySetterCallback(
     args.GetReturnValue().Set(false);
   }
 
-  ctx->sandbox()->Set(ctx->context(), property, value).Check();
+  USE(ctx->sandbox()->Set(ctx->context(), property, value));
 }
 
 // static
@@ -432,9 +437,10 @@ void ContextifyContext::PropertyDescriptorCallback(
   Local<Object> sandbox = ctx->sandbox();
 
   if (sandbox->HasOwnProperty(context, property).FromMaybe(false)) {
-    args.GetReturnValue().Set(
-        sandbox->GetOwnPropertyDescriptor(context, property)
-            .ToLocalChecked());
+    Local<Value> desc;
+    if (sandbox->GetOwnPropertyDescriptor(context, property).ToLocal(&desc)) {
+      args.GetReturnValue().Set(desc);
+    }
   }
 }
 
@@ -477,8 +483,7 @@ void ContextifyContext::PropertyDefinerCallback(
           desc_for_sandbox->set_configurable(desc.configurable());
         }
         // Set the property on the sandbox.
-        sandbox->DefineProperty(context, property, *desc_for_sandbox)
-            .Check();
+        USE(sandbox->DefineProperty(context, property, *desc_for_sandbox));
       };
 
   if (desc.has_get() || desc.has_set()) {
@@ -622,7 +627,8 @@ void ContextifyScript::Init(Environment* env, Local<Object> target) {
       FIXED_ONE_BYTE_STRING(env->isolate(), "ContextifyScript");
 
   Local<FunctionTemplate> script_tmpl = env->NewFunctionTemplate(New);
-  script_tmpl->InstanceTemplate()->SetInternalFieldCount(1);
+  script_tmpl->InstanceTemplate()->SetInternalFieldCount(
+      ContextifyScript::kInternalFieldCount);
   script_tmpl->SetClassName(class_name);
   env->SetProtoMethod(script_tmpl, "createCachedData", CreateCachedData);
   env->SetProtoMethod(script_tmpl, "runInContext", RunInContext);
@@ -755,8 +761,8 @@ void ContextifyScript::New(const FunctionCallbackInfo<Value>& args) {
         env->cached_data_rejected_string(),
         Boolean::New(isolate, source.GetCachedData()->rejected)).Check();
   } else if (produce_cached_data) {
-    const ScriptCompiler::CachedData* cached_data =
-      ScriptCompiler::CreateCodeCache(v8_script.ToLocalChecked());
+    std::unique_ptr<ScriptCompiler::CachedData> cached_data {
+      ScriptCompiler::CreateCodeCache(v8_script.ToLocalChecked()) };
     bool cached_data_produced = cached_data != nullptr;
     if (cached_data_produced) {
       MaybeLocal<Object> buf = Buffer::Copy(
@@ -1113,14 +1119,14 @@ void ContextifyContext::CompileFunction(
       context_extensions.size(), context_extensions.data(), options,
       v8::ScriptCompiler::NoCacheReason::kNoCacheNoReason, &script);
 
-  if (maybe_fn.IsEmpty()) {
+  Local<Function> fn;
+  if (!maybe_fn.ToLocal(&fn)) {
     if (try_catch.HasCaught() && !try_catch.HasTerminated()) {
       errors::DecorateErrorStack(env, try_catch);
       try_catch.ReThrow();
     }
     return;
   }
-  Local<Function> fn = maybe_fn.ToLocalChecked();
 
   Local<Object> cache_key;
   if (!env->compiled_fn_entry_template()->NewInstance(
@@ -1217,7 +1223,8 @@ void Initialize(Local<Object> target,
   {
     Local<FunctionTemplate> tpl = FunctionTemplate::New(env->isolate());
     tpl->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "CompiledFnEntry"));
-    tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    tpl->InstanceTemplate()->SetInternalFieldCount(
+        CompiledFnEntry::kInternalFieldCount);
 
     env->set_compiled_fn_entry_template(tpl->InstanceTemplate());
   }

@@ -1,4 +1,12 @@
-# Style Guide
+# Documentation style guide
+
+This style guide helps us create organized and easy-to-read documentation. It
+provides guidelines for organization, spelling, formatting, and more.
+
+These are guidelines rather than strict rules. Content is more important than
+formatting. You do not need to learn the entire style guide before contributing
+to documentation. Someone can always edit your material later to conform with
+this guide.
 
 * Documentation is in markdown files with names formatted as
   `lowercase-with-dashes.md`.
@@ -30,7 +38,29 @@
 * When documenting APIs, update the YAML comment associated with the API as
   appropriate. This is especially true when introducing or deprecating an API.
 * For code blocks:
-  * Use language aware fences. ("```js")
+  * Use [language][]-aware fences. (<code>```js</code>)
+  * For the [info string][], use one of the following.
+
+    | Meaning       | Info string       |
+    | ------------- | ----------------- |
+    | Bash          | `bash`            |
+    | C             | `c`               |
+    | C++           | `cpp`             |
+    | CoffeeScript  | `coffee`          |
+    | Diff          | `diff`            |
+    | HTTP          | `http`            |
+    | JavaScript    | `js`              |
+    | JSON          | `json`            |
+    | Markdown      | `markdown`        |
+    | Plaintext     | `text`            |
+    | Powershell    | `powershell`      |
+    | R             | `r`               |
+    | Shell Session | `console`         |
+
+    If one of your language-aware fences needs an info string that is not
+    already on this list, you may use `text` until the grammar gets added to
+    [`remark-preset-lint-node`][].
+
   * Code need not be complete. Treat code blocks as an illustration or aid to
     your point, not as complete running programs. If a complete running program
     is necessary, include it as an asset in `assets/code-examples` and link to
@@ -61,11 +91,27 @@
   <!-- lint disable prohibited-strings remark-lint-->
   * NOT OK: It is important to note that, in all cases, the return value will be
     a string regardless.
+* For headings, use sentence case, not title case.
   <!-- lint enable prohibited-strings remark-lint-->
+  * OK: _## Everybody to the limit_
+  * NOT OK: _## Everybody To The Limit_
+* When referring to a version of Node.js in prose, use _Node.js_ and the version
+  number. Do not prefix the version number with _v_ in prose. This is to avoid
+  confusion about whether _V8_ refers to Node.js 8.x or the V8 JavaScript
+  engine.
+  <!-- lint enable prohibited-strings remark-lint-->
+  * OK: _Node.js 14.x_, _Node.js 14.3.1_
+  * NOT OK: _Node.js v14_
 
 See also API documentation structure overview in [doctools README][].
 
+For topics not covered here, refer to the [Microsoft Writing Style Guide][].
+
 [Javascript type]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Grammar_and_types#Data_structures_and_types
-[serial commas]: https://en.wikipedia.org/wiki/Serial_comma
-[plugin]: https://editorconfig.org/#download
+[Microsoft Writing Style Guide]: https://docs.microsoft.com/en-us/style-guide/welcome/
+[`remark-preset-lint-node`]: https://github.com/nodejs/remark-preset-lint-node
 [doctools README]: ../../tools/doc/README.md
+[info string]: https://github.github.com/gfm/#info-string
+[language]: https://github.com/highlightjs/highlight.js/blob/master/SUPPORTED_LANGUAGES.md
+[plugin]: https://editorconfig.org/#download
+[serial commas]: https://en.wikipedia.org/wiki/Serial_comma

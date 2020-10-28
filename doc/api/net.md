@@ -5,6 +5,8 @@
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/net.js -->
+
 The `net` module provides an asynchronous network API for creating stream-based
 TCP or [IPC][] servers ([`net.createServer()`][]) and clients
 ([`net.createConnection()`][]).
@@ -15,7 +17,7 @@ It can be accessed using:
 const net = require('net');
 ```
 
-## IPC Support
+## IPC support
 
 The `net` module supports IPC with named pipes on Windows, and Unix domain
 sockets on other operating systems.
@@ -600,6 +602,10 @@ the error passed to the [`'error'`][] listener.
 The last parameter `connectListener`, if supplied, will be added as a listener
 for the [`'connect'`][] event **once**.
 
+This function should only be used for reconnecting a socket after
+`'close'` has been emitted or otherwise it may lead to undefined
+behavior.
+
 #### `socket.connect(options[, connectListener])`
 <!-- YAML
 added: v0.1.90
@@ -717,29 +723,30 @@ added: v6.1.0
 If `true`,
 [`socket.connect(options[, connectListener])`][`socket.connect(options)`] was
 called and has not yet finished. It will stay `true` until the socket becomes
-connected, then it is set to `false` and the `'connect'` event is emitted.  Note
+connected, then it is set to `false` and the `'connect'` event is emitted. Note
 that the
 [`socket.connect(options[, connectListener])`][`socket.connect(options)`]
 callback is a listener for the `'connect'` event.
 
-### `socket.destroy([exception])`
+### `socket.destroy([error])`
 <!-- YAML
 added: v0.1.90
 -->
 
-* `exception` {Object}
+* `error` {Object}
 * Returns: {net.Socket}
 
-Ensures that no more I/O activity happens on this socket. Only necessary in
-case of errors (parse error or so).
+Ensures that no more I/O activity happens on this socket.
+Destroys the stream and closes the connection.
 
-If `exception` is specified, an [`'error'`][] event will be emitted and any
-listeners for that event will receive `exception` as an argument.
+See [`writable.destroy()`][] for further details.
 
 ### `socket.destroyed`
 
 * {boolean} Indicates if the connection is destroyed or not. Once a
   connection is destroyed no further data can be transferred using it.
+
+See [`writable.destroyed`][] for further details.
 
 ### `socket.end([data[, encoding]][, callback])`
 <!-- YAML
@@ -754,8 +761,7 @@ added: v0.1.90
 Half-closes the socket. i.e., it sends a FIN packet. It is possible the
 server will still send some data.
 
-If `data` is specified, it is equivalent to calling
-`socket.write(data, encoding)` followed by [`socket.end()`][].
+See [`writable.end()`][] for further details.
 
 ### `socket.localAddress`
 <!-- YAML
@@ -1255,19 +1261,22 @@ Returns `true` if input is a version 6 IP address, otherwise returns `false`.
 [`server.listen(handle)`]: #net_server_listen_handle_backlog_callback
 [`server.listen(options)`]: #net_server_listen_options_callback
 [`server.listen(path)`]: #net_server_listen_path_backlog_callback
-[`socket(7)`]: http://man7.org/linux/man-pages/man7/socket.7.html
+[`socket(7)`]: https://man7.org/linux/man-pages/man7/socket.7.html
 [`socket.connect()`]: #net_socket_connect
 [`socket.connect(options)`]: #net_socket_connect_options_connectlistener
 [`socket.connect(path)`]: #net_socket_connect_path_connectlistener
 [`socket.connect(port)`]: #net_socket_connect_port_host_connectlistener
 [`socket.connecting`]: #net_socket_connecting
-[`socket.destroy()`]: #net_socket_destroy_exception
+[`socket.destroy()`]: #net_socket_destroy_error
 [`socket.end()`]: #net_socket_end_data_encoding_callback
 [`socket.pause()`]: #net_socket_pause
 [`socket.resume()`]: #net_socket_resume
 [`socket.setEncoding()`]: #net_socket_setencoding_encoding
 [`socket.setTimeout()`]: #net_socket_settimeout_timeout_callback
 [`socket.setTimeout(timeout)`]: #net_socket_settimeout_timeout_callback
+[`writable.destroyed`]: stream.html#stream_writable_destroyed
+[`writable.destroy()`]: stream.html#stream_writable_destroy_error
+[`writable.end()`]: stream.html#stream_writable_end_chunk_encoding_callback
 [half-closed]: https://tools.ietf.org/html/rfc1122
 [stream_writable_write]: stream.html#stream_writable_write_chunk_encoding_callback
 [unspecified IPv4 address]: https://en.wikipedia.org/wiki/0.0.0.0

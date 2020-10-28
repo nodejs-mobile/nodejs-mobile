@@ -46,12 +46,15 @@ const path = require('path');
     delete providers.STREAMPIPE;
     delete providers.MESSAGEPORT;
     delete providers.WORKER;
+    delete providers.JSUDPWRAP;
     if (!common.isMainThread)
       delete providers.INSPECTORJSBINDING;
     delete providers.KEYPAIRGENREQUEST;
     delete providers.HTTPCLIENTREQUEST;
     delete providers.HTTPINCOMINGMESSAGE;
     delete providers.ELDHISTOGRAM;
+    delete providers.SIGINTWATCHDOG;
+    delete providers.WORKERHEAPSNAPSHOT;
 
     if (common.isIOS) {
       // These providers are not tested on iOS.

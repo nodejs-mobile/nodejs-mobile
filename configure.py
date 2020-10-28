@@ -164,6 +164,11 @@ parser.add_option("--link-module",
          "e.g. /root/x/y.js will be referenced via require('root/x/y'). "
          "Can be used multiple times")
 
+parser.add_option('--openssl-default-cipher-list',
+    action='store',
+    dest='openssl_default_cipher_list',
+    help='Use the specified cipher list as the default cipher list')
+
 parser.add_option("--openssl-no-asm",
     action="store_true",
     dest="openssl_no_asm",
@@ -376,6 +381,11 @@ parser.add_option('--v8-options',
     dest='v8_options',
     help='v8 options to pass, see `node --v8-options` for examples.')
 
+parser.add_option('--with-ossfuzz',
+    action='store_true',
+    dest='ossfuzz',
+    help='Enables building of fuzzers. This command should be run in an OSS-Fuzz Docker image.')
+
 parser.add_option('--with-arm-float-abi',
     action='store',
     dest='arm_float_abi',
@@ -427,13 +437,12 @@ parser.add_option('--with-etw',
 parser.add_option('--use-largepages',
     action='store_true',
     dest='node_use_large_pages',
-    help='build with Large Pages support. This feature is supported only on Linux kernel' +
-         '>= 2.6.38 with Transparent Huge pages enabled and FreeBSD')
+    help='This option has no effect. --use-largepages is now a runtime option.')
 
 parser.add_option('--use-largepages-script-lld',
     action='store_true',
     dest='node_use_large_pages_script_lld',
-    help='link against the LLVM ld linker script. Implies -fuse-ld=lld in the linker flags')
+    help='This option has no effect. --use-largepages is now a runtime option.')
 
 intl_optgroup.add_option('--with-intl',
     action='store',
@@ -533,12 +542,12 @@ parser.add_option('--without-npm',
     dest='without_npm',
     help='do not install the bundled npm (package manager)')
 
+# Dummy option for backwards compatibility
 parser.add_option('--without-report',
     action='store_true',
-    dest='without_report',
-    help='build without report')
+    dest='unused_without_report',
+    help=optparse.SUPPRESS_HELP)
 
-# Dummy option for backwards compatibility
 parser.add_option('--with-snapshot',
     action='store_true',
     dest='unused_with_snapshot',
@@ -629,6 +638,32 @@ parser.add_option('--v8-non-optimized-debug',
     dest='v8_non_optimized_debug',
     default=False,
     help='compile V8 with minimal optimizations and with runtime checks')
+
+parser.add_option('--v8-with-dchecks',
+    action='store_true',
+    dest='v8_with_dchecks',
+    default=False,
+    help='compile V8 with debug checks and runtime debugging features enabled')
+
+parser.add_option('--v8-lite-mode',
+    action='store_true',
+    dest='v8_lite_mode',
+    default=False,
+    help='compile V8 in lite mode for constrained environments (lowers V8 '+
+         'memory footprint, but also implies no just-in-time compilation ' +
+         'support, thus much slower execution)')
+
+parser.add_option('--v8-enable-object-print',
+    action='store_true',
+    dest='v8_enable_object_print',
+    default=True,
+    help='compile V8 with auxiliar functions for native debuggers')
+
+parser.add_option('--node-builtin-modules-path',
+    action='store',
+    dest='node_builtin_modules_path',
+    default=False,
+    help='node will load builtin modules from disk instead of from binary')
 
 # Create compile_commands.json in out/Debug and out/Release.
 parser.add_option('-C',
@@ -770,7 +805,7 @@ def get_nasm_version(asm):
 
 def get_llvm_version(cc):
   return get_version_helper(
-    cc, r"(^(?:FreeBSD )?clang version|based on LLVM) ([0-9]+\.[0-9]+)")
+    cc, r"(^(?:.+ )?clang version|based on LLVM) ([0-9]+\.[0-9]+)")
 
 def get_xcode_version(cc):
   return get_version_helper(
@@ -977,12 +1012,14 @@ def configure_arm(o):
   o['variables']['arm_fpu'] = options.arm_fpu or arm_fpu
 
 
-def configure_mips(o):
+def configure_mips(o, target_arch):
   can_use_fpu_instructions = (options.mips_float_abi != 'soft')
   o['variables']['v8_can_use_fpu_instructions'] = b(can_use_fpu_instructions)
   o['variables']['v8_use_mips_abi_hardfloat'] = b(can_use_fpu_instructions)
   o['variables']['mips_arch_variant'] = options.mips_arch_variant
   o['variables']['mips_fpu_mode'] = options.mips_fpu_mode
+  host_byteorder = 'little' if target_arch in ('mipsel', 'mips64el') else 'big'
+  o['variables']['v8_host_byteorder'] = host_byteorder
 
 
 def gcc_version_ge(version_checked):
@@ -1001,7 +1038,6 @@ def configure_node(o):
     o['variables']['OS'] = 'android'
   o['variables']['node_prefix'] = options.prefix
   o['variables']['node_install_npm'] = b(not options.without_npm)
-  o['variables']['node_report'] = b(not options.without_report)
   o['variables']['debug_node'] = b(options.debug_node)
   o['default_configuration'] = 'Debug' if options.debug else 'Release'
 
@@ -1025,23 +1061,23 @@ def configure_node(o):
   o['variables']['want_separate_host_toolset'] = int(
       cross_compiling)
 
-  if not options.without_node_snapshot:
+  if options.without_node_snapshot or options.node_builtin_modules_path:
+    o['variables']['node_use_node_snapshot'] = 'false'
+  else:
     o['variables']['node_use_node_snapshot'] = b(
       not cross_compiling and want_snapshots and not options.shared)
-  else:
-    o['variables']['node_use_node_snapshot'] = 'false'
 
-  if not options.without_node_code_cache:
+  if options.without_node_code_cache or options.node_builtin_modules_path:
+    o['variables']['node_use_node_code_cache'] = 'false'
+  else:
     # TODO(refack): fix this when implementing embedded code-cache when cross-compiling.
     o['variables']['node_use_node_code_cache'] = b(
       not cross_compiling and not options.shared)
-  else:
-    o['variables']['node_use_node_code_cache'] = 'false'
 
   if target_arch == 'arm':
     configure_arm(o)
   elif target_arch in ('mips', 'mipsel', 'mips64el'):
-    configure_mips(o)
+    configure_mips(o, target_arch)
 
   if flavor == 'aix':
     o['variables']['node_target_type'] = 'static_library'
@@ -1100,27 +1136,12 @@ def configure_node(o):
   else:
     o['variables']['node_use_dtrace'] = 'false'
 
-  if options.node_use_large_pages and not flavor in ('linux', 'freebsd', 'mac'):
-    raise Exception(
-      'Large pages are supported only on Linux, FreeBSD and MacOS Systems.')
-  if options.node_use_large_pages and flavor in ('linux', 'freebsd', 'mac'):
-    if options.shared or options.enable_static:
-      raise Exception(
-        'Large pages are supported only while creating node executable.')
-    if target_arch!="x64":
-      raise Exception(
-        'Large pages are supported only x64 platform.')
-    if flavor == 'mac':
-      info('macOS server with 32GB or more is recommended')
-    if flavor == 'linux':
-      # Example full version string: 2.6.32-696.28.1.el6.x86_64
-      FULL_KERNEL_VERSION=os.uname()[2]
-      KERNEL_VERSION=FULL_KERNEL_VERSION.split('-')[0]
-      if KERNEL_VERSION < "2.6.38" and flavor == 'linux':
-        raise Exception(
-          'Large pages need Linux kernel version >= 2.6.38')
-  o['variables']['node_use_large_pages'] = b(options.node_use_large_pages)
-  o['variables']['node_use_large_pages_script_lld'] = b(options.node_use_large_pages_script_lld)
+  if options.node_use_large_pages or options.node_use_large_pages_script_lld:
+    warn('''The `--use-largepages` and `--use-largepages-script-lld` options
+         have no effect during build time. Support for mapping to large pages is
+         now a runtime option of Node.js. Run `node --use-largepages` or add
+         `--use-largepages` to the `NODE_OPTIONS` environment variable once
+         Node.js is built to enable mapping to large pages.''')
 
   if options.no_ifaddrs:
     o['defines'] += ['SUNOS_NO_IFADDRS']
@@ -1193,6 +1214,10 @@ def configure_node(o):
   else:
     o['variables']['node_target_type'] = 'executable'
 
+  if options.node_builtin_modules_path:
+    print('Warning! Loading builtin modules from disk is for development')
+    o['variables']['node_builtin_modules_path'] = options.node_builtin_modules_path
+
 def configure_napi(output):
   version = getnapibuildversion.get_napi_version()
   output['variables']['napi_build_version'] = version
@@ -1234,9 +1259,12 @@ def configure_library(lib, output, pkgname=None):
 
 
 def configure_v8(o):
+  o['variables']['v8_enable_lite_mode'] = 1 if options.v8_lite_mode else 0
   o['variables']['v8_enable_gdbjit'] = 1 if options.gdb else 0
   o['variables']['v8_no_strict_aliasing'] = 1  # Work around compiler bugs.
   o['variables']['v8_optimized_debug'] = 0 if options.v8_non_optimized_debug else 1
+  o['variables']['dcheck_always_on'] = 1 if options.v8_with_dchecks else 0
+  o['variables']['v8_enable_object_print'] = 1 if options.v8_enable_object_print else 0
   o['variables']['v8_random_seed'] = 0  # Use a random seed for hash tables.
   o['variables']['v8_promise_internal_field_count'] = 1 # Add internal field to promises for async hooks.
   o['variables']['v8_use_siphash'] = 0 if options.without_siphash else 1
@@ -1279,6 +1307,8 @@ def configure_openssl(o):
       without_ssl_error('--openssl-no-asm')
     if options.openssl_fips:
       without_ssl_error('--openssl-fips')
+    if options.openssl_default_cipher_list:
+      without_ssl_error('--openssl-default-cipher-list')
     return
 
   if options.use_openssl_ca_store:
@@ -1288,6 +1318,9 @@ def configure_openssl(o):
   variables['node_without_node_options'] = b(options.without_node_options)
   if options.without_node_options:
       o['defines'] += ['NODE_WITHOUT_NODE_OPTIONS']
+  if options.openssl_default_cipher_list:
+    variables['openssl_default_cipher_list'] = \
+            options.openssl_default_cipher_list
 
   if not options.shared_openssl and not options.openssl_no_asm:
     is_x86 = 'x64' in variables['target_arch'] or 'ia32' in variables['target_arch']
@@ -1692,6 +1725,9 @@ configure_intl(output)
 configure_static(output)
 configure_inspector(output)
 
+# Forward OSS-Fuzz settings
+output['variables']['ossfuzz'] = b(options.ossfuzz)
+
 # variables should be a root level element,
 # move everything else to target_defaults
 variables = output['variables']
@@ -1745,6 +1781,10 @@ if options.prefix:
 
 if options.use_ninja:
   config['BUILD_WITH'] = 'ninja'
+
+# On Windows there is another find.exe in C:\Windows\System32
+if sys.platform == 'win32':
+  config['FIND'] = '/usr/bin/find'
 
 config_lines = ['='.join((k,v)) for k,v in config.items()]
 # Add a blank string to get a blank line at the end.

@@ -2,14 +2,15 @@
 require('../common');
 const assert = require('assert');
 const child_process = require('child_process');
-const { inspect } = require('util');
+const { debuglog, inspect } = require('util');
+const debug = debuglog('test');
 
 const p = child_process.spawnSync(
   process.execPath, [ '--completion-bash' ]);
 assert.ifError(p.error);
 
 const output = p.stdout.toString().trim().replace(/\r/g, '');
-console.log(output);
+debug(output);
 
 const prefix = `_node_complete() {
   local cur_word options
@@ -23,7 +24,8 @@ const suffix = `' -- "\${cur_word}") )
     return 0
   fi
 }
-complete -F _node_complete node node_g`.replace(/\r/g, '');
+complete -o filenames -o nospace -o bashdefault -F _node_complete node node_g`
+  .replace(/\r/g, '');
 
 assert.ok(
   output.includes(prefix),

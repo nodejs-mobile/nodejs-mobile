@@ -457,6 +457,28 @@ const errorTests = [
       /'thefourtheye'/
     ]
   },
+  // Check for wrapped objects.
+  {
+    send: '{ a: 1 }.a', // ({ a: 1 }.a);
+    expect: '1'
+  },
+  {
+    send: '{ a: 1 }.a;', // { a: 1 }.a;
+    expect: [
+      kSource,
+      kArrow,
+      '',
+      /^Uncaught SyntaxError: /
+    ]
+  },
+  {
+    send: '{ a: 1 }["a"] === 1', // ({ a: 1 }['a'] === 1);
+    expect: 'true'
+  },
+  {
+    send: '{ a: 1 }["a"] === 1;', // { a: 1 }; ['a'] === 1;
+    expect: 'false'
+  },
   // Empty lines in the REPL should be allowed
   {
     send: '\n\r\n\r\n',
@@ -538,7 +560,7 @@ const errorTests = [
     expect: '... ... ... undefined'
   },
   // REPL should get a normal require() function, not one that allows
-  // access to internal modules without the --expose_internals flag.
+  // access to internal modules without the --expose-internals flag.
   {
     send: 'require("internal/repl")',
     expect: [
@@ -730,6 +752,39 @@ const errorTests = [
       kArrow,
       '',
       /^Uncaught SyntaxError: /
+    ]
+  },
+  {
+    send: 'console',
+    expect: [
+      '{',
+      '  log: [Function: log],',
+      '  warn: [Function: warn],',
+      '  dir: [Function: dir],',
+      '  time: [Function: time],',
+      '  timeEnd: [Function: timeEnd],',
+      '  timeLog: [Function: timeLog],',
+      '  trace: [Function: trace],',
+      '  assert: [Function: assert],',
+      '  clear: [Function: clear],',
+      '  count: [Function: count],',
+      '  countReset: [Function: countReset],',
+      '  group: [Function: group],',
+      '  groupEnd: [Function: groupEnd],',
+      '  table: [Function: table],',
+      /  debug: \[Function: (debug|log)],/,
+      /  info: \[Function: (info|log)],/,
+      /  dirxml: \[Function: (dirxml|log)],/,
+      /  error: \[Function: (error|warn)],/,
+      /  groupCollapsed: \[Function: (groupCollapsed|group)],/,
+      /  Console: \[Function: Console],?/,
+      ...process.features.inspector ? [
+        '  profile: [Function: profile],',
+        '  profileEnd: [Function: profileEnd],',
+        '  timeStamp: [Function: timeStamp],',
+        '  context: [Function: context]',
+      ] : [],
+      '}',
     ]
   },
 ];

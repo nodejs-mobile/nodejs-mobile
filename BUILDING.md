@@ -202,7 +202,7 @@ For use of AVX2,
 * nasm version 2.10 or higher in Windows
 
 Please refer to
- https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_ia32cap.html for details.
+ <https://www.openssl.org/docs/man1.1.1/man3/OPENSSL_ia32cap.html> for details.
 
  If compiling without one of the above, use `configure` with the
 `--openssl-no-asm` flag. Otherwise, `configure` will fail.
@@ -225,8 +225,8 @@ Consult previous versions of this document for older versions of Node.js:
 The Node.js project uses Python as part of its build process and has
 historically only been Python 2 compatible.
 
-Python 2 will reach its _end-of-life_ at the end of 2019 at which point the
-interpreter will cease receiving updates. See https://python3statement.org/
+Python 2 will reach its _End-of-Life_ at the end of 2019 at which point the
+interpreter will cease receiving updates. See <https://python3statement.org/>
 for more information.
 
 The Node.js project is in the process of transitioning its Python code to
@@ -254,6 +254,8 @@ Installation via Linux package manager can be achieved with:
 * Arch Linux, Manjaro: `sudo pacman -S python gcc make`
 
 FreeBSD and OpenBSD users may also need to install `libexecinfo`.
+
+Python 3 users may also need to install `python3-distutils`.
 
 #### macOS prerequisites
 
@@ -283,7 +285,7 @@ $ make -j4
 If you run into a `No module named 'distutils.spawn'` error when executing
 `./configure`, please try `python3 -m pip install --upgrade setuptools` or
 `sudo apt install python3-distutils -y`.
-For more information, see https://github.com/nodejs/node/issues/30189.
+For more information, see <https://github.com/nodejs/node/issues/30189>.
 
 The `-j4` option will cause `make` to run 4 simultaneous compilation jobs which
 may reduce build time. For more information, see the
@@ -421,41 +423,51 @@ To build the documentation:
 
 This will build Node.js first (if necessary) and then use it to build the docs:
 
-```console
-$ make doc
+```bash
+make doc
 ```
 
 If you have an existing Node.js build, you can build just the docs with:
 
-```console
-$ NODE=/path/to/node make doc-only
+```bash
+NODE=/path/to/node make doc-only
 ```
 
-To read the documentation:
+To read the man page:
 
-```console
-$ man doc/node.1
+```bash
+man doc/node.1
 ```
 
-If you prefer to read the documentation in a browser,
-run the following after `make doc` is finished:
+If you prefer to read the full documentation in a browser, run the following.
 
-```console
-$ make docopen
+```bash
+make docserve
 ```
 
-This will open a browser with the documentation.
+This will spin up a static file server and provide a URL to where you may browse
+the documentation locally.
+
+If you're comfortable viewing the documentation using the program your operating
+system has associated with the default web browser, run the following.
+
+```bash
+make docopen
+```
+
+This will open a file URL to a one-page version of all the browsable HTML
+documents using the default browser.
 
 To test if Node.js was built correctly:
 
-```console
-$ ./node -e "console.log('Hello from Node.js ' + process.version)"
+```bash
+./node -e "console.log('Hello from Node.js ' + process.version)"
 ```
 
 To install this version of Node.js into a system directory:
 
-```console
-$ [sudo] make install
+```bash
+[sudo] make install
 ```
 
 #### Building a debug build
@@ -689,7 +701,7 @@ that works for both your host and target environments.
 ### Build with a specific ICU
 
 You can find other ICU releases at
-[the ICU homepage](http://icu-project.org/download).
+[the ICU homepage](http://site.icu-project.org/download).
 Download the file named something like `icu4c-**##.#**-src.tgz` (or
 `.zip`).
 
@@ -720,7 +732,7 @@ $ ./configure --with-intl=full-icu --with-icu-source=http://url/to/icu.tgz
 #### Windows
 
 First unpack latest ICU to `deps/icu`
-[icu4c-**##.#**-src.tgz](http://icu-project.org/download) (or `.zip`)
+[icu4c-**##.#**-src.tgz](http://site.icu-project.org/download) (or `.zip`)
 as `deps/icu` (You'll have: `deps/icu/source/...`)
 
 ```console

@@ -10,6 +10,8 @@ changes:
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/http2.js -->
+
 The `http2` module provides an implementation of the [HTTP/2][] protocol. It
 can be accessed using:
 
@@ -49,7 +51,7 @@ server.on('error', (err) => console.error(err));
 server.on('stream', (stream, headers) => {
   // stream is a Duplex
   stream.respond({
-    'content-type': 'text/html',
+    'content-type': 'text/html; charset=utf-8',
     ':status': 200
   });
   stream.end('<h1>Hello World</h1>');
@@ -119,7 +121,7 @@ User code will not create `Http2Session` instances directly. Server-side
 new HTTP/2 connection is received. Client-side `Http2Session` instances are
 created using the `http2.connect()` method.
 
-#### `Http2Session` and Sockets
+#### `Http2Session` and sockets
 
 Every `Http2Session` instance is associated with exactly one [`net.Socket`][] or
 [`tls.TLSSocket`][] when it is created. When either the `Socket` or the
@@ -269,7 +271,7 @@ session.on('stream', (stream, headers, flags) => {
   // ...
   stream.respond({
     ':status': 200,
-    'content-type': 'text/plain'
+    'content-type': 'text/plain; charset=utf-8'
   });
   stream.write('hello ');
   stream.end('world');
@@ -289,7 +291,7 @@ const server = http2.createServer();
 
 server.on('stream', (stream, headers) => {
   stream.respond({
-    'content-type': 'text/html',
+    'content-type': 'text/html; charset=utf-8',
     ':status': 200
   });
   stream.on('error', (error) => console.error(error));
@@ -887,6 +889,18 @@ All `Http2Stream` instances are [`Duplex`][] streams. The `Writable` side of the
 `Duplex` is used to send data to the connected peer, while the `Readable` side
 is used to receive data sent by the connected peer.
 
+The default text character encoding for all `Http2Stream`s is UTF-8. As a best
+practice, it is recommended that when using an `Http2Stream` to send text,
+the `'content-type'` header should be set and should identify the character
+encoding used.
+
+```js
+stream.respond({
+  'content-type': 'text/html; charset=utf-8',
+  ':status': 200
+});
+```
+
 #### `Http2Stream` Lifecycle
 
 ##### Creation
@@ -980,6 +994,15 @@ send a frame. When invoked, the handler function will receive an integer
 argument identifying the frame type, and an integer argument identifying the
 error code. The `Http2Stream` instance will be destroyed immediately after the
 `'frameError'` event is emitted.
+
+#### Event: `'ready'`
+<!-- YAML
+added: v8.4.0
+-->
+
+The `'ready'` event is emitted when the `Http2Stream` has been opened, has
+been assigned an `id`, and can be used. The listener does not expect any
+arguments.
 
 #### Event: `'timeout'`
 <!-- YAML
@@ -1406,6 +1429,10 @@ and will throw an error.
 #### `http2stream.respond([headers[, options]])`
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: v12.19.0
+    pr-url: https://github.com/nodejs/node/pull/33160
+    description: Allow explicity setting date headers.
 -->
 
 * `headers` {HTTP/2 Headers Object}
@@ -1450,6 +1477,9 @@ server.on('stream', (stream) => {
 <!-- YAML
 added: v8.4.0
 changes:
+  - version: v12.19.0
+    pr-url: https://github.com/nodejs/node/pull/33160
+    description: Allow explicity setting date headers.
   - version: v12.12.0
     pr-url: https://github.com/nodejs/node/pull/29876
     description: The `fd` option may now be a `FileHandle`.
@@ -1488,7 +1518,7 @@ server.on('stream', (stream) => {
   const headers = {
     'content-length': stat.size,
     'last-modified': stat.mtime.toUTCString(),
-    'content-type': 'text/plain'
+    'content-type': 'text/plain; charset=utf-8'
   };
   stream.respondWithFD(fd, headers);
   stream.on('close', () => fs.closeSync(fd));
@@ -1533,7 +1563,7 @@ server.on('stream', (stream) => {
   const headers = {
     'content-length': stat.size,
     'last-modified': stat.mtime.toUTCString(),
-    'content-type': 'text/plain'
+    'content-type': 'text/plain; charset=utf-8'
   };
   stream.respondWithFD(fd, headers, { waitForTrailers: true });
   stream.on('wantTrailers', () => {
@@ -1548,6 +1578,9 @@ server.on('stream', (stream) => {
 <!-- YAML
 added: v8.4.0
 changes:
+  - version: v12.19.0
+    pr-url: https://github.com/nodejs/node/pull/33160
+    description: Allow explicity setting date headers.
   - version: v10.0.0
     pr-url: https://github.com/nodejs/node/pull/18936
     description: Any readable file, not necessarily a
@@ -1600,7 +1633,7 @@ server.on('stream', (stream) => {
   }
 
   stream.respondWithFile('/some/file',
-                         { 'content-type': 'text/plain' },
+                         { 'content-type': 'text/plain; charset=utf-8' },
                          { statCheck, onError });
 });
 ```
@@ -1620,7 +1653,7 @@ server.on('stream', (stream) => {
     return false; // Cancel the send operation
   }
   stream.respondWithFile('/some/file',
-                         { 'content-type': 'text/plain' },
+                         { 'content-type': 'text/plain; charset=utf-8' },
                          { statCheck });
 });
 ```
@@ -1650,7 +1683,7 @@ const http2 = require('http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
   stream.respondWithFile('/some/file',
-                         { 'content-type': 'text/plain' },
+                         { 'content-type': 'text/plain; charset=utf-8' },
                          { waitForTrailers: true });
   stream.on('wantTrailers', () => {
     stream.sendTrailers({ ABC: 'some value to send' });
@@ -1690,6 +1723,20 @@ the request body.
 
 When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
+
+### Event: `'connection'`
+<!-- YAML
+added: v8.4.0
+-->
+
+* `socket` {stream.Duplex}
+
+This event is emitted when a new TCP stream is established. `socket` is
+typically an object of type [`net.Socket`][]. Usually users will not want to
+access this event.
+
+This event can also be explicitly emitted by users to inject connections
+into the HTTP server. In that case, any [`Duplex`][] stream can be passed.
 
 #### Event: `'request'`
 <!-- YAML
@@ -1742,7 +1789,7 @@ server.on('stream', (stream, headers, flags) => {
   // ...
   stream.respond({
     [HTTP2_HEADER_STATUS]: 200,
-    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain; charset=utf-8'
   });
   stream.write('hello ');
   stream.end('world');
@@ -1831,6 +1878,20 @@ the request body.
 When this event is emitted and handled, the [`'request'`][] event will
 not be emitted.
 
+### Event: `'connection'`
+<!-- YAML
+added: v8.4.0
+-->
+
+* `socket` {stream.Duplex}
+
+This event is emitted when a new TCP stream is established, before the TLS
+handshake begins. `socket` is typically an object of type [`net.Socket`][].
+Usually users will not want to access this event.
+
+This event can also be explicitly emitted by users to inject connections
+into the HTTP server. In that case, any [`Duplex`][] stream can be passed.
+
 #### Event: `'request'`
 <!-- YAML
 added: v8.4.0
@@ -1884,7 +1945,7 @@ server.on('stream', (stream, headers, flags) => {
   // ...
   stream.respond({
     [HTTP2_HEADER_STATUS]: 200,
-    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
+    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain; charset=utf-8'
   });
   stream.write('hello ');
   stream.end('world');
@@ -1948,6 +2009,10 @@ error will be thrown.
 <!-- YAML
 added: v8.4.0
 changes:
+  - version:
+     - v12.18.0
+    pr-url: https://github.com/nodejs-private/node-private/pull/206
+    description: Added `maxSettings` option with a default of 32.
   - version: v12.16.0
     pr-url: https://github.com/nodejs/node/pull/30534
     description: Added `maxSessionRejectedStreams` option with a default of 100.
@@ -1975,6 +2040,8 @@ changes:
 * `options` {Object}
   * `maxDeflateDynamicTableSize` {number} Sets the maximum dynamic table size
     for deflating header fields. **Default:** `4Kib`.
+  * `maxSettings` {number} Sets the maximum number of settings entries per
+    `SETTINGS` frame. The minimum value allowed is `1`. **Default:** `32`.
   * `maxSessionMemory`{number} Sets the maximum memory that the `Http2Session`
     is permitted to use. The value is expressed in terms of number of megabytes,
     e.g. `1` equal 1 megabyte. The minimum value allowed is `1`.
@@ -1985,7 +2052,9 @@ changes:
     queued to be sent, and unacknowledged `PING` and `SETTINGS` frames are all
     counted towards the current limit. **Default:** `10`.
   * `maxHeaderListPairs` {number} Sets the maximum number of header entries.
-    The minimum value is `4`. **Default:** `128`.
+    This is similar to [`http.Server#maxHeadersCount`][] or
+    [`http.ClientRequest#maxHeadersCount`][]. The minimum value is `4`.
+    **Default:** `128`.
   * `maxOutstandingPings` {number} Sets the maximum number of outstanding,
     unacknowledged pings. **Default:** `10`.
   * `maxSendHeaderBlockLength` {number} Sets the maximum allowed size for a
@@ -2065,7 +2134,7 @@ const server = http2.createServer();
 
 server.on('stream', (stream, headers) => {
   stream.respond({
-    'content-type': 'text/html',
+    'content-type': 'text/html; charset=utf-8',
     ':status': 200
   });
   stream.end('<h1>Hello World</h1>');
@@ -2078,6 +2147,10 @@ server.listen(80);
 <!-- YAML
 added: v8.4.0
 changes:
+  - version:
+     - v12.18.0
+    pr-url: https://github.com/nodejs-private/node-private/pull/206
+    description: Added `maxSettings` option with a default of 32.
   - version: v12.16.0
     pr-url: https://github.com/nodejs/node/pull/30534
     description: Added `maxSessionRejectedStreams` option with a default of 100.
@@ -2105,6 +2178,8 @@ changes:
     **Default:** `false`.
   * `maxDeflateDynamicTableSize` {number} Sets the maximum dynamic table size
     for deflating header fields. **Default:** `4Kib`.
+  * `maxSettings` {number} Sets the maximum number of settings entries per
+    `SETTINGS` frame. The minimum value allowed is `1`. **Default:** `32`.
   * `maxSessionMemory`{number} Sets the maximum memory that the `Http2Session`
     is permitted to use. The value is expressed in terms of number of megabytes,
     e.g. `1` equal 1 megabyte. The minimum value allowed is `1`. This is a
@@ -2115,7 +2190,9 @@ changes:
     queued to be sent, and unacknowledged `PING` and `SETTINGS` frames are all
     counted towards the current limit. **Default:** `10`.
   * `maxHeaderListPairs` {number} Sets the maximum number of header entries.
-    The minimum value is `4`. **Default:** `128`.
+    This is similar to [`http.Server#maxHeadersCount`][] or
+    [`http.ClientRequest#maxHeadersCount`][]. The minimum value is `4`.
+    **Default:** `128`.
   * `maxOutstandingPings` {number} Sets the maximum number of outstanding,
     unacknowledged pings. **Default:** `10`.
   * `maxSendHeaderBlockLength` {number} Sets the maximum allowed size for a
@@ -2182,7 +2259,7 @@ const server = http2.createSecureServer(options);
 
 server.on('stream', (stream, headers) => {
   stream.respond({
-    'content-type': 'text/html',
+    'content-type': 'text/html; charset=utf-8',
     ':status': 200
   });
   stream.end('<h1>Hello World</h1>');
@@ -2195,6 +2272,10 @@ server.listen(80);
 <!-- YAML
 added: v8.4.0
 changes:
+  - version:
+     - v12.18.0
+    pr-url: https://github.com/nodejs-private/node-private/pull/206
+    description: Added `maxSettings` option with a default of 32.
   - version: v8.9.3
     pr-url: https://github.com/nodejs/node/pull/17105
     description: Added the `maxOutstandingPings` option with a default limit of
@@ -2213,6 +2294,8 @@ changes:
 * `options` {Object}
   * `maxDeflateDynamicTableSize` {number} Sets the maximum dynamic table size
     for deflating header fields. **Default:** `4Kib`.
+  * `maxSettings` {number} Sets the maximum number of settings entries per
+    `SETTINGS` frame. The minimum value allowed is `1`. **Default:** `32`.
   * `maxSessionMemory`{number} Sets the maximum memory that the `Http2Session`
     is permitted to use. The value is expressed in terms of number of megabytes,
     e.g. `1` equal 1 megabyte. The minimum value allowed is `1`.
@@ -2223,7 +2306,9 @@ changes:
     queued to be sent, and unacknowledged `PING` and `SETTINGS` frames are all
     counted towards the current limit. **Default:** `10`.
   * `maxHeaderListPairs` {number} Sets the maximum number of header entries.
-    The minimum value is `1`. **Default:** `128`.
+    This is similar to [`http.Server#maxHeadersCount`][] or
+    [`http.ClientRequest#maxHeadersCount`][]. The minimum value is `1`.
+    **Default:** `128`.
   * `maxOutstandingPings` {number} Sets the maximum number of outstanding,
     unacknowledged pings. **Default:** `10`.
   * `maxReservedRemoteStreams` {number} Sets the maximum number of reserved push
@@ -2290,7 +2375,7 @@ client.close();
 added: v8.4.0
 -->
 
-#### Error Codes for `RST_STREAM` and `GOAWAY`
+#### Error codes for `RST_STREAM` and `GOAWAY`
 <a id="error_codes"></a>
 
 | Value  | Name                | Constant                                      |
@@ -2356,7 +2441,7 @@ added: v8.4.0
 Returns a [HTTP/2 Settings Object][] containing the deserialized settings from
 the given `Buffer` as generated by `http2.getPackedSettings()`.
 
-### Headers Object
+### Headers object
 
 Headers are represented as own-properties on JavaScript objects. The property
 keys will be serialized to lower-case. Property values should be strings (if
@@ -2404,7 +2489,7 @@ server.on('stream', (stream, headers) => {
 });
 ```
 
-### Settings Object
+### Settings object
 <!-- YAML
 added: v8.4.0
 changes:
@@ -2425,15 +2510,15 @@ properties.
 
 * `headerTableSize` {number} Specifies the maximum number of bytes used for
   header compression. The minimum allowed value is 0. The maximum allowed value
-  is 2<sup>32</sup>-1. **Default:** `4,096 octets`.
+  is 2<sup>32</sup>-1. **Default:** `4096`.
 * `enablePush` {boolean} Specifies `true` if HTTP/2 Push Streams are to be
   permitted on the `Http2Session` instances. **Default:** `true`.
-* `initialWindowSize` {number} Specifies the *senders* initial window size
-  for stream-level flow control. The minimum allowed value is 0. The maximum
-  allowed value is 2<sup>32</sup>-1. **Default:** `65,535 bytes`.
-* `maxFrameSize` {number} Specifies the size of the largest frame payload.
-  The minimum allowed value is 16,384. The maximum allowed value
-  is 2<sup>24</sup>-1. **Default:** `16,384 bytes`.
+* `initialWindowSize` {number} Specifies the *sender's* initial window size in
+  bytes for stream-level flow control. The minimum allowed value is 0. The
+  maximum allowed value is 2<sup>32</sup>-1. **Default:** `65535`.
+* `maxFrameSize` {number} Specifies the size in bytes of the largest frame
+  payload. The minimum allowed value is 16,384. The maximum allowed value is
+  2<sup>24</sup>-1. **Default:** `16384`.
 * `maxConcurrentStreams` {number} Specifies the maximum number of concurrent
   streams permitted on an `Http2Session`. There is no default value which
   implies, at least theoretically, 2<sup>32</sup>-1 streams may be open
@@ -2443,6 +2528,7 @@ properties.
 * `maxHeaderListSize` {number} Specifies the maximum size (uncompressed octets)
   of header list that will be accepted. The minimum allowed value is 0. The
   maximum allowed value is 2<sup>32</sup>-1. **Default:** `65535`.
+* `maxHeaderSize` {number} Alias for `maxHeaderListSize`.
 * `enableConnectProtocol`{boolean} Specifies `true` if the "Extended Connect
   Protocol" defined by [RFC 8441][] is to be enabled. This setting is only
   meaningful if sent by the server. Once the `enableConnectProtocol` setting
@@ -2475,7 +2561,7 @@ const server = http2.createServer({
 The `options.selectPadding()` function is invoked once for *every* `HEADERS` and
 `DATA` frame. This has a definite noticeable impact on performance.
 
-### Error Handling
+### Error handling
 
 There are several types of error conditions that may arise when using the
 `http2` module:
@@ -2615,7 +2701,7 @@ req.on('end', () => {
 req.end('Jane');
 ```
 
-### The Extended `CONNECT` Protocol
+### The extended `CONNECT` protocol
 
 [RFC 8441][] defines an "Extended CONNECT Protocol" extension to HTTP/2 that
 may be used to bootstrap the use of an `Http2Stream` using the `CONNECT`
@@ -2662,7 +2748,7 @@ const http2 = require('http2');
 const server = http2.createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html');
   res.setHeader('X-Foo', 'bar');
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('ok');
 });
 ```
@@ -2961,13 +3047,12 @@ added: v8.4.0
 
 * {string}
 
-Request URL string. This contains only the URL that is
-present in the actual HTTP request. If the request is:
+Request URL string. This contains only the URL that is present in the actual
+HTTP request. If the request is:
 
-```txt
-GET /status?name=ryan HTTP/1.1\r\n
-Accept: text/plain\r\n
-\r\n
+```http
+GET /status?name=ryan HTTP/1.1
+Accept: text/plain
 ```
 
 Then `request.url` will be:
@@ -2977,10 +3062,10 @@ Then `request.url` will be:
 '/status?name=ryan'
 ```
 
-To parse the url into its parts `require('url').parse(request.url)`
+To parse the url into its parts, `require('url').parse(request.url)`
 can be used:
 
-```txt
+```console
 $ node
 > require('url').parse('/status?name=ryan')
 Url {
@@ -2998,9 +3083,9 @@ Url {
   href: '/status?name=ryan' }
 ```
 
-To extract the parameters from the query string, the
-`require('querystring').parse` function can be used, or
-`true` can be passed as the second argument to `require('url').parse`.
+To obtain the parameters from the query string, use the
+`require('querystring').parse()` function or pass
+`true` as the second argument to `require('url').parse()`.
 
 ```console
 $ node
@@ -3081,7 +3166,7 @@ changes:
     description: This method now returns a reference to `ServerResponse`.
 -->
 
-* `data` {string|Buffer}
+* `data` {string|Buffer|Uint8Array}
 * `encoding` {string}
 * `callback` {Function}
 * Returns: {this}
@@ -3231,7 +3316,7 @@ in the to-be-sent headers, its value will be replaced. Use an array of strings
 here to send multiple headers with the same name.
 
 ```js
-response.setHeader('Content-Type', 'text/html');
+response.setHeader('Content-Type', 'text/html; charset=utf-8');
 ```
 
 or
@@ -3250,9 +3335,9 @@ to [`response.writeHead()`][] given precedence.
 ```js
 // Returns content-type = text/plain
 const server = http2.createServer((req, res) => {
-  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('X-Foo', 'bar');
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('ok');
 });
 ```
@@ -3361,7 +3446,7 @@ does not indicate whether the data has been flushed, for this use
 added: v8.4.0
 -->
 
-* `chunk` {string|Buffer}
+* `chunk` {string|Buffer|Uint8Array}
 * `encoding` {string}
 * `callback` {Function}
 * Returns: {boolean}
@@ -3432,7 +3517,7 @@ will be emitted.
 const body = 'hello world';
 response.writeHead(200, {
   'Content-Length': Buffer.byteLength(body),
-  'Content-Type': 'text/plain' });
+  'Content-Type': 'text/plain; charset=utf-8' });
 ```
 
 `Content-Length` is given in bytes not characters. The
@@ -3455,9 +3540,9 @@ to [`response.writeHead()`][] given precedence.
 ```js
 // Returns content-type = text/plain
 const server = http2.createServer((req, res) => {
-  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('X-Foo', 'bar');
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end('ok');
 });
 ```
@@ -3483,7 +3568,7 @@ given [`Http2Stream`][] on a newly created `Http2ServerResponse` as the callback
 parameter if successful. When `Http2ServerRequest` is closed, the callback is
 called with an error `ERR_HTTP2_INVALID_STREAM`.
 
-## Collecting HTTP/2 Performance Metrics
+## Collecting HTTP/2 performance metrics
 
 The [Performance Observer][] API can be used to collect basic performance
 metrics for each `Http2Session` and `Http2Stream` instance.
@@ -3565,11 +3650,13 @@ following additional properties:
 [`ClientHttp2Stream`]: #http2_class_clienthttp2stream
 [`Duplex`]: stream.html#stream_class_stream_duplex
 [`Http2ServerRequest`]: #http2_class_http2_http2serverrequest
-[`Http2ServerResponse`]: #class-http2http2serverresponse
+[`Http2ServerResponse`]: #http2_class_http2_http2serverresponse
 [`Http2Session` and Sockets]: #http2_http2session_and_sockets
 [`Http2Stream`]: #http2_class_http2stream
 [`ServerHttp2Stream`]: #http2_class_serverhttp2stream
 [`TypeError`]: errors.html#errors_class_typeerror
+[`http.ClientRequest#maxHeadersCount`]: http.html#http_request_maxheaderscount
+[`http.Server#maxHeadersCount`]: http.html#http_server_maxheaderscount
 [`http2.SecureServer`]: #http2_class_http2secureserver
 [`http2.Server`]: #http2_class_http2server
 [`http2.createSecureServer()`]: #http2_http2_createsecureserver_options_onrequesthandler

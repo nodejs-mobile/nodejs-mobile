@@ -141,7 +141,7 @@ class ProgressIndicator(object):
       # Wait for the remaining threads
       for thread in threads:
         # Use a timeout so that signals (ctrl-c) will be processed.
-        thread.join(timeout=10000000)
+        thread.join(timeout=1000000)
     except (KeyboardInterrupt, SystemExit):
       self.shutdown_event.set()
     except Exception:
@@ -1486,6 +1486,7 @@ IGNORED_SUITES = [
   'addons',
   'benchmark',
   'doctool',
+  'embedding',
   'internet',
   'js-native-api',
   'node-api',

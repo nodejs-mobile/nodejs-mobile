@@ -58,7 +58,7 @@ assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_FUNCTION], 0);
                   {
                     code: 'ERR_INVALID_OPT_VALUE',
                     name: 'TypeError',
-                    message: 'The value "[object Object]" is invalid ' +
+                    message: `The value "${i}" is invalid ` +
                                    'for option "entryTypes"'
                   });
   });
@@ -88,8 +88,10 @@ assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_FUNCTION], 0);
     countdown.dec();
   }
   assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_MARK], 0);
-  observer.observe({ entryTypes: ['mark'] });
+  assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_NODE], 0);
+  observer.observe({ entryTypes: ['mark', 'node'] });
   assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_MARK], 1);
+  assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_NODE], 1);
   performance.mark('test1');
   performance.mark('test2');
   performance.mark('test3');

@@ -4,6 +4,8 @@
 
 > Stability: 2 - Stable
 
+<!-- source_link=lib/util.js -->
+
 The `util` module supports the needs of Node.js internal APIs. Many of the
 utilities are useful for application and module developers as well. To access
 it:
@@ -42,7 +44,7 @@ callbackFunction((err, ret) => {
 
 Will print:
 
-```txt
+```text
 hello world
 ```
 
@@ -68,13 +70,15 @@ callbackFunction((err, ret) => {
 });
 ```
 
-## `util.debuglog(section)`
+## `util.debuglog(section[, callback])`
 <!-- YAML
 added: v0.11.3
 -->
 
 * `section` {string} A string identifying the portion of the application for
   which the `debuglog` function is being created.
+* `callback` {Function} A callback invoked the first time the logging function
+is called with a function argument that is a more optimized logging function.
 * Returns: {Function} The logging function
 
 The `util.debuglog()` method is used to create a function that conditionally
@@ -93,7 +97,7 @@ debuglog('hello from foo [%d]', 123);
 If this program is run with `NODE_DEBUG=foo` in the environment, then
 it will output something like:
 
-```txt
+```console
 FOO 3245: hello from foo [123]
 ```
 
@@ -112,12 +116,25 @@ debuglog('hi there, it\'s foo-bar [%d]', 2333);
 if it is run with `NODE_DEBUG=foo*` in the environment, then it will output
 something like:
 
-```txt
+```console
 FOO-BAR 3257: hi there, it's foo-bar [2333]
 ```
 
 Multiple comma-separated `section` names may be specified in the `NODE_DEBUG`
 environment variable: `NODE_DEBUG=fs,net,tls`.
+
+The optional `callback` argument can be used to replace the logging function
+with a different function that doesn't have any initialization or
+unnecessary wrapping.
+
+```js
+const util = require('util');
+let debuglog = util.debuglog('internals', (debug) => {
+  // Replace with a logging function that optimizes out
+  // testing if the section is enabled
+  debuglog = debug;
+});
+```
 
 ## `util.deprecate(fn, msg[, code])`
 <!-- YAML
@@ -243,8 +260,7 @@ corresponding argument. Supported specifiers are:
 * `%O`: `Object`. A string representation of an object with generic JavaScript
   object formatting. Similar to `util.inspect()` without options. This will show
   the full object not including non-enumerable properties and proxies.
-* `%c`: `CSS`. This specifier is currently ignored, and will skip any CSS
-  passed in.
+* `%c`: `CSS`. This specifier is ignored and will skip any CSS passed in.
 * `%%`: single percent sign (`'%'`). This does not consume an argument.
 * Returns: {string} The formatted string
 
@@ -398,6 +414,14 @@ stream.write('With ES6');
 <!-- YAML
 added: v0.3.0
 changes:
+  - version: v12.19.0
+    pr-url: https://github.com/nodejs/node/pull/33690
+    description: If `object` is from a different `vm.Context` now, a custom
+                 inspection function on it will not receive context-specific
+                 arguments anymore.
+  - version: v12.17.0
+    pr-url: https://github.com/nodejs/node/pull/32392
+    description: The `maxStringLength` option is supported now.
   - version: v12.16.0
     pr-url: https://github.com/nodejs/node/pull/30768
     description: User defined prototype properties are inspected in case
@@ -480,6 +504,9 @@ changes:
     [`TypedArray`][], [`WeakMap`][] and [`WeakSet`][] elements to include when
     formatting. Set to `null` or `Infinity` to show all elements. Set to `0` or
     negative to show no elements. **Default:** `100`.
+  * `maxStringLength` {integer} Specifies the maximum number of characters to
+    include when formatting. Set to `null` or `Infinity` to show all elements.
+    Set to `0` or negative to show no characters. **Default:** `Infinity`.
   * `breakLength` {integer} The length at which input values are split across
     multiple lines. Set to `Infinity` to format the input as a single line
     (in combination with `compact` set to `true` or any number >= `1`).
@@ -746,7 +773,7 @@ ignored, if not supported.
 * `bgCyanBright`
 * `bgWhiteBright`
 
-### Custom inspection functions on Objects
+### Custom inspection functions on objects
 
 <!-- type=misc -->
 
@@ -1035,7 +1062,7 @@ while (buffer = getNextChunkSomehow()) {
 string += decoder.decode(); // end-of-stream
 ```
 
-### WHATWG Supported Encodings
+### WHATWG supported encodings
 
 Per the [WHATWG Encoding Standard][], the encodings supported by the
 `TextDecoder` API are outlined in the tables below. For each encoding,
@@ -1061,7 +1088,7 @@ with ICU and using the full ICU data (see [Internationalization][]).
 | `'utf-16le'` | `'utf-16'`                        |
 | `'utf-16be'` |                                   |
 
-#### Encodings Requiring Full ICU Data
+#### Encodings requiring full ICU data
 
 | Encoding           | Aliases                          |
 | -----------------  | -------------------------------- |
@@ -1246,6 +1273,25 @@ See also [`util.types.isArrayBuffer()`][] and
 ```js
 util.types.isAnyArrayBuffer(new ArrayBuffer());  // Returns true
 util.types.isAnyArrayBuffer(new SharedArrayBuffer());  // Returns true
+```
+
+### `util.types.isArrayBufferView(value)`
+<!-- YAML
+added: v10.0.0
+-->
+
+* `value` {any}
+* Returns: {boolean}
+
+Returns `true` if the value is an instance of one of the [`ArrayBuffer`][]
+views, such as typed array objects or [`DataView`][]. Equivalent to
+[`ArrayBuffer.isView()`][].
+
+```js
+util.types.isArrayBufferView(new Int8Array());  // true
+util.types.isArrayBufferView(Buffer.from('hello world')); // true
+util.types.isArrayBufferView(new DataView(new ArrayBuffer(16)));  // true
+util.types.isArrayBufferView(new ArrayBuffer());  // false
 ```
 
 ### `util.types.isArgumentsObject(value)`
@@ -2358,7 +2404,7 @@ util.log('Timestamped message.');
 [`Array.isArray()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/isArray
 [`ArrayBuffer.isView()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer/isView
 [`ArrayBuffer`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer
-[`Buffer.isBuffer()`]: buffer.html#buffer_class_method_buffer_isbuffer_obj
+[`Buffer.isBuffer()`]: buffer.html#buffer_static_method_buffer_isbuffer_obj
 [`DataView`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView
 [`Date`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date
 [`Error`]: errors.html#errors_class_error
@@ -2395,7 +2441,7 @@ util.log('Timestamped message.');
 [`util.types.isNativeError()`]: #util_util_types_isnativeerror_value
 [`util.types.isSharedArrayBuffer()`]: #util_util_types_issharedarraybuffer_value
 [Common System Errors]: errors.html#errors_common_system_errors
-[Custom inspection functions on Objects]: #util_custom_inspection_functions_on_objects
+[Custom inspection functions on objects]: #util_custom_inspection_functions_on_objects
 [Custom promisified functions]: #util_custom_promisified_functions
 [Customizing `util.inspect` colors]: #util_customizing_util_inspect_colors
 [Internationalization]: intl.html

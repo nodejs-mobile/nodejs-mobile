@@ -4,9 +4,7 @@
 #include "debug_utils-inl.h"
 #include "node_errors.h"
 #include "node_internals.h"
-#ifdef NODE_REPORT
 #include "node_report.h"
-#endif
 #include "node_process.h"
 #include "node_v8_platform-inl.h"
 #include "util-inl.h"
@@ -27,7 +25,6 @@ using v8::Local;
 using v8::Maybe;
 using v8::MaybeLocal;
 using v8::Message;
-using v8::Number;
 using v8::Object;
 using v8::ScriptOrigin;
 using v8::StackFrame;
@@ -377,8 +374,13 @@ static void ReportFatalException(Environment* env,
     }
 
     if (!env->options()->trace_uncaught) {
-      FPrintF(stderr, "(Use `node --trace-uncaught ...` to show "
-                      "where the exception was thrown)\n");
+      std::string argv0;
+      if (!env->argv().empty()) argv0 = env->argv()[0];
+      if (argv0.empty()) argv0 = "node";
+      FPrintF(stderr,
+              "(Use `%s --trace-uncaught ...` to show where the exception "
+              "was thrown)\n",
+              fs::Basename(argv0, ".exe"));
     }
   }
 
@@ -405,14 +407,20 @@ void OnFatalError(const char* location, const char* message) {
   } else {
     FPrintF(stderr, "FATAL ERROR: %s\n", message);
   }
-#ifdef NODE_REPORT
+
   Isolate* isolate = Isolate::GetCurrent();
   Environment* env = Environment::GetCurrent(isolate);
-  if (env == nullptr || env->isolate_data()->options()->report_on_fatalerror) {
-    report::TriggerNodeReport(
-        isolate, env, message, "FatalError", "", Local<String>());
+  bool report_on_fatalerror;
+  {
+    Mutex::ScopedLock lock(node::per_process::cli_options_mutex);
+    report_on_fatalerror = per_process::cli_options->report_on_fatalerror;
   }
-#endif  // NODE_REPORT
+
+  if (report_on_fatalerror) {
+    report::TriggerNodeReport(
+        isolate, env, message, "FatalError", "", Local<Object>());
+  }
+
   fflush(stderr);
   ABORT();
 }

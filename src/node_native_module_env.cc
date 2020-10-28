@@ -11,7 +11,6 @@ using v8::FunctionCallbackInfo;
 using v8::IntegrityLevel;
 using v8::Isolate;
 using v8::Local;
-using v8::Maybe;
 using v8::MaybeLocal;
 using v8::Name;
 using v8::None;
@@ -31,6 +30,10 @@ Local<Set> ToJsSet(Local<Context> context, const std::set<std::string>& in) {
         .ToLocalChecked();
   }
   return out;
+}
+
+bool NativeModuleEnv::Add(const char* id, const UnionBytes& source) {
+  return NativeModuleLoader::GetInstance()->Add(id, source);
 }
 
 bool NativeModuleEnv::Exists(const char* id) {
@@ -128,8 +131,9 @@ void NativeModuleEnv::CompileFunction(const FunctionCallbackInfo<Value>& args) {
       NativeModuleLoader::GetInstance()->CompileAsModule(
           env->context(), id, &result);
   RecordResult(id, result, env);
-  if (!maybe.IsEmpty()) {
-    args.GetReturnValue().Set(maybe.ToLocalChecked());
+  Local<Function> fn;
+  if (maybe.ToLocal(&fn)) {
+    args.GetReturnValue().Set(fn);
   }
 }
 

@@ -11,7 +11,6 @@
 namespace node {
 namespace performance {
 
-using v8::Array;
 using v8::Context;
 using v8::DontDelete;
 using v8::Function;
@@ -25,14 +24,12 @@ using v8::Isolate;
 using v8::Local;
 using v8::Map;
 using v8::MaybeLocal;
-using v8::Name;
 using v8::NewStringType;
 using v8::Number;
 using v8::Object;
 using v8::PropertyAttribute;
 using v8::ReadOnly;
 using v8::String;
-using v8::Uint32Array;
 using v8::Value;
 
 // Microseconds in a millisecond, as a float.
@@ -249,6 +246,10 @@ void PerformanceGCCallback(Environment* env,
                            env->kind_string(),
                            Integer::New(env->isolate(), entry->gckind()),
                            attr).Check();
+    obj->DefineOwnProperty(context,
+                           env->flags_string(),
+                           Integer::New(env->isolate(), entry->gcflags()),
+                           attr).Check();
     PerformanceEntry::Notify(env, entry->kind(), obj);
   }
 }
@@ -275,11 +276,12 @@ void MarkGarbageCollectionEnd(Isolate* isolate,
   auto entry = std::make_unique<GCPerformanceEntry>(
       env,
       static_cast<PerformanceGCKind>(type),
+      static_cast<PerformanceGCFlags>(flags),
       state->performance_last_gc_start_mark,
       PERFORMANCE_NOW());
-  env->SetUnrefImmediate([entry = std::move(entry)](Environment* env) mutable {
+  env->SetImmediate([entry = std::move(entry)](Environment* env) mutable {
     PerformanceGCCallback(env, std::move(entry));
-  });
+  }, CallbackFlags::kUnrefed);
 }
 
 void GarbageCollectionCleanupHook(void* data) {
@@ -393,6 +395,13 @@ void Notify(const FunctionCallbackInfo<Value>& args) {
     USE(env->performance_entry_callback()->
       Call(env->context(), Undefined(env->isolate()), 1, &entry));
   }
+}
+
+// Return idle time of the event loop
+void LoopIdleTime(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  uint64_t idle_time = uv_metrics_idle_time(env->event_loop());
+  args.GetReturnValue().Set(1.0 * idle_time / 1e6);
 }
 
 
@@ -584,6 +593,7 @@ void Initialize(Local<Object> target,
                  "removeGarbageCollectionTracking",
                  RemoveGarbageCollectionTracking);
   env->SetMethod(target, "notify", Notify);
+  env->SetMethod(target, "loopIdleTime", LoopIdleTime);
 
   Local<Object> constants = Object::New(isolate);
 
@@ -591,6 +601,21 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(constants, NODE_PERFORMANCE_GC_MINOR);
   NODE_DEFINE_CONSTANT(constants, NODE_PERFORMANCE_GC_INCREMENTAL);
   NODE_DEFINE_CONSTANT(constants, NODE_PERFORMANCE_GC_WEAKCB);
+
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_NO);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_FORCED);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY);
+  NODE_DEFINE_CONSTANT(
+    constants, NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE);
 
 #define V(name, _)                                                            \
   NODE_DEFINE_HIDDEN_CONSTANT(constants, NODE_PERFORMANCE_ENTRY_TYPE_##name);
@@ -625,7 +650,9 @@ void Initialize(Local<Object> target,
   Local<FunctionTemplate> eldh =
       env->NewFunctionTemplate(ELDHistogramNew);
   eldh->SetClassName(eldh_classname);
-  eldh->InstanceTemplate()->SetInternalFieldCount(1);
+  eldh->InstanceTemplate()->SetInternalFieldCount(
+      ELDHistogram::kInternalFieldCount);
+  eldh->Inherit(BaseObject::GetConstructorTemplate(env));
   env->SetProtoMethod(eldh, "exceeds", ELDHistogramExceeds);
   env->SetProtoMethod(eldh, "min", ELDHistogramMin);
   env->SetProtoMethod(eldh, "max", ELDHistogramMax);

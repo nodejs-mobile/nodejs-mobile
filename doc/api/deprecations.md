@@ -38,7 +38,7 @@ Occasionally, the deprecation of an API may be reversed. In such situations,
 this document will be updated with information relevant to the decision.
 However, the deprecation identifier will not be modified.
 
-## List of Deprecated APIs
+## List of deprecated APIs
 
 <a id="DEP0001"></a>
 ### DEP0001: `http.OutgoingMessage.prototype.flush`
@@ -1577,7 +1577,7 @@ querystring.parse(str, '\n', '=');
 This function is not completely equivalent to `querystring.parse()`. One
 difference is that `querystring.parse()` does url decoding:
 
-```sh
+```console
 > querystring.parse('%E5%A5%BD=1', '\n', '=');
 { '好': '1' }
 > tls.parseCertString('%E5%A5%BD=1');
@@ -1614,7 +1614,7 @@ Type: Runtime
 `REPLServer.turnOffEditorMode()` was removed from userland visibility.
 
 <a id="DEP0079"></a>
-### DEP0079: Custom inspection function on Objects via `.inspect()`
+### DEP0079: Custom inspection function on objects via `.inspect()`
 <!-- YAML
 changes:
   - version: v11.0.0
@@ -1739,7 +1739,7 @@ manager, as it is published on the npm registry under the same name. No source
 code modification is necessary if that is done.
 
 <a id="DEP0085"></a>
-### DEP0085: AsyncHooks Sensitive API
+### DEP0085: AsyncHooks sensitive API
 <!-- YAML
 changes:
   - version: 10.0.0
@@ -1754,7 +1754,7 @@ changes:
 
 Type: End-of-Life
 
-The AsyncHooks Sensitive API was never documented and had various minor issues.
+The AsyncHooks sensitive API was never documented and had various minor issues.
 Use the `AsyncResource` API instead. See
 <https://github.com/nodejs/node/issues/15572>.
 
@@ -1795,7 +1795,7 @@ Type: Deprecation revoked
 
 Importing assert directly was not recommended as the exposed functions use
 loose equality checks. The deprecation was revoked because use of the `assert`
-module is not discouraged, and the deprecation caused end user confusion.
+module is not discouraged, and the deprecation caused developer confusion.
 
 <a id="DEP0090"></a>
 ### DEP0090: Invalid GCM authentication tag lengths
@@ -1918,7 +1918,7 @@ should start using the `async_context` variant of `MakeCallback` or
 `CallbackScope`, or the high-level `AsyncResource` class.
 
 <a id="DEP0098"></a>
-### DEP0098: AsyncHooks Embedder `AsyncResource.emitBefore` and `AsyncResource.emitAfter` APIs
+### DEP0098: AsyncHooks embedder `AsyncResource.emitBefore` and `AsyncResource.emitAfter` APIs
 <!-- YAML
 changes:
   - version: v12.0.0
@@ -1943,7 +1943,7 @@ safer, and more convenient, alternative. See
 <https://github.com/nodejs/node/pull/18513>.
 
 <a id="DEP0099"></a>
-### DEP0099: async context-unaware `node::MakeCallback` C++ APIs
+### DEP0099: Async context-unaware `node::MakeCallback` C++ APIs
 <!-- YAML
 changes:
   - version: v10.0.0
@@ -2300,7 +2300,7 @@ Type: Documentation-only (supports [`--pending-deprecation`][])
 [`util.getSystemErrorName()`][] instead.
 
 <a id="DEP0120"></a>
-### DEP0120: Windows Performance Counter Support
+### DEP0120: Windows Performance Counter support
 <!-- YAML
 changes:
   - version: v12.0.0
@@ -2334,7 +2334,7 @@ The undocumented `net._setSimultaneousAccepts()` function was originally
 intended for debugging and performance tuning when using the `child_process`
 and `cluster` modules on Windows. The function is not generally useful and
 is being removed. See discussion here:
-https://github.com/nodejs/node/issues/18391
+<https://github.com/nodejs/node/issues/18391>
 
 <a id="DEP0122"></a>
 ### DEP0122: `tls` `Server.prototype.setOptions()`
@@ -2542,13 +2542,66 @@ accordingly instead to avoid the ambigiuty.
 To maintain existing behaviour `response.finished` should be replaced with
 `response.writableEnded`.
 
+<a id="DEP0139"></a>
+### DEP0139: `process.umask()` with no arguments
+<!-- YAML
+changes:
+  - version:
+    - v12.19.0
+    - v14.0.0
+    pr-url: https://github.com/nodejs/node/pull/32499
+    description: Documentation-only deprecation.
+-->
+
+Type: Documentation-only
+
+Calling `process.umask()` with no argument causes the process-wide umask to be
+written twice. This introduces a race condition between threads, and is a
+potential security vulnerability. There is no safe, cross-platform alternative
+API.
+
+<a id="DEP0144"></a>
+### DEP0144: `module.parent`
+<!-- YAML
+changes:
+  - version:
+    - v12.19.0
+    - v14.6.0
+    pr-url: https://github.com/nodejs/node/pull/32217
+    description: Documentation-only deprecation.
+-->
+
+Type: Documentation-only
+
+A CommonJS module can access the first module that required it using
+`module.parent`. This feature is deprecated because it does not work
+consistently in the presence of ECMAScript modules and because it gives an
+inaccurate representation of the CommonJS module graph.
+
+Some modules use it to check if they are the entry point of the current process.
+Instead, it is recommended to compare `require.main` and `module`:
+
+```js
+if (require.main === module) {
+  // Code section that will run only if current file is the entry point.
+}
+```
+
+When looking for the CommonJS modules that have required the current one,
+`require.cache` and `module.children` can be used:
+
+```js
+const moduleParents = Object.values(require.cache)
+  .filter((m) => m.children.includes(module));
+```
+
 [`--http-parser=legacy`]: cli.html#cli_http_parser_library
 [`--pending-deprecation`]: cli.html#cli_pending_deprecation
 [`--throw-deprecation`]: cli.html#cli_throw_deprecation
-[`Buffer.allocUnsafeSlow(size)`]: buffer.html#buffer_class_method_buffer_allocunsafeslow_size
-[`Buffer.from(array)`]: buffer.html#buffer_class_method_buffer_from_array
-[`Buffer.from(buffer)`]: buffer.html#buffer_class_method_buffer_from_buffer
-[`Buffer.isBuffer()`]: buffer.html#buffer_class_method_buffer_isbuffer_obj
+[`Buffer.allocUnsafeSlow(size)`]: buffer.html#buffer_static_method_buffer_allocunsafeslow_size
+[`Buffer.from(array)`]: buffer.html#buffer_static_method_buffer_from_array
+[`Buffer.from(buffer)`]: buffer.html#buffer_static_method_buffer_from_buffer
+[`Buffer.isBuffer()`]: buffer.html#buffer_static_method_buffer_isbuffer_obj
 [`Cipher`]: crypto.html#crypto_class_cipher
 [`Decipher`]: crypto.html#crypto_class_decipher
 [`EventEmitter.listenerCount(emitter, eventName)`]: events.html#events_eventemitter_listenercount_emitter_eventname
@@ -2602,18 +2655,18 @@ To maintain existing behaviour `response.finished` should be replaced with
 [`response.socket`]: http.html#http_response_socket
 [`response.connection`]: http.html#http_response_connection
 [`response.end()`]: http.html#http_response_end_data_encoding_callback
-[`response.finished`]: #http_response_finished
-[`response.writableFinished`]: #http_response_writablefinished
-[`response.writableEnded`]: #http_response_writableended
+[`response.finished`]: http.html#http_response_finished
+[`response.writableFinished`]: http.html#http_response_writablefinished
+[`response.writableEnded`]: http.html#http_response_writableended
 [`script.createCachedData()`]: vm.html#vm_script_createcacheddata
 [`setInterval()`]: timers.html#timers_setinterval_callback_delay_args
 [`setTimeout()`]: timers.html#timers_settimeout_callback_delay_args
 [`timeout.ref()`]: timers.html#timers_timeout_ref
 [`timeout.refresh()`]: timers.html#timers_timeout_refresh
 [`timeout.unref()`]: timers.html#timers_timeout_unref
-[`tls.CryptoStream`]: tls.html#tls_class_cryptostream
+[`tls.CryptoStream`]: tls.html#tls_class_tls_cryptostream
 [`tls.SecureContext`]: tls.html#tls_tls_createsecurecontext_options
-[`tls.SecurePair`]: tls.html#tls_class_securepair
+[`tls.SecurePair`]: tls.html#tls_class_tls_securepair
 [`tls.TLSSocket`]: tls.html#tls_class_tls_tlssocket
 [`tls.checkServerIdentity()`]: tls.html#tls_tls_checkserveridentity_hostname_cert
 [`tls.createSecureContext()`]: tls.html#tls_tls_createsecurecontext_options
@@ -2649,8 +2702,8 @@ To maintain existing behaviour `response.finished` should be replaced with
 [NIST SP 800-38D]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 [RFC 6066]: https://tools.ietf.org/html/rfc6066#section-3
 [WHATWG URL API]: url.html#url_the_whatwg_url_api
-[alloc]: buffer.html#buffer_class_method_buffer_alloc_size_fill_encoding
-[alloc_unsafe_size]: buffer.html#buffer_class_method_buffer_allocunsafe_size
-[from_arraybuffer]: buffer.html#buffer_class_method_buffer_from_arraybuffer_byteoffset_length
-[from_string_encoding]: buffer.html#buffer_class_method_buffer_from_string_encoding
+[alloc]: buffer.html#buffer_static_method_buffer_alloc_size_fill_encoding
+[alloc_unsafe_size]: buffer.html#buffer_static_method_buffer_allocunsafe_size
+[from_arraybuffer]: buffer.html#buffer_static_method_buffer_from_arraybuffer_byteoffset_length
+[from_string_encoding]: buffer.html#buffer_static_method_buffer_from_string_encoding
 [legacy `urlObject`]: url.html#url_legacy_urlobject

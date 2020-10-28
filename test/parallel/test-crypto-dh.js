@@ -20,6 +20,62 @@ assert.strictEqual(secret2.toString('base64'), secret1);
 assert.strictEqual(dh1.verifyError, 0);
 assert.strictEqual(dh2.verifyError, 0);
 
+// https://github.com/nodejs/node/issues/32738
+// XXX(bnoordhuis) validateInt32() throwing ERR_OUT_OF_RANGE and RangeError
+// instead of ERR_INVALID_ARG_TYPE and TypeError is questionable, IMO.
+assert.throws(() => crypto.createDiffieHellman(13.37), {
+  code: 'ERR_OUT_OF_RANGE',
+  name: 'RangeError',
+  message: 'The value of "sizeOrKey" is out of range. ' +
+           'It must be an integer. Received 13.37',
+});
+
+assert.throws(() => crypto.createDiffieHellman('abcdef', 13.37), {
+  code: 'ERR_OUT_OF_RANGE',
+  name: 'RangeError',
+  message: 'The value of "generator" is out of range. ' +
+           'It must be an integer. Received 13.37',
+});
+
+for (const bits of [-1, 0, 1]) {
+  assert.throws(() => crypto.createDiffieHellman(bits), {
+    code: 'ERR_OSSL_BN_BITS_TOO_SMALL',
+    name: 'Error',
+    message: /bits too small/,
+  });
+}
+
+// Through a fluke of history, g=0 defaults to DH_GENERATOR (2).
+{
+  const g = 0;
+  crypto.createDiffieHellman('abcdef', g);
+  crypto.createDiffieHellman('abcdef', 'hex', g);
+}
+
+for (const g of [-1, 1]) {
+  const ex = {
+    code: 'ERR_OSSL_DH_BAD_GENERATOR',
+    name: 'Error',
+    message: /bad generator/,
+  };
+  assert.throws(() => crypto.createDiffieHellman('abcdef', g), ex);
+  assert.throws(() => crypto.createDiffieHellman('abcdef', 'hex', g), ex);
+}
+
+crypto.createDiffieHellman('abcdef', Buffer.from([2]));  // OK
+
+for (const g of [Buffer.from([]),
+                 Buffer.from([0]),
+                 Buffer.from([1])]) {
+  const ex = {
+    code: 'ERR_OSSL_DH_BAD_GENERATOR',
+    name: 'Error',
+    message: /bad generator/,
+  };
+  assert.throws(() => crypto.createDiffieHellman('abcdef', g), ex);
+  assert.throws(() => crypto.createDiffieHellman('abcdef', 'hex', g), ex);
+}
+
 {
   const DiffieHellman = crypto.DiffieHellman;
   const dh = DiffieHellman(p1, 'buffer');
@@ -389,7 +445,11 @@ assert.throws(
   function() {
     crypto.getDiffieHellman('unknown-group');
   },
-  /^Error: Unknown group$/,
+  {
+    name: 'Error',
+    code: 'ERR_CRYPTO_UNKNOWN_DH_GROUP',
+    message: 'Unknown group'
+  },
   'crypto.getDiffieHellman(\'unknown-group\') ' +
   'failed to throw the expected error.'
 );

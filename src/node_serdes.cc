@@ -451,7 +451,9 @@ void Initialize(Local<Object> target,
   Local<FunctionTemplate> ser =
       env->NewFunctionTemplate(SerializerContext::New);
 
-  ser->InstanceTemplate()->SetInternalFieldCount(1);
+  ser->InstanceTemplate()->SetInternalFieldCount(
+      SerializerContext::kInternalFieldCount);
+  ser->Inherit(BaseObject::GetConstructorTemplate(env));
 
   env->SetProtoMethod(ser, "writeHeader", SerializerContext::WriteHeader);
   env->SetProtoMethod(ser, "writeValue", SerializerContext::WriteValue);
@@ -477,7 +479,9 @@ void Initialize(Local<Object> target,
   Local<FunctionTemplate> des =
       env->NewFunctionTemplate(DeserializerContext::New);
 
-  des->InstanceTemplate()->SetInternalFieldCount(1);
+  des->InstanceTemplate()->SetInternalFieldCount(
+      DeserializerContext::kInternalFieldCount);
+  des->Inherit(BaseObject::GetConstructorTemplate(env));
 
   env->SetProtoMethod(des, "readHeader", DeserializerContext::ReadHeader);
   env->SetProtoMethod(des, "readValue", DeserializerContext::ReadValue);

@@ -8,9 +8,10 @@ namespace util {
 using v8::ALL_PROPERTIES;
 using v8::Array;
 using v8::ArrayBufferView;
+using v8::BigInt;
 using v8::Boolean;
 using v8::Context;
-using v8::Function;
+using v8::External;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::Global;
@@ -66,6 +67,18 @@ static void GetConstructorName(
   Local<String> name = object->GetConstructorName();
 
   args.GetReturnValue().Set(name);
+}
+
+static void GetExternalValue(
+    const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsExternal());
+  Isolate* isolate = args.GetIsolate();
+  Local<External> external = args[0].As<External>();
+
+  void* ptr = external->Value();
+  uint64_t value = reinterpret_cast<uint64_t>(ptr);
+  Local<BigInt> ret = BigInt::NewFromUnsigned(isolate, value);
+  args.GetReturnValue().Set(ret);
 }
 
 static void GetPromiseDetails(const FunctionCallbackInfo<Value>& args) {
@@ -149,11 +162,11 @@ static void GetHiddenValue(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[1]->IsUint32());
 
   Local<Object> obj = args[0].As<Object>();
-  auto index = args[1]->Uint32Value(env->context()).FromJust();
-  auto private_symbol = IndexToPrivateSymbol(env, index);
-  auto maybe_value = obj->GetPrivate(env->context(), private_symbol);
-
-  args.GetReturnValue().Set(maybe_value.ToLocalChecked());
+  uint32_t index = args[1].As<Uint32>()->Value();
+  Local<Private> private_symbol = IndexToPrivateSymbol(env, index);
+  Local<Value> ret;
+  if (obj->GetPrivate(env->context(), private_symbol).ToLocal(&ret))
+    args.GetReturnValue().Set(ret);
 }
 
 static void SetHiddenValue(const FunctionCallbackInfo<Value>& args) {
@@ -163,11 +176,11 @@ static void SetHiddenValue(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[1]->IsUint32());
 
   Local<Object> obj = args[0].As<Object>();
-  auto index = args[1]->Uint32Value(env->context()).FromJust();
-  auto private_symbol = IndexToPrivateSymbol(env, index);
-  auto maybe_value = obj->SetPrivate(env->context(), private_symbol, args[2]);
-
-  args.GetReturnValue().Set(maybe_value.FromJust());
+  uint32_t index = args[1].As<Uint32>()->Value();
+  Local<Private> private_symbol = IndexToPrivateSymbol(env, index);
+  bool ret;
+  if (obj->SetPrivate(env->context(), private_symbol, args[2]).To(&ret))
+    args.GetReturnValue().Set(ret);
 }
 
 static void Sleep(const FunctionCallbackInfo<Value>& args) {
@@ -297,6 +310,7 @@ void Initialize(Local<Object> target,
   env->SetMethodNoSideEffect(target, "getOwnNonIndexProperties",
                                      GetOwnNonIndexProperties);
   env->SetMethodNoSideEffect(target, "getConstructorName", GetConstructorName);
+  env->SetMethodNoSideEffect(target, "getExternalValue", GetExternalValue);
   env->SetMethod(target, "sleep", Sleep);
 
   env->SetMethod(target, "arrayBufferViewHasBuffer", ArrayBufferViewHasBuffer);
@@ -323,8 +337,10 @@ void Initialize(Local<Object> target,
       FIXED_ONE_BYTE_STRING(env->isolate(), "WeakReference");
   Local<FunctionTemplate> weak_ref =
       env->NewFunctionTemplate(WeakReference::New);
-  weak_ref->InstanceTemplate()->SetInternalFieldCount(1);
+  weak_ref->InstanceTemplate()->SetInternalFieldCount(
+      WeakReference::kInternalFieldCount);
   weak_ref->SetClassName(weak_ref_string);
+  weak_ref->Inherit(BaseObject::GetConstructorTemplate(env));
   env->SetProtoMethod(weak_ref, "get", WeakReference::Get);
   env->SetProtoMethod(weak_ref, "incRef", WeakReference::IncRef);
   env->SetProtoMethod(weak_ref, "decRef", WeakReference::DecRef);

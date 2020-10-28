@@ -100,6 +100,7 @@ class DebugOptions : public Options {
 class EnvironmentOptions : public Options {
  public:
   bool abort_on_uncaught_exception = false;
+  std::vector<std::string> conditions;
   bool enable_source_maps = false;
   bool experimental_json_modules = false;
   bool experimental_modules = false;
@@ -139,6 +140,7 @@ class EnvironmentOptions : public Options {
   bool heap_prof = false;
 #endif  // HAVE_INSPECTOR
   std::string redirect_warnings;
+  std::string diagnostic_dir;
   bool test_udp_no_try_send = false;
   bool throw_deprecation = false;
   bool trace_deprecation = false;
@@ -152,9 +154,6 @@ class EnvironmentOptions : public Options {
 
   bool syntax_check_only = false;
   bool has_eval_string = false;
-#ifdef NODE_REPORT
-  bool experimental_report = false;
-#endif  //  NODE_REPORT
   bool experimental_wasi = false;
   std::string eval_string;
   bool print_eval = false;
@@ -188,21 +187,23 @@ class PerIsolateOptions : public Options {
   std::shared_ptr<EnvironmentOptions> per_env { new EnvironmentOptions() };
   bool track_heap_objects = false;
   bool no_node_snapshot = false;
-
-#ifdef NODE_REPORT
   bool report_uncaught_exception = false;
   bool report_on_signal = false;
-  bool report_on_fatalerror = false;
-  std::string report_signal;
-  std::string report_filename;
-  std::string report_directory;
-#endif  //  NODE_REPORT
+  std::string report_signal = "SIGUSR2";
   inline EnvironmentOptions* get_per_env_options();
   void CheckOptions(std::vector<std::string>* errors) override;
 };
 
 class PerProcessOptions : public Options {
  public:
+  // Options shouldn't be here unless they affect the entire process scope, and
+  // that should avoided when possible.
+  //
+  // When an option is used during process initialization, it does not need
+  // protection, but any use after that will likely require synchronization
+  // using the node::per_process::cli_options_mutex, typically:
+  //
+  //     Mutex::ScopedLock lock(node::per_process::cli_options_mutex);
   std::shared_ptr<PerIsolateOptions> per_isolate { new PerIsolateOptions() };
 
   std::string title;
@@ -212,6 +213,7 @@ class PerProcessOptions : public Options {
   int64_t v8_thread_pool_size = 4;
   bool zero_fill_all_buffers = false;
   bool debug_arraybuffer_allocations = false;
+  std::string disable_proto;
 
   std::vector<std::string> security_reverts;
   bool print_bash_completion = false;
@@ -223,7 +225,8 @@ class PerProcessOptions : public Options {
   std::string icu_data_dir;
 #endif
 
-  // TODO(addaleax): Some of these could probably be per-Environment.
+  // Per-process because they affect singleton OpenSSL shared library state,
+  // or are used once during process intialization.
 #if HAVE_OPENSSL
   std::string openssl_config;
   std::string tls_cipher_list = DEFAULT_CIPHER_LIST_CORE;
@@ -240,9 +243,16 @@ class PerProcessOptions : public Options {
 #endif
 #endif
 
-#ifdef NODE_REPORT
+  // Per-process because reports can be triggered outside a known V8 context.
+  bool report_on_fatalerror = false;
+  bool report_compact = false;
+  std::string report_directory;
+  std::string report_filename;
+
+  // TODO(addaleax): Some of these could probably be per-Environment.
+  std::string use_largepages = "off";
+  bool trace_sigint = false;
   std::vector<std::string> cmdline;
-#endif  //  NODE_REPORT
 
   inline PerIsolateOptions* get_per_isolate_options();
   void CheckOptions(std::vector<std::string>* errors) override;

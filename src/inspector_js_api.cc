@@ -12,7 +12,6 @@ namespace node {
 namespace inspector {
 namespace {
 
-using v8::Boolean;
 using v8::Context;
 using v8::Function;
 using v8::FunctionCallbackInfo;
@@ -84,7 +83,7 @@ class JSBindingsConnection : public AsyncWrap {
 
    private:
     Environment* env_;
-    JSBindingsConnection* connection_;
+    BaseObjectPtr<JSBindingsConnection> connection_;
   };
 
   JSBindingsConnection(Environment* env,
@@ -105,7 +104,8 @@ class JSBindingsConnection : public AsyncWrap {
     Local<String> class_name = ConnectionType::GetClassName(env);
     Local<FunctionTemplate> tmpl =
         env->NewFunctionTemplate(JSBindingsConnection::New);
-    tmpl->InstanceTemplate()->SetInternalFieldCount(1);
+    tmpl->InstanceTemplate()->SetInternalFieldCount(
+        JSBindingsConnection::kInternalFieldCount);
     tmpl->SetClassName(class_name);
     tmpl->Inherit(AsyncWrap::GetConstructorTemplate(env));
     env->SetProtoMethod(tmpl, "dispatch", JSBindingsConnection::Dispatch);
@@ -302,7 +302,7 @@ void WaitForDebugger(const FunctionCallbackInfo<Value>& args) {
 void Url(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   std::string url = env->inspector_agent()->GetWsUrl();
-  if (url.length() == 0) {
+  if (url.empty()) {
     return;
   }
   args.GetReturnValue().Set(OneByteString(env->isolate(), url.c_str()));

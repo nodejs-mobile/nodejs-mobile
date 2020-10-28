@@ -18,7 +18,6 @@ using v8::ArrayBuffer;
 using v8::ArrayBufferView;
 using v8::Boolean;
 using v8::Context;
-using v8::Float64Array;
 using v8::Function;
 using v8::Integer;
 using v8::NewStringType;
@@ -26,7 +25,6 @@ using v8::Number;
 using v8::ObjectTemplate;
 using v8::String;
 using v8::Uint32;
-using v8::Uint32Array;
 using v8::Uint8Array;
 using v8::Undefined;
 
@@ -202,6 +200,12 @@ Http2Options::Http2Options(Environment* env, nghttp2_session_type type) {
   //            terms of MB increments (i.e. the value 1 == 1 MB)
   if (flags & (1 << IDX_OPTIONS_MAX_SESSION_MEMORY)) {
     SetMaxSessionMemory(buffer[IDX_OPTIONS_MAX_SESSION_MEMORY] * 1e6);
+  }
+
+  if (flags & (1 << IDX_OPTIONS_MAX_SETTINGS)) {
+    nghttp2_option_set_max_settings(
+        options_,
+        static_cast<size_t>(buffer[IDX_OPTIONS_MAX_SETTINGS]));
   }
 }
 
@@ -1585,7 +1589,7 @@ void Http2Session::ClearOutgoing(int status) {
 
   flags_ &= ~SESSION_STATE_SENDING;
 
-  if (outgoing_buffers_.size() > 0) {
+  if (!outgoing_buffers_.empty()) {
     outgoing_storage_.clear();
     outgoing_length_ = 0;
 
@@ -1604,7 +1608,7 @@ void Http2Session::ClearOutgoing(int status) {
 
   // Now that we've finished sending queued data, if there are any pending
   // RstStreams we should try sending again and then flush them one by one.
-  if (pending_rst_streams_.size() > 0) {
+  if (!pending_rst_streams_.empty()) {
     std::vector<int32_t> current_pending_rst_streams;
     pending_rst_streams_.swap(current_pending_rst_streams);
 
@@ -1663,8 +1667,8 @@ uint8_t Http2Session::SendPendingData() {
   ssize_t src_length;
   const uint8_t* src;
 
-  CHECK_EQ(outgoing_buffers_.size(), 0);
-  CHECK_EQ(outgoing_storage_.size(), 0);
+  CHECK(outgoing_buffers_.empty());
+  CHECK(outgoing_storage_.empty());
 
   // Part One: Gather data from nghttp2
 
@@ -3059,14 +3063,14 @@ void Initialize(Local<Object> target,
   ping->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "Http2Ping"));
   ping->Inherit(AsyncWrap::GetConstructorTemplate(env));
   Local<ObjectTemplate> pingt = ping->InstanceTemplate();
-  pingt->SetInternalFieldCount(1);
+  pingt->SetInternalFieldCount(Http2Session::Http2Ping::kInternalFieldCount);
   env->set_http2ping_constructor_template(pingt);
 
   Local<FunctionTemplate> setting = FunctionTemplate::New(env->isolate());
   setting->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "Http2Setting"));
   setting->Inherit(AsyncWrap::GetConstructorTemplate(env));
   Local<ObjectTemplate> settingt = setting->InstanceTemplate();
-  settingt->SetInternalFieldCount(1);
+  settingt->SetInternalFieldCount(AsyncWrap::kInternalFieldCount);
   env->set_http2settings_constructor_template(settingt);
 
   Local<FunctionTemplate> stream = FunctionTemplate::New(env->isolate());
@@ -3083,7 +3087,7 @@ void Initialize(Local<Object> target,
   stream->Inherit(AsyncWrap::GetConstructorTemplate(env));
   StreamBase::AddMethods(env, stream);
   Local<ObjectTemplate> streamt = stream->InstanceTemplate();
-  streamt->SetInternalFieldCount(StreamBase::kStreamBaseFieldCount);
+  streamt->SetInternalFieldCount(StreamBase::kInternalFieldCount);
   env->set_http2stream_constructor_template(streamt);
   target->Set(context,
               FIXED_ONE_BYTE_STRING(env->isolate(), "Http2Stream"),
@@ -3092,7 +3096,8 @@ void Initialize(Local<Object> target,
   Local<FunctionTemplate> session =
       env->NewFunctionTemplate(Http2Session::New);
   session->SetClassName(http2SessionClassName);
-  session->InstanceTemplate()->SetInternalFieldCount(1);
+  session->InstanceTemplate()->SetInternalFieldCount(
+      Http2Session::kInternalFieldCount);
   session->Inherit(AsyncWrap::GetConstructorTemplate(env));
   env->SetProtoMethod(session, "origin", Http2Session::Origin);
   env->SetProtoMethod(session, "altsvc", Http2Session::AltSvc);
