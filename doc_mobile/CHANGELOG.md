@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.3.2">0.3.2</a><br/>
 <a href="#0.3.1">0.3.1</a><br/>
 <a href="#0.3.0">0.3.0</a><br/>
 <a href="#0.2.2">0.2.2</a><br/>
@@ -25,8 +26,23 @@
 </tr>
 </table>
 
+<a id="0.3.2"></a>
+## 2020-11-02, Version 0.3.2 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 12.19.0 LTS.
+
+### Commits
+
+* [[`9d19d1e171`](https://github.com/janeasystems/nodejs-mobile/commit/9d19d1e1710c87fa8f745b64b9ed00528df7842b)] - Node.js on Mobile v0.3.2 (Jaime Bernardo)
+* [[`62c8bcaa6b`](https://github.com/janeasystems/nodejs-mobile/commit/62c8bcaa6bba2001bd4bf1ed77145b1a3514fcc3)] - android: don't use copy_file_range on 32 bits (Jaime Bernardo)
+* [[`02799cb9dc`](https://github.com/janeasystems/nodejs-mobile/commit/02799cb9dc9d410616ade010604636633c9925f7)] - test: fix mobile tests for 12.19.0 (Jaime Bernardo)
+* [[`fb24d2532e`](https://github.com/janeasystems/nodejs-mobile/commit/fb24d2532ecfe6655c3fefe83311748c5f2bd020)] - Merge node 12.19.0 (Jaime Bernardo)
+* [[`c8ed4167f5`](https://github.com/janeasystems/nodejs-mobile/commit/c8ed4167f58fd3dc35b508fa7018497a908751b5)] - Working on Node.js for Mobile Apps v0.3.2 (Jaime Bernardo)
+
 <a id="0.3.1"></a>
-## 2020-05-25, Version 0.3.1 (Current)
+## 2020-05-25, Version 0.3.1
 
 ### Notable Changes
 
