@@ -36,6 +36,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_packet.h>
+#include <dlfcn.h>
 
 typedef struct NetlinkList
 {
@@ -534,7 +535,7 @@ static int interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList, 
                 {
                     if(l_entry->ifa_addr)
                     {
-                        l_entry->ifa_dstaddr = (struct sockaddr *)l_addr;
+                        l_entry->ifa_ifu.ifu_dstaddr = (struct sockaddr *)l_addr;
                     }
                     else
                     {
@@ -545,7 +546,7 @@ static int interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList, 
                 {
                     if(l_entry->ifa_addr)
                     {
-                        l_entry->ifa_dstaddr = l_entry->ifa_addr;
+                        l_entry->ifa_ifu.ifu_dstaddr = l_entry->ifa_addr;
                     }
                     l_entry->ifa_addr = (struct sockaddr *)l_addr;
                 }
@@ -652,8 +653,52 @@ static int interpretAddrs(int p_socket, pid_t p_pid, NetlinkList *p_netlinkList,
     return 0;
 }
 
+// Tries to get the system's getifaddrs if it's available.
+void *_dlopen_ifaddrs_handle = NULL;
+void init_dlopen_ifaddrs_handle(void) __attribute__((constructor));
+void destroy_dlopen_ifaddrs_handle(void) __attribute__((destructor));
+
+void init_dlopen_ifaddrs_handle(void)
+{
+    _dlopen_ifaddrs_handle = dlopen("libc.so", RTLD_NOW|RTLD_LOCAL);
+}
+
+void destroy_dlopen_ifaddrs_handle(void)
+{
+    if (_dlopen_ifaddrs_handle != NULL)
+    {
+        dlclose(_dlopen_ifaddrs_handle);
+        _dlopen_ifaddrs_handle = NULL;
+    }
+}
+
+int (*get_getifaddrs_native_func(void))(struct ifaddrs **)
+{
+    if (!_dlopen_ifaddrs_handle)
+    {
+        return NULL;
+    }
+    return dlsym(_dlopen_ifaddrs_handle, "getifaddrs");
+}
+
+void (*get_freeifaddrs_native_func(void))(struct ifaddrs *)
+{
+    if (!_dlopen_ifaddrs_handle)
+    {
+        return NULL;
+    }
+    return dlsym(_dlopen_ifaddrs_handle, "freeifaddrs");
+}
+
 int getifaddrs(struct ifaddrs **ifap)
 {
+    // If the native getifaddrs is available, call it.
+    int (*getifaddrs_native)(struct ifaddrs **) = get_getifaddrs_native_func();
+    if (getifaddrs_native != NULL)
+    {
+        return getifaddrs_native(ifap);
+    }
+
     int l_socket;
     int l_result;
     int l_numLinks;
@@ -703,6 +748,14 @@ int getifaddrs(struct ifaddrs **ifap)
 
 void freeifaddrs(struct ifaddrs *ifa)
 {
+    // If the native freeifaddrs is available, call it.
+    void (*freeifaddrs_native)(struct ifaddrs *) = get_freeifaddrs_native_func();
+    if (freeifaddrs_native != NULL)
+    {
+        freeifaddrs_native(ifa);
+        return;
+    }
+
     struct ifaddrs *l_cur;
     while(ifa)
     {
