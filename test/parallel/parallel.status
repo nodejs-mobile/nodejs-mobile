@@ -701,6 +701,10 @@ test-whatwg-url-toascii: SKIP
 #
 test-os-process-priority : SKIP
 #
+# Test that requires user interaction to allow using udp6 link local address on iOS 14.
+#
+test-dgram-udp6-link-local-address : SKIP
+#
 # Tests that require the debugger to not stop on signals.
 # Tests pass if run individually with debugger configured to not stop.
 #
