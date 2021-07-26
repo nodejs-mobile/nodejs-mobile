@@ -364,6 +364,10 @@ test-process-uid-gid: SKIP # process.setuid is not a function
 #
 test-fs-link: SKIP
 #
+# Test that requires using udp6 link local address, not available on old devices.
+#
+test-dgram-udp6-link-local-address : SKIP
+#
 # Tests that enter in conflict with the test app.
 #
 test-listen-fd-ebadf: SKIP # uses stderr as a socket, which the test app redirects.
