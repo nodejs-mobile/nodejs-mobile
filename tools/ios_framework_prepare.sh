@@ -96,6 +96,9 @@ lipo -create "$TARGET_LIBRARY_PATH/arm64/libv8_libsampler.a" "$TARGET_LIBRARY_PA
 lipo -create "$TARGET_LIBRARY_PATH/arm64/libv8_snapshot.a" "$TARGET_LIBRARY_PATH/x64/libv8_snapshot.a" -output "$TARGET_LIBRARY_PATH/libv8_snapshot.a"
 lipo -create "$TARGET_LIBRARY_PATH/arm64/libzlib.a" "$TARGET_LIBRARY_PATH/x64/libzlib.a" -output "$TARGET_LIBRARY_PATH/libzlib.a"
 
+rm -rf "$TARGET_LIBRARY_PATH/arm64/"
+rm -rf "$TARGET_LIBRARY_PATH/x64/"
+
 #Create a path to build the frameworks into
 rm -rf out_ios
 mkdir -p out_ios
@@ -109,6 +112,9 @@ xcodebuild build -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj -target "No
 xcodebuild build -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj -target "NodeMobile" -configuration Release -arch x86_64 -sdk "iphonesimulator" SYMROOT=$FRAMEWORK_TARGET_DIR
 cp -RL $FRAMEWORK_TARGET_DIR/Release-iphoneos $FRAMEWORK_TARGET_DIR/Release-universal
 lipo -create $FRAMEWORK_TARGET_DIR/Release-iphoneos/NodeMobile.framework/NodeMobile $FRAMEWORK_TARGET_DIR/Release-iphonesimulator/NodeMobile.framework/NodeMobile -output $FRAMEWORK_TARGET_DIR/Release-universal/NodeMobile.framework/NodeMobile
+
+#Create a .xcframework
+xcodebuild  -create-xcframework -framework $FRAMEWORK_TARGET_DIR/Release-iphoneos/NodeMobile.framework -framework $FRAMEWORK_TARGET_DIR/Release-iphonesimulator/NodeMobile.framework -output $FRAMEWORK_TARGET_DIR/NodeMobile.xcframework
 
 echo "Frameworks built to $FRAMEWORK_TARGET_DIR"
 
