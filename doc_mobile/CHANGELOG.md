@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#0.3.3">0.3.3</a><br/>
 <a href="#0.3.2">0.3.2</a><br/>
 <a href="#0.3.1">0.3.1</a><br/>
 <a href="#0.3.0">0.3.0</a><br/>
@@ -26,8 +27,32 @@
 </tr>
 </table>
 
+<a id="0.3.3"></a>
+## 2021-08-16, Version 0.3.3 (Current)
+
+### Notable Changes
+
+* Releases now contain .xcframework format for iOS.
+* Fix permission error when using geeetifaddrs on newer versions of  Android.
+* iOS library now built with Xcode 12.
+* Android library now built with NDK r22b.
+* Account for new logcat format in Android > 11 in the automated tests.
+* Skip automated tests that require manual validation on newer versions of iOS and Android.
+
+### Commits
+
+* [[`780ae712b4`](https://github.com/janeasystems/nodejs-mobile/commit/780ae712b47fb34c459ea5e3b1d566f029c3c99a)] - Node.js on Mobile 0.3.3 (Jaime Bernardo)
+* [[`7f64610f0d`](https://github.com/janeasystems/nodejs-mobile/commit/7f64610f0d774ff4225595c3d76aa0132b79753e)] - build,ios: build .xcframework and use it for tests (Jaime Bernardo)
+* [[`359665c4d1`](https://github.com/janeasystems/nodejs-mobile/commit/359665c4d1cb8d5e9eb1d1e986c7230e432dc84b)] - test,android: skip link local address test (Jaime Bernardo)
+* [[`0e500291cb`](https://github.com/janeasystems/nodejs-mobile/commit/0e500291cbb7619a714e7018db14ce1d18428f1a)] - test,ios: skip test that requires manual action (Jaime Bernardo)
+* [[`4046cf8d25`](https://github.com/janeasystems/nodejs-mobile/commit/4046cf8d25b0035dafdbd6c7c892d1686417f676)] - test,android: fix for logcat format in Android 11 (Jaime Bernardo)
+* [[`c4aca452c2`](https://github.com/janeasystems/nodejs-mobile/commit/c4aca452c2b7a2e3e92178b9f1cd265762f92f51)] - test,android: fix libuv socket name length in test (Jaime Bernardo)
+* [[`73d5d375db`](https://github.com/janeasystems/nodejs-mobile/commit/73d5d375dbd672c3df8556a83ad122a078d21ed2)] - android: fix permission issue on getifaddrs (Jaime Bernardo)
+* [[`adce4913ac`](https://github.com/janeasystems/nodejs-mobile/commit/adce4913ac2ec809b5da0f46f86c975661bcf112)] - build,android: fix building with updated tools (Jaime Bernardo)
+* [[`d4af0e6bda`](https://github.com/janeasystems/nodejs-mobile/commit/d4af0e6bdaf753d1f0d69db13627dcdffc90c436)] - Working on Node.js for Mobile Apps v0.3.3 (Jaime Bernardo)
+
 <a id="0.3.2"></a>
-## 2020-11-02, Version 0.3.2 (Current)
+## 2020-11-02, Version 0.3.2
 
 ### Notable Changes
 
