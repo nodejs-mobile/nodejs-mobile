@@ -183,6 +183,7 @@ int uv_uptime(double* uptime) {
   return 0;
 }
 
+#if defined(TARGET_OS_IPHONE) && !TARGET_OS_IPHONE
 static int uv__get_cpu_speed(uint64_t* speed) {
   /* IOKit */
   void (*pIOObjectRelease)(io_object_t);
@@ -319,6 +320,7 @@ out:
 
   return err;
 }
+#endif
 
 int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   unsigned int ticks = (unsigned int)sysconf(_SC_CLK_TCK),
@@ -339,9 +341,14 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
     return UV__ERR(errno);
   }
 
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+  // You can't get cpu frequency on iOS devices. Defaults to 0.
+  cpuspeed = 0;
+#else
   err = uv__get_cpu_speed(&cpuspeed);
   if (err < 0)
     return err;
+#endif
 
   if (host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &numcpus,
                           (processor_info_array_t*)&info,
