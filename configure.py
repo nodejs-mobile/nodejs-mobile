@@ -51,7 +51,7 @@ from utils import SearchFiles
 parser = argparse.ArgumentParser()
 
 valid_os = ('win', 'mac', 'solaris', 'freebsd', 'openbsd', 'linux',
-            'android', 'aix', 'cloudabi')
+            'android', 'aix', 'cloudabi', 'ios')
 valid_arch = ('arm', 'arm64', 'ia32', 'mips', 'mipsel', 'mips64el', 'ppc',
               'ppc64', 'x32','x64', 'x86', 'x86_64', 's390x', 'riscv64')
 valid_arm_float_abi = ('soft', 'softfp', 'hard')
@@ -1155,6 +1155,8 @@ def configure_node_lib_files(o):
   o['variables']['node_library_files'] = SearchFiles('lib', 'js')
 
 def configure_node(o):
+  if options.dest_os == 'ios':
+    o['variables']['OS'] = 'ios'
   if options.dest_os == 'android':
     o['variables']['OS'] = 'android'
   o['variables']['node_prefix'] = options.prefix
