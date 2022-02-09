@@ -25,6 +25,10 @@
 #include <unicode/uversion.h>
 #endif  // NODE_HAVE_I18N_SUPPORT
 
+#ifdef NODE_MOBILE
+#include "node_mobile_version.h"
+#endif // NODE_MOBILE
+
 namespace node {
 
 namespace per_process {
@@ -77,6 +81,9 @@ Metadata::Versions::Versions() {
   ares = ARES_VERSION_STR;
   modules = NODE_STRINGIFY(NODE_MODULE_VERSION);
   nghttp2 = NGHTTP2_VERSION;
+#ifdef NODE_MOBILE
+  mobile = NODE_MOBILE_VERSION_STRING;
+#endif  // NODE_MOBILE
   napi = NODE_STRINGIFY(NAPI_VERSION);
   llhttp =
       NODE_STRINGIFY(LLHTTP_VERSION_MAJOR)

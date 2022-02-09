@@ -745,6 +745,8 @@ void ResetStdio() {
       CHECK_NE(err, -1);
     }
 
+    #if !(defined(__APPLE__) && TARGET_OS_IPHONE)
+    // tcsetattr is not working on iOS devices.
     if (s.isatty) {
       sigset_t sa;
       int err;
@@ -764,6 +766,7 @@ void ResetStdio() {
       // tcsetattr will fail with err == -1 and errno == EPERM.
       CHECK_IMPLIES(err != 0, err == -1 && errno == EPERM);
     }
+    #endif // !(defined(__APPLE__) && TARGET_OS_IPHONE)
   }
 #endif  // __POSIX__
 }
