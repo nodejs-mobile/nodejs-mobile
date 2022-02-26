@@ -836,7 +836,7 @@ bool BigInt::EqualToNumber(Handle<BigInt> x, Handle<Object> y) {
     STATIC_ASSERT(sizeof(digit_t) >= sizeof(value));
     return (x->length() == 1) && (x->sign() == (value < 0)) &&
            (x->digit(0) ==
-            static_cast<digit_t>(std::abs(static_cast<int64_t>(value))));
+            static_cast<digit_t>(std::fabs(static_cast<int64_t>(value))));
   }
   DCHECK(y->IsHeapNumber());
   double value = Handle<HeapNumber>::cast(y)->value();
@@ -860,7 +860,7 @@ ComparisonResult BigInt::CompareToNumber(Handle<BigInt> x, Handle<Object> y) {
     STATIC_ASSERT(sizeof(digit_t) >= sizeof(y_value));
     if (x->length() > 1) return AbsoluteGreater(x_sign);
 
-    digit_t abs_value = std::abs(static_cast<int64_t>(y_value));
+    digit_t abs_value = std::fabs(static_cast<int64_t>(y_value));
     digit_t x_digit = x->digit(0);
     if (x_digit > abs_value) return AbsoluteGreater(x_sign);
     if (x_digit < abs_value) return AbsoluteLess(x_sign);

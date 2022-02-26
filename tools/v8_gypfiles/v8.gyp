@@ -862,10 +862,15 @@
             '<!@pymod_do_main(GN-scraper "<(V8_ROOT)/BUILD.gn"  "\\"v8_base_without_compiler.*?v8_current_cpu == \\"arm64\\".*?sources \\+= ")',
           ],
           'conditions': [
-            ['OS=="mac"', {
+            ['(OS=="mac" or OS=="ios") and v8_enable_webassembly==1', {
               'sources': [
                 "<(V8_ROOT)/src/trap-handler/handler-inside-posix.cc",
                 "<(V8_ROOT)/src/trap-handler/handler-outside-posix.cc",
+              ],
+              'target_conditions': [
+                ['OS=="ios" and _toolset=="host"', {
+                  'sources': ['<(V8_ROOT)/src/trap-handler/handler-outside-simulator.cc'],
+                }],
               ],
             }],
             ['OS=="win"', {

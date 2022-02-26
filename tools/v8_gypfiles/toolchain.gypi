@@ -363,7 +363,7 @@
                   [ 'clang==1', {
                     'cflags': ['-integrated-as'],
                   }],
-                  ['OS!="mac"', {
+                  ['OS!="mac" or OS!="ios"', {
                     'defines': ['_MIPS_TARGET_HW',],
                   }, {
                     'defines': ['_MIPS_TARGET_SIMULATOR',],
@@ -376,7 +376,7 @@
           }],  #'_toolset=="target"
           ['_toolset=="host"', {
             'conditions': [
-              ['v8_target_arch==target_arch and OS!="mac"', {
+              ['v8_target_arch==target_arch and OS not in ("mac", "ios")', {
                 'defines': ['_MIPS_TARGET_HW',],
               }, {
                 'defines': ['_MIPS_TARGET_SIMULATOR',],
@@ -1027,7 +1027,7 @@
         ]
       }],
       ['(OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" \
-         or OS=="netbsd" or OS=="mac" or OS=="android" or OS=="qnx") and \
+         or OS=="netbsd" or OS=="mac" or OS=="ios" or OS=="android" or OS=="qnx") and \
         v8_target_arch=="ia32"', {
         'cflags': [
           '-msse2',
@@ -1036,7 +1036,7 @@
         ],
       }],
       ['(OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" \
-         or OS=="netbsd" or OS=="mac" or OS=="android" or OS=="qnx") and \
+         or OS=="netbsd" or OS=="mac" or OS=="ios" or OS=="android" or OS=="qnx") and \
         (v8_target_arch=="arm" or v8_target_arch=="ia32" or \
          v8_target_arch=="mips" or v8_target_arch=="mipsel" or \
          v8_target_arch=="ppc")', {
@@ -1139,6 +1139,25 @@
           }],
         ],
       }],
+      ['OS=="ios"', {
+        'target_conditions': [
+          ['_toolset=="host" and host_os=="mac"', {
+            'xcode_settings': {
+              'SDKROOT': '',
+              'IPHONEOS_DEPLOYMENT_TARGET': '',
+              'MACOSX_DEPLOYMENT_TARGET': '10.10',
+            },
+            'conditions': [
+              ['target_arch=="arm64"', {
+                'xcode_settings': {
+                  'ARCHS!': ['arm64'],
+                  'ARCHS': ['x86_64'],
+                },
+              }],
+            ],
+          }],
+        ],
+      }],
     ],  # conditions
     'configurations': {
       'Debug': {
@@ -1212,7 +1231,7 @@
                   '-ffunction-sections',
                 ],
               }],
-              ['OS=="mac"', {
+              ['OS=="mac" or OS=="ios"', {
                 'xcode_settings': {
                   'GCC_OPTIMIZATION_LEVEL': '0',  # -O0
                 },
@@ -1273,7 +1292,7 @@
                    }],
                 ],
               }],
-              ['OS=="mac"', {
+              ['OS=="mac" or OS=="ios"', {
                 'xcode_settings': {
                   'GCC_OPTIMIZATION_LEVEL': '3',  # -O3
                   'GCC_STRICT_ALIASING': 'YES',
@@ -1332,7 +1351,7 @@
               '-O2',
             ],
           }],
-          ['OS=="mac"', {
+          ['OS=="mac" or OS=="ios"', {
             'xcode_settings': {
               'GCC_OPTIMIZATION_LEVEL': '3',  # -O3
 

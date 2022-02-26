@@ -211,7 +211,7 @@
             },
           },
           'conditions': [
-            ['OS != "aix" and OS != "mac"', {
+            ['OS != "aix" and OS != "mac" and OS != "ios"', {
               'ldflags': [
                 '-Wl,--whole-archive',
                 '<(obj_dir)/<(STATIC_LIB_PREFIX)<(node_core_target_name)<(STATIC_LIB_SUFFIX)',
@@ -306,8 +306,12 @@
             },
           ],
         }, {
-          'sources': [
-            'src/node_code_cache_stub.cc'
+         'conditions': [
+            [ 'not (node_target_type=="static_library" and OS=="ios")', {
+              'sources': [
+                'src/node_code_cache_stub.cc'
+              ],
+            }],
           ],
         }],
         ['node_use_node_snapshot=="true"', {
@@ -331,8 +335,12 @@
             },
           ],
         }, {
-          'sources': [
-            'src/node_snapshot_stub.cc'
+         'conditions': [
+            [ 'not (node_target_type=="static_library" and OS=="ios")', {
+              'sources': [
+                'src/node_snapshot_stub.cc'
+              ],
+            }],
           ],
         }],
         [ 'OS in "linux freebsd" and '
@@ -612,6 +620,12 @@
             'src/node_code_cache_stub.cc',
           ]
         }],
+        ['node_target_type=="static_library" and OS=="ios"', {
+          'sources': [
+            'src/node_snapshot_stub.cc',
+            'src/node_code_cache_stub.cc',
+          ]
+        }],
         [ 'node_shared=="true" and node_module_version!="" and OS!="win"', {
           'product_extension': '<(shlib_suffix)',
           'xcode_settings': {
@@ -699,7 +713,7 @@
                 '<(SHARED_INTERMEDIATE_DIR)/node_dtrace_provider.o'
               ],
             }],
-            [ 'OS!="mac" and OS!="linux"', {
+            [ 'OS!="mac" and OS!="ios" and OS!="linux"', {
               'sources': [
                 'src/node_dtrace_ustack.cc',
                 'src/node_dtrace_provider.cc',
@@ -763,7 +777,7 @@
             'src/node_crypto.h'
           ],
         }],
-        [ 'OS in "linux freebsd mac solaris" and '
+        [ 'OS in "linux freebsd solaris" and '
           'target_arch=="x64" and '
           'node_target_type=="executable"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
@@ -894,7 +908,7 @@
       'target_name': 'node_dtrace_provider',
       'type': 'none',
       'conditions': [
-        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="linux"', {
+        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="ios" and OS!="linux"', {
           'actions': [
             {
               'action_name': 'node_dtrace_provider_o',
@@ -929,7 +943,7 @@
       'target_name': 'node_dtrace_ustack',
       'type': 'none',
       'conditions': [
-        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="linux"', {
+        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="ios" and OS!="linux"', {
           'actions': [
             {
               'action_name': 'node_dtrace_ustack_constants',

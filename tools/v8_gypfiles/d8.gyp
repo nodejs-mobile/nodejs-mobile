@@ -44,7 +44,7 @@
             'd8_js2c#host',
           ],
         }],
-        ['(OS=="linux" or OS=="mac" or OS=="freebsd" or OS=="netbsd" \
+        ['(OS=="linux" or OS=="mac" or OS=="ios" or OS=="freebsd" or OS=="netbsd" \
            or OS=="openbsd" or OS=="solaris" or OS=="android" \
            or OS=="qnx" or OS=="aix")', {
              'sources': [ '<(V8_ROOT)/src/d8/d8-posix.cc', ]
