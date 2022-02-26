@@ -67,7 +67,7 @@ compile_for_arch() {
         --without-node-snapshot \
         --v8-disable-webassembly
 
-    make -j$(getconf _NPROCESSOR_ONLN)
+    make -j$(getconf _NPROCESSORS_ONLN)
     mkdir -p ${TARGET_LIBRARY_PATH}
 
     for LIB in "${LIBRARY_FILES[@]}"; do
