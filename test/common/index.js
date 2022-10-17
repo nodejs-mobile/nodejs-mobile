@@ -120,6 +120,8 @@ const isFreeBSD = process.platform === 'freebsd';
 const isOpenBSD = process.platform === 'openbsd';
 const isLinux = process.platform === 'linux';
 const isOSX = process.platform === 'darwin';
+const isAndroid = process.platform === 'android';
+const isIOS = process.platform === 'ios';
 const isPi = (() => {
   try {
     // Normal Raspberry Pi detection is to find the `Raspberry Pi` string in
@@ -896,8 +898,10 @@ const common = {
   invalidArgTypeHelper,
   isAIX,
   isAlive,
+  isAndroid,
   isDumbTerminal,
   isFreeBSD,
+  isIOS,
   isLinux,
   isMainThread,
   isOpenBSD,
