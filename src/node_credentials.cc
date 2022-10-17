@@ -168,6 +168,19 @@ static char* name_by_uid(uid_t uid) {
   return nullptr;
 }
 
+#ifdef __ANDROID__
+// Android has getgrnam instead of getgrnam_r.
+static gid_t gid_by_name(const char* name) {
+  struct group* pp = getgrnam(name);
+
+  errno = 0;
+
+  if (pp != nullptr)
+    return pp->gr_gid;
+
+  return gid_not_found;
+}
+#else // __ANDROID__
 static gid_t gid_by_name(const char* name) {
   struct group pwd;
   struct group* pp;
@@ -181,6 +194,7 @@ static gid_t gid_by_name(const char* name) {
 
   return gid_not_found;
 }
+#endif // __ANDROID__
 
 #if 0  // For future use.
 static const char* name_by_gid(gid_t gid) {
@@ -250,6 +264,8 @@ static void GetEGid(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(static_cast<uint32_t>(getegid()));
 }
 
+#ifndef __ANDROID__
+// Android blocks setting Uid and Gid.
 static void SetGid(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(env->owns_process_state());
@@ -325,6 +341,7 @@ static void SetEUid(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(0);
   }
 }
+#endif // ifndef __ANDROID__
 
 static void GetGroups(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
@@ -348,6 +365,8 @@ static void GetGroups(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(array.ToLocalChecked());
 }
 
+#ifndef __ANDROID__
+// Android blocks setting groups
 static void SetGroups(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
@@ -377,6 +396,7 @@ static void SetGroups(const FunctionCallbackInfo<Value>& args) {
 
   args.GetReturnValue().Set(0);
 }
+#endif // ifndef __ANDROID__
 
 static void InitGroups(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
@@ -460,11 +480,13 @@ static void Initialize(Local<Object> target,
 
   if (env->owns_process_state()) {
     SetMethod(context, target, "initgroups", InitGroups);
+    #ifndef __ANDROID__
     SetMethod(context, target, "setegid", SetEGid);
     SetMethod(context, target, "seteuid", SetEUid);
     SetMethod(context, target, "setgid", SetGid);
     SetMethod(context, target, "setuid", SetUid);
     SetMethod(context, target, "setgroups", SetGroups);
+    #endif
   }
 #endif  // NODE_IMPLEMENTS_POSIX_CREDENTIALS
 }
