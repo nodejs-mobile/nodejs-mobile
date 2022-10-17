@@ -354,9 +354,13 @@
             }],
           ],
           }, {
-          'sources': [
-            'src/node_snapshot_stub.cc'
-          ],
+          'conditions': [
+            [ 'not (node_target_type=="static_library" and OS=="ios")', {
+              'sources': [
+                'src/node_snapshot_stub.cc'
+              ],
+            }],
+           ],
         }],
         [ 'OS in "linux freebsd" and '
           'target_arch=="x64"', {
@@ -623,6 +627,7 @@
         'src/node_messaging.h',
         'src/node_metadata.h',
         'src/node_mutex.h',
+        'src/node_mobile_version.h',
         'src/node_object_wrap.h',
         'src/node_options.h',
         'src/node_options-inl.h',
@@ -721,6 +726,11 @@
             'src/node_snapshot_stub.cc',
           ]
         }],
+        [ 'node_target_type=="static_library" and OS=="ios"', {
+          'sources': [
+            'src/node_snapshot_stub.cc',
+          ]
+        }],
         [ 'node_shared=="true" and node_module_version!="" and OS!="win"', {
           'product_extension': '<(shlib_suffix)',
           'xcode_settings': {
@@ -814,7 +824,7 @@
                 '<(SHARED_INTERMEDIATE_DIR)/node_dtrace_provider.o'
               ],
             }],
-            [ 'OS!="mac" and OS!="linux"', {
+            [ 'OS!="mac" and OS!="ios" and OS!="linux"', {
               'sources': [
                 'src/node_dtrace_ustack.cc',
                 'src/node_dtrace_provider.cc',
@@ -877,7 +887,7 @@
             'src/node_crypto.h'
           ],
         }],
-        [ 'OS in "linux freebsd mac solaris" and '
+        [ 'OS in "linux freebsd mac solaris ios" and '
           'target_arch=="x64" and '
           'node_target_type=="executable"', {
           'defines': [ 'NODE_ENABLE_LARGE_CODE_PAGES=1' ],
@@ -1008,7 +1018,7 @@
       'target_name': 'node_dtrace_provider',
       'type': 'none',
       'conditions': [
-        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="linux"', {
+        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="ios" and OS!="linux"', {
           'actions': [
             {
               'action_name': 'node_dtrace_provider_o',
@@ -1043,7 +1053,7 @@
       'target_name': 'node_dtrace_ustack',
       'type': 'none',
       'conditions': [
-        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="linux"', {
+        [ 'node_use_dtrace=="true" and OS!="mac" and OS!="ios" and OS!="linux"', {
           'actions': [
             {
               'action_name': 'node_dtrace_ustack_constants',
@@ -1223,7 +1233,6 @@
       ],
 
       'sources': [
-        'src/node_snapshot_stub.cc',
         'test/cctest/node_test_fixture.cc',
         'test/cctest/node_test_fixture.h',
         'test/cctest/test_aliased_buffer.cc',
@@ -1245,6 +1254,11 @@
       ],
 
       'conditions': [
+        [ 'not (node_target_type=="static_library" and OS=="ios")', {
+          'sources': [
+            'src/node_snapshot_stub.cc',
+          ]
+        }],
         [ 'node_use_openssl=="true"', {
           'defines': [
             'HAVE_OPENSSL=1',
@@ -1270,8 +1284,8 @@
         ['OS=="solaris"', {
           'ldflags': [ '-I<(SHARED_INTERMEDIATE_DIR)' ]
         }],
-        # Skip cctest while building shared lib node for Windows
-        [ 'OS=="win" and node_shared=="true"', {
+        # Skip cctest while building shared lib node for Windows and mobile
+        [ 'OS in ("win", "android") and node_shared=="true"', {
           'type': 'none',
         }],
         [ 'node_shared=="true"', {
@@ -1387,11 +1401,15 @@
       'defines': [ 'NODE_WANT_INTERNALS=1' ],
 
       'sources': [
-        'src/node_snapshot_stub.cc',
         'tools/snapshot/node_mksnapshot.cc',
       ],
 
       'conditions': [
+        [ 'not (node_target_type=="static_library" and OS=="ios")', {
+          'sources': [
+            'src/node_snapshot_stub.cc',
+          ]
+        }],
         [ 'node_use_openssl=="true"', {
           'defines': [
             'HAVE_OPENSSL=1',
