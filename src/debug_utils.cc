@@ -504,7 +504,33 @@ void FWrite(FILE* file, const std::string& str) {
   return;
 #elif defined(__ANDROID__)
   if (file == stderr) {
-    __android_log_print(ANDROID_LOG_ERROR, "nodejs", "%s", str.data());
+    // Android log implementations will truncate log messages to 1023 length.
+    const int maxLength = 1023;
+
+    int n = str.size();
+
+    if (n <= maxLength) {
+      __android_log_print(ANDROID_LOG_ERROR, "nodejs", "%s", str.data());
+    } else {
+      // Divide the output in lines with length < maxLength.
+      std::vector<char> line(maxLength+1);
+      const char* sep = "\n";
+      const char* token = str.c_str();
+      while (*token) {
+        int tokenLen = std::strcspn(token, sep);
+        if (tokenLen > maxLength) {
+          tokenLen = maxLength;
+        }
+        std::strncpy(line.data(), token, tokenLen);
+        line.data()[tokenLen]='\0';
+        __android_log_print(ANDROID_LOG_ERROR, "nodejs", "%s", line.data());
+        token += tokenLen;
+        if (*token == '\n') {
+          // __android_log_write will introduce the line break.
+          token++;
+        }
+      }
+    }
     return;
   }
 #endif
