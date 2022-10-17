@@ -345,7 +345,7 @@
       [ 'target_arch=="arm64"', {
         'msvs_configuration_platform': 'arm64',
       }],
-      ['asan == 1 and OS != "mac" and OS != "zos" and OS !== "ios"', {
+      ['asan == 1 and OS != "mac" and OS != "zos" and OS != "ios"', {
         'cflags+': [
           '-fno-omit-frame-pointer',
           '-fsanitize=address',
