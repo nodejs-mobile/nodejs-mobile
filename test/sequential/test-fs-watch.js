@@ -36,6 +36,8 @@ if (!common.isMainThread)
 const expectFilePath = common.isWindows ||
                        common.isLinux ||
                        common.isOSX ||
+                       common.isIOS ||
+                       common.isAndroid ||
                        common.isAIX;
 
 const testDir = tmpdir.path;

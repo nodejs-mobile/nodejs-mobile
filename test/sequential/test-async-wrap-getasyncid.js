@@ -12,6 +12,7 @@ const providers = { ...internalBinding('async_wrap').Providers };
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const { getSystemErrorName } = require('util');
+const path = require('path');
 
 // Make sure that all Providers are tested.
 {
@@ -66,6 +67,12 @@ const { getSystemErrorName } = require('util');
     delete providers.FIXEDSIZEBLOBCOPY;
     delete providers.RANDOMPRIMEREQUEST;
     delete providers.CHECKPRIMEREQUEST;
+
+    if (common.isIOS) {
+      // These providers are not tested on iOS.
+      delete providers.PIPECONNECTWRAP;
+      delete providers.PIPESERVERWRAP;
+    }
 
     const objKeys = Object.keys(providers);
     if (objKeys.length > 0)
@@ -186,7 +193,9 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   testInitialized(handle, 'Pipe');
 }
 
+if(!common.isIOS)
 {
+  // Fails with EADDRINUSE on iOS.
   tmpdir.refresh();
 
   const server = net.createServer(common.mustCall((socket) => {
@@ -325,6 +334,6 @@ if (process.features.inspector && common.isMainThread) {
 // DIRHANDLE
 {
   const dirBinding = internalBinding('fs_dir');
-  const handle = dirBinding.opendir('./', 'utf8', undefined, {});
+  const handle = dirBinding.opendir(common.isAndroid ? __dirname : './', 'utf8', undefined, {});
   testInitialized(handle, 'DirHandle');
 }
