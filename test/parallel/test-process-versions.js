@@ -15,6 +15,10 @@ const expected_keys = [
   'llhttp',
 ];
 
+if (common.isAndroid || common.isIOS) {
+  expected_keys.push('mobile');
+}
+
 if (common.hasCrypto) {
   expected_keys.push('openssl');
 }

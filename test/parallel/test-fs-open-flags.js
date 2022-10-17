@@ -83,7 +83,7 @@ assert.throws(
   { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' }
 );
 
-if (common.isLinux || common.isOSX) {
+if (common.isLinux || common.isOSX || common.isIOS || common.isAndroid) {
   const tmpdir = require('../common/tmpdir');
   tmpdir.refresh();
   const file = path.join(tmpdir.path, 'a.js');
