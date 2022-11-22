@@ -134,7 +134,7 @@ static char* name_by_uid(uid_t uid) {
 #ifdef __ANDROID__
 // Android has getgrnam instead of getgrnam_r.
 static gid_t gid_by_name(const char* name) {
-  struct group* pp = getgrnam(name);
+  struct group* pp = getgrnam(name);  // NOLINT(runtime/threadsafe_fn)
 
   errno = 0;
 
@@ -143,7 +143,7 @@ static gid_t gid_by_name(const char* name) {
 
   return gid_not_found;
 }
-#else // __ANDROID__
+#else  // __ANDROID__
 static gid_t gid_by_name(const char* name) {
   struct group pwd;
   struct group* pp;
@@ -157,7 +157,7 @@ static gid_t gid_by_name(const char* name) {
 
   return gid_not_found;
 }
-#endif // __ANDROID__
+#endif  // __ANDROID__
 
 #if 0  // For future use.
 static const char* name_by_gid(gid_t gid) {
@@ -304,7 +304,7 @@ static void SetEUid(const FunctionCallbackInfo<Value>& args) {
     args.GetReturnValue().Set(0);
   }
 }
-#endif // ifndef __ANDROID__
+#endif  // ifndef __ANDROID__
 
 static void GetGroups(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
@@ -359,7 +359,7 @@ static void SetGroups(const FunctionCallbackInfo<Value>& args) {
 
   args.GetReturnValue().Set(0);
 }
-#endif // ifndef __ANDROID__
+#endif  // ifndef __ANDROID__
 
 static void InitGroups(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
