@@ -1183,7 +1183,7 @@ assert.throws(
   );
 }
 
-if(common.isIOS) {
+if (common.isIOS) {
   // iOS reports TTY window size as 0, which causes the strings diverge
   // indicator to not show.
   process.stderr.columns = 80;

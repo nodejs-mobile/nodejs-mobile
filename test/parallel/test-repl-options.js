@@ -115,7 +115,7 @@ assert.strictEqual(r4.input, process.stdin);
 assert.strictEqual(r4.output, process.stdout);
 assert.strictEqual(r4.terminal, !!r4.output.isTTY);
 if (common.isIOS) {
-  assert.equal(r4.useColors, r4.output.hasColors());
+  assert.strictEqual(r4.useColors, r4.output.hasColors());
 } else {
   assert.strictEqual(r4.useColors, r4.terminal);
 }
