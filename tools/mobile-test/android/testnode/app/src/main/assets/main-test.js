@@ -1,11 +1,12 @@
-const TEST_FAILED = "RESULT:FAIL\n";
-const TEST_PASSED = "RESULT:PASS\n";
+'use strict';
+const TEST_FAILED = 'RESULT:FAIL\n';
+const TEST_PASSED = 'RESULT:PASS\n';
 
-var originalExit = process.exit;
+const originalExit = process.exit;
 function remappedExit(val) {
   const { isMainThread } = require('worker_threads');
   if (isMainThread) {
-    if (typeof val === "undefined") {
+    if (typeof val === 'undefined') {
       process.stdout.write(TEST_PASSED);
       originalExit();
     }

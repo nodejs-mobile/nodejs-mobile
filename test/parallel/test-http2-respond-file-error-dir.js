@@ -7,10 +7,10 @@ const http2 = require('http2');
 const assert = require('assert');
 const path = require('path');
 
-if(common.isIOS || common.isAndroid) {
+if (common.isIOS || common.isAndroid) {
   // Change the working dir for what would be expected of the test framework
-  //running in a Desktop environment.
-  process.chdir(path.join(__dirname,'..','..'));
+  // running in a Desktop environment.
+  process.chdir(path.join(__dirname, '..', '..'));
 }
 
 const server = http2.createServer();

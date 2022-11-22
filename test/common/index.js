@@ -722,7 +722,6 @@ const common = {
   isAlive,
   isDumbTerminal,
   isAndroid,
-  isDumbTerminal,
   isFreeBSD,
   isIOS,
   isLinux,
@@ -749,13 +748,12 @@ const common = {
   skipIfWorker,
 
   get enoughTestCpu() {
-    if(isAndroid || isIOS) {
+    if (isAndroid || isIOS) {
       // On mobile platforms, CPU information might be unavailable.
       return true;
-    } else {
-      const cpus = require('os').cpus();
-      return Array.isArray(cpus) && (cpus.length > 1 || cpus[0].speed > 999);
     }
+    const cpus = require('os').cpus();
+    return Array.isArray(cpus) && (cpus.length > 1 || cpus[0].speed > 999);
   },
 
   get enoughTestMem() {

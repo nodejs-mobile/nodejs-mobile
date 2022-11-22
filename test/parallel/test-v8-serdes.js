@@ -12,7 +12,9 @@ const os = require('os');
 const circular = {};
 circular.circular = circular;
 
-const wasmModule = common.isIOS ? null : new WebAssembly.Module(fixtures.readSync('simple.wasm'));
+const wasmModule = common.isIOS ?
+  null :
+  new WebAssembly.Module(fixtures.readSync('simple.wasm'));
 
 const objects = [
   { foo: 'bar' },
@@ -236,8 +238,7 @@ const deserializerTypeError =
   );
 }
 
-if(!common.isIOS)
-{
+if (!common.isIOS) {
   const deserializedWasmModule = v8.deserialize(v8.serialize(wasmModule));
   const instance = new WebAssembly.Instance(deserializedWasmModule);
   assert.strictEqual(instance.exports.add(10, 20), 30);

@@ -12,6 +12,7 @@ const providers = { ...internalBinding('async_wrap').Providers };
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const { getSystemErrorName } = require('util');
+// eslint-disable-next-line no-unused-vars
 const path = require('path');
 
 // Make sure that all Providers are tested.
@@ -181,8 +182,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   testInitialized(handle, 'Pipe');
 }
 
-if(!common.isIOS)
-{
+if (!common.isIOS) {
   // Fails with EADDRINUSE on iOS.
   tmpdir.refresh();
 
@@ -322,6 +322,8 @@ if (process.features.inspector && common.isMainThread) {
 // DIRHANDLE
 {
   const dirBinding = internalBinding('fs_dir');
-  const handle = dirBinding.opendir(common.isAndroid ? __dirname : './', 'utf8', undefined, {});
+  const handle = dirBinding.opendir(
+    common.isAndroid ? __dirname : './', 'utf8', undefined, {}
+  );
   testInitialized(handle, 'DirHandle');
 }
