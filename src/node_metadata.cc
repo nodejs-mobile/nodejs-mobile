@@ -21,7 +21,7 @@
 
 #ifdef NODE_MOBILE
 #include "node_mobile_version.h"
-#endif // NODE_MOBILE
+#endif  // NODE_MOBILE
 
 namespace node {
 
