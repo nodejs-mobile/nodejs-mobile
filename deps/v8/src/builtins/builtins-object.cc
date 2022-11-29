@@ -38,7 +38,7 @@ BUILTIN(ObjectPrototypePropertyIsEnumerable) {
 // ES6 section 19.1.2.3 Object.defineProperties
 BUILTIN(ObjectDefineProperties) {
   HandleScope scope(isolate);
-  DCHECK_EQ(3, args.length());
+  DCHECK_LE(3, args.length());
   Handle<Object> target = args.at(1);
   Handle<Object> properties = args.at(2);
 
@@ -49,7 +49,7 @@ BUILTIN(ObjectDefineProperties) {
 // ES6 section 19.1.2.4 Object.defineProperty
 BUILTIN(ObjectDefineProperty) {
   HandleScope scope(isolate);
-  DCHECK_EQ(4, args.length());
+  DCHECK_LE(4, args.length());
   Handle<Object> target = args.at(1);
   Handle<Object> key = args.at(2);
   Handle<Object> attributes = args.at(3);
@@ -105,13 +105,14 @@ Object ObjectLookupAccessor(Isolate* isolate, Handle<Object> object,
                             Handle<Object> key, AccessorComponent component) {
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, object,
                                      Object::ToObject(isolate, object));
+  // TODO(jkummerow/verwaest): PropertyKey(..., bool*) performs a
+  // functionally equivalent conversion, but handles element indices slightly
+  // differently. Does one of the approaches have a performance advantage?
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, key,
                                      Object::ToPropertyKey(isolate, key));
-  bool success = false;
-  LookupIterator it = LookupIterator::PropertyOrElement(
-      isolate, object, key, &success,
-      LookupIterator::PROTOTYPE_CHAIN_SKIP_INTERCEPTOR);
-  DCHECK(success);
+  PropertyKey lookup_key(isolate, key);
+  LookupIterator it(isolate, object, lookup_key,
+                    LookupIterator::PROTOTYPE_CHAIN_SKIP_INTERCEPTOR);
 
   for (; it.IsFound(); it.Next()) {
     switch (it.state()) {
@@ -156,8 +157,9 @@ Object ObjectLookupAccessor(Isolate* isolate, Handle<Object> object,
       case LookupIterator::ACCESSOR: {
         Handle<Object> maybe_pair = it.GetAccessors();
         if (maybe_pair->IsAccessorPair()) {
-          Handle<NativeContext> native_context =
-              it.GetHolder<JSReceiver>()->GetCreationContext();
+          Handle<NativeContext> native_context = it.GetHolder<JSReceiver>()
+                                                     ->GetCreationContext()
+                                                     .ToHandleChecked();
           return *AccessorPair::GetComponent(
               isolate, native_context, Handle<AccessorPair>::cast(maybe_pair),
               component);

@@ -191,6 +191,7 @@ const PureOperator kPureOperators[] = {
     PURE(Word64Shr, 2, 0, 1),                 // --
     PURE(Word64Sar, 2, 0, 1),                 // --
     PURE(Word64Ror, 2, 0, 1),                 // --
+    PURE(Word64RorLowerable, 2, 1, 1),        // --
     PURE(Word64Equal, 2, 0, 1),               // --
     PURE(Int32Add, 2, 0, 1),                  // --
     PURE(Int32Sub, 2, 0, 1),                  // --
@@ -245,7 +246,6 @@ const PureOperator kPureOperators[] = {
     PURE(Float64Equal, 2, 0, 1),              // --
     PURE(Float64LessThan, 2, 0, 1),           // --
     PURE(Float64LessThanOrEqual, 2, 0, 1),    // --
-    PURE(StackPointerGreaterThan, 1, 0, 1),   // --
     PURE(Float64ExtractLowWord32, 1, 0, 1),   // --
     PURE(Float64ExtractHighWord32, 1, 0, 1),  // --
     PURE(Float64InsertLowWord32, 2, 0, 1),    // --
@@ -253,7 +253,6 @@ const PureOperator kPureOperators[] = {
     PURE(Float64Neg, 1, 0, 1),                // --
 #undef PURE
 };
-
 
 class MachinePureOperatorTest : public TestWithZone {
  protected:
@@ -307,6 +306,10 @@ const OptionalOperatorEntry kOptionalOperators[] = {
     OPTIONAL_ENTRY(Float64RoundDown, 1, 0, 1),      // --
     OPTIONAL_ENTRY(Float64RoundTruncate, 1, 0, 1),  // --
     OPTIONAL_ENTRY(Float64RoundTiesAway, 1, 0, 1),  // --
+    OPTIONAL_ENTRY(Float64Select, 3, 0, 1),         // --
+    OPTIONAL_ENTRY(Float32Select, 3, 0, 1),         // --
+    OPTIONAL_ENTRY(Word32Select, 3, 0, 1),          // --
+    OPTIONAL_ENTRY(Word64Select, 3, 0, 1),          // --
 #undef OPTIONAL_ENTRY
 };
 

@@ -7,16 +7,18 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const {
   constants,
+  createPrivateKey,
   createSign,
   createVerify,
   generateKeyPair,
   generateKeyPairSync,
+  getCurves,
   publicEncrypt,
   privateDecrypt,
   sign,
   verify
 } = require('crypto');
-const { promisify } = require('util');
+const { inspect, promisify } = require('util');
 
 // Asserts that the size of the given key (in chars or bytes) is within 10% of
 // the expected size.
@@ -103,14 +105,39 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   const { publicKey, privateKey } = ret;
 
   assert.strictEqual(typeof publicKey, 'string');
-  assert(pkcs1PubExp.test(publicKey));
+  assert.match(publicKey, pkcs1PubExp);
   assertApproximateSize(publicKey, 162);
   assert.strictEqual(typeof privateKey, 'string');
-  assert(pkcs8Exp.test(privateKey));
+  assert.match(privateKey, pkcs8Exp);
   assertApproximateSize(privateKey, 512);
 
   testEncryptDecrypt(publicKey, privateKey);
   testSignVerify(publicKey, privateKey);
+}
+
+{
+  // Test sync key generation with key objects with a non-standard
+  // publicExpononent
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+    publicExponent: 3,
+    modulusLength: 512
+  });
+
+  assert.strictEqual(typeof publicKey, 'object');
+  assert.strictEqual(publicKey.type, 'public');
+  assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
+  assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+    modulusLength: 512,
+    publicExponent: 3n
+  });
+
+  assert.strictEqual(typeof privateKey, 'object');
+  assert.strictEqual(privateKey.type, 'private');
+  assert.strictEqual(privateKey.asymmetricKeyType, 'rsa');
+  assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+    modulusLength: 512,
+    publicExponent: 3n
+  });
 }
 
 {
@@ -122,10 +149,18 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   assert.strictEqual(typeof publicKey, 'object');
   assert.strictEqual(publicKey.type, 'public');
   assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
+  assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+    modulusLength: 512,
+    publicExponent: 65537n
+  });
 
   assert.strictEqual(typeof privateKey, 'object');
   assert.strictEqual(privateKey.type, 'private');
   assert.strictEqual(privateKey.asymmetricKeyType, 'rsa');
+  assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+    modulusLength: 512,
+    publicExponent: 65537n
+  });
 }
 
 {
@@ -143,14 +178,12 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'pkcs1',
       format: 'pem'
     }
-  }, common.mustCall((err, publicKeyDER, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKeyDER, privateKey) => {
     assert(Buffer.isBuffer(publicKeyDER));
     assertApproximateSize(publicKeyDER, 74);
 
     assert.strictEqual(typeof privateKey, 'string');
-    assert(pkcs1PrivExp.test(privateKey));
+    assert.match(privateKey, pkcs1PrivExp);
     assertApproximateSize(privateKey, 512);
 
     const publicKey = { key: publicKeyDER, ...publicKeyEncoding };
@@ -160,7 +193,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
 
   // Now do the same with an encrypted private key.
   generateKeyPair('rsa', {
-    publicExponent: 0x1001,
+    publicExponent: 0x10001,
     modulusLength: 512,
     publicKeyEncoding,
     privateKeyEncoding: {
@@ -169,22 +202,25 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-256-cbc',
       passphrase: 'secret'
     }
-  }, common.mustCall((err, publicKeyDER, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKeyDER, privateKey) => {
     assert(Buffer.isBuffer(publicKeyDER));
     assertApproximateSize(publicKeyDER, 74);
 
     assert.strictEqual(typeof privateKey, 'string');
-    assert(pkcs1EncExp('AES-256-CBC').test(privateKey));
+    assert.match(privateKey, pkcs1EncExp('AES-256-CBC'));
 
     // Since the private key is encrypted, signing shouldn't work anymore.
     const publicKey = { key: publicKeyDER, ...publicKeyEncoding };
-    assert.throws(() => testSignVerify(publicKey, privateKey), {
+    const expectedError = common.hasOpenSSL3 ? {
+      name: 'Error',
+      message: 'error:07880109:common libcrypto routines::interrupted or ' +
+               'cancelled'
+    } : {
       name: 'TypeError',
       code: 'ERR_MISSING_PASSPHRASE',
       message: 'Passphrase required for encrypted key'
-    });
+    };
+    assert.throws(() => testSignVerify(publicKey, privateKey), expectedError);
 
     const key = { key: privateKey, passphrase: 'secret' };
     testEncryptDecrypt(publicKey, key);
@@ -202,9 +238,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-256-cbc',
       passphrase: 'secret'
     }
-  }, common.mustCall((err, publicKeyDER, privateKeyDER) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKeyDER, privateKeyDER) => {
     assert(Buffer.isBuffer(publicKeyDER));
     assertApproximateSize(publicKeyDER, 74);
 
@@ -245,9 +279,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'pkcs8',
       format: 'der'
     }
-  }, common.mustCall((err, publicKeyDER, privateKeyDER) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKeyDER, privateKeyDER) => {
     assert(Buffer.isBuffer(publicKeyDER));
     assertApproximateSize(publicKeyDER, 74);
 
@@ -270,16 +302,28 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   generateKeyPair('rsa-pss', {
     modulusLength: 512,
     saltLength: 16,
-    hash: 'sha256',
-    mgf1Hash: 'sha256'
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+    hashAlgorithm: 'sha256',
+    mgf1HashAlgorithm: 'sha256'
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(publicKey.type, 'public');
     assert.strictEqual(publicKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
 
     assert.strictEqual(privateKey.type, 'private');
     assert.strictEqual(privateKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
 
     // Unlike RSA, RSA-PSS does not allow encryption.
     assert.throws(() => {
@@ -303,6 +347,88 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
 }
 
 {
+  // 'rsa-pss' should not add a RSASSA-PSS-params sequence by default.
+  // Regression test for: https://github.com/nodejs/node/issues/39936
+
+  generateKeyPair('rsa-pss', {
+    modulusLength: 512
+  }, common.mustSucceed((publicKey, privateKey) => {
+    const expectedKeyDetails = {
+      modulusLength: 512,
+      publicExponent: 65537n
+    };
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, expectedKeyDetails);
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, expectedKeyDetails);
+
+    // To allow backporting the fix to versions that do not support
+    // asymmetricKeyDetails for RSA-PSS params, also verify that the exported
+    // AlgorithmIdentifier member of the SubjectPublicKeyInfo has the expected
+    // length of 11 bytes (as opposed to > 11 bytes if node added params).
+    const spki = publicKey.export({ format: 'der', type: 'spki' });
+    assert.strictEqual(spki[3], 11, spki.toString('hex'));
+  }));
+}
+
+{
+  // RFC 8017, 9.1.: "Assuming that the mask generation function is based on a
+  // hash function, it is RECOMMENDED that the hash function be the same as the
+  // one that is applied to the message."
+
+  generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    hashAlgorithm: 'sha256',
+    saltLength: 16
+  }, common.mustSucceed((publicKey, privateKey) => {
+    const expectedKeyDetails = {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    };
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, expectedKeyDetails);
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, expectedKeyDetails);
+  }));
+}
+
+{
+  // RFC 8017, A.2.3.: "For a given hashAlgorithm, the default value of
+  // saltLength is the octet length of the hash value."
+
+  generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    hashAlgorithm: 'sha512'
+  }, common.mustSucceed((publicKey, privateKey) => {
+    const expectedKeyDetails = {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha512',
+      mgf1HashAlgorithm: 'sha512',
+      saltLength: 64
+    };
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, expectedKeyDetails);
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, expectedKeyDetails);
+  }));
+
+  // It is still possible to explicitly set saltLength to 0.
+  generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    hashAlgorithm: 'sha512',
+    saltLength: 0
+  }, common.mustSucceed((publicKey, privateKey) => {
+    const expectedKeyDetails = {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha512',
+      mgf1HashAlgorithm: 'sha512',
+      saltLength: 0
+    };
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, expectedKeyDetails);
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, expectedKeyDetails);
+  }));
+}
+
+{
   const privateKeyEncoding = {
     type: 'pkcs8',
     format: 'der'
@@ -310,7 +436,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
 
   // Test async DSA key generation.
   generateKeyPair('dsa', {
-    modulusLength: 512,
+    modulusLength: common.hasOpenSSL3 ? 2048 : 512,
     divisorLength: 256,
     publicKeyEncoding: {
       type: 'spki',
@@ -321,16 +447,14 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       passphrase: 'secret',
       ...privateKeyEncoding
     }
-  }, common.mustCall((err, publicKey, privateKeyDER) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKeyDER) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     // The private key is DER-encoded.
     assert(Buffer.isBuffer(privateKeyDER));
 
-    assertApproximateSize(publicKey, 440);
-    assertApproximateSize(privateKeyDER, 336);
+    assertApproximateSize(publicKey, common.hasOpenSSL3 ? 1194 : 440);
+    assertApproximateSize(privateKeyDER, common.hasOpenSSL3 ? 721 : 336);
 
     // Since the private key is encrypted, signing shouldn't work anymore.
     assert.throws(() => {
@@ -352,6 +476,27 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     });
   }));
 }
+{
+  // Test async DSA key object generation.
+  generateKeyPair('dsa', {
+    modulusLength: common.hasOpenSSL3 ? 2048 : 512,
+    divisorLength: 256
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.strictEqual(publicKey.type, 'public');
+    assert.strictEqual(publicKey.asymmetricKeyType, 'dsa');
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      modulusLength: common.hasOpenSSL3 ? 2048 : 512,
+      divisorLength: 256
+    });
+
+    assert.strictEqual(privateKey.type, 'private');
+    assert.strictEqual(privateKey.asymmetricKeyType, 'dsa');
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      modulusLength: common.hasOpenSSL3 ? 2048 : 512,
+      divisorLength: 256
+    });
+  }));
+}
 
 {
   // Test async elliptic curve key generation, e.g. for ECDSA, with a SEC1
@@ -367,13 +512,11 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'sec1',
       format: 'pem'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(sec1Exp.test(privateKey));
+    assert.match(privateKey, sec1Exp);
 
     testSignVerify(publicKey, privateKey);
   }));
@@ -391,13 +534,11 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'sec1',
       format: 'pem'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(sec1Exp.test(privateKey));
+    assert.match(privateKey, sec1Exp);
 
     testSignVerify(publicKey, privateKey);
   }));
@@ -416,20 +557,22 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-128-cbc',
       passphrase: 'secret'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(sec1EncExp('AES-128-CBC').test(privateKey));
+    assert.match(privateKey, sec1EncExp('AES-128-CBC'));
 
     // Since the private key is encrypted, signing shouldn't work anymore.
-    assert.throws(() => testSignVerify(publicKey, privateKey), {
-      name: 'TypeError',
-      code: 'ERR_MISSING_PASSPHRASE',
-      message: 'Passphrase required for encrypted key'
-    });
+    assert.throws(() => testSignVerify(publicKey, privateKey),
+                  common.hasOpenSSL3 ? {
+                    message: 'error:07880109:common libcrypto ' +
+                             'routines::interrupted or cancelled'
+                  } : {
+                    name: 'TypeError',
+                    code: 'ERR_MISSING_PASSPHRASE',
+                    message: 'Passphrase required for encrypted key'
+                  });
 
     testSignVerify(publicKey, { key: privateKey, passphrase: 'secret' });
   }));
@@ -448,20 +591,22 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-128-cbc',
       passphrase: 'secret'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(sec1EncExp('AES-128-CBC').test(privateKey));
+    assert.match(privateKey, sec1EncExp('AES-128-CBC'));
 
     // Since the private key is encrypted, signing shouldn't work anymore.
-    assert.throws(() => testSignVerify(publicKey, privateKey), {
-      name: 'TypeError',
-      code: 'ERR_MISSING_PASSPHRASE',
-      message: 'Passphrase required for encrypted key'
-    });
+    assert.throws(() => testSignVerify(publicKey, privateKey),
+                  common.hasOpenSSL3 ? {
+                    message: 'error:07880109:common libcrypto ' +
+                             'routines::interrupted or cancelled'
+                  } : {
+                    name: 'TypeError',
+                    code: 'ERR_MISSING_PASSPHRASE',
+                    message: 'Passphrase required for encrypted key'
+                  });
 
     testSignVerify(publicKey, { key: privateKey, passphrase: 'secret' });
   }));
@@ -483,20 +628,22 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-128-cbc',
       passphrase: 'top secret'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(pkcs8EncExp.test(privateKey));
+    assert.match(privateKey, pkcs8EncExp);
 
     // Since the private key is encrypted, signing shouldn't work anymore.
-    assert.throws(() => testSignVerify(publicKey, privateKey), {
-      name: 'TypeError',
-      code: 'ERR_MISSING_PASSPHRASE',
-      message: 'Passphrase required for encrypted key'
-    });
+    assert.throws(() => testSignVerify(publicKey, privateKey),
+                  common.hasOpenSSL3 ? {
+                    message: 'error:07880109:common libcrypto ' +
+                             'routines::interrupted or cancelled'
+                  } : {
+                    name: 'TypeError',
+                    code: 'ERR_MISSING_PASSPHRASE',
+                    message: 'Passphrase required for encrypted key'
+                  });
 
     testSignVerify(publicKey, {
       key: privateKey,
@@ -519,26 +666,116 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       cipher: 'aes-128-cbc',
       passphrase: 'top secret'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'string');
-    assert(spkiExp.test(publicKey));
+    assert.match(publicKey, spkiExp);
     assert.strictEqual(typeof privateKey, 'string');
-    assert(pkcs8EncExp.test(privateKey));
+    assert.match(privateKey, pkcs8EncExp);
 
     // Since the private key is encrypted, signing shouldn't work anymore.
-    assert.throws(() => testSignVerify(publicKey, privateKey), {
-      name: 'TypeError',
-      code: 'ERR_MISSING_PASSPHRASE',
-      message: 'Passphrase required for encrypted key'
-    });
+    assert.throws(() => testSignVerify(publicKey, privateKey),
+                  common.hasOpenSSL3 ? {
+                    message: 'error:07880109:common libcrypto ' +
+                             'routines::interrupted or cancelled'
+                  } : {
+                    name: 'TypeError',
+                    code: 'ERR_MISSING_PASSPHRASE',
+                    message: 'Passphrase required for encrypted key'
+                  });
 
     testSignVerify(publicKey, {
       key: privateKey,
       passphrase: 'top secret'
     });
   }));
+
+  // Test async elliptic curve key generation with 'jwk' encoding
+  [
+    ['ec', ['P-384', 'P-256', 'P-521', 'secp256k1']],
+    ['rsa'],
+    ['ed25519'],
+    ['ed448'],
+    ['x25519'],
+    ['x448'],
+  ].forEach((types) => {
+    const [type, options] = types;
+    switch (type) {
+      case 'ec': {
+        return options.forEach((curve) => {
+          generateKeyPair(type, {
+            namedCurve: curve,
+            publicKeyEncoding: {
+              format: 'jwk'
+            },
+            privateKeyEncoding: {
+              format: 'jwk'
+            }
+          }, common.mustSucceed((publicKey, privateKey) => {
+            assert.strictEqual(typeof publicKey, 'object');
+            assert.strictEqual(typeof privateKey, 'object');
+            assert.strictEqual(publicKey.x, privateKey.x);
+            assert.strictEqual(publicKey.y, privateKey.y);
+            assert(!publicKey.d);
+            assert(privateKey.d);
+            assert.strictEqual(publicKey.kty, 'EC');
+            assert.strictEqual(publicKey.kty, privateKey.kty);
+            assert.strictEqual(publicKey.crv, curve);
+            assert.strictEqual(publicKey.crv, privateKey.crv);
+          }));
+        });
+      }
+      case 'rsa': {
+        return generateKeyPair(type, {
+          modulusLength: 4096,
+          publicKeyEncoding: {
+            format: 'jwk'
+          },
+          privateKeyEncoding: {
+            format: 'jwk'
+          }
+        }, common.mustSucceed((publicKey, privateKey) => {
+          assert.strictEqual(typeof publicKey, 'object');
+          assert.strictEqual(typeof privateKey, 'object');
+          assert.strictEqual(publicKey.kty, 'RSA');
+          assert.strictEqual(publicKey.kty, privateKey.kty);
+          assert.strictEqual(typeof publicKey.n, 'string');
+          assert.strictEqual(publicKey.n, privateKey.n);
+          assert.strictEqual(typeof publicKey.e, 'string');
+          assert.strictEqual(publicKey.e, privateKey.e);
+          assert.strictEqual(typeof privateKey.d, 'string');
+          assert.strictEqual(typeof privateKey.p, 'string');
+          assert.strictEqual(typeof privateKey.q, 'string');
+          assert.strictEqual(typeof privateKey.dp, 'string');
+          assert.strictEqual(typeof privateKey.dq, 'string');
+          assert.strictEqual(typeof privateKey.qi, 'string');
+        }));
+      }
+      case 'ed25519':
+      case 'ed448':
+      case 'x25519':
+      case 'x448': {
+        generateKeyPair(type, {
+          publicKeyEncoding: {
+            format: 'jwk'
+          },
+          privateKeyEncoding: {
+            format: 'jwk'
+          }
+        }, common.mustSucceed((publicKey, privateKey) => {
+          assert.strictEqual(typeof publicKey, 'object');
+          assert.strictEqual(typeof privateKey, 'object');
+          assert.strictEqual(publicKey.x, privateKey.x);
+          assert(!publicKey.d);
+          assert(privateKey.d);
+          assert.strictEqual(publicKey.kty, 'OKP');
+          assert.strictEqual(publicKey.kty, privateKey.kty);
+          const expectedCrv = `${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+          assert.strictEqual(publicKey.crv, expectedCrv);
+          assert.strictEqual(publicKey.crv, privateKey.crv);
+        }));
+      }
+    }
+  });
 }
 
 // Test invalid parameter encoding.
@@ -558,9 +795,35 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     }
   }), {
     name: 'TypeError',
-    code: 'ERR_INVALID_OPT_VALUE',
-    message: 'The value "otherEncoding" is invalid for ' +
-    'option "paramEncoding"'
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.paramEncoding' is invalid. " +
+      "Received 'otherEncoding'"
+  });
+  assert.throws(() => generateKeyPairSync('dsa', {
+    modulusLength: 4096,
+    publicKeyEncoding: {
+      format: 'jwk'
+    },
+    privateKeyEncoding: {
+      format: 'jwk'
+    }
+  }), {
+    name: 'Error',
+    code: 'ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE',
+    message: 'Unsupported JWK Key Type.'
+  });
+  assert.throws(() => generateKeyPairSync('ec', {
+    namedCurve: 'secp224r1',
+    publicKeyEncoding: {
+      format: 'jwk'
+    },
+    privateKeyEncoding: {
+      format: 'jwk'
+    }
+  }), {
+    name: 'Error',
+    code: 'ERR_CRYPTO_JWK_UNSUPPORTED_CURVE',
+    message: 'Unsupported JWK EC curve: secp224r1.'
   });
 }
 
@@ -580,11 +843,11 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   }).then(common.mustCall((keys) => {
     const { publicKey, privateKey } = keys;
     assert.strictEqual(typeof publicKey, 'string');
-    assert(pkcs1PubExp.test(publicKey));
+    assert.match(publicKey, pkcs1PubExp);
     assertApproximateSize(publicKey, 180);
 
     assert.strictEqual(typeof privateKey, 'string');
-    assert(pkcs1PrivExp.test(privateKey));
+    assert.match(privateKey, pkcs1PrivExp);
     assertApproximateSize(privateKey, 512);
 
     testEncryptDecrypt(publicKey, privateKey);
@@ -637,9 +900,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'pkcs1',
       format: 'pem'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(typeof publicKey, 'object');
     assert.strictEqual(publicKey.type, 'public');
     assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
@@ -658,9 +919,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       type: 'pkcs1',
       format: 'pem'
     }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     // The public key should still be a string.
     assert.strictEqual(typeof publicKey, 'string');
 
@@ -685,8 +944,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${enc}" is invalid for option "publicKeyEncoding"`
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.publicKeyEncoding' is invalid. " +
+        `Received ${inspect(enc)}`
     });
   }
 
@@ -704,9 +964,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${type}" is invalid for option ` +
-               '"publicKeyEncoding.type"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.publicKeyEncoding.type' is invalid. " +
+        `Received ${inspect(type)}`
     });
   }
 
@@ -724,9 +984,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${format}" is invalid for option ` +
-               '"publicKeyEncoding.format"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.publicKeyEncoding.format' is invalid. " +
+        `Received ${inspect(format)}`
     });
   }
 
@@ -741,8 +1001,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       privateKeyEncoding: enc
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${enc}" is invalid for option "privateKeyEncoding"`
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding' is invalid. " +
+        `Received ${inspect(enc)}`
     });
   }
 
@@ -760,9 +1021,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${type}" is invalid for option ` +
-               '"privateKeyEncoding.type"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding.type' is invalid. " +
+        `Received ${inspect(type)}`
     });
   }
 
@@ -780,9 +1041,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${format}" is invalid for option ` +
-               '"privateKeyEncoding.format"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding.format' is invalid. " +
+        `Received ${inspect(format)}`
     });
   }
 
@@ -801,9 +1062,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${cipher}" is invalid for option ` +
-               '"privateKeyEncoding.cipher"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding.cipher' is invalid. " +
+        `Received ${inspect(cipher)}`
     });
   }
 
@@ -842,9 +1103,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       }
     }), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${passphrase}" is invalid for option ` +
-               '"privateKeyEncoding.passphrase"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding.passphrase' " +
+        `is invalid. Received ${inspect(passphrase)}`
     });
   }
 
@@ -867,11 +1128,11 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   for (const modulusLength of [undefined, null, 'a', true, {}, [], 512.1, -1]) {
     assert.throws(() => generateKeyPair('rsa', {
       modulusLength
-    }), {
+    }, common.mustNotCall()), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${modulusLength}" is invalid for option ` +
-               '"modulusLength"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.modulusLength' is invalid. " +
+        `Received ${inspect(modulusLength)}`
     });
   }
 
@@ -880,11 +1141,11 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     assert.throws(() => generateKeyPair('rsa', {
       modulusLength: 4096,
       publicExponent
-    }), {
+    }, common.mustNotCall()), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${publicExponent}" is invalid for option ` +
-               '"publicExponent"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.publicExponent' is invalid. " +
+        `Received ${inspect(publicExponent)}`
     });
   }
 }
@@ -895,24 +1156,24 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
   for (const modulusLength of [undefined, null, 'a', true, {}, [], 4096.1]) {
     assert.throws(() => generateKeyPair('dsa', {
       modulusLength
-    }), {
+    }, common.mustNotCall()), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${modulusLength}" is invalid for option ` +
-               '"modulusLength"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.modulusLength' is invalid. " +
+        `Received ${inspect(modulusLength)}`
     });
   }
 
   // Test invalid divisor lengths.
-  for (const divisorLength of ['a', true, {}, [], 4096.1]) {
+  for (const divisorLength of ['a', true, {}, [], 4096.1, 2147483648, -1]) {
     assert.throws(() => generateKeyPair('dsa', {
       modulusLength: 2048,
       divisorLength
-    }), {
+    }, common.mustNotCall()), {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${divisorLength}" is invalid for option ` +
-               '"divisorLength"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.divisorLength' is invalid. " +
+        `Received ${inspect(divisorLength)}`
     });
   }
 }
@@ -928,7 +1189,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     });
   }, {
     name: 'TypeError',
-    message: 'Invalid ECDH curve name'
+    message: 'Invalid EC curve name'
   });
 
   // Test error type when curve is not a string
@@ -941,27 +1202,33 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       });
     }, {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${namedCurve}" is invalid for option ` +
-               '"namedCurve"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.namedCurve' is invalid. " +
+        `Received ${inspect(namedCurve)}`
     });
   }
 
   // It should recognize both NIST and standard curve names.
   generateKeyPair('ec', {
     namedCurve: 'P-256',
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      namedCurve: 'prime256v1'
+    });
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      namedCurve: 'prime256v1'
+    });
   }));
 
   generateKeyPair('ec', {
     namedCurve: 'secp256k1',
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      namedCurve: 'secp256k1'
+    });
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      namedCurve: 'secp256k1'
+    });
   }));
 }
 
@@ -969,14 +1236,14 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
 {
   if (!/^1\.1\.0/.test(process.versions.openssl)) {
     ['ed25519', 'ed448', 'x25519', 'x448'].forEach((keyType) => {
-      generateKeyPair(keyType, common.mustCall((err, publicKey, privateKey) => {
-        assert.ifError(err);
-
+      generateKeyPair(keyType, common.mustSucceed((publicKey, privateKey) => {
         assert.strictEqual(publicKey.type, 'public');
         assert.strictEqual(publicKey.asymmetricKeyType, keyType);
+        assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {});
 
         assert.strictEqual(privateKey.type, 'private');
         assert.strictEqual(privateKey.asymmetricKeyType, keyType);
+        assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {});
       }));
     });
   }
@@ -986,9 +1253,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
 {
   generateKeyPair('dh', {
     primeLength: 1024
-  }, common.mustCall((err, publicKey, privateKey) => {
-    assert.ifError(err);
-
+  }, common.mustSucceed((publicKey, privateKey) => {
     assert.strictEqual(publicKey.type, 'public');
     assert.strictEqual(publicKey.asymmetricKeyType, 'dh');
 
@@ -1023,6 +1288,52 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     message: 'Unknown DH group'
   });
 
+  assert.throws(() => {
+    generateKeyPair('dh', {
+      primeLength: 2147483648
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.primeLength' is invalid. " +
+             'Received 2147483648',
+  });
+
+  assert.throws(() => {
+    generateKeyPair('dh', {
+      primeLength: -1
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.primeLength' is invalid. " +
+             'Received -1',
+  });
+
+  assert.throws(() => {
+    generateKeyPair('dh', {
+      primeLength: 2,
+      generator: 2147483648,
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.generator' is invalid. " +
+             'Received 2147483648',
+  });
+
+  assert.throws(() => {
+    generateKeyPair('dh', {
+      primeLength: 2,
+      generator: -1,
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.generator' is invalid. " +
+             'Received -1',
+  });
+
   // Test incompatible options.
   const allOpts = {
     group: 'modp5',
@@ -1034,7 +1345,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     ['group', 'prime'],
     ['group', 'primeLength'],
     ['group', 'generator'],
-    ['prime', 'primeLength']
+    ['prime', 'primeLength'],
   ];
   for (const [opt1, opt2] of incompatible) {
     assert.throws(() => {
@@ -1063,9 +1374,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       });
     }, {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${type}" is invalid for option ` +
-               '"publicKeyEncoding.type"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.publicKeyEncoding.type' is invalid. " +
+        `Received ${inspect(type)}`
     });
   }
 
@@ -1074,14 +1385,44 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     assert.throws(() => {
       generateKeyPairSync('rsa-pss', {
         modulusLength: 4096,
-        hash: hashValue
+        hashAlgorithm: hashValue
       });
     }, {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${hashValue}" is invalid for option "hash"`
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.hashAlgorithm' is invalid. " +
+        `Received ${inspect(hashValue)}`
     });
   }
+
+  // too long salt length
+  assert.throws(() => {
+    generateKeyPair('rsa-pss', {
+      modulusLength: 512,
+      saltLength: 2147483648,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256'
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.saltLength' is invalid. " +
+             'Received 2147483648'
+  });
+
+  assert.throws(() => {
+    generateKeyPair('rsa-pss', {
+      modulusLength: 512,
+      saltLength: -1,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256'
+    }, common.mustNotCall());
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_VALUE',
+    message: "The property 'options.saltLength' is invalid. " +
+             'Received -1'
+  });
 
   // Invalid private key type.
   for (const type of ['foo', 'spki']) {
@@ -1093,9 +1434,9 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       });
     }, {
       name: 'TypeError',
-      code: 'ERR_INVALID_OPT_VALUE',
-      message: `The value "${type}" is invalid for option ` +
-               '"privateKeyEncoding.type"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      message: "The property 'options.privateKeyEncoding.type' is invalid. " +
+        `Received ${inspect(type)}`
     });
   }
 
@@ -1163,6 +1504,7 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     });
   }
 }
+
 {
   // Test RSA-PSS.
   assert.throws(
@@ -1170,8 +1512,8 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
       generateKeyPair('rsa-pss', {
         modulusLength: 512,
         saltLength: 16,
-        hash: 'sha256',
-        mgf1Hash: undefined
+        hashAlgorithm: 'sha256',
+        mgf1HashAlgorithm: undefined
       });
     },
     {
@@ -1181,21 +1523,167 @@ const sec1EncExp = (cipher) => getRegExpForPEM('EC PRIVATE KEY', cipher);
     }
   );
 
-  for (const mgf1Hash of [null, 0, false, {}, []]) {
+  for (const mgf1HashAlgorithm of [null, 0, false, {}, []]) {
     assert.throws(
       () => {
         generateKeyPair('rsa-pss', {
           modulusLength: 512,
           saltLength: 16,
-          hash: 'sha256',
-          mgf1Hash
-        });
+          hashAlgorithm: 'sha256',
+          mgf1HashAlgorithm
+        }, common.mustNotCall());
       },
       {
         name: 'TypeError',
-        code: 'ERR_INVALID_OPT_VALUE',
-        message: `The value "${mgf1Hash}" is invalid for option "mgf1Hash"`
+        code: 'ERR_INVALID_ARG_VALUE',
+        message: "The property 'options.mgf1HashAlgorithm' is invalid. " +
+          `Received ${inspect(mgf1HashAlgorithm)}`
+
       }
     );
   }
+}
+
+// Passing an empty passphrase string should not cause OpenSSL's default
+// passphrase prompt in the terminal.
+// See https://github.com/nodejs/node/issues/35898.
+
+for (const type of ['pkcs1', 'pkcs8']) {
+  generateKeyPair('rsa', {
+    modulusLength: 1024,
+    privateKeyEncoding: {
+      type,
+      format: 'pem',
+      cipher: 'aes-256-cbc',
+      passphrase: ''
+    }
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.strictEqual(publicKey.type, 'public');
+
+    for (const passphrase of ['', Buffer.alloc(0)]) {
+      const privateKeyObject = createPrivateKey({
+        passphrase,
+        key: privateKey
+      });
+      assert.strictEqual(privateKeyObject.asymmetricKeyType, 'rsa');
+    }
+
+    // Encrypting with an empty passphrase is not the same as not encrypting
+    // the key, and not specifying a passphrase should fail when decoding it.
+    assert.throws(() => {
+      return testSignVerify(publicKey, privateKey);
+    }, common.hasOpenSSL3 ? {
+      name: 'Error',
+      code: 'ERR_OSSL_CRYPTO_INTERRUPTED_OR_CANCELLED',
+      message: 'error:07880109:common libcrypto routines::interrupted or cancelled'
+    } : {
+      name: 'TypeError',
+      code: 'ERR_MISSING_PASSPHRASE',
+      message: 'Passphrase required for encrypted key'
+    });
+  }));
+}
+
+// Passing an empty passphrase string should not throw ERR_OSSL_CRYPTO_MALLOC_FAILURE even on OpenSSL 3.
+// Regression test for https://github.com/nodejs/node/issues/41428.
+generateKeyPair('rsa', {
+  modulusLength: 4096,
+  publicKeyEncoding: {
+    type: 'spki',
+    format: 'pem'
+  },
+  privateKeyEncoding: {
+    type: 'pkcs8',
+    format: 'pem',
+    cipher: 'aes-256-cbc',
+    passphrase: ''
+  }
+}, common.mustSucceed((publicKey, privateKey) => {
+  assert.strictEqual(typeof publicKey, 'string');
+  assert.strictEqual(typeof privateKey, 'string');
+}));
+
+{
+  // This test creates EC key pairs on curves without associated OIDs.
+  // Specifying a key encoding should not crash.
+
+  if (process.versions.openssl >= '1.1.1i') {
+    for (const namedCurve of ['Oakley-EC2N-3', 'Oakley-EC2N-4']) {
+      if (!getCurves().includes(namedCurve))
+        continue;
+
+      const expectedErrorCode =
+        common.hasOpenSSL3 ? 'ERR_OSSL_MISSING_OID' : 'ERR_OSSL_EC_MISSING_OID';
+      const params = {
+        namedCurve,
+        publicKeyEncoding: {
+          format: 'der',
+          type: 'spki'
+        }
+      };
+
+      assert.throws(() => {
+        generateKeyPairSync('ec', params);
+      }, {
+        code: expectedErrorCode
+      });
+
+      generateKeyPair('ec', params, common.mustCall((err) => {
+        assert.strictEqual(err.code, expectedErrorCode);
+      }));
+    }
+  }
+}
+
+{
+  // This test makes sure deprecated and new options may be used
+  // simultaneously so long as they're identical values.
+
+  generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    saltLength: 16,
+    hash: 'sha256',
+    hashAlgorithm: 'sha256',
+    mgf1Hash: 'sha256',
+    mgf1HashAlgorithm: 'sha256'
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.strictEqual(publicKey.type, 'public');
+    assert.strictEqual(publicKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
+
+    assert.strictEqual(privateKey.type, 'private');
+    assert.strictEqual(privateKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      modulusLength: 512,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
+  }));
+}
+
+{
+  // This test makes sure deprecated and new options must
+  // be the same value.
+
+  assert.throws(() => generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    saltLength: 16,
+    mgf1Hash: 'sha256',
+    mgf1HashAlgorithm: 'sha1'
+  }, common.mustNotCall()), { code: 'ERR_INVALID_ARG_VALUE' });
+
+  assert.throws(() => generateKeyPair('rsa-pss', {
+    modulusLength: 512,
+    saltLength: 16,
+    hash: 'sha256',
+    hashAlgorithm: 'sha1'
+  }, common.mustNotCall()), { code: 'ERR_INVALID_ARG_VALUE' });
 }

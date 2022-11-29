@@ -2,129 +2,155 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/objects/module.h"
+
 #include <unordered_map>
 #include <unordered_set>
-
-#include "src/objects/module.h"
 
 #include "src/api/api-inl.h"
 #include "src/ast/modules.h"
 #include "src/builtins/accessors.h"
+#include "src/common/assert-scope.h"
+#include "src/heap/heap-inl.h"
 #include "src/objects/cell-inl.h"
 #include "src/objects/hash-table-inl.h"
 #include "src/objects/js-generator-inl.h"
 #include "src/objects/module-inl.h"
 #include "src/objects/objects-inl.h"
+#include "src/objects/source-text-module.h"
+#include "src/objects/synthetic-module-inl.h"
 #include "src/utils/ostreams.h"
 
 namespace v8 {
 namespace internal {
 
+namespace {
 #ifdef DEBUG
-void Module::PrintStatusTransition(Status new_status) {
-  if (FLAG_trace_module_status) {
-    StdoutStream os;
-    os << "Changing module status from " << status() << " to " << new_status
-       << " for ";
-    if (this->IsSourceTextModule()) {
-      Handle<Script> script(SourceTextModule::cast(*this).script(),
-                            GetIsolate());
-      script->GetNameOrSourceURL().Print(os);
-    } else {
-      SyntheticModule::cast(*this).name().Print(os);
-    }
-#ifndef OBJECT_PRINT
-    os << "\n";
-#endif  // OBJECT_PRINT
+void PrintModuleName(Module module, std::ostream& os) {
+  if (module.IsSourceTextModule()) {
+    SourceTextModule::cast(module).GetScript().GetNameOrSourceURL().Print(os);
+  } else {
+    SyntheticModule::cast(module).name().Print(os);
   }
+#ifndef OBJECT_PRINT
+  os << "\n";
+#endif  // OBJECT_PRINT
+}
+
+void PrintStatusTransition(Module module, Module::Status old_status) {
+  if (!FLAG_trace_module_status) return;
+  StdoutStream os;
+  os << "Changing module status from " << old_status << " to "
+     << module.status() << " for ";
+  PrintModuleName(module, os);
+}
+
+void PrintStatusMessage(Module module, const char* message) {
+  if (!FLAG_trace_module_status) return;
+  StdoutStream os;
+  os << "Instantiating module ";
+  PrintModuleName(module, os);
 }
 #endif  // DEBUG
+
+void SetStatusInternal(Module module, Module::Status new_status) {
+  DisallowGarbageCollection no_gc;
+#ifdef DEBUG
+  Module::Status old_status = static_cast<Module::Status>(module.status());
+  module.set_status(new_status);
+  PrintStatusTransition(module, old_status);
+#else
+  module.set_status(new_status);
+#endif  // DEBUG
+}
+
+}  // end namespace
 
 void Module::SetStatus(Status new_status) {
-  DisallowHeapAllocation no_alloc;
+  DisallowGarbageCollection no_gc;
   DCHECK_LE(status(), new_status);
   DCHECK_NE(new_status, Module::kErrored);
-#ifdef DEBUG
-  PrintStatusTransition(new_status);
-#endif  // DEBUG
-  set_status(new_status);
+  SetStatusInternal(*this, new_status);
 }
 
-void Module::RecordError(Isolate* isolate) {
-  DisallowHeapAllocation no_alloc;
-  DCHECK(exception().IsTheHole(isolate));
-  Object the_exception = isolate->pending_exception();
-  DCHECK(!the_exception.IsTheHole(isolate));
+// static
+void Module::RecordErrorUsingPendingException(Isolate* isolate,
+                                              Handle<Module> module) {
+  Handle<Object> the_exception(isolate->pending_exception(), isolate);
+  RecordError(isolate, module, the_exception);
+}
 
-  if (this->IsSourceTextModule()) {
-    Handle<SourceTextModule> self(SourceTextModule::cast(*this), GetIsolate());
-    self->set_code(self->info());
+// static
+void Module::RecordError(Isolate* isolate, Handle<Module> module,
+                         Handle<Object> error) {
+  DisallowGarbageCollection no_gc;
+  DCHECK(module->exception().IsTheHole(isolate));
+  DCHECK(!error->IsTheHole(isolate));
+  if (module->IsSourceTextModule()) {
+    // Revert to minmal SFI in case we have already been instantiating or
+    // evaluating.
+    auto self = SourceTextModule::cast(*module);
+    self.set_code(self.GetSharedFunctionInfo());
   }
-#ifdef DEBUG
-  PrintStatusTransition(Module::kErrored);
-#endif  // DEBUG
-  set_status(Module::kErrored);
-  set_exception(the_exception);
+  SetStatusInternal(*module, Module::kErrored);
+  if (isolate->is_catchable_by_javascript(*error)) {
+    module->set_exception(*error);
+  } else {
+    // v8::TryCatch uses `null` for termination exceptions.
+    module->set_exception(*isolate->factory()->null_value());
+  }
 }
 
 void Module::ResetGraph(Isolate* isolate, Handle<Module> module) {
-  DCHECK_NE(module->status(), kInstantiating);
   DCHECK_NE(module->status(), kEvaluating);
-  if (module->status() != kPreInstantiating) return;
+  if (module->status() != kPreLinking && module->status() != kLinking) {
+    return;
+  }
 
   Handle<FixedArray> requested_modules =
       module->IsSourceTextModule()
           ? Handle<FixedArray>(
-                Handle<SourceTextModule>::cast(module)->requested_modules(),
-                isolate)
+                SourceTextModule::cast(*module).requested_modules(), isolate)
           : Handle<FixedArray>();
   Reset(isolate, module);
-  if (module->IsSourceTextModule()) {
-    for (int i = 0; i < requested_modules->length(); ++i) {
-      Handle<Object> descendant(requested_modules->get(i), isolate);
-      if (descendant->IsModule()) {
-        ResetGraph(isolate, Handle<Module>::cast(descendant));
-      } else {
-        DCHECK(descendant->IsUndefined(isolate));
-      }
-    }
-  } else {
+
+  if (!module->IsSourceTextModule()) {
     DCHECK(module->IsSyntheticModule());
-    // Nothing else to do here.
+    return;
+  }
+  for (int i = 0; i < requested_modules->length(); ++i) {
+    Handle<Object> descendant(requested_modules->get(i), isolate);
+    if (descendant->IsModule()) {
+      ResetGraph(isolate, Handle<Module>::cast(descendant));
+    } else {
+      DCHECK(descendant->IsUndefined(isolate));
+    }
   }
 }
 
 void Module::Reset(Isolate* isolate, Handle<Module> module) {
-  DCHECK(module->status() == kPreInstantiating ||
-         module->status() == kInstantiating);
+  DCHECK(module->status() == kPreLinking || module->status() == kLinking);
   DCHECK(module->exception().IsTheHole(isolate));
   // The namespace object cannot exist, because it would have been created
   // by RunInitializationCode, which is called only after this module's SCC
   // succeeds instantiation.
   DCHECK(!module->module_namespace().IsJSModuleNamespace());
-
-#ifdef DEBUG
-  module->PrintStatusTransition(kUninstantiated);
-#endif  // DEBUG
-
   const int export_count =
       module->IsSourceTextModule()
-          ? Handle<SourceTextModule>::cast(module)->regular_exports().length()
-          : Handle<SyntheticModule>::cast(module)->export_names().length();
+          ? SourceTextModule::cast(*module).regular_exports().length()
+          : SyntheticModule::cast(*module).export_names().length();
   Handle<ObjectHashTable> exports = ObjectHashTable::New(isolate, export_count);
 
   if (module->IsSourceTextModule()) {
     SourceTextModule::Reset(isolate, Handle<SourceTextModule>::cast(module));
-  } else {
-    // Nothing to do here.
   }
 
   module->set_exports(*exports);
-  module->set_status(kUninstantiated);
+  SetStatusInternal(*module, kUnlinked);
 }
 
 Object Module::GetException() {
-  DisallowHeapAllocation no_alloc;
+  DisallowGarbageCollection no_gc;
   DCHECK_EQ(status(), Module::kErrored);
   DCHECK(!exception().IsTheHole());
   return exception();
@@ -135,7 +161,7 @@ MaybeHandle<Cell> Module::ResolveExport(Isolate* isolate, Handle<Module> module,
                                         Handle<String> export_name,
                                         MessageLocation loc, bool must_resolve,
                                         Module::ResolveSet* resolve_set) {
-  DCHECK_GE(module->status(), kPreInstantiating);
+  DCHECK_GE(module->status(), kPreLinking);
   DCHECK_NE(module->status(), kEvaluating);
 
   if (module->IsSourceTextModule()) {
@@ -149,62 +175,51 @@ MaybeHandle<Cell> Module::ResolveExport(Isolate* isolate, Handle<Module> module,
   }
 }
 
-bool Module::Instantiate(Isolate* isolate, Handle<Module> module,
-                         v8::Local<v8::Context> context,
-                         v8::Module::ResolveCallback callback) {
+bool Module::Instantiate(
+    Isolate* isolate, Handle<Module> module, v8::Local<v8::Context> context,
+    v8::Module::ResolveModuleCallback callback,
+    DeprecatedResolveCallback callback_without_import_assertions) {
 #ifdef DEBUG
-  if (FLAG_trace_module_status) {
-    StdoutStream os;
-    os << "Instantiating module ";
-    if (module->IsSourceTextModule()) {
-      Handle<SourceTextModule>::cast(module)
-          ->script()
-          .GetNameOrSourceURL()
-          .Print(os);
-    } else {
-      Handle<SyntheticModule>::cast(module)->name().Print(os);
-    }
-#ifndef OBJECT_PRINT
-    os << "\n";
-#endif  // OBJECT_PRINT
-  }
+  PrintStatusMessage(*module, "Instantiating module ");
 #endif  // DEBUG
 
-  if (!PrepareInstantiate(isolate, module, context, callback)) {
+  if (!PrepareInstantiate(isolate, module, context, callback,
+                          callback_without_import_assertions)) {
     ResetGraph(isolate, module);
+    DCHECK_EQ(module->status(), kUnlinked);
     return false;
   }
   Zone zone(isolate->allocator(), ZONE_NAME);
   ZoneForwardList<Handle<SourceTextModule>> stack(&zone);
   unsigned dfs_index = 0;
   if (!FinishInstantiate(isolate, module, &stack, &dfs_index, &zone)) {
-    for (auto& descendant : stack) {
-      Reset(isolate, descendant);
-    }
-    DCHECK_EQ(module->status(), kUninstantiated);
+    ResetGraph(isolate, module);
+    DCHECK_EQ(module->status(), kUnlinked);
     return false;
   }
-  DCHECK(module->status() == kInstantiated || module->status() == kEvaluated ||
+  DCHECK(module->status() == kLinked || module->status() == kEvaluated ||
          module->status() == kErrored);
   DCHECK(stack.empty());
   return true;
 }
 
-bool Module::PrepareInstantiate(Isolate* isolate, Handle<Module> module,
-                                v8::Local<v8::Context> context,
-                                v8::Module::ResolveCallback callback) {
+bool Module::PrepareInstantiate(
+    Isolate* isolate, Handle<Module> module, v8::Local<v8::Context> context,
+    v8::Module::ResolveModuleCallback callback,
+    DeprecatedResolveCallback callback_without_import_assertions) {
   DCHECK_NE(module->status(), kEvaluating);
-  DCHECK_NE(module->status(), kInstantiating);
-  if (module->status() >= kPreInstantiating) return true;
-  module->SetStatus(kPreInstantiating);
+  DCHECK_NE(module->status(), kLinking);
+  if (module->status() >= kPreLinking) return true;
+  module->SetStatus(kPreLinking);
   STACK_CHECK(isolate, false);
 
   if (module->IsSourceTextModule()) {
     return SourceTextModule::PrepareInstantiate(
-        isolate, Handle<SourceTextModule>::cast(module), context, callback);
+        isolate, Handle<SourceTextModule>::cast(module), context, callback,
+        callback_without_import_assertions);
   } else {
     return SyntheticModule::PrepareInstantiate(
-        isolate, Handle<SyntheticModule>::cast(module), context, callback);
+        isolate, Handle<SyntheticModule>::cast(module), context);
   }
 }
 
@@ -212,8 +227,8 @@ bool Module::FinishInstantiate(Isolate* isolate, Handle<Module> module,
                                ZoneForwardList<Handle<SourceTextModule>>* stack,
                                unsigned* dfs_index, Zone* zone) {
   DCHECK_NE(module->status(), kEvaluating);
-  if (module->status() >= kInstantiating) return true;
-  DCHECK_EQ(module->status(), kPreInstantiating);
+  if (module->status() >= kLinking) return true;
+  DCHECK_EQ(module->status(), kPreLinking);
   STACK_CHECK(isolate, false);
 
   if (module->IsSourceTextModule()) {
@@ -228,62 +243,82 @@ bool Module::FinishInstantiate(Isolate* isolate, Handle<Module> module,
 
 MaybeHandle<Object> Module::Evaluate(Isolate* isolate, Handle<Module> module) {
 #ifdef DEBUG
-  if (FLAG_trace_module_status) {
-    StdoutStream os;
-    os << "Evaluating module ";
-    if (module->IsSourceTextModule()) {
-      Handle<SourceTextModule>::cast(module)
-          ->script()
-          .GetNameOrSourceURL()
-          .Print(os);
-    } else {
-      Handle<SyntheticModule>::cast(module)->name().Print(os);
-    }
-#ifndef OBJECT_PRINT
-    os << "\n";
-#endif  // OBJECT_PRINT
-  }
+  PrintStatusMessage(*module, "Evaluating module ");
 #endif  // DEBUG
-  if (module->status() == kErrored) {
-    isolate->Throw(module->GetException());
-    return MaybeHandle<Object>();
+  STACK_CHECK(isolate, MaybeHandle<Object>());
+  if (FLAG_harmony_top_level_await) {
+    return Module::EvaluateMaybeAsync(isolate, module);
+  } else {
+    return Module::InnerEvaluate(isolate, module);
   }
-  DCHECK_NE(module->status(), kEvaluating);
-  DCHECK_GE(module->status(), kInstantiated);
-  Zone zone(isolate->allocator(), ZONE_NAME);
-
-  ZoneForwardList<Handle<SourceTextModule>> stack(&zone);
-  unsigned dfs_index = 0;
-  Handle<Object> result;
-  if (!Evaluate(isolate, module, &stack, &dfs_index).ToHandle(&result)) {
-    for (auto& descendant : stack) {
-      DCHECK_EQ(descendant->status(), kEvaluating);
-      descendant->RecordError(isolate);
-    }
-    DCHECK_EQ(module->GetException(), isolate->pending_exception());
-    return MaybeHandle<Object>();
-  }
-  DCHECK_EQ(module->status(), kEvaluated);
-  DCHECK(stack.empty());
-  return result;
 }
 
-MaybeHandle<Object> Module::Evaluate(
-    Isolate* isolate, Handle<Module> module,
-    ZoneForwardList<Handle<SourceTextModule>>* stack, unsigned* dfs_index) {
+MaybeHandle<Object> Module::EvaluateMaybeAsync(Isolate* isolate,
+                                               Handle<Module> module) {
+  // In the event of errored evaluation, return a rejected promise.
+  if (module->status() == kErrored) {
+    // If we have a top level capability we assume it has already been
+    // rejected, and return it here. Otherwise create a new promise and
+    // reject it with the module's exception.
+    if (module->top_level_capability().IsJSPromise()) {
+      Handle<JSPromise> top_level_capability(
+          JSPromise::cast(module->top_level_capability()), isolate);
+      DCHECK(top_level_capability->status() == Promise::kRejected &&
+             top_level_capability->result() == module->exception());
+      return top_level_capability;
+    }
+    Handle<JSPromise> capability = isolate->factory()->NewJSPromise();
+    JSPromise::Reject(capability, handle(module->exception(), isolate));
+    return capability;
+  }
+
+  // Start of Evaluate () Concrete Method
+  // 2. Assert: module.[[Status]] is "linked" or "evaluated".
+  CHECK(module->status() == kLinked || module->status() == kEvaluated);
+
+  // 3. If module.[[Status]] is "evaluated", set module to
+  //    module.[[CycleRoot]].
+  // A Synthetic Module has no children so it is its own cycle root.
+  if (module->status() == kEvaluated && module->IsSourceTextModule()) {
+    module = Handle<SourceTextModule>::cast(module)->GetCycleRoot(isolate);
+  }
+
+  // 4. If module.[[TopLevelCapability]] is not undefined, then
+  //    a. Return module.[[TopLevelCapability]].[[Promise]].
+  if (module->top_level_capability().IsJSPromise()) {
+    return handle(JSPromise::cast(module->top_level_capability()), isolate);
+  }
+  DCHECK(module->top_level_capability().IsUndefined());
+
+  if (module->IsSourceTextModule()) {
+    return SourceTextModule::EvaluateMaybeAsync(
+        isolate, Handle<SourceTextModule>::cast(module));
+  } else {
+    return SyntheticModule::Evaluate(isolate,
+                                     Handle<SyntheticModule>::cast(module));
+  }
+}
+
+MaybeHandle<Object> Module::InnerEvaluate(Isolate* isolate,
+                                          Handle<Module> module) {
   if (module->status() == kErrored) {
     isolate->Throw(module->GetException());
     return MaybeHandle<Object>();
-  }
-  if (module->status() >= kEvaluating) {
+  } else if (module->status() == kEvaluated) {
     return isolate->factory()->undefined_value();
   }
-  DCHECK_EQ(module->status(), kInstantiated);
-  STACK_CHECK(isolate, MaybeHandle<Object>());
+
+  // InnerEvaluate can be called both to evaluate top level modules without
+  // the harmony_top_level_await flag and recursively to evaluate
+  // SyntheticModules in the dependency graphs of SourceTextModules.
+  //
+  // However, SyntheticModules transition directly to 'Evaluated,' so we should
+  // never see an 'Evaluating' module at this point.
+  CHECK_EQ(module->status(), kLinked);
 
   if (module->IsSourceTextModule()) {
-    return SourceTextModule::Evaluate(
-        isolate, Handle<SourceTextModule>::cast(module), stack, dfs_index);
+    return SourceTextModule::Evaluate(isolate,
+                                      Handle<SourceTextModule>::cast(module));
   } else {
     return SyntheticModule::Evaluate(isolate,
                                      Handle<SyntheticModule>::cast(module));
@@ -311,7 +346,7 @@ Handle<JSModuleNamespace> Module::GetModuleNamespace(Isolate* isolate,
   Handle<ObjectHashTable> exports(module->exports(), isolate);
   ZoneVector<Handle<String>> names(&zone);
   names.reserve(exports->NumberOfElements());
-  for (int i = 0, n = exports->Capacity(); i < n; ++i) {
+  for (InternalIndex i : exports->IterateEntries()) {
     Object key;
     if (!exports->ToKey(roots, i, &key)) continue;
     names.push_back(handle(String::cast(key), isolate));
@@ -362,7 +397,7 @@ MaybeHandle<Object> JSModuleNamespace::GetExport(Isolate* isolate,
     return isolate->factory()->undefined_value();
   }
 
-  Handle<Object> value(Handle<Cell>::cast(object)->value(), isolate);
+  Handle<Object> value(Cell::cast(*object).value(), isolate);
   if (value->IsTheHole(isolate)) {
     THROW_NEW_ERROR(
         isolate, NewReferenceError(MessageTemplate::kNotDefined, name), Object);
@@ -380,9 +415,7 @@ Maybe<PropertyAttributes> JSModuleNamespace::GetPropertyAttributes(
   Isolate* isolate = it->isolate();
 
   Handle<Object> lookup(object->module().exports().Lookup(name), isolate);
-  if (lookup->IsTheHole(isolate)) {
-    return Just(ABSENT);
-  }
+  if (lookup->IsTheHole(isolate)) return Just(ABSENT);
 
   Handle<Object> value(Handle<Cell>::cast(lookup)->value(), isolate);
   if (value->IsTheHole(isolate)) {
@@ -392,6 +425,39 @@ Maybe<PropertyAttributes> JSModuleNamespace::GetPropertyAttributes(
   }
 
   return Just(it->property_attributes());
+}
+
+bool Module::IsGraphAsync(Isolate* isolate) const {
+  DisallowGarbageCollection no_gc;
+
+  // Only SourceTextModules may be async.
+  if (!IsSourceTextModule()) return false;
+  SourceTextModule root = SourceTextModule::cast(*this);
+
+  Zone zone(isolate->allocator(), ZONE_NAME);
+  const size_t bucket_count = 2;
+  ZoneUnorderedSet<Module, Module::Hash> visited(&zone, bucket_count);
+  ZoneVector<SourceTextModule> worklist(&zone);
+  visited.insert(root);
+  worklist.push_back(root);
+
+  do {
+    SourceTextModule current = worklist.back();
+    worklist.pop_back();
+    DCHECK_GE(current.status(), kLinked);
+
+    if (current.async()) return true;
+    FixedArray requested_modules = current.requested_modules();
+    for (int i = 0, length = requested_modules.length(); i < length; ++i) {
+      Module descendant = Module::cast(requested_modules.get(i));
+      if (descendant.IsSourceTextModule()) {
+        const bool cycle = !visited.insert(descendant).second;
+        if (!cycle) worklist.push_back(SourceTextModule::cast(descendant));
+      }
+    }
+  } while (!worklist.empty());
+
+  return false;
 }
 
 }  // namespace internal

@@ -11,8 +11,8 @@
 #include "src/objects/hash-table-inl.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/objects.h"
+#include "src/objects/string-set.h"
 #include "test/unittests/test-utils.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace v8 {
@@ -57,7 +57,7 @@ TEST(Object, InstanceTypeList) {
 
 TEST(Object, InstanceTypeListOrder) {
   int current = 0;
-  int last = -1;
+  int prev = -1;
   InstanceType current_type = static_cast<InstanceType>(current);
   EXPECT_EQ(current_type, InstanceType::FIRST_TYPE);
   EXPECT_EQ(current_type, InstanceType::INTERNALIZED_STRING_TYPE);
@@ -65,32 +65,37 @@ TEST(Object, InstanceTypeListOrder) {
   current_type = InstanceType::type;                                       \
   current = static_cast<int>(current_type);                                \
   if (current > static_cast<int>(LAST_NAME_TYPE)) {                        \
-    EXPECT_LE(last + 1, current);                                          \
+    EXPECT_LE(prev + 1, current);                                          \
   }                                                                        \
-  EXPECT_LT(last, current) << " INSTANCE_TYPE_LIST is not ordered: "       \
-                           << "last = " << static_cast<InstanceType>(last) \
+  EXPECT_LT(prev, current) << " INSTANCE_TYPE_LIST is not ordered: "       \
+                           << "last = " << static_cast<InstanceType>(prev) \
                            << " vs. current = " << current_type;           \
-  last = current;
+  prev = current;
 
-  INSTANCE_TYPE_LIST(TEST_INSTANCE_TYPE)
+  // Only test hand-written portion of instance type list. The generated portion
+  // doesn't run the same risk of getting out of order, and it does emit type
+  // names out of numerical order in one case: JS_OBJECT_TYPE is emitted before
+  // its subclass types, because types are emitted in depth-first pre-order
+  // traversal order, and some of its subclass types are numerically earlier.
+  INSTANCE_TYPE_LIST_BASE(TEST_INSTANCE_TYPE)
 #undef TEST_INSTANCE_TYPE
 }
 
 TEST(Object, StructListOrder) {
-  int current = static_cast<int>(InstanceType::ACCESS_CHECK_INFO_TYPE);
-  int last = current - 1;
-  ASSERT_LT(0, last);
+  int current = static_cast<int>(InstanceType::FIRST_STRUCT_TYPE);
+  int prev = current - 1;
+  ASSERT_LT(0, prev);
   InstanceType current_type = static_cast<InstanceType>(current);
 #define TEST_STRUCT(TYPE, class, name)                 \
   current_type = InstanceType::TYPE;                   \
   current = static_cast<int>(current_type);            \
-  EXPECT_EQ(last + 1, current)                         \
+  EXPECT_LE(prev + 1, current)                         \
       << " STRUCT_LIST is not ordered: "               \
-      << " last = " << static_cast<InstanceType>(last) \
+      << " last = " << static_cast<InstanceType>(prev) \
       << " vs. current = " << current_type;            \
-  last = current;
+  prev = current;
 
-  STRUCT_LIST(TEST_STRUCT)
+  STRUCT_LIST_GENERATOR(STRUCT_LIST_ADAPTER, TEST_STRUCT)
 #undef TEST_STRUCT
 }
 
@@ -162,12 +167,49 @@ TEST_F(TestWithNativeContext, EmptyFunctionScopeInfo) {
       isolate()->empty_function()->shared().scope_info(),
       function->GetIsolate());
 
-  EXPECT_EQ(scope_info->length(), empty_function_scope_info->length());
   EXPECT_EQ(scope_info->Flags(), empty_function_scope_info->Flags());
   EXPECT_EQ(scope_info->ParameterCount(),
             empty_function_scope_info->ParameterCount());
   EXPECT_EQ(scope_info->ContextLocalCount(),
             empty_function_scope_info->ContextLocalCount());
+}
+
+TEST_F(TestWithNativeContext, RecreateScopeInfoWithLocalsBlocklistWorks) {
+  // Create a JSFunction to get a {ScopeInfo} we can use for the test.
+  Handle<JSFunction> function = RunJS<JSFunction>("(function foo() {})");
+  Handle<ScopeInfo> original_scope_info(function->shared().scope_info(),
+                                        isolate());
+  ASSERT_FALSE(original_scope_info->HasLocalsBlockList());
+
+  Handle<String> foo_string =
+      isolate()->factory()->NewStringFromStaticChars("foo");
+  Handle<String> bar_string =
+      isolate()->factory()->NewStringFromStaticChars("bar");
+
+  Handle<StringSet> blocklist = StringSet::New(isolate());
+  StringSet::Add(isolate(), blocklist, foo_string);
+
+  Handle<ScopeInfo> scope_info = ScopeInfo::RecreateWithBlockList(
+      isolate(), original_scope_info, blocklist);
+
+  DisallowGarbageCollection no_gc;
+  EXPECT_TRUE(scope_info->HasLocalsBlockList());
+  EXPECT_TRUE(scope_info->LocalsBlockList().Has(isolate(), foo_string));
+  EXPECT_FALSE(scope_info->LocalsBlockList().Has(isolate(), bar_string));
+
+  EXPECT_EQ(original_scope_info->length() + 1, scope_info->length());
+
+  // Check that all variable fields *before* the blocklist stayed the same.
+  for (int i = ScopeInfo::kVariablePartIndex;
+       i < scope_info->LocalsBlockListIndex(); ++i) {
+    EXPECT_EQ(original_scope_info->get(i), scope_info->get(i));
+  }
+
+  // Check that all variable fields *after* the blocklist stayed the same.
+  for (int i = scope_info->LocalsBlockListIndex() + 1; i < scope_info->length();
+       ++i) {
+    EXPECT_EQ(original_scope_info->get(i - 1), scope_info->get(i));
+  }
 }
 
 }  // namespace internal

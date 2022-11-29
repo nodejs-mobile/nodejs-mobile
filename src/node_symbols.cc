@@ -18,7 +18,9 @@ static void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
 #define V(PropertyName, StringValue)                                           \
   target                                                                       \
-      ->Set(env->context(), env->PropertyName()->Name(), env->PropertyName())  \
+      ->Set(env->context(),                                                    \
+            env->PropertyName()->Description(env->isolate()),                  \
+            env->PropertyName())                                               \
       .Check();
   PER_ISOLATE_SYMBOL_PROPERTIES(V)
 #undef V

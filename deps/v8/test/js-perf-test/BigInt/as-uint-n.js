@@ -4,7 +4,9 @@
 
 "use strict";
 
-load('bigint-util.js');
+d8.file.execute('bigint-util.js');
+
+let random_bigints = [];
 
 // This dummy ensures that the feedback for benchmark.run() in the Measure
 // function from base.js is not monomorphic, thereby preventing the benchmarks

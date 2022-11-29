@@ -16,8 +16,9 @@ class Counters;
 namespace wasm {
 
 struct CompilationEnv;
+class DebugSideTable;
 struct FunctionBody;
-struct WasmFeatures;
+class WasmFeatures;
 
 // Note: If this list changes, also the histogram "V8.LiftoffBailoutReasons"
 // on the chromium side needs to be updated.
@@ -37,13 +38,14 @@ enum LiftoffBailoutReason : int8_t {
   kComplexOperation = 4,
   // Unimplemented proposals:
   kSimd = 5,
-  kAnyRef = 6,
+  kRefTypes = 6,
   kExceptionHandling = 7,
   kMultiValue = 8,
   kTailCall = 9,
   kAtomics = 10,
   kBulkMemory = 11,
   kNonTrappingFloatToInt = 12,
+  kGC = 13,
   // A little gap, for forward compatibility.
   // Any other reason (use rarely; introduce new reasons if this spikes).
   kOtherReason = 20,
@@ -51,9 +53,49 @@ enum LiftoffBailoutReason : int8_t {
   kNumBailoutReasons
 };
 
-WasmCompilationResult ExecuteLiftoffCompilation(
-    AccountingAllocator*, CompilationEnv*, const FunctionBody&, int func_index,
-    Counters*, WasmFeatures* detected_features);
+struct LiftoffOptions {
+  Counters* counters = nullptr;
+  WasmFeatures* detected_features = nullptr;
+  base::Vector<const int> breakpoints = {};
+  std::unique_ptr<DebugSideTable>* debug_sidetable = nullptr;
+  int dead_breakpoint = 0;
+  int32_t* max_steps = nullptr;
+  int32_t* nondeterminism = nullptr;
+
+  // We keep the macro as small as possible by offloading the actual DCHECK and
+  // assignment to another function. This makes debugging easier.
+#define SETTER(field)                               \
+  template <typename T>                             \
+  LiftoffOptions& set_##field(T new_value) {        \
+    return Set<decltype(field)>(&field, new_value); \
+  }
+
+  SETTER(counters)
+  SETTER(detected_features)
+  SETTER(breakpoints)
+  SETTER(debug_sidetable)
+  SETTER(dead_breakpoint)
+  SETTER(max_steps)
+  SETTER(nondeterminism)
+
+#undef SETTER
+
+ private:
+  template <typename T>
+  LiftoffOptions& Set(T* ptr, T new_value) {
+    // The field must still have its default value.
+    DCHECK_EQ(*ptr, T{});
+    *ptr = new_value;
+    return *this;
+  }
+};
+
+V8_EXPORT_PRIVATE WasmCompilationResult
+ExecuteLiftoffCompilation(CompilationEnv*, const FunctionBody&, int func_index,
+                          ForDebugging, const LiftoffOptions& = {});
+
+V8_EXPORT_PRIVATE std::unique_ptr<DebugSideTable> GenerateLiftoffDebugSideTable(
+    const WasmCode*);
 
 }  // namespace wasm
 }  // namespace internal

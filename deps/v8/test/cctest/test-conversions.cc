@@ -312,10 +312,10 @@ TEST(ExponentNumberStr) {
   CHECK_EQ(1e-106, StringToDouble(".000001e-100", NO_FLAGS));
 }
 
-using OneBit1 = BitField<uint32_t, 0, 1>;
-using OneBit2 = BitField<uint32_t, 7, 1>;
-using EightBit1 = BitField<uint32_t, 0, 8>;
-using EightBit2 = BitField<uint32_t, 13, 8>;
+using OneBit1 = base::BitField<uint32_t, 0, 1>;
+using OneBit2 = base::BitField<uint32_t, 7, 1>;
+using EightBit1 = base::BitField<uint32_t, 0, 8>;
+using EightBit2 = base::BitField<uint32_t, 13, 8>;
 
 TEST(BitField) {
   uint32_t x;
@@ -350,19 +350,19 @@ TEST(BitField) {
   CHECK(!EightBit2::is_valid(256));
 }
 
-using UpperBits = BitField64<int, 61, 3>;
-using MiddleBits = BitField64<int, 31, 2>;
+using UpperBits = base::BitField64<int, 61, 3>;
+using MiddleBits = base::BitField64<int, 31, 2>;
 
 TEST(BitField64) {
   uint64_t x;
 
   // Test most significant bits.
-  x = V8_2PART_UINT64_C(0xE0000000, 00000000);
+  x = 0xE000'0000'0000'0000;
   CHECK(x == UpperBits::encode(7));
   CHECK_EQ(7, UpperBits::decode(x));
 
   // Test the 32/64-bit boundary bits.
-  x = V8_2PART_UINT64_C(0x00000001, 80000000);
+  x = 0x0000'0001'8000'0000;
   CHECK(x == MiddleBits::encode(3));
   CHECK_EQ(3, MiddleBits::decode(x));
 }

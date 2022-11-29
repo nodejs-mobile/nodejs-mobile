@@ -124,7 +124,7 @@ if __name__ == '__main__':
   # Ensure output directory is setup
   output_path_base = os.path.abspath(os.getcwd())
   output_path = os.path.join(output_path_base, "_results")
-  output_file = os.path.join(output_path, "master")
+  output_file = os.path.join(output_path, "master_" + suite)
   if not os.path.exists(output_path):
     if opts.verbose:
       print("Creating directory %s." % output_path)
@@ -144,14 +144,23 @@ if __name__ == '__main__':
   if mode == "baseline":
     cmdline = "%s > %s" % (cmdline_base, output_file)
   else:
-    cmdline = "%s | %s %s" \
-        % (cmdline_base, compare_baseline_py_path, output_file)
+    output_file_compare = output_file + "_compare"
+    cmdline = "%s > %s" % (cmdline_base, output_file_compare)
 
   if opts.verbose:
     print("Spawning subprocess: %s." % cmdline)
   return_code = subprocess.call(cmdline, shell=True, cwd=suite_path)
   if return_code < 0:
     print("Error return code: %d." % return_code)
+
   if mode == "baseline":
     print("Wrote %s." % output_file)
     print("Run %s again with compare mode to see results." % suite)
+  else:
+    print("Wrote %s." % output_file_compare)
+    cmdline = "python %s  %s -f %s" % (compare_baseline_py_path, output_file, output_file_compare)
+    if opts.verbose:
+      print("Spawning subprocess: %s." % cmdline)
+    return_code = subprocess.call(cmdline, shell=True, cwd=suite_path)
+    if return_code < 0:
+      print("Error return code: %d." % return_code)

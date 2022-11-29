@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2021 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -819,7 +819,9 @@ int generate_stateless_cookie_callback(SSL *ssl, unsigned char *cookie,
 {
     unsigned int temp;
     int res = generate_cookie_callback(ssl, cookie, &temp);
-    *cookie_len = temp;
+
+    if (res != 0)
+        *cookie_len = temp;
     return res;
 }
 
@@ -934,7 +936,8 @@ static int set_cert_cb(SSL *ssl, void *arg)
                 if (!SSL_build_cert_chain(ssl, 0))
                     return 0;
             } else if (exc->chain != NULL) {
-                SSL_set1_chain(ssl, exc->chain);
+                if (!SSL_set1_chain(ssl, exc->chain))
+                    return 0;
             }
         }
         exc = exc->prev;

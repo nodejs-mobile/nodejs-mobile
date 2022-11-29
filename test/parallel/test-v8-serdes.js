@@ -3,7 +3,6 @@
 'use strict';
 
 const common = require('../common');
-const fixtures = require('../common/fixtures');
 const { internalBinding } = require('internal/test/binding');
 const assert = require('assert');
 const v8 = require('v8');
@@ -12,28 +11,28 @@ const os = require('os');
 const circular = {};
 circular.circular = circular;
 
-const wasmModule = common.isIOS ?
-  null :
-  new WebAssembly.Module(fixtures.readSync('simple.wasm'));
-
 const objects = [
   { foo: 'bar' },
   { bar: 'baz' },
+  new Int8Array([1, 2, 3, 4]),
   new Uint8Array([1, 2, 3, 4]),
+  new Int16Array([1, 2, 3, 4]),
+  new Uint16Array([1, 2, 3, 4]),
+  new Int32Array([1, 2, 3, 4]),
   new Uint32Array([1, 2, 3, 4]),
+  new Float32Array([1, 2, 3, 4]),
+  new Float64Array([1, 2, 3, 4]),
+  new DataView(new ArrayBuffer(42)),
   Buffer.from([1, 2, 3, 4]),
+  new BigInt64Array([42n]),
+  new BigUint64Array([42n]),
   undefined,
   null,
   42,
-  circular
-].concat(common.isIOS ? [] : [wasmModule]);
+  circular,
+];
 
 const hostObject = new (internalBinding('js_stream').JSStream)();
-
-const serializerTypeError =
-  /^TypeError: Class constructor Serializer cannot be invoked without 'new'$/;
-const deserializerTypeError =
-  /^TypeError: Class constructor Deserializer cannot be invoked without 'new'$/;
 
 {
   const ser = new v8.DefaultSerializer();
@@ -59,7 +58,7 @@ const deserializerTypeError =
 {
   const ser = new v8.DefaultSerializer();
   ser._getDataCloneError = common.mustCall((message) => {
-    assert.strictEqual(message, '[object Object] could not be cloned.');
+    assert.strictEqual(message, '#<Object> could not be cloned.');
     return new Error('foobar');
   });
 
@@ -191,8 +190,16 @@ const deserializerTypeError =
 }
 
 {
-  assert.throws(v8.Serializer, serializerTypeError);
-  assert.throws(v8.Deserializer, deserializerTypeError);
+  assert.throws(() => v8.Serializer(), {
+    constructor: TypeError,
+    message: "Class constructor Serializer cannot be invoked without 'new'",
+    code: 'ERR_CONSTRUCT_CALL_REQUIRED'
+  });
+  assert.throws(() => v8.Deserializer(), {
+    constructor: TypeError,
+    message: "Class constructor Deserializer cannot be invoked without 'new'",
+    code: 'ERR_CONSTRUCT_CALL_REQUIRED'
+  });
 }
 
 
@@ -238,8 +245,9 @@ const deserializerTypeError =
   );
 }
 
-if (!common.isIOS) {
-  const deserializedWasmModule = v8.deserialize(v8.serialize(wasmModule));
-  const instance = new WebAssembly.Instance(deserializedWasmModule);
-  assert.strictEqual(instance.exports.add(10, 20), 30);
+{
+  // Regression test for https://github.com/nodejs/node/issues/37978
+  assert.throws(() => {
+    new v8.Deserializer(new v8.Serializer().releaseBuffer()).readDouble();
+  }, /ReadDouble\(\) failed/);
 }

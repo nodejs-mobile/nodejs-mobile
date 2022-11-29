@@ -110,6 +110,7 @@ class TraceSigintWatchdog : public HandleWrap, public SigintWatchdogBase {
 class SigintWatchdogHelper {
  public:
   static SigintWatchdogHelper* GetInstance() { return &instance; }
+  static Mutex& GetInstanceActionMutex() { return instance_action_mutex_; }
   void Register(SigintWatchdogBase* watchdog);
   void Unregister(SigintWatchdogBase* watchdog);
   bool HasPendingSignal();
@@ -123,6 +124,7 @@ class SigintWatchdogHelper {
 
   static bool InformWatchdogsAboutSignal();
   static SigintWatchdogHelper instance;
+  static Mutex instance_action_mutex_;
 
   int start_stop_count_;
 
@@ -138,7 +140,7 @@ class SigintWatchdogHelper {
   bool stopping_;
 
   static void* RunSigintWatchdog(void* arg);
-  static void HandleSignal(int signum);
+  static void HandleSignal(int signum, siginfo_t* info, void* ucontext);
 #else
   bool watchdog_disabled_;
   static BOOL WINAPI WinCtrlCHandlerRoutine(DWORD dwCtrlType);

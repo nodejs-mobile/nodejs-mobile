@@ -18,23 +18,25 @@
 namespace v8 {
 namespace internal {
 
-OBJECT_CONSTRUCTORS_IMPL(JSDateTimeFormat, JSObject)
+#include "torque-generated/src/objects/js-date-time-format-tq-inl.inc"
+
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSDateTimeFormat)
 
 ACCESSORS(JSDateTimeFormat, icu_locale, Managed<icu::Locale>, kIcuLocaleOffset)
 ACCESSORS(JSDateTimeFormat, icu_simple_date_format,
           Managed<icu::SimpleDateFormat>, kIcuSimpleDateFormatOffset)
 ACCESSORS(JSDateTimeFormat, icu_date_interval_format,
           Managed<icu::DateIntervalFormat>, kIcuDateIntervalFormatOffset)
-ACCESSORS(JSDateTimeFormat, bound_format, Object, kBoundFormatOffset)
-SMI_ACCESSORS(JSDateTimeFormat, flags, kFlagsOffset)
 
-inline void JSDateTimeFormat::set_hour_cycle(Intl::HourCycle hour_cycle) {
+BOOL_ACCESSORS(JSDateTimeFormat, flags, iso8601, Iso8601Bit::kShift)
+
+inline void JSDateTimeFormat::set_hour_cycle(HourCycle hour_cycle) {
   int hints = flags();
   hints = HourCycleBits::update(hints, hour_cycle);
   set_flags(hints);
 }
 
-inline Intl::HourCycle JSDateTimeFormat::hour_cycle() const {
+inline JSDateTimeFormat::HourCycle JSDateTimeFormat::hour_cycle() const {
   return HourCycleBits::decode(flags());
 }
 
@@ -59,8 +61,6 @@ inline void JSDateTimeFormat::set_time_style(
 inline JSDateTimeFormat::DateTimeStyle JSDateTimeFormat::time_style() const {
   return TimeStyleBits::decode(flags());
 }
-
-CAST_ACCESSOR(JSDateTimeFormat)
 
 }  // namespace internal
 }  // namespace v8

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/compiler-dispatcher/compiler-dispatcher.h"
-
 #include <sstream>
 
 #include "include/v8-platform.h"
@@ -12,8 +10,8 @@
 #include "src/ast/ast.h"
 #include "src/ast/scopes.h"
 #include "src/base/platform/semaphore.h"
-#include "src/base/template-utils.h"
 #include "src/codegen/compiler.h"
+#include "src/compiler-dispatcher/lazy-compile-dispatcher.h"
 #include "src/flags/flags.h"
 #include "src/handles/handles.h"
 #include "src/init/v8.h"
@@ -28,14 +26,19 @@
 namespace v8 {
 namespace internal {
 
-class CompilerDispatcherTestFlags {
+class LazyCompilerDispatcherTestFlags {
  public:
+  LazyCompilerDispatcherTestFlags(const LazyCompilerDispatcherTestFlags&) =
+      delete;
+  LazyCompilerDispatcherTestFlags& operator=(
+      const LazyCompilerDispatcherTestFlags&) = delete;
   static void SetFlagsForTest() {
     CHECK_NULL(save_flags_);
     save_flags_ = new SaveFlags();
     FLAG_single_threaded = true;
     FlagList::EnforceFlagImplications();
-    FLAG_compiler_dispatcher = true;
+    FLAG_lazy_compile_dispatcher = true;
+    FLAG_finalize_streaming_on_background = false;
   }
 
   static void RestoreFlags() {
@@ -46,32 +49,35 @@ class CompilerDispatcherTestFlags {
 
  private:
   static SaveFlags* save_flags_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(CompilerDispatcherTestFlags);
 };
 
-SaveFlags* CompilerDispatcherTestFlags::save_flags_ = nullptr;
+SaveFlags* LazyCompilerDispatcherTestFlags::save_flags_ = nullptr;
 
-class CompilerDispatcherTest : public TestWithNativeContext {
+class LazyCompilerDispatcherTest : public TestWithNativeContext {
  public:
-  CompilerDispatcherTest() = default;
-  ~CompilerDispatcherTest() override = default;
+  LazyCompilerDispatcherTest() = default;
+  ~LazyCompilerDispatcherTest() override = default;
+  LazyCompilerDispatcherTest(const LazyCompilerDispatcherTest&) = delete;
+  LazyCompilerDispatcherTest& operator=(const LazyCompilerDispatcherTest&) =
+      delete;
 
   static void SetUpTestCase() {
-    CompilerDispatcherTestFlags::SetFlagsForTest();
+    LazyCompilerDispatcherTestFlags::SetFlagsForTest();
     TestWithNativeContext::SetUpTestCase();
   }
 
   static void TearDownTestCase() {
     TestWithNativeContext::TearDownTestCase();
-    CompilerDispatcherTestFlags::RestoreFlags();
+    LazyCompilerDispatcherTestFlags::RestoreFlags();
   }
 
-  static base::Optional<CompilerDispatcher::JobId> EnqueueUnoptimizedCompileJob(
-      CompilerDispatcher* dispatcher, Isolate* isolate,
-      Handle<SharedFunctionInfo> shared) {
+  static base::Optional<LazyCompileDispatcher::JobId>
+  EnqueueUnoptimizedCompileJob(LazyCompileDispatcher* dispatcher,
+                               Isolate* isolate,
+                               Handle<SharedFunctionInfo> shared) {
+    UnoptimizedCompileState state(isolate);
     std::unique_ptr<ParseInfo> outer_parse_info =
-        test::OuterParseInfoForShared(isolate, shared);
+        test::OuterParseInfoForShared(isolate, shared, &state);
     AstValueFactory* ast_value_factory =
         outer_parse_info->GetOrCreateAstValueFactory();
     AstNodeFactory ast_node_factory(ast_value_factory,
@@ -79,10 +85,11 @@ class CompilerDispatcherTest : public TestWithNativeContext {
 
     const AstRawString* function_name =
         ast_value_factory->GetOneByteString("f");
-    DeclarationScope* script_scope = new (outer_parse_info->zone())
-        DeclarationScope(outer_parse_info->zone(), ast_value_factory);
+    DeclarationScope* script_scope =
+        outer_parse_info->zone()->New<DeclarationScope>(
+            outer_parse_info->zone(), ast_value_factory);
     DeclarationScope* function_scope =
-        new (outer_parse_info->zone()) DeclarationScope(
+        outer_parse_info->zone()->New<DeclarationScope>(
             outer_parse_info->zone(), script_scope, FUNCTION_SCOPE);
     function_scope->set_start_position(shared->StartPosition());
     function_scope->set_end_position(shared->EndPosition());
@@ -100,8 +107,14 @@ class CompilerDispatcherTest : public TestWithNativeContext {
                                function_literal);
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(CompilerDispatcherTest);
+ protected:
+  void SetUp() override {
+    // TODO(leszeks): Support background finalization in compiler dispatcher.
+    if (FLAG_finalize_streaming_on_background) {
+      GTEST_SKIP_(
+          "Parallel compile tasks don't yet support background finalization");
+    }
+  }
 };
 
 namespace {
@@ -120,6 +133,8 @@ class MockPlatform : public v8::Platform {
     EXPECT_TRUE(worker_tasks_.empty());
     EXPECT_TRUE(idle_task_ == nullptr);
   }
+  MockPlatform(const MockPlatform&) = delete;
+  MockPlatform& operator=(const MockPlatform&) = delete;
 
   int NumberOfWorkerThreads() override { return 1; }
 
@@ -138,24 +153,12 @@ class MockPlatform : public v8::Platform {
     UNREACHABLE();
   }
 
-  void CallOnForegroundThread(v8::Isolate* isolate, Task* task) override {
-    base::MutexGuard lock(&mutex_);
-    foreground_tasks_.push_back(std::unique_ptr<Task>(task));
-  }
+  bool IdleTasksEnabled(v8::Isolate* isolate) override { return true; }
 
-  void CallDelayedOnForegroundThread(v8::Isolate* isolate, Task* task,
-                                     double delay_in_seconds) override {
+  std::unique_ptr<JobHandle> PostJob(
+      TaskPriority priority, std::unique_ptr<JobTask> job_state) override {
     UNREACHABLE();
   }
-
-  void CallIdleOnForegroundThread(v8::Isolate* isolate,
-                                  IdleTask* task) override {
-    base::MutexGuard lock(&mutex_);
-    ASSERT_TRUE(idle_task_ == nullptr);
-    idle_task_ = task;
-  }
-
-  bool IdleTasksEnabled(v8::Isolate* isolate) override { return true; }
 
   double MonotonicallyIncreasingTime() override {
     time_ += time_step_;
@@ -205,7 +208,7 @@ class MockPlatform : public v8::Platform {
       tasks.swap(worker_tasks_);
     }
     platform->CallOnWorkerThread(
-        base::make_unique<TaskWrapper>(this, std::move(tasks), true));
+        std::make_unique<TaskWrapper>(this, std::move(tasks), true));
     sem_.Wait();
   }
 
@@ -216,7 +219,7 @@ class MockPlatform : public v8::Platform {
       tasks.swap(worker_tasks_);
     }
     platform->CallOnWorkerThread(
-        base::make_unique<TaskWrapper>(this, std::move(tasks), false));
+        std::make_unique<TaskWrapper>(this, std::move(tasks), false));
   }
 
   void RunForegroundTasks() {
@@ -262,6 +265,8 @@ class MockPlatform : public v8::Platform {
                 std::vector<std::unique_ptr<Task>> tasks, bool signal)
         : platform_(platform), tasks_(std::move(tasks)), signal_(signal) {}
     ~TaskWrapper() override = default;
+    TaskWrapper(const TaskWrapper&) = delete;
+    TaskWrapper& operator=(const TaskWrapper&) = delete;
 
     void Run() override {
       for (auto& task : tasks_) {
@@ -276,8 +281,6 @@ class MockPlatform : public v8::Platform {
     MockPlatform* platform_;
     std::vector<std::unique_ptr<Task>> tasks_;
     bool signal_;
-
-    DISALLOW_COPY_AND_ASSIGN(TaskWrapper);
   };
 
   class MockForegroundTaskRunner final : public TaskRunner {
@@ -288,6 +291,11 @@ class MockPlatform : public v8::Platform {
     void PostTask(std::unique_ptr<v8::Task> task) override {
       base::MutexGuard lock(&platform_->mutex_);
       platform_->foreground_tasks_.push_back(std::move(task));
+    }
+
+    void PostNonNestableTask(std::unique_ptr<v8::Task> task) override {
+      // The mock platform does not nest tasks.
+      PostTask(std::move(task));
     }
 
     void PostDelayedTask(std::unique_ptr<Task> task,
@@ -303,6 +311,8 @@ class MockPlatform : public v8::Platform {
     }
 
     bool IdleTasksEnabled() override { return true; }
+
+    bool NonNestableTasksEnabled() const override { return false; }
 
    private:
     MockPlatform* platform_;
@@ -321,28 +331,26 @@ class MockPlatform : public v8::Platform {
   base::Semaphore sem_;
 
   v8::TracingController* tracing_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockPlatform);
 };
 
 }  // namespace
 
-TEST_F(CompilerDispatcherTest, Construct) {
+TEST_F(LazyCompilerDispatcherTest, Construct) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, IsEnqueued) {
+TEST_F(LazyCompilerDispatcherTest, IsEnqueued) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
   ASSERT_FALSE(dispatcher.IsEnqueued(shared));
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
 
   ASSERT_TRUE(job_id);
@@ -362,15 +370,15 @@ TEST_F(CompilerDispatcherTest, IsEnqueued) {
   platform.ClearWorkerTasks();
 }
 
-TEST_F(CompilerDispatcherTest, FinishNow) {
+TEST_F(LazyCompilerDispatcherTest, FinishNow) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   dispatcher.RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -385,16 +393,16 @@ TEST_F(CompilerDispatcherTest, FinishNow) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, CompileAndFinalize) {
+TEST_F(LazyCompilerDispatcherTest, CompileAndFinalize) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
   ASSERT_FALSE(platform.IdleTaskPending());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   ASSERT_TRUE(platform.WorkerTasksPending());
 
@@ -420,16 +428,16 @@ TEST_F(CompilerDispatcherTest, CompileAndFinalize) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, IdleTaskNoIdleTime) {
+TEST_F(LazyCompilerDispatcherTest, IdleTaskNoIdleTime) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
   ASSERT_FALSE(platform.IdleTaskPending());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   dispatcher.RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -462,9 +470,9 @@ TEST_F(CompilerDispatcherTest, IdleTaskNoIdleTime) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, IdleTaskSmallIdleTime) {
+TEST_F(LazyCompilerDispatcherTest, IdleTaskSmallIdleTime) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared_1 =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
@@ -473,9 +481,9 @@ TEST_F(CompilerDispatcherTest, IdleTaskSmallIdleTime) {
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared_2->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id_1 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_1 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_1);
-  base::Optional<CompilerDispatcher::JobId> job_id_2 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_2 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_2);
 
   dispatcher.RegisterSharedFunctionInfo(*job_id_1, *shared_1);
@@ -512,9 +520,9 @@ TEST_F(CompilerDispatcherTest, IdleTaskSmallIdleTime) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, IdleTaskException) {
+TEST_F(LazyCompilerDispatcherTest, IdleTaskException) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, 50);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, 50);
 
   std::string raw_script("(x) { var a = ");
   for (int i = 0; i < 1000; i++) {
@@ -528,7 +536,7 @@ TEST_F(CompilerDispatcherTest, IdleTaskException) {
       test::CreateSharedFunctionInfo(i_isolate(), script);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   dispatcher.RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -543,15 +551,15 @@ TEST_F(CompilerDispatcherTest, IdleTaskException) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, FinishNowWithWorkerTask) {
+TEST_F(LazyCompilerDispatcherTest, FinishNowWithWorkerTask) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   dispatcher.RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -576,9 +584,9 @@ TEST_F(CompilerDispatcherTest, FinishNowWithWorkerTask) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, IdleTaskMultipleJobs) {
+TEST_F(LazyCompilerDispatcherTest, IdleTaskMultipleJobs) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared_1 =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
@@ -587,9 +595,9 @@ TEST_F(CompilerDispatcherTest, IdleTaskMultipleJobs) {
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared_2->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id_1 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_1 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_1);
-  base::Optional<CompilerDispatcher::JobId> job_id_2 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_2 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_2);
 
   dispatcher.RegisterSharedFunctionInfo(*job_id_1, *shared_1);
@@ -611,9 +619,9 @@ TEST_F(CompilerDispatcherTest, IdleTaskMultipleJobs) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, FinishNowException) {
+TEST_F(LazyCompilerDispatcherTest, FinishNowException) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, 50);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, 50);
 
   std::string raw_script("(x) { var a = ");
   for (int i = 0; i < 1000; i++) {
@@ -627,7 +635,7 @@ TEST_F(CompilerDispatcherTest, FinishNowException) {
       test::CreateSharedFunctionInfo(i_isolate(), script);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
   dispatcher.RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -643,15 +651,15 @@ TEST_F(CompilerDispatcherTest, FinishNowException) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, AbortJobNotStarted) {
+TEST_F(LazyCompilerDispatcherTest, AbortJobNotStarted) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
 
   ASSERT_EQ(dispatcher.jobs_.size(), 1u);
@@ -673,15 +681,15 @@ TEST_F(CompilerDispatcherTest, AbortJobNotStarted) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, AbortJobAlreadyStarted) {
+TEST_F(LazyCompilerDispatcherTest, AbortJobAlreadyStarted) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared);
 
   ASSERT_EQ(dispatcher.jobs_.size(), 1u);
@@ -738,10 +746,10 @@ TEST_F(CompilerDispatcherTest, AbortJobAlreadyStarted) {
   dispatcher.AbortAll();
 }
 
-TEST_F(CompilerDispatcherTest, CompileLazyFinishesDispatcherJob) {
+TEST_F(LazyCompilerDispatcherTest, CompileLazyFinishesDispatcherJob) {
   // Use the real dispatcher so that CompileLazy checks the same one for
   // enqueued functions.
-  CompilerDispatcher* dispatcher = i_isolate()->compiler_dispatcher();
+  LazyCompileDispatcher* dispatcher = i_isolate()->lazy_compile_dispatcher();
 
   const char raw_script[] = "function lazy() { return 42; }; lazy;";
   test::ScriptResource* script =
@@ -750,7 +758,7 @@ TEST_F(CompilerDispatcherTest, CompileLazyFinishesDispatcherJob) {
   Handle<SharedFunctionInfo> shared(f->shared(), i_isolate());
   ASSERT_FALSE(shared->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id =
+  base::Optional<LazyCompileDispatcher::JobId> job_id =
       EnqueueUnoptimizedCompileJob(dispatcher, i_isolate(), shared);
   dispatcher->RegisterSharedFunctionInfo(*job_id, *shared);
 
@@ -761,10 +769,10 @@ TEST_F(CompilerDispatcherTest, CompileLazyFinishesDispatcherJob) {
   ASSERT_FALSE(dispatcher->IsEnqueued(shared));
 }
 
-TEST_F(CompilerDispatcherTest, CompileLazy2FinishesDispatcherJob) {
+TEST_F(LazyCompilerDispatcherTest, CompileLazy2FinishesDispatcherJob) {
   // Use the real dispatcher so that CompileLazy checks the same one for
   // enqueued functions.
-  CompilerDispatcher* dispatcher = i_isolate()->compiler_dispatcher();
+  LazyCompileDispatcher* dispatcher = i_isolate()->lazy_compile_dispatcher();
 
   const char raw_source_2[] = "function lazy2() { return 42; }; lazy2;";
   test::ScriptResource* source_2 =
@@ -780,11 +788,11 @@ TEST_F(CompilerDispatcherTest, CompileLazy2FinishesDispatcherJob) {
   Handle<SharedFunctionInfo> shared_1(lazy1->shared(), i_isolate());
   ASSERT_FALSE(shared_1->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id_1 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_1 =
       EnqueueUnoptimizedCompileJob(dispatcher, i_isolate(), shared_1);
   dispatcher->RegisterSharedFunctionInfo(*job_id_1, *shared_1);
 
-  base::Optional<CompilerDispatcher::JobId> job_id_2 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_2 =
       EnqueueUnoptimizedCompileJob(dispatcher, i_isolate(), shared_2);
   dispatcher->RegisterSharedFunctionInfo(*job_id_2, *shared_2);
 
@@ -798,9 +806,9 @@ TEST_F(CompilerDispatcherTest, CompileLazy2FinishesDispatcherJob) {
   ASSERT_FALSE(dispatcher->IsEnqueued(shared_2));
 }
 
-TEST_F(CompilerDispatcherTest, CompileMultipleOnBackgroundThread) {
+TEST_F(LazyCompilerDispatcherTest, CompileMultipleOnBackgroundThread) {
   MockPlatform platform;
-  CompilerDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
+  LazyCompileDispatcher dispatcher(i_isolate(), &platform, FLAG_stack_size);
 
   Handle<SharedFunctionInfo> shared_1 =
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
@@ -810,11 +818,11 @@ TEST_F(CompilerDispatcherTest, CompileMultipleOnBackgroundThread) {
       test::CreateSharedFunctionInfo(i_isolate(), nullptr);
   ASSERT_FALSE(shared_2->is_compiled());
 
-  base::Optional<CompilerDispatcher::JobId> job_id_1 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_1 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_1);
   dispatcher.RegisterSharedFunctionInfo(*job_id_1, *shared_1);
 
-  base::Optional<CompilerDispatcher::JobId> job_id_2 =
+  base::Optional<LazyCompileDispatcher::JobId> job_id_2 =
       EnqueueUnoptimizedCompileJob(&dispatcher, i_isolate(), shared_2);
   dispatcher.RegisterSharedFunctionInfo(*job_id_2, *shared_2);
 

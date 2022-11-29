@@ -15,7 +15,7 @@ namespace v8 {
 namespace internal {
 
 StubCache::StubCache(Isolate* isolate) : isolate_(isolate) {
-  // Ensure the nullptr (aka Smi::kZero) which StubCache::Get() returns
+  // Ensure the nullptr (aka Smi::zero()) which StubCache::Get() returns
   // when the entry is not found is not considered as a handler.
   DCHECK(!IC::IsHandler(MaybeObject()));
 }
@@ -26,14 +26,13 @@ void StubCache::Initialize() {
   Clear();
 }
 
-// Hash algorithm for the primary table.  This algorithm is replicated in
-// assembler for every architecture.  Returns an index into the table that
+// Hash algorithm for the primary table. This algorithm is replicated in
+// the AccessorAssembler.  Returns an index into the table that
 // is scaled by 1 << kCacheIndexShift.
 int StubCache::PrimaryOffset(Name name, Map map) {
-  STATIC_ASSERT(kCacheIndexShift == Name::kHashShift);
   // Compute the hash of the name (use entire hash field).
   DCHECK(name.HasHashCode());
-  uint32_t field = name.hash_field();
+  uint32_t field = name.raw_hash_field();
   // Using only the low bits in 64-bit mode is unlikely to increase the
   // risk of collision even if the heap is spread over an area larger than
   // 4Gb (and not at all if it isn't).
@@ -72,7 +71,6 @@ bool CommonStubCacheChecks(StubCache* stub_cache, Name name, Map map,
   DCHECK(!Heap::InYoungGeneration(name));
   DCHECK(!Heap::InYoungGeneration(handler));
   DCHECK(name.IsUniqueName());
-  DCHECK(name.HasHashCode());
   if (handler->ptr() != kNullAddress) DCHECK(IC::IsHandler(handler));
   return true;
 }
@@ -91,7 +89,7 @@ void StubCache::Set(Name name, Map map, MaybeObject handler) {
   // If the primary entry has useful data in it, we retire it to the
   // secondary cache before overwriting it.
   if (old_handler != MaybeObject::FromObject(
-                         isolate()->builtins()->builtin(Builtins::kIllegal)) &&
+                         isolate()->builtins()->code(Builtin::kIllegal)) &&
       !primary->map.IsSmi()) {
     Map old_map =
         Map::cast(StrongTaggedValue::ToObject(isolate(), primary->map));
@@ -127,8 +125,8 @@ MaybeObject StubCache::Get(Name name, Map map) {
 }
 
 void StubCache::Clear() {
-  MaybeObject empty = MaybeObject::FromObject(
-      isolate_->builtins()->builtin(Builtins::kIllegal));
+  MaybeObject empty =
+      MaybeObject::FromObject(isolate_->builtins()->code(Builtin::kIllegal));
   Name empty_string = ReadOnlyRoots(isolate()).empty_string();
   for (int i = 0; i < kPrimaryTableSize; i++) {
     primary_[i].key = StrongTaggedValue(empty_string);

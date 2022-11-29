@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-private-methods
-
 "use strict";
 
 // Basic private method test
@@ -266,8 +264,10 @@
 }
 
 {
-  // TODO(v8:9177): test extending a class expression that does not have
-  // a private method.
+  class A extends class { } {
+    #a() {}
+  }
+
   class D extends class {
     #c() {}
   } {
@@ -278,6 +278,7 @@
     #e() {}
   }
 
+  new A;
   new D;
   new E;
 }
@@ -294,4 +295,13 @@
   }
 
   assertEquals(1, new C().fn());
+}
+
+{
+  assertThrows(() => {
+    class A {
+      [this.#a] = 1;
+      #a() { }
+    }
+  }, TypeError);
 }

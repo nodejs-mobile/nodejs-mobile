@@ -19,12 +19,13 @@ function test(size, useBuffer, cb) {
 
   try {
     fs.unlinkSync(tmpFile);
-  } catch {}
+  } catch {
+    // Continue regardless of error.
+  }
 
   console.log(`${size} chars to ${tmpFile}...`);
 
-  childProcess.exec(cmd, common.mustCall(function(err) {
-    assert.ifError(err);
+  childProcess.exec(cmd, common.mustSucceed(() => {
     console.log('done!');
 
     const stat = fs.statSync(tmpFile);

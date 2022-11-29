@@ -15,7 +15,7 @@
 #include "src/regexp/arm64/regexp-macro-assembler-arm64.h"
 #elif V8_TARGET_ARCH_ARM
 #include "src/regexp/arm/regexp-macro-assembler-arm.h"
-#elif V8_TARGET_ARCH_PPC
+#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
 #include "src/regexp/ppc/regexp-macro-assembler-ppc.h"
 #elif V8_TARGET_ARCH_MIPS
 #include "src/regexp/mips/regexp-macro-assembler-mips.h"
@@ -23,6 +23,8 @@
 #include "src/regexp/mips64/regexp-macro-assembler-mips64.h"
 #elif V8_TARGET_ARCH_S390
 #include "src/regexp/s390/regexp-macro-assembler-s390.h"
+#elif V8_TARGET_ARCH_RISCV64
+#include "src/regexp/riscv64/regexp-macro-assembler-riscv64.h"
 #else
 #error Unsupported target architecture.
 #endif

@@ -21,71 +21,6 @@ namespace internal {
 namespace compiler {
 
 // static
-int NodeProperties::PastValueIndex(Node* node) {
-  return FirstValueIndex(node) + node->op()->ValueInputCount();
-}
-
-
-// static
-int NodeProperties::PastContextIndex(Node* node) {
-  return FirstContextIndex(node) +
-         OperatorProperties::GetContextInputCount(node->op());
-}
-
-
-// static
-int NodeProperties::PastFrameStateIndex(Node* node) {
-  return FirstFrameStateIndex(node) +
-         OperatorProperties::GetFrameStateInputCount(node->op());
-}
-
-
-// static
-int NodeProperties::PastEffectIndex(Node* node) {
-  return FirstEffectIndex(node) + node->op()->EffectInputCount();
-}
-
-
-// static
-int NodeProperties::PastControlIndex(Node* node) {
-  return FirstControlIndex(node) + node->op()->ControlInputCount();
-}
-
-
-// static
-Node* NodeProperties::GetValueInput(Node* node, int index) {
-  DCHECK(0 <= index && index < node->op()->ValueInputCount());
-  return node->InputAt(FirstValueIndex(node) + index);
-}
-
-
-// static
-Node* NodeProperties::GetContextInput(Node* node) {
-  DCHECK(OperatorProperties::HasContextInput(node->op()));
-  return node->InputAt(FirstContextIndex(node));
-}
-
-
-// static
-Node* NodeProperties::GetFrameStateInput(Node* node) {
-  DCHECK_EQ(1, OperatorProperties::GetFrameStateInputCount(node->op()));
-  return node->InputAt(FirstFrameStateIndex(node));
-}
-
-
-// static
-Node* NodeProperties::GetEffectInput(Node* node, int index) {
-  DCHECK(0 <= index && index < node->op()->EffectInputCount());
-  return node->InputAt(FirstEffectIndex(node) + index);
-}
-
-
-// static
-Node* NodeProperties::GetControlInput(Node* node, int index) {
-  DCHECK(0 <= index && index < node->op()->ControlInputCount());
-  return node->InputAt(FirstControlIndex(node) + index);
-}
-
 
 // static
 bool NodeProperties::IsValueEdge(Edge edge) {
@@ -142,7 +77,7 @@ bool NodeProperties::IsExceptionalCall(Node* node, Node** out_exception) {
 
 // static
 Node* NodeProperties::FindSuccessfulControlProjection(Node* node) {
-  DCHECK_GT(node->op()->ControlOutputCount(), 0);
+  CHECK_GT(node->op()->ControlOutputCount(), 0);
   if (node->op()->HasProperty(Operator::kNoThrow)) return node;
   for (Edge const edge : node->use_edges()) {
     if (!NodeProperties::IsControlEdge(edge)) continue;
@@ -155,7 +90,8 @@ Node* NodeProperties::FindSuccessfulControlProjection(Node* node) {
 
 // static
 void NodeProperties::ReplaceValueInput(Node* node, Node* value, int index) {
-  DCHECK(index < node->op()->ValueInputCount());
+  CHECK_LE(0, index);
+  CHECK_LT(index, node->op()->ValueInputCount());
   node->ReplaceInput(FirstValueIndex(node) + index, value);
 }
 
@@ -163,7 +99,7 @@ void NodeProperties::ReplaceValueInput(Node* node, Node* value, int index) {
 // static
 void NodeProperties::ReplaceValueInputs(Node* node, Node* value) {
   int value_input_count = node->op()->ValueInputCount();
-  DCHECK_LE(1, value_input_count);
+  CHECK_GT(value_input_count, 0);
   node->ReplaceInput(0, value);
   while (--value_input_count > 0) {
     node->RemoveInput(value_input_count);
@@ -173,30 +109,32 @@ void NodeProperties::ReplaceValueInputs(Node* node, Node* value) {
 
 // static
 void NodeProperties::ReplaceContextInput(Node* node, Node* context) {
+  CHECK(OperatorProperties::HasContextInput(node->op()));
   node->ReplaceInput(FirstContextIndex(node), context);
 }
 
 
 // static
 void NodeProperties::ReplaceControlInput(Node* node, Node* control, int index) {
-  DCHECK(index < node->op()->ControlInputCount());
+  CHECK_LE(0, index);
+  CHECK_LT(index, node->op()->ControlInputCount());
   node->ReplaceInput(FirstControlIndex(node) + index, control);
 }
 
 
 // static
 void NodeProperties::ReplaceEffectInput(Node* node, Node* effect, int index) {
-  DCHECK(index < node->op()->EffectInputCount());
+  CHECK_LE(0, index);
+  CHECK_LT(index, node->op()->EffectInputCount());
   return node->ReplaceInput(FirstEffectIndex(node) + index, effect);
 }
 
 
 // static
 void NodeProperties::ReplaceFrameStateInput(Node* node, Node* frame_state) {
-  DCHECK_EQ(1, OperatorProperties::GetFrameStateInputCount(node->op()));
+  CHECK(OperatorProperties::HasFrameStateInput(node->op()));
   node->ReplaceInput(FirstFrameStateIndex(node), frame_state);
 }
-
 
 // static
 void NodeProperties::RemoveNonValueInputs(Node* node) {
@@ -220,6 +158,21 @@ void NodeProperties::MergeControlToEnd(Graph* graph,
   graph->end()->set_op(common->End(graph->end()->InputCount()));
 }
 
+void NodeProperties::RemoveControlFromEnd(Graph* graph,
+                                          CommonOperatorBuilder* common,
+                                          Node* node) {
+  int index_to_remove = -1;
+  for (int i = 0; i < graph->end()->op()->ControlInputCount(); i++) {
+    int index = NodeProperties::FirstControlIndex(graph->end()) + i;
+    if (graph->end()->InputAt(index) == node) {
+      index_to_remove = index;
+      break;
+    }
+  }
+  CHECK_NE(-1, index_to_remove);
+  graph->end()->RemoveInput(index_to_remove);
+  graph->end()->set_op(common->End(graph->end()->InputCount()));
+}
 
 // static
 void NodeProperties::ReplaceUses(Node* node, Node* value, Node* effect,
@@ -375,16 +328,13 @@ base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
          receiver->opcode() == IrOpcode::kJSCreateArray);
   HeapObjectMatcher mtarget(GetValueInput(receiver, 0));
   HeapObjectMatcher mnewtarget(GetValueInput(receiver, 1));
-  if (mtarget.HasValue() && mnewtarget.HasValue() &&
+  if (mtarget.HasResolvedValue() && mnewtarget.HasResolvedValue() &&
       mnewtarget.Ref(broker).IsJSFunction()) {
     ObjectRef target = mtarget.Ref(broker);
     JSFunctionRef newtarget = mnewtarget.Ref(broker).AsJSFunction();
-    if (newtarget.map().has_prototype_slot() && newtarget.has_initial_map()) {
-      if (!newtarget.serialized()) {
-        TRACE_BROKER_MISSING(broker, "initial map on " << newtarget);
-        return base::nullopt;
-      }
-      MapRef initial_map = newtarget.initial_map();
+    if (newtarget.map().has_prototype_slot() &&
+        newtarget.has_initial_map(broker->dependencies())) {
+      MapRef initial_map = newtarget.initial_map(broker->dependencies());
       if (initial_map.GetConstructor().equals(target)) {
         DCHECK(target.AsJSFunction().map().is_constructor());
         DCHECK(newtarget.map().is_constructor());
@@ -395,12 +345,34 @@ base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
   return base::nullopt;
 }
 
+namespace {
+
+// TODO(jgruber): Remove the intermediate ZoneHandleSet and then this function.
+ZoneRefUnorderedSet<MapRef> ToRefSet(JSHeapBroker* broker,
+                                     const ZoneHandleSet<Map>& handles) {
+  ZoneRefUnorderedSet<MapRef> refs =
+      ZoneRefUnorderedSet<MapRef>(broker->zone());
+  for (Handle<Map> handle : handles) {
+    refs.insert(MakeRefAssumeMemoryFence(broker, *handle));
+  }
+  return refs;
+}
+
+ZoneRefUnorderedSet<MapRef> RefSetOf(JSHeapBroker* broker, const MapRef& ref) {
+  ZoneRefUnorderedSet<MapRef> refs =
+      ZoneRefUnorderedSet<MapRef>(broker->zone());
+  refs.insert(ref);
+  return refs;
+}
+
+}  // namespace
+
 // static
-NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
-    JSHeapBroker* broker, Node* receiver, Node* effect,
-    ZoneHandleSet<Map>* maps_return) {
+NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
+    JSHeapBroker* broker, Node* receiver, Effect effect,
+    ZoneRefUnorderedSet<MapRef>* maps_out) {
   HeapObjectMatcher m(receiver);
-  if (m.HasValue()) {
+  if (m.HasResolvedValue()) {
     HeapObjectRef receiver = m.Ref(broker);
     // We don't use ICs for the Array.prototype and the Object.prototype
     // because the runtime has to be able to intercept them properly, so
@@ -414,18 +386,18 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
       if (receiver.map().is_stable()) {
         // The {receiver_map} is only reliable when we install a stability
         // code dependency.
-        *maps_return = ZoneHandleSet<Map>(receiver.map().object());
-        return kUnreliableReceiverMaps;
+        *maps_out = RefSetOf(broker, receiver.map());
+        return kUnreliableMaps;
       }
     }
   }
-  InferReceiverMapsResult result = kReliableReceiverMaps;
+  InferMapsResult result = kReliableMaps;
   while (true) {
     switch (effect->opcode()) {
       case IrOpcode::kMapGuard: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_return = MapGuardMapsOf(effect->op());
+          *maps_out = ToRefSet(broker, MapGuardMapsOf(effect->op()));
           return result;
         }
         break;
@@ -433,7 +405,8 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
       case IrOpcode::kCheckMaps: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_return = CheckMapsParametersOf(effect->op()).maps();
+          *maps_out =
+              ToRefSet(broker, CheckMapsParametersOf(effect->op()).maps());
           return result;
         }
         break;
@@ -442,20 +415,21 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
         if (IsSame(receiver, effect)) {
           base::Optional<MapRef> initial_map = GetJSCreateMap(broker, receiver);
           if (initial_map.has_value()) {
-            *maps_return = ZoneHandleSet<Map>(initial_map->object());
+            *maps_out = RefSetOf(broker, initial_map.value());
             return result;
           }
           // We reached the allocation of the {receiver}.
-          return kNoReceiverMaps;
+          return kNoMaps;
         }
+        result = kUnreliableMaps;  // JSCreate can have side-effect.
         break;
       }
       case IrOpcode::kJSCreatePromise: {
         if (IsSame(receiver, effect)) {
-          *maps_return = ZoneHandleSet<Map>(broker->target_native_context()
-                                                .promise_function()
-                                                .initial_map()
-                                                .object());
+          *maps_out = RefSetOf(
+              broker,
+              broker->target_native_context().promise_function().initial_map(
+                  broker->dependencies()));
           return result;
         }
         break;
@@ -469,14 +443,14 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
           if (IsSame(receiver, object)) {
             Node* const value = GetValueInput(effect, 1);
             HeapObjectMatcher m(value);
-            if (m.HasValue()) {
-              *maps_return = ZoneHandleSet<Map>(m.Ref(broker).AsMap().object());
+            if (m.HasResolvedValue()) {
+              *maps_out = RefSetOf(broker, m.Ref(broker).AsMap());
               return result;
             }
           }
           // Without alias analysis we cannot tell whether this
           // StoreField[map] affects {receiver} or not.
-          result = kUnreliableReceiverMaps;
+          result = kUnreliableMaps;
         }
         break;
       }
@@ -499,25 +473,25 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
         if (control->opcode() != IrOpcode::kLoop) {
           DCHECK(control->opcode() == IrOpcode::kDead ||
                  control->opcode() == IrOpcode::kMerge);
-          return kNoReceiverMaps;
+          return kNoMaps;
         }
 
         // Continue search for receiver map outside the loop. Since operations
         // inside the loop may change the map, the result is unreliable.
         effect = GetEffectInput(effect, 0);
-        result = kUnreliableReceiverMaps;
+        result = kUnreliableMaps;
         continue;
       }
       default: {
         DCHECK_EQ(1, effect->op()->EffectOutputCount());
         if (effect->op()->EffectInputCount() != 1) {
           // Didn't find any appropriate CheckMaps node.
-          return kNoReceiverMaps;
+          return kNoMaps;
         }
         if (!effect->op()->HasProperty(Operator::kNoWrite)) {
           // Without alias/escape analysis we cannot tell whether this
           // {effect} affects {receiver} or not.
-          result = kUnreliableReceiverMaps;
+          result = kUnreliableMaps;
         }
         break;
       }
@@ -525,7 +499,7 @@ NodeProperties::InferReceiverMapsResult NodeProperties::InferReceiverMapsUnsafe(
 
     // Stop walking the effect chain once we hit the definition of
     // the {receiver} along the {effect}s.
-    if (IsSame(receiver, effect)) return kNoReceiverMaps;
+    if (IsSame(receiver, effect)) return kNoMaps;
 
     // Continue with the next {effect}.
     DCHECK_EQ(1, effect->op()->EffectInputCount());
@@ -549,7 +523,7 @@ bool NodeProperties::NoObservableSideEffectBetween(Node* effect,
 
 // static
 bool NodeProperties::CanBePrimitive(JSHeapBroker* broker, Node* receiver,
-                                    Node* effect) {
+                                    Effect effect) {
   switch (receiver->opcode()) {
 #define CASE(Opcode) case IrOpcode::k##Opcode:
     JS_CONSTRUCT_OP_LIST(CASE)
@@ -574,7 +548,7 @@ bool NodeProperties::CanBePrimitive(JSHeapBroker* broker, Node* receiver,
 
 // static
 bool NodeProperties::CanBeNullOrUndefined(JSHeapBroker* broker, Node* receiver,
-                                          Node* effect) {
+                                          Effect effect) {
   if (CanBePrimitive(broker, receiver, effect)) {
     switch (receiver->opcode()) {
       case IrOpcode::kCheckInternalizedString:
@@ -614,10 +588,9 @@ Node* NodeProperties::GetOuterContext(Node* node, size_t* depth) {
 }
 
 // static
-Type NodeProperties::GetTypeOrAny(Node* node) {
+Type NodeProperties::GetTypeOrAny(const Node* node) {
   return IsTyped(node) ? node->type() : Type::Any();
 }
-
 
 // static
 bool NodeProperties::AllValueInputsAreTyped(Node* node) {
@@ -628,6 +601,37 @@ bool NodeProperties::AllValueInputsAreTyped(Node* node) {
   return true;
 }
 
+// static
+bool NodeProperties::IsFreshObject(Node* node) {
+  if (node->opcode() == IrOpcode::kAllocate ||
+      node->opcode() == IrOpcode::kAllocateRaw)
+    return true;
+#if V8_ENABLE_WEBASSEMBLY
+  if (node->opcode() == IrOpcode::kCall) {
+    // TODO(manoskouk): Currently, some wasm builtins are called with in
+    // CallDescriptor::kCallWasmFunction mode. Make sure this is synced if the
+    // calling mechanism is refactored.
+    if (CallDescriptorOf(node->op())->kind() !=
+        CallDescriptor::kCallBuiltinPointer) {
+      return false;
+    }
+    NumberMatcher matcher(node->InputAt(0));
+    if (matcher.HasResolvedValue()) {
+      Builtin callee = static_cast<Builtin>(matcher.ResolvedValue());
+      // Note: Make sure to only add builtins which are guaranteed to return a
+      // fresh object. E.g. kWasmAllocateFixedArray may return the canonical
+      // empty array, and kWasmAllocateRtt may return a cached rtt.
+      return callee == Builtin::kWasmAllocateArray_Uninitialized ||
+             callee == Builtin::kWasmAllocateArray_InitNull ||
+             callee == Builtin::kWasmAllocateArray_InitZero ||
+             callee == Builtin::kWasmAllocateStructWithRtt ||
+             callee == Builtin::kWasmAllocateObjectWrapper ||
+             callee == Builtin::kWasmAllocatePair;
+    }
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
+  return false;
+}
 
 // static
 bool NodeProperties::IsInputRange(Edge edge, int first, int num) {

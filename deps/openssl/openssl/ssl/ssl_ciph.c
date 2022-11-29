@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2019 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2021 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  * Copyright 2005 Nokia. All rights reserved.
  *
@@ -1601,6 +1601,7 @@ STACK_OF(SSL_CIPHER) *ssl_create_cipher_list(const SSL_METHOD *ssl_method,
     for (i = 0; i < sk_SSL_CIPHER_num(tls13_ciphersuites); i++) {
         if (!sk_SSL_CIPHER_push(cipherstack,
                                 sk_SSL_CIPHER_value(tls13_ciphersuites, i))) {
+            OPENSSL_free(co_list);
             sk_SSL_CIPHER_free(cipherstack);
             return NULL;
         }
@@ -2162,3 +2163,37 @@ int ssl_cert_is_disabled(size_t idx)
         return 1;
     return 0;
 }
+
+#ifndef OPENSSL_NO_QUIC
+int SSL_CIPHER_get_prf_nid(const SSL_CIPHER *c)
+{
+    switch (c->algorithm2 & (0xFF << TLS1_PRF_DGST_SHIFT)) {
+    default:
+        break;
+    case TLS1_PRF_SHA1_MD5: /* TLS1_PRF */
+        return NID_md5_sha1;
+    case TLS1_PRF_SHA256:
+        return NID_sha256;
+    case TLS1_PRF_SHA384:
+        return NID_sha384;
+    case TLS1_PRF_GOST94:
+        return NID_id_GostR3411_94_prf;
+    case TLS1_PRF_GOST12_256:
+        return NID_id_GostR3411_2012_256;
+    case TLS1_PRF_GOST12_512:
+        return NID_id_GostR3411_2012_512;
+    }
+    /* TLSv1.3 ciphers don't specify separate PRF */
+    switch (c->algorithm2 & SSL_HANDSHAKE_MAC_MASK) {
+    default:
+        break;
+    case SSL_HANDSHAKE_MAC_MD5_SHA1: /* SSL_HANDSHAKE_MAC_DEFAULT */
+        return NID_md5_sha1;
+    case SSL_HANDSHAKE_MAC_SHA256:
+        return NID_sha256;
+    case SSL_HANDSHAKE_MAC_SHA384:
+        return NID_sha384;
+    }
+    return NID_undef;
+}
+#endif

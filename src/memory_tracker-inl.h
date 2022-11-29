@@ -22,7 +22,7 @@ inline const char* GetNodeName(const char* node_name, const char* edge_name) {
 class MemoryRetainerNode : public v8::EmbedderGraph::Node {
  public:
   inline MemoryRetainerNode(MemoryTracker* tracker,
-                                     const MemoryRetainer* retainer)
+                            const MemoryRetainer* retainer)
       : retainer_(retainer) {
     CHECK_NOT_NULL(retainer_);
     v8::HandleScope handle_scope(tracker->isolate());
@@ -34,9 +34,9 @@ class MemoryRetainerNode : public v8::EmbedderGraph::Node {
   }
 
   inline MemoryRetainerNode(MemoryTracker* tracker,
-                                     const char* name,
-                                     size_t size,
-                                     bool is_root_node = false)
+                            const char* name,
+                            size_t size,
+                            bool is_root_node = false)
       : retainer_(nullptr) {
     name_ = name;
     size_ = size;
@@ -110,6 +110,16 @@ void MemoryTracker::TrackField(const char* edge_name,
 template <typename T, typename D>
 void MemoryTracker::TrackField(const char* edge_name,
                                const std::unique_ptr<T, D>& value,
+                               const char* node_name) {
+  if (value.get() == nullptr) {
+    return;
+  }
+  TrackField(edge_name, value.get(), node_name);
+}
+
+template <typename T>
+void MemoryTracker::TrackField(const char* edge_name,
+                               const std::shared_ptr<T>& value,
                                const char* node_name) {
   if (value.get() == nullptr) {
     return;
@@ -221,6 +231,12 @@ void MemoryTracker::TrackField(const char* edge_name,
                                const MallocedBuffer<T>& value,
                                const char* node_name) {
   TrackFieldWithSize(edge_name, value.size, "MallocedBuffer");
+}
+
+void MemoryTracker::TrackField(const char* edge_name,
+                               const v8::BackingStore* value,
+                               const char* node_name) {
+  TrackFieldWithSize(edge_name, value->ByteLength(), "BackingStore");
 }
 
 void MemoryTracker::TrackField(const char* name,

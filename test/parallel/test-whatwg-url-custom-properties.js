@@ -4,9 +4,7 @@
 // Tests below are not from WPT.
 
 require('../common');
-const URL = require('url').URL;
 const assert = require('assert');
-const urlToOptions = require('internal/url').urlToOptions;
 
 const url = new URL('http://user:pass@foo.bar.com:21/aaa/zzz?l=24#test');
 const oldParams = url.searchParams;  // For test of [SameObject]
@@ -131,53 +129,18 @@ assert.strictEqual(url.toString(),
 assert.strictEqual((delete url.searchParams), true);
 assert.strictEqual(url.searchParams, oldParams);
 
-// Test urlToOptions
-{
-  const urlObj = new URL('http://user:pass@foo.bar.com:21/aaa/zzz?l=24#test');
-  const opts = urlToOptions(urlObj);
-  assert.strictEqual(opts instanceof URL, false);
-  assert.strictEqual(opts.protocol, 'http:');
-  assert.strictEqual(opts.auth, 'user:pass');
-  assert.strictEqual(opts.hostname, 'foo.bar.com');
-  assert.strictEqual(opts.port, 21);
-  assert.strictEqual(opts.path, '/aaa/zzz?l=24');
-  assert.strictEqual(opts.pathname, '/aaa/zzz');
-  assert.strictEqual(opts.search, '?l=24');
-  assert.strictEqual(opts.hash, '#test');
-
-  const { hostname } = urlToOptions(new URL('http://[::1]:21'));
-  assert.strictEqual(hostname, '::1');
-
-  // If a WHATWG URL object is copied, it is possible that the resulting copy
-  // contains the Symbols that Node uses for brand checking, but not the data
-  // properties, which are getters. Verify that urlToOptions() can handle such
-  // a case.
-  const copiedUrlObj = { ...urlObj };
-  const copiedOpts = urlToOptions(copiedUrlObj);
-  assert.strictEqual(copiedOpts instanceof URL, false);
-  assert.strictEqual(copiedOpts.protocol, undefined);
-  assert.strictEqual(copiedOpts.auth, undefined);
-  assert.strictEqual(copiedOpts.hostname, undefined);
-  assert.strictEqual(copiedOpts.port, NaN);
-  assert.strictEqual(copiedOpts.path, '');
-  assert.strictEqual(copiedOpts.pathname, undefined);
-  assert.strictEqual(copiedOpts.search, undefined);
-  assert.strictEqual(copiedOpts.hash, undefined);
-  assert.strictEqual(copiedOpts.href, undefined);
-}
-
 // Test special origins
 [
   { expected: 'https://whatwg.org',
     url: 'blob:https://whatwg.org/d0360e2f-caee-469f-9a2f-87d5b0456f6f' },
   { expected: 'ftp://example.org', url: 'ftp://example.org/foo' },
-  { expected: 'gopher://gopher.quux.org', url: 'gopher://gopher.quux.org/1/' },
   { expected: 'http://example.org', url: 'http://example.org/foo' },
   { expected: 'https://example.org', url: 'https://example.org/foo' },
   { expected: 'ws://example.org', url: 'ws://example.org/foo' },
   { expected: 'wss://example.org', url: 'wss://example.org/foo' },
+  { expected: 'null', url: 'gopher://gopher.quux.org/1/' },
   { expected: 'null', url: 'file:///tmp/mock/path' },
-  { expected: 'null', url: 'npm://nodejs/rules' }
+  { expected: 'null', url: 'npm://nodejs/rules' },
 ].forEach((test) => {
   assert.strictEqual(new URL(test.url).origin, test.expected);
 });

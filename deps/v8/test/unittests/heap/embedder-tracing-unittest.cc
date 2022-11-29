@@ -31,13 +31,16 @@ LocalEmbedderHeapTracer::WrapperInfo CreateWrapperInfo() {
 
 class MockEmbedderHeapTracer : public EmbedderHeapTracer {
  public:
-  MOCK_METHOD1(TracePrologue, void(EmbedderHeapTracer::TraceFlags));
-  MOCK_METHOD1(TraceEpilogue, void(EmbedderHeapTracer::TraceSummary*));
-  MOCK_METHOD1(EnterFinalPause, void(EmbedderHeapTracer::EmbedderStackState));
-  MOCK_METHOD0(IsTracingDone, bool());
-  MOCK_METHOD1(RegisterV8References,
-               void(const std::vector<std::pair<void*, void*> >&));
-  MOCK_METHOD1(AdvanceTracing, bool(double deadline_in_ms));
+  MOCK_METHOD(void, TracePrologue, (EmbedderHeapTracer::TraceFlags),
+              (override));
+  MOCK_METHOD(void, TraceEpilogue, (EmbedderHeapTracer::TraceSummary*),
+              (override));
+  MOCK_METHOD(void, EnterFinalPause, (EmbedderHeapTracer::EmbedderStackState),
+              (override));
+  MOCK_METHOD(bool, IsTracingDone, (), (override));
+  MOCK_METHOD(void, RegisterV8References,
+              ((const std::vector<std::pair<void*, void*> >&)), (override));
+  MOCK_METHOD(bool, AdvanceTracing, (double deadline_in_ms), (override));
 };
 
 TEST(LocalEmbedderHeapTracer, InUse) {
@@ -105,59 +108,81 @@ TEST(LocalEmbedderHeapTracer, EnterFinalPauseDefaultStackStateUnkown) {
   LocalEmbedderHeapTracer local_tracer(nullptr);
   local_tracer.SetRemoteTracer(&remote_tracer);
   // The default stack state is expected to be unkown.
-  EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kUnknown));
+  EXPECT_CALL(
+      remote_tracer,
+      EnterFinalPause(
+          EmbedderHeapTracer::EmbedderStackState::kMayContainHeapPointers));
   local_tracer.EnterFinalPause();
 }
 
-TEST(LocalEmbedderHeapTracer, EnterFinalPauseStackStateIsForwarded) {
+TEST_F(LocalEmbedderHeapTracerWithIsolate,
+       EnterFinalPauseStackStateIsForwarded) {
   StrictMock<MockEmbedderHeapTracer> remote_tracer;
-  LocalEmbedderHeapTracer local_tracer(nullptr);
+  LocalEmbedderHeapTracer local_tracer(isolate());
   local_tracer.SetRemoteTracer(&remote_tracer);
   local_tracer.SetEmbedderStackStateForNextFinalization(
-      EmbedderHeapTracer::kEmpty);
-  EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kEmpty));
+      EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers);
+  EXPECT_CALL(
+      remote_tracer,
+      EnterFinalPause(EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers));
   local_tracer.EnterFinalPause();
 }
 
-TEST(LocalEmbedderHeapTracer, TemporaryEmbedderStackState) {
+TEST_F(LocalEmbedderHeapTracerWithIsolate, TemporaryEmbedderStackState) {
   StrictMock<MockEmbedderHeapTracer> remote_tracer;
-  LocalEmbedderHeapTracer local_tracer(nullptr);
+  LocalEmbedderHeapTracer local_tracer(isolate());
   local_tracer.SetRemoteTracer(&remote_tracer);
   // Default is unknown, see above.
   {
-    EmbedderStackStateScope scope(&local_tracer, EmbedderHeapTracer::kEmpty);
-    EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kEmpty));
+    EmbedderStackStateScope scope(
+        &local_tracer, EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers);
+    EXPECT_CALL(remote_tracer,
+                EnterFinalPause(
+                    EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers));
     local_tracer.EnterFinalPause();
   }
 }
 
-TEST(LocalEmbedderHeapTracer, TemporaryEmbedderStackStateRestores) {
+TEST_F(LocalEmbedderHeapTracerWithIsolate,
+       TemporaryEmbedderStackStateRestores) {
   StrictMock<MockEmbedderHeapTracer> remote_tracer;
-  LocalEmbedderHeapTracer local_tracer(nullptr);
+  LocalEmbedderHeapTracer local_tracer(isolate());
   local_tracer.SetRemoteTracer(&remote_tracer);
   // Default is unknown, see above.
   {
-    EmbedderStackStateScope scope(&local_tracer, EmbedderHeapTracer::kEmpty);
+    EmbedderStackStateScope scope(
+        &local_tracer, EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers);
     {
-      EmbedderStackStateScope scope(&local_tracer,
-                                    EmbedderHeapTracer::kUnknown);
-      EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kUnknown));
+      EmbedderStackStateScope scope(
+          &local_tracer,
+          EmbedderHeapTracer::EmbedderStackState::kMayContainHeapPointers);
+      EXPECT_CALL(
+          remote_tracer,
+          EnterFinalPause(
+              EmbedderHeapTracer::EmbedderStackState::kMayContainHeapPointers));
       local_tracer.EnterFinalPause();
     }
-    EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kEmpty));
+    EXPECT_CALL(remote_tracer,
+                EnterFinalPause(
+                    EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers));
     local_tracer.EnterFinalPause();
   }
 }
 
-TEST(LocalEmbedderHeapTracer, EnterFinalPauseStackStateResets) {
+TEST_F(LocalEmbedderHeapTracerWithIsolate, EnterFinalPauseStackStateResets) {
   StrictMock<MockEmbedderHeapTracer> remote_tracer;
-  LocalEmbedderHeapTracer local_tracer(nullptr);
+  LocalEmbedderHeapTracer local_tracer(isolate());
   local_tracer.SetRemoteTracer(&remote_tracer);
   local_tracer.SetEmbedderStackStateForNextFinalization(
-      EmbedderHeapTracer::kEmpty);
-  EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kEmpty));
+      EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers);
+  EXPECT_CALL(
+      remote_tracer,
+      EnterFinalPause(EmbedderHeapTracer::EmbedderStackState::kNoHeapPointers));
   local_tracer.EnterFinalPause();
-  EXPECT_CALL(remote_tracer, EnterFinalPause(EmbedderHeapTracer::kUnknown));
+  EXPECT_CALL(
+      remote_tracer,
+      EnterFinalPause(
+          EmbedderHeapTracer::EmbedderStackState::kMayContainHeapPointers));
   local_tracer.EnterFinalPause();
 }
 

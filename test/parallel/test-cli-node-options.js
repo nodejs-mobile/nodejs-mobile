@@ -61,7 +61,8 @@ if (common.isLinux) {
 if (common.hasCrypto) {
   expectNoWorker('--use-openssl-ca', 'B\n');
   expectNoWorker('--use-bundled-ca', 'B\n');
-  expectNoWorker('--openssl-config=_ossl_cfg', 'B\n');
+  if (!common.hasOpenSSL3)
+    expectNoWorker('--openssl-config=_ossl_cfg', 'B\n');
 }
 
 // V8 options
@@ -77,6 +78,10 @@ expect('--stack-trace-limit=100',
 // Unsupported on arm. See https://crbug.com/v8/8713.
 if (!['arm', 'arm64'].includes(process.arch))
   expect('--interpreted-frames-native-stack', 'B\n');
+
+// Workers can't eval as ES Modules. https://github.com/nodejs/node/issues/30682
+expectNoWorker('--input-type=module',
+               'B\n', 'console.log(await "B")');
 
 function expectNoWorker(opt, want, command, wantsError) {
   expect(opt, want, command, wantsError, false);

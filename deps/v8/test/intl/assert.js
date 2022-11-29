@@ -141,6 +141,15 @@ function assertNotNull(value, user_message = '') {
   }
 }
 
+/**
+ * Throws if value is undefined.
+ */
+function assertNotUndefined(value, user_message = '') {
+  if (value === undefined) {
+    fail("not undefined", value, user_message);
+  }
+}
+
 
 /**
  * Runs code() and asserts that it throws the specified exception.
@@ -157,7 +166,7 @@ function assertThrows(code, type_opt, cause_opt) {
       assertInstanceof(e, type_opt);
     }
     if (arguments.length >= 3) {
-      assertEquals(cause_opt, e.type, 'thrown exception type mismatch');
+      assertEquals(cause_opt, e.message, 'thrown exception type mismatch');
     }
     // Success.
     return;

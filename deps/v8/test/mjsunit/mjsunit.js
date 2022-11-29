@@ -175,6 +175,9 @@ var V8OptimizationStatus = {
   kTopmostFrameIsTurboFanned: 1 << 11,
   kLiteMode: 1 << 12,
   kMarkedForDeoptimization: 1 << 13,
+  kBaseline: 1 << 14,
+  kTopmostFrameIsInterpreted: 1 << 15,
+  kTopmostFrameIsBaseline: 1 << 16,
 };
 
 // Returns true if --lite-mode is on and we can't ever turn on optimization.
@@ -188,6 +191,12 @@ var isAlwaysOptimize;
 
 // Returns true if given function in interpreted.
 var isInterpreted;
+
+// Returns true if given function in baseline.
+var isBaseline;
+
+// Returns true if given function in unoptimized (interpreted or baseline).
+var isUnoptimized;
 
 // Returns true if given function is optimized.
 var isOptimized;
@@ -216,6 +225,7 @@ var prettyPrinted;
   var ArrayPrototypeJoin = Array.prototype.join;
   var ArrayPrototypeMap = Array.prototype.map;
   var ArrayPrototypePush = Array.prototype.push;
+  var JSONStringify = JSON.stringify;
 
   var BigIntPrototypeValueOf;
   // TODO(neis): Remove try-catch once BigInts are enabled by default.
@@ -252,7 +262,7 @@ var prettyPrinted;
   prettyPrinted = function prettyPrinted(value) {
     switch (typeof value) {
       case "string":
-        return JSON.stringify(value);
+        return JSONStringify(value);
       case "bigint":
         return String(value) + "n";
       case "number":
@@ -295,7 +305,7 @@ var prettyPrinted;
           default:
             return objectClass + "(" + String(value) + ")";
         }
-        // [[Class]] is "Object".
+        // classOf() returned "Object".
         var name = value.constructor.name;
         if (name) return name + "()";
         return "Object()";
@@ -548,13 +558,14 @@ var prettyPrinted;
   assertInstanceof = function assertInstanceof(obj, type) {
     if (!(obj instanceof type)) {
       var actualTypeName = null;
-      var actualConstructor = Object.getPrototypeOf(obj).constructor;
-      if (typeof actualConstructor === "function") {
+      var actualConstructor = obj && Object.getPrototypeOf(obj).constructor;
+      if (typeof actualConstructor === 'function') {
         actualTypeName = actualConstructor.name || String(actualConstructor);
       }
-      failWithMessage("Object <" + prettyPrinted(obj) + "> is not an instance of <" +
-               (type.name || type) + ">" +
-               (actualTypeName ? " but of <" + actualTypeName + ">" : ""));
+      failWithMessage(
+          'Object <' + prettyPrinted(obj) + '> is not an instance of <' +
+          (type.name || type) + '>' +
+          (actualTypeName ? ' but of <' + actualTypeName + '>' : ''));
     }
   };
 
@@ -674,7 +685,8 @@ var prettyPrinted;
       // to stress test the deoptimizer.
       return;
     }
-    assertFalse((opt_status & V8OptimizationStatus.kOptimized) !== 0, name_opt);
+    var is_optimized = (opt_status & V8OptimizationStatus.kOptimized) !== 0;
+    assertFalse(is_optimized, name_opt);
   }
 
   assertOptimized = function assertOptimized(
@@ -727,6 +739,18 @@ var prettyPrinted;
                "not a function");
     return (opt_status & V8OptimizationStatus.kOptimized) === 0 &&
            (opt_status & V8OptimizationStatus.kInterpreted) !== 0;
+  }
+
+  isBaseline = function isBaseline(fun) {
+    var opt_status = OptimizationStatus(fun, "");
+    assertTrue((opt_status & V8OptimizationStatus.kIsFunction) !== 0,
+               "not a function");
+    return (opt_status & V8OptimizationStatus.kOptimized) === 0 &&
+           (opt_status & V8OptimizationStatus.kBaseline) !== 0;
+  }
+
+  isUnoptimized = function isUnoptimized(fun) {
+    return isInterpreted(fun) || isBaseline(fun);
   }
 
   isOptimized = function isOptimized(fun) {

@@ -1,6 +1,7 @@
 #include "node_dir.h"
+#include "node_external_reference.h"
 #include "node_file-inl.h"
-#include "node_process.h"
+#include "node_process-inl.h"
 #include "memory_tracker-inl.h"
 #include "util.h"
 
@@ -39,7 +40,6 @@ using v8::Null;
 using v8::Number;
 using v8::Object;
 using v8::ObjectTemplate;
-using v8::String;
 using v8::Value;
 
 #define TRACE_NAME(name) "fs_dir.sync." #name
@@ -149,7 +149,7 @@ void DirHandle::Close(const FunctionCallbackInfo<Value>& args) {
   dir->closing_ = false;
   dir->closed_ = true;
 
-  FSReqBase* req_wrap_async = GetReqWrap(env, args[0]);
+  FSReqBase* req_wrap_async = GetReqWrap(args, 0);
   if (req_wrap_async != nullptr) {  // close(req)
     AsyncCall(env, req_wrap_async, args, "closedir", UTF8, AfterClose,
               uv_fs_closedir, dir->dir());
@@ -218,9 +218,10 @@ static void AfterDirRead(uv_fs_t* req) {
   Local<Array> js_array;
   if (!DirentListToArray(env,
                          dir->dirents,
-                         req->result,
+                         static_cast<int>(req->result),
                          req_wrap->encoding(),
-                         &error).ToLocal(&js_array)) {
+                         &error)
+           .ToLocal(&js_array)) {
     // Clear libuv resources *before* delivering results to JS land because
     // that can schedule another operation on the same uv_dir_t. Ditto below.
     after.Clear();
@@ -245,7 +246,7 @@ void DirHandle::Read(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&dir, args.Holder());
 
   CHECK(args[1]->IsNumber());
-  uint64_t buffer_size = args[1].As<Number>()->Value();
+  uint64_t buffer_size = static_cast<uint64_t>(args[1].As<Number>()->Value());
 
   if (buffer_size != dir->dirents_.size()) {
     dir->dirents_.resize(buffer_size);
@@ -253,7 +254,7 @@ void DirHandle::Read(const FunctionCallbackInfo<Value>& args) {
     dir->dir_->dirents = dir->dirents_.data();
   }
 
-  FSReqBase* req_wrap_async = GetReqWrap(env, args[2]);
+  FSReqBase* req_wrap_async = GetReqWrap(args, 2);
   if (req_wrap_async != nullptr) {  // dir.read(encoding, bufferSize, req)
     AsyncCall(env, req_wrap_async, args, "readdir", encoding,
               AfterDirRead, uv_fs_readdir, dir->dir());
@@ -281,9 +282,10 @@ void DirHandle::Read(const FunctionCallbackInfo<Value>& args) {
     Local<Array> js_array;
     if (!DirentListToArray(env,
                            dir->dir()->dirents,
-                           req_wrap_sync.req.result,
+                           static_cast<int>(req_wrap_sync.req.result),
                            encoding,
-                           &error).ToLocal(&js_array)) {
+                           &error)
+             .ToLocal(&js_array)) {
       Local<Object> ctx = args[2].As<Object>();
       USE(ctx->Set(env->context(), env->error_string(), error));
       return;
@@ -321,7 +323,7 @@ static void OpenDir(const FunctionCallbackInfo<Value>& args) {
 
   const enum encoding encoding = ParseEncoding(isolate, args[1], UTF8);
 
-  FSReqBase* req_wrap_async = GetReqWrap(env, args[2]);
+  FSReqBase* req_wrap_async = GetReqWrap(args, 2);
   if (req_wrap_async != nullptr) {  // openDir(path, encoding, req)
     AsyncCall(env, req_wrap_async, args, "opendir", encoding, AfterOpenDir,
               uv_fs_opendir, *path);
@@ -349,7 +351,6 @@ void Initialize(Local<Object> target,
                 Local<Context> context,
                 void* priv) {
   Environment* env = Environment::GetCurrent(context);
-  Isolate* isolate = env->isolate();
 
   env->SetMethod(target, "opendir", OpenDir);
 
@@ -360,14 +361,15 @@ void Initialize(Local<Object> target,
   env->SetProtoMethod(dir, "close", DirHandle::Close);
   Local<ObjectTemplate> dirt = dir->InstanceTemplate();
   dirt->SetInternalFieldCount(DirHandle::kInternalFieldCount);
-  Local<String> handleString =
-       FIXED_ONE_BYTE_STRING(isolate, "DirHandle");
-  dir->SetClassName(handleString);
-  target
-      ->Set(context, handleString,
-            dir->GetFunction(env->context()).ToLocalChecked())
-      .FromJust();
+  env->SetConstructorFunction(target, "DirHandle", dir);
   env->set_dir_instance_template(dirt);
+}
+
+void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(OpenDir);
+  registry->Register(DirHandle::New);
+  registry->Register(DirHandle::Read);
+  registry->Register(DirHandle::Close);
 }
 
 }  // namespace fs_dir
@@ -375,3 +377,4 @@ void Initialize(Local<Object> target,
 }  // end namespace node
 
 NODE_MODULE_CONTEXT_AWARE_INTERNAL(fs_dir, node::fs_dir::Initialize)
+NODE_MODULE_EXTERNAL_REFERENCE(fs_dir, node::fs_dir::RegisterExternalReferences)

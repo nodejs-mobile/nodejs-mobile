@@ -7,15 +7,15 @@
 
 'use strict';
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 function WasmAtomicNotify(memory, offset, index, num) {
   let builder = new WasmModuleBuilder();
   builder.addImportedMemory("m", "memory", 0, 20, "shared");
   builder.addFunction("main", kSig_i_ii)
     .addBody([
-      kExprGetLocal, 0,
-      kExprGetLocal, 1,
+      kExprLocalGet, 0,
+      kExprLocalGet, 1,
       kAtomicPrefix,
       kExprAtomicNotify, /* alignment */ 0, offset])
     .exportAs("main");
@@ -32,9 +32,9 @@ function WasmI32AtomicWait(memory, offset, index, val, timeout) {
   builder.addFunction("main",
     makeSig([kWasmI32, kWasmI32, kWasmF64], [kWasmI32]))
     .addBody([
-      kExprGetLocal, 0,
-      kExprGetLocal, 1,
-      kExprGetLocal, 2,
+      kExprLocalGet, 0,
+      kExprLocalGet, 1,
+      kExprLocalGet, 2,
       kExprI64SConvertF64,
       kAtomicPrefix,
       kExprI32AtomicWait, /* alignment */ 0, offset])
@@ -54,19 +54,19 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
   // I64 for the instruction parameter.
   builder.addFunction("main",
     makeSig([kWasmI32, kWasmI32, kWasmI32, kWasmF64], [kWasmI32]))
-    .addLocals({i64_count: 1}) // local that is passed as value param to wait
+    .addLocals(kWasmI64, 1) // local that is passed as value param to wait
     .addBody([
-      kExprGetLocal, 1,
+      kExprLocalGet, 1,
       kExprI64UConvertI32,
       kExprI64Const, 32,
       kExprI64Shl,
-      kExprGetLocal, 2,
+      kExprLocalGet, 2,
       kExprI64UConvertI32,
       kExprI64Ior,
-      kExprSetLocal, 4, // Store the created I64 value in local
-      kExprGetLocal, 0,
-      kExprGetLocal, 4,
-      kExprGetLocal, 3,
+      kExprLocalSet, 4, // Store the created I64 value in local
+      kExprLocalGet, 0,
+      kExprLocalGet, 4,
+      kExprLocalGet, 3,
       kExprI64SConvertF64,
       kAtomicPrefix,
       kExprI64AtomicWait, /* alignment */ 0, offset])
@@ -79,6 +79,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 }
 
 (function TestInvalidIndex() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
 
   // Valid indexes are 0-65535 (1 page).
@@ -114,6 +115,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 })();
 
 (function TestInvalidAlignment() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
 
   // Wait and wake must be 4 byte aligned.
@@ -150,6 +152,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 })();
 
 (function TestI32WaitTimeout() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
   var waitMs = 100;
   var startTime = new Date();
@@ -159,6 +162,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 })();
 
 (function TestI64WaitTimeout() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
   var waitMs = 100;
   var startTime = new Date();
@@ -168,6 +172,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 })();
 
 (function TestI32WaitNotEqual() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
   assertEquals(1, WasmI32AtomicWait(memory, 0, 0, 42, -1));
 
@@ -180,6 +185,7 @@ function WasmI64AtomicWait(memory, offset, index, val_low,
 })();
 
 (function TestI64WaitNotEqual() {
+  if (!%IsAtomicsWaitAllowed()) return;
   let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
   assertEquals(1, WasmI64AtomicWait(memory, 0, 0, 42, 0, -1));
 
@@ -216,7 +222,7 @@ if (this.Worker) {
   const numWorkers = 4;
 
   let workerScript = `onmessage = function(msg) {
-    load("test/mjsunit/wasm/wasm-module-builder.js");
+    d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
     ${WasmI32AtomicWait.toString()}
     ${WasmI64AtomicWait.toString()}
     let id = msg.id;
@@ -282,12 +288,12 @@ if (this.Worker) {
     if (num >= numWorkers) {
       // if numWorkers or more is passed to wake, numWorkers workers should be
       // woken.
-      assertEquals(numWorkers, Atomics.wake(i32a, indexJs, num));
+      assertEquals(numWorkers, Atomics.notify(i32a, indexJs, num));
     } else {
       // if num < numWorkers is passed to wake, num workers should be woken.
       // Then the remaining workers are woken for the next part
-      assertEquals(num, Atomics.wake(i32a, indexJs, num));
-      assertEquals(numWorkers-num, Atomics.wake(i32a, indexJs, numWorkers));
+      assertEquals(num, Atomics.notify(i32a, indexJs, num));
+      assertEquals(numWorkers-num, Atomics.notify(i32a, indexJs, numWorkers));
     }
     for (let id = 0; id < numWorkers; id++) {
       assertEquals(msg, workers[id].getMessage());
@@ -342,3 +348,13 @@ if (this.Worker) {
     workers[id].terminate();
   }
 }
+
+(function TestWaitTrapsOnDisallowedIsolate() {
+  let memory = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true});
+  var waitMs = 100;
+  %SetAllowAtomicsWait(false)
+  assertThrows(function() {
+    WasmI32AtomicWait(memory, 0, 0, 0, waitMs*1000000)}, WebAssembly.RuntimeError);
+  assertThrows(function() {
+    WasmI64AtomicWait(memory, 0, 0, 0, waitMs*1000000)}, WebAssembly.RuntimeError);
+})();

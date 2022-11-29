@@ -21,8 +21,6 @@ if (mkfifo.error && mkfifo.error.code === 'ENOENT') {
   common.skip('missing mkfifo');
 }
 
-process.on('exit', () => fs.unlinkSync(pipeName));
-
 const server = http2.createServer();
 server.on('stream', (stream) => {
   stream.respondWithFile(pipeName, {
@@ -58,4 +56,11 @@ server.listen(0, () => {
   req.end();
 });
 
-fs.writeFile(pipeName, 'Hello, world!\n', common.mustCall());
+fs.writeFile(pipeName, 'Hello, world!\n', common.mustCall((err) => {
+  // It's possible for the reading end of the pipe to get the expected error
+  // and break everything down before we're finished, so allow `EPIPE` but
+  // no other errors.
+  if (err?.code !== 'EPIPE') {
+    assert.ifError(err);
+  }
+}));

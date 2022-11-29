@@ -15,12 +15,13 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/js-regexp-string-iterator-tq-inl.inc"
+
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSRegExpStringIterator)
 
-TQ_SMI_ACCESSORS(JSRegExpStringIterator, flags)
-BOOL_ACCESSORS(JSRegExpStringIterator, flags, done, kDoneBit)
-BOOL_ACCESSORS(JSRegExpStringIterator, flags, global, kGlobalBit)
-BOOL_ACCESSORS(JSRegExpStringIterator, flags, unicode, kUnicodeBit)
+BOOL_ACCESSORS(JSRegExpStringIterator, flags, done, DoneBit::kShift)
+BOOL_ACCESSORS(JSRegExpStringIterator, flags, global, GlobalBit::kShift)
+BOOL_ACCESSORS(JSRegExpStringIterator, flags, unicode, UnicodeBit::kShift)
 
 }  // namespace internal
 }  // namespace v8

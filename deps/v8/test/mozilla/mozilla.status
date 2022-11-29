@@ -137,7 +137,7 @@
   # time to do so.
   'js1_5/Regress/regress-271716-n': [SKIP],
 
-  # BUG(960): This test has an insane amount of output when it times out,
+  # BUG(960): This test has an excessive amount of output when it times out,
   # messing up ability to see other failures on the waterfall.
   'js1_5/extensions/regress-342960': [SKIP],
 
@@ -332,7 +332,6 @@
 
   # Test that depends on timer resolution. Fails every now and then
   # if we're unlucky enough to get a context switch at a bad time.
-  # TODO(mstarzinger): Switch off TF on windows due to timeouts.
   'js1_5/extensions/regress-363258': [PASS, FAIL, ['system == windows', NO_VARIANTS]],
 
 
@@ -955,8 +954,6 @@
 ['arch ==  arm64', {
   # BUG(v8:3503): Times out in debug mode.
   'js1_5/Regress/regress-280769-2': [PASS, FAIL, ['mode == debug', SKIP]],
-  # BUG(v8:3716): Flaky failure.
-  'ecma/Date/15.9.5.26-1': [PASS, FAIL],
 }],  # 'arch ==  arm64'
 
 
@@ -1013,6 +1010,11 @@
   'js1_5/extensions/regress-355497': [SKIP],
 }],  # 'arch == arm and simulator_run'
 
+['arch == arm64', {
+  # BUG(v8:9863)
+  'js1_5/Regress/regress-80981': [SKIP],
+}], # 'arch == arm64'
+
 ['arch == arm64 and simulator_run', {
 
   'js1_5/GC/regress-203278-2': [SKIP],
@@ -1059,9 +1061,15 @@
   '*': [SKIP],
 }],  # variant == no_wasm_traps
 
-##############################################################################
-['variant == jitless and not embedded_builtins', {
-  '*': [SKIP],
-}], # variant == jitless and not embedded_builtins
+################################################################################
+['variant == stress_snapshot', {
+  '*': [SKIP],  # only relevant for mjsunit tests.
+}],
+
+################################################################################
+['variant == stress_concurrent_inlining', {
+  # Timeout during TurboFan optimization.
+  'ecma/FunctionObjects/15.3.1.1-3': [SKIP],
+}],
 
 ]

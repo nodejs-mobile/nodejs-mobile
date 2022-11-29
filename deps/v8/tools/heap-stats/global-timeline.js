@@ -4,15 +4,18 @@
 
 'use strict';
 
-const global_timeline_template =
-    document.currentScript.ownerDocument.querySelector(
-        '#global-timeline-template');
+import {
+  VIEW_BY_INSTANCE_TYPE,
+  VIEW_BY_INSTANCE_CATEGORY,
+  VIEW_BY_FIELD_TYPE
+} from './details-selection.js';
 
-class GlobalTimeline extends HTMLElement {
+defineCustomElement('global-timeline', (templateText) =>
+ class GlobalTimeline extends HTMLElement {
   constructor() {
     super();
     const shadowRoot = this.attachShadow({mode: 'open'});
-    shadowRoot.appendChild(global_timeline_template.content.cloneNode(true));
+    shadowRoot.innerHTML = templateText;
   }
 
   $(id) {
@@ -206,6 +209,10 @@ class GlobalTimeline extends HTMLElement {
   }
 
   drawChart() {
+    setTimeout(() => this._drawChart(), 10);
+  }
+
+  _drawChart() {
     console.assert(this.data, 'invalid data');
     console.assert(this.selection, 'invalid selection');
 
@@ -217,6 +224,4 @@ class GlobalTimeline extends HTMLElement {
     this.show();
     chart.draw(data, google.charts.Line.convertOptions(options));
   }
-}
-
-customElements.define('global-timeline', GlobalTimeline);
+});

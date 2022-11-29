@@ -10,54 +10,60 @@
 
 // Tests that should have access to private methods of {v8::internal::Heap}.
 // Those tests need to be defined using HEAP_TEST(Name) { ... }.
-#define HEAP_TEST_METHODS(V)                              \
-  V(CodeLargeObjectSpace)                                 \
-  V(CompactionFullAbortedPage)                            \
-  V(CompactionPartiallyAbortedPage)                       \
-  V(CompactionPartiallyAbortedPageIntraAbortedPointers)   \
-  V(CompactionPartiallyAbortedPageWithStoreBufferEntries) \
-  V(CompactionSpaceDivideMultiplePages)                   \
-  V(CompactionSpaceDivideSinglePage)                      \
-  V(InvalidatedSlotsAfterTrimming)                        \
-  V(InvalidatedSlotsAllInvalidatedRanges)                 \
-  V(InvalidatedSlotsCleanupEachObject)                    \
-  V(InvalidatedSlotsCleanupFull)                          \
-  V(InvalidatedSlotsCleanupRightTrim)                     \
-  V(InvalidatedSlotsCleanupOverlapRight)                  \
-  V(InvalidatedSlotsEvacuationCandidate)                  \
-  V(InvalidatedSlotsNoInvalidatedRanges)                  \
-  V(InvalidatedSlotsResetObjectRegression)                \
-  V(InvalidatedSlotsRightTrimFixedArray)                  \
-  V(InvalidatedSlotsRightTrimLargeFixedArray)             \
-  V(InvalidatedSlotsLeftTrimFixedArray)                   \
-  V(InvalidatedSlotsFastToSlow)                           \
-  V(InvalidatedSlotsSomeInvalidatedRanges)                \
-  V(TestNewSpaceRefsInCopiedCode)                         \
-  V(GCFlags)                                              \
-  V(MarkCompactCollector)                                 \
-  V(MarkCompactEpochCounter)                              \
-  V(MemoryReducerActivationForSmallHeaps)                 \
-  V(NoPromotion)                                          \
-  V(NumberStringCacheSize)                                \
-  V(ObjectGroups)                                         \
-  V(Promotion)                                            \
-  V(Regression39128)                                      \
-  V(ResetWeakHandle)                                      \
-  V(StressHandles)                                        \
-  V(TestMemoryReducerSampleJsCalls)                       \
-  V(TestSizeOfObjects)                                    \
-  V(Regress5831)                                          \
-  V(Regress538257)                                        \
-  V(Regress587004)                                        \
-  V(Regress589413)                                        \
-  V(Regress658718)                                        \
-  V(Regress670675)                                        \
-  V(Regress777177)                                        \
-  V(Regress779503)                                        \
-  V(Regress791582)                                        \
-  V(Regress845060)                                        \
-  V(RegressMissingWriteBarrierInAllocate)                 \
-  V(WriteBarriersInCopyJSObject)
+#define HEAP_TEST_METHODS(V)                                \
+  V(CodeLargeObjectSpace)                                   \
+  V(CodeLargeObjectSpace64k)                                \
+  V(CompactionFullAbortedPage)                              \
+  V(CompactionPartiallyAbortedPage)                         \
+  V(CompactionPartiallyAbortedPageIntraAbortedPointers)     \
+  V(CompactionPartiallyAbortedPageWithInvalidatedSlots)     \
+  V(CompactionPartiallyAbortedPageWithRememberedSetEntries) \
+  V(CompactionSpaceDivideMultiplePages)                     \
+  V(CompactionSpaceDivideSinglePage)                        \
+  V(InvalidatedSlotsAfterTrimming)                          \
+  V(InvalidatedSlotsAllInvalidatedRanges)                   \
+  V(InvalidatedSlotsCleanupEachObject)                      \
+  V(InvalidatedSlotsCleanupFull)                            \
+  V(InvalidatedSlotsCleanupRightTrim)                       \
+  V(InvalidatedSlotsCleanupOverlapRight)                    \
+  V(InvalidatedSlotsEvacuationCandidate)                    \
+  V(InvalidatedSlotsNoInvalidatedRanges)                    \
+  V(InvalidatedSlotsResetObjectRegression)                  \
+  V(InvalidatedSlotsRightTrimFixedArray)                    \
+  V(InvalidatedSlotsRightTrimLargeFixedArray)               \
+  V(InvalidatedSlotsLeftTrimFixedArray)                     \
+  V(InvalidatedSlotsFastToSlow)                             \
+  V(InvalidatedSlotsSomeInvalidatedRanges)                  \
+  V(TestNewSpaceRefsInCopiedCode)                           \
+  V(GCFlags)                                                \
+  V(MarkCompactCollector)                                   \
+  V(MarkCompactEpochCounter)                                \
+  V(MemoryReducerActivationForSmallHeaps)                   \
+  V(NoPromotion)                                            \
+  V(NumberStringCacheSize)                                  \
+  V(ObjectGroups)                                           \
+  V(Promotion)                                              \
+  V(Regression39128)                                        \
+  V(ResetWeakHandle)                                        \
+  V(StressHandles)                                          \
+  V(TestMemoryReducerSampleJsCalls)                         \
+  V(TestSizeOfObjects)                                      \
+  V(Regress10560)                                           \
+  V(Regress538257)                                          \
+  V(Regress587004)                                          \
+  V(Regress589413)                                          \
+  V(Regress658718)                                          \
+  V(Regress670675)                                          \
+  V(Regress777177)                                          \
+  V(Regress779503)                                          \
+  V(Regress791582)                                          \
+  V(Regress845060)                                          \
+  V(RegressMissingWriteBarrierInAllocate)                   \
+  V(WriteBarrier_Marking)                                   \
+  V(WriteBarrier_MarkingExtension)                          \
+  V(WriteBarriersInCopyJSObject)                            \
+  V(DoNotEvacuatePinnedPages)                               \
+  V(ObjectStartBitmap)
 
 #define HEAP_TEST(Name)                                                   \
   CcTest register_test_##Name(v8::internal::heap::HeapTester::Test##Name, \
@@ -103,6 +109,7 @@ class HeapTester {
   // test-heap.cc
   static AllocationResult AllocateByteArrayForTest(Heap* heap, int length,
                                                    AllocationType allocation);
+  static bool CodeEnsureLinearAllocationArea(Heap* heap, int size_in_bytes);
 
   // test-mark-compact.cc
   static AllocationResult AllocateMapForTest(v8::internal::Isolate* isolate);

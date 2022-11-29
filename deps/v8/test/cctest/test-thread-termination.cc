@@ -239,6 +239,14 @@ TEST(TerminateBigIntToString) {
       "fail();");
 }
 
+TEST(TerminateBigIntFromString) {
+  TestTerminatingSlowOperation(
+      "var a = '12344567890'.repeat(10000);\n"
+      "terminate();\n"
+      "BigInt(a);\n"
+      "fail();\n");
+}
+
 int call_count = 0;
 
 
@@ -492,10 +500,11 @@ TEST(TerminateFromOtherThreadWhileMicrotaskRunning) {
   isolate->EnqueueMicrotask(
       v8::Function::New(isolate->GetCurrentContext(), MicrotaskShouldNotRun)
           .ToLocalChecked());
-  isolate->RunMicrotasks();
+  isolate->PerformMicrotaskCheckpoint();
 
   isolate->CancelTerminateExecution();
-  isolate->RunMicrotasks();  // should not run MicrotaskShouldNotRun
+  // Should not run MicrotaskShouldNotRun.
+  isolate->PerformMicrotaskCheckpoint();
 
   thread.Join();
   delete semaphore;
@@ -760,9 +769,9 @@ void InnerTryCallTerminate(const v8::FunctionCallbackInfo<v8::Value>& args) {
                             v8::Utils::OpenHandle((*global)), 0, nullptr,
                             i::Execution::MessageHandling::kReport, &exception);
   CHECK(result.is_null());
-  // TryCall ignores terminate execution, but rerequests the interrupt.
-  CHECK(!args.GetIsolate()->IsExecutionTerminating());
-  CHECK(CompileRun("1 + 1;").IsEmpty());
+  CHECK(exception.is_null());
+  // TryCall reschedules the termination exception.
+  CHECK(args.GetIsolate()->IsExecutionTerminating());
 }
 
 
@@ -781,7 +790,10 @@ TEST(TerminationInInnerTryCall) {
     v8::TryCatch try_catch(isolate);
     CompileRun("inner_try_call_terminate()");
     CHECK(try_catch.HasTerminated());
+    // Any further exectutions in this TryCatch scope would fail.
+    CHECK(isolate->IsExecutionTerminating());
   }
+  // Leaving the TryCatch cleared the termination exception.
   v8::Maybe<int32_t> result =
       CompileRun("2 + 2")->Int32Value(isolate->GetCurrentContext());
   CHECK_EQ(4, result.FromJust());
@@ -811,11 +823,12 @@ TEST(TerminateAndTryCall) {
             ->Get(isolate->GetCurrentContext(), v8_str("terminate"))
             .ToLocalChecked();
     CHECK(value->IsFunction());
-    // The first stack check after terminate has been re-requested fails.
+    // Any further executions in this TryCatch scope fail.
+    CHECK(!isolate->IsExecutionTerminating());
     CHECK(CompileRun("1 + 1").IsEmpty());
     CHECK(isolate->IsExecutionTerminating());
   }
-  // V8 then recovers.
+  // Leaving the TryCatch cleared the termination exception.
   v8::Maybe<int32_t> result =
       CompileRun("2 + 2")->Int32Value(isolate->GetCurrentContext());
   CHECK_EQ(4, result.FromJust());
@@ -867,6 +880,12 @@ class TerminatorSleeperThread : public v8::base::Thread {
 
 TEST(TerminateRegExp) {
   i::FLAG_allow_natives_syntax = true;
+  // We want to be stuck regexp execution, so no fallback to linear-time
+  // engine.
+  // TODO(mbid,v8:10765): Find a way to test interrupt support of the
+  // experimental engine.
+  i::FLAG_enable_experimental_regexp_engine_on_excessive_backtracks = false;
+
   v8::Isolate* isolate = CcTest::isolate();
   v8::HandleScope scope(isolate);
   v8::Local<v8::ObjectTemplate> global = CreateGlobalTemplate(
@@ -894,26 +913,32 @@ TEST(TerminateInMicrotask) {
       isolate, TerminateCurrentThread, DoLoopCancelTerminate);
   v8::Local<v8::Context> context1 = v8::Context::New(isolate, nullptr, global);
   v8::Local<v8::Context> context2 = v8::Context::New(isolate, nullptr, global);
-  v8::TryCatch try_catch(isolate);
   {
-    v8::Context::Scope context_scope(context1);
-    CHECK(!isolate->IsExecutionTerminating());
-    CHECK(!CompileRun("Promise.resolve().then(function() {"
-                      "terminate(); loop(); fail();})")
-               .IsEmpty());
-    CHECK(!try_catch.HasCaught());
+    v8::TryCatch try_catch(isolate);
+    {
+      v8::Context::Scope context_scope(context1);
+      CHECK(!isolate->IsExecutionTerminating());
+      CHECK(!CompileRun("Promise.resolve().then(function() {"
+                        "terminate(); loop(); fail();})")
+                 .IsEmpty());
+      CHECK(!try_catch.HasCaught());
+    }
+    {
+      v8::Context::Scope context_scope(context2);
+      CHECK(context2 == isolate->GetCurrentContext());
+      CHECK(context2 == isolate->GetEnteredOrMicrotaskContext());
+      CHECK(!isolate->IsExecutionTerminating());
+      isolate->PerformMicrotaskCheckpoint();
+      CHECK(context2 == isolate->GetCurrentContext());
+      CHECK(context2 == isolate->GetEnteredOrMicrotaskContext());
+      CHECK(try_catch.HasCaught());
+      CHECK(try_catch.HasTerminated());
+      // Any further exectutions in this TryCatch scope would fail.
+      CHECK(isolate->IsExecutionTerminating());
+      CHECK(!CcTest::i_isolate()->stack_guard()->CheckTerminateExecution());
+    }
   }
-  {
-    v8::Context::Scope context_scope(context2);
-    CHECK(context2 == isolate->GetCurrentContext());
-    CHECK(context2 == isolate->GetEnteredOrMicrotaskContext());
-    CHECK(!isolate->IsExecutionTerminating());
-    isolate->RunMicrotasks();
-    CHECK(context2 == isolate->GetCurrentContext());
-    CHECK(context2 == isolate->GetEnteredOrMicrotaskContext());
-    CHECK(try_catch.HasCaught());
-    CHECK(try_catch.HasTerminated());
-  }
+  CHECK(!CcTest::i_isolate()->stack_guard()->CheckTerminateExecution());
   CHECK(!isolate->IsExecutionTerminating());
 }
 
@@ -932,15 +957,16 @@ TEST(TerminateInApiMicrotask) {
   v8::Local<v8::ObjectTemplate> global = CreateGlobalTemplate(
       isolate, TerminateCurrentThread, DoLoopCancelTerminate);
   v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, global);
-  v8::TryCatch try_catch(isolate);
   {
+    v8::TryCatch try_catch(isolate);
     v8::Context::Scope context_scope(context);
     CHECK(!isolate->IsExecutionTerminating());
     isolate->EnqueueMicrotask(TerminationMicrotask);
     isolate->EnqueueMicrotask(UnreachableMicrotask);
-    isolate->RunMicrotasks();
+    isolate->PerformMicrotaskCheckpoint();
     CHECK(try_catch.HasCaught());
     CHECK(try_catch.HasTerminated());
+    CHECK(isolate->IsExecutionTerminating());
   }
   CHECK(!isolate->IsExecutionTerminating());
 }

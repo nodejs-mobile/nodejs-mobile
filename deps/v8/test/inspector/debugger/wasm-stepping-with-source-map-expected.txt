@@ -1,308 +1,305 @@
 Tests stepping through wasm scripts with source maps
-Installing code an global variable and instantiate.
-Got wasm script: wasm-9b4bf87e
+
+Running test: test
+Got wasm script: wasm://wasm/9b4bf87e
 Script sourceMapURL: abc
-Requesting source for wasm-9b4bf87e...
+Requesting source for wasm://wasm/9b4bf87e...
 Source retrieved without error: true
-Setting breakpoint on offset 54 (on the setlocal before the call), url wasm-9b4bf87e
+Setting breakpoint on offset 54 (on the setlocal before the call), url wasm://wasm/9b4bf87e
 {
     columnNumber : 54
     lineNumber : 0
     scriptId : <scriptId>
 }
-Paused at wasm-9b4bf87e:0:54
-at wasm_B (0:54):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 54: Wasm opcode 0x21 (kExprLocalSet)
+at $wasm_B (0:54):
+ - scope (wasm-expression-stack):
+   0: 3 (i32)
  - scope (local):
-   locals: {"arg#0":4}
-   stack: {"0":3}
+   $var0: 4 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:56
-at wasm_B (0:56):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 56: Wasm opcode 0x10 (kExprCallFunction)
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":3}
-   stack: {}
+   $var0: 3 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:38
-at wasm_A (0:38):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 38: Wasm opcode 0x01 (kExprNop)
+at $wasm_A (0:38):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+ - scope (module):
    -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":3}
-   stack: {}
+   $var0: 3 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOver called
-Paused at wasm-9b4bf87e:0:39
-at wasm_A (0:39):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 39: Wasm opcode 0x01 (kExprNop)
+at $wasm_A (0:39):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+ - scope (module):
    -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":3}
-   stack: {}
+   $var0: 3 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOut called
-Paused at wasm-9b4bf87e:0:58
-at wasm_B (0:58):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 58: Wasm opcode 0x0c (kExprBr)
+at $wasm_B (0:58):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":3}
-   stack: {}
+   $var0: 3 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOut called
-Paused at wasm-9b4bf87e:0:54
-at wasm_B (0:54):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 54: Wasm opcode 0x21 (kExprLocalSet)
+at $wasm_B (0:54):
+ - scope (wasm-expression-stack):
+   0: 2 (i32)
  - scope (local):
-   locals: {"arg#0":3}
-   stack: {"0":2}
+   $var0: 3 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOver called
-Paused at wasm-9b4bf87e:0:56
-at wasm_B (0:56):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 56: Wasm opcode 0x10 (kExprCallFunction)
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":2}
-   stack: {}
+   $var0: 2 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOver called
-Paused at wasm-9b4bf87e:0:58
-at wasm_B (0:58):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 58: Wasm opcode 0x0c (kExprBr)
+at $wasm_B (0:58):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":2}
-   stack: {}
+   $var0: 2 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.resume called
-Paused at wasm-9b4bf87e:0:54
-at wasm_B (0:54):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 54: Wasm opcode 0x21 (kExprLocalSet)
+at $wasm_B (0:54):
+ - scope (wasm-expression-stack):
+   0: 1 (i32)
  - scope (local):
-   locals: {"arg#0":2}
-   stack: {"0":1}
+   $var0: 2 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:56
-at wasm_B (0:56):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 56: Wasm opcode 0x10 (kExprCallFunction)
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:38
-at wasm_A (0:38):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 38: Wasm opcode 0x01 (kExprNop)
+at $wasm_A (0:38):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+ - scope (module):
    -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepOut called
-Paused at wasm-9b4bf87e:0:58
-at wasm_B (0:58):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 58: Wasm opcode 0x0c (kExprBr)
+at $wasm_B (0:58):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:43
-at wasm_B (0:43):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 45: Wasm opcode 0x20 (kExprLocalGet)
+at $wasm_B (0:45):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:45
-at wasm_B (0:45):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 47: Wasm opcode 0x04 (kExprIf)
+at $wasm_B (0:47):
+ - scope (wasm-expression-stack):
+   0: 1 (i32)
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:47
-at wasm_B (0:47):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 49: Wasm opcode 0x20 (kExprLocalGet)
+at $wasm_B (0:49):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {"0":1}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:49
-at wasm_B (0:49):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 51: Wasm opcode 0x41 (kExprI32Const)
+at $wasm_B (0:51):
+ - scope (wasm-expression-stack):
+   0: 1 (i32)
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:51
-at wasm_B (0:51):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 53: Wasm opcode 0x6b (kExprI32Sub)
+at $wasm_B (0:53):
+ - scope (wasm-expression-stack):
+   0: 1 (i32)
+   1: 1 (i32)
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {"0":1}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:53
-at wasm_B (0:53):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 54: Wasm opcode 0x21 (kExprLocalSet)
+at $wasm_B (0:54):
+ - scope (wasm-expression-stack):
+   0: 0 (i32)
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {"0":1,"1":1}
+   $var0: 1 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:54
-at wasm_B (0:54):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 56: Wasm opcode 0x10 (kExprCallFunction)
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":1}
-   stack: {"0":0}
+   $var0: 0 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:56
-at wasm_B (0:56):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 38: Wasm opcode 0x01 (kExprNop)
+at $wasm_A (0:38):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":0}
-   stack: {}
+ - scope (module):
+   -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
+ - scope (local):
+   $var0: 0 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:38
-at wasm_A (0:38):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 39: Wasm opcode 0x01 (kExprNop)
+at $wasm_A (0:39):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+ - scope (module):
    -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":0}
-   stack: {}
+   $var0: 0 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:39
-at wasm_A (0:39):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 40: Wasm opcode 0x0b (kExprEnd)
+at $wasm_A (0:40):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+ - scope (module):
    -- skipped
+at $wasm_B (0:56):
+ - scope (wasm-expression-stack):
  - scope (local):
-   locals: {"arg#0":0}
-   stack: {}
+   $var0: 0 (i32)
+ - scope (module):
+   -- skipped
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:40
-at wasm_A (0:40):
- - scope (global):
-   -- skipped
+Script wasm://wasm/9b4bf87e byte offset 58: Wasm opcode 0x0c (kExprBr)
+at $wasm_B (0:58):
+ - scope (wasm-expression-stack):
  - scope (local):
-   stack: {}
-at wasm_B (0:56):
- - scope (global):
+   $var0: 0 (i32)
+ - scope (module):
    -- skipped
- - scope (local):
-   locals: {"arg#0":0}
-   stack: {}
-at (anonymous) (0:17):
- - scope (global):
-   -- skipped
-Debugger.stepInto called
-Paused at wasm-9b4bf87e:0:58
-at wasm_B (0:58):
- - scope (global):
-   -- skipped
- - scope (local):
-   locals: {"arg#0":0}
-   stack: {}
 at (anonymous) (0:17):
  - scope (global):
    -- skipped
 Debugger.resume called
 exports.main returned!
-Finished!

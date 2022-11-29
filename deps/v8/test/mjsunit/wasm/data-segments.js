@@ -4,7 +4,7 @@
 
 // Flags: --expose-wasm
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 var debug = false;
 
@@ -13,7 +13,7 @@ function SimpleDataSegmentTest(offset) {
   var builder = new WasmModuleBuilder();
   builder.addMemory(1, 1, false);
   builder.addFunction("load", kSig_i_i)
-    .addBody([kExprGetLocal, 0, kExprI32LoadMem, 0, 0])
+    .addBody([kExprLocalGet, 0, kExprI32LoadMem, 0, 0])
     .exportAs("load");
   builder.addDataSegment(offset, [9, 9, 9, 9]);
 
@@ -38,10 +38,10 @@ function GlobalImportedInitTest(pad) {
 
   var g = builder.addImportedGlobal("mod", "offset", kWasmI32);
 
-  while (pad-- > 0) builder.addGlobal(kWasmI32);  // pad
+  while (pad-- > 0) builder.addGlobal(kWasmI32, false);  // pad
 
   builder.addFunction("load", kSig_i_i)
-    .addBody([kExprGetLocal, 0, kExprI32LoadMem, 0, 0])
+    .addBody([kExprLocalGet, 0, kExprI32LoadMem, 0, 0])
     .exportAs("load");
   builder.addDataSegment(g.index, [5, 5, 5, 5], true);
 

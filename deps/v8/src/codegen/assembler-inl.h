@@ -15,7 +15,7 @@
 #include "src/codegen/arm64/assembler-arm64-inl.h"
 #elif V8_TARGET_ARCH_ARM
 #include "src/codegen/arm/assembler-arm-inl.h"
-#elif V8_TARGET_ARCH_PPC
+#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
 #include "src/codegen/ppc/assembler-ppc-inl.h"
 #elif V8_TARGET_ARCH_MIPS
 #include "src/codegen/mips/assembler-mips-inl.h"
@@ -23,6 +23,8 @@
 #include "src/codegen/mips64/assembler-mips64-inl.h"
 #elif V8_TARGET_ARCH_S390
 #include "src/codegen/s390/assembler-s390-inl.h"
+#elif V8_TARGET_ARCH_RISCV64
+#include "src/codegen/riscv64/assembler-riscv64-inl.h"
 #else
 #error Unknown architecture.
 #endif

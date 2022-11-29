@@ -28,6 +28,8 @@ class ScriptResource : public v8::String::ExternalOneByteStringResource {
   ScriptResource(const char* data, size_t length)
       : data_(data), length_(length) {}
   ~ScriptResource() override = default;
+  ScriptResource(const ScriptResource&) = delete;
+  ScriptResource& operator=(const ScriptResource&) = delete;
 
   const char* data() const override { return data_; }
   size_t length() const override { return length_; }
@@ -35,8 +37,6 @@ class ScriptResource : public v8::String::ExternalOneByteStringResource {
  private:
   const char* data_;
   size_t length_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScriptResource);
 };
 
 Handle<String> CreateSource(
@@ -46,7 +46,8 @@ Handle<SharedFunctionInfo> CreateSharedFunctionInfo(
     Isolate* isolate,
     v8::String::ExternalOneByteStringResource* maybe_resource);
 std::unique_ptr<ParseInfo> OuterParseInfoForShared(
-    Isolate* isolate, Handle<SharedFunctionInfo> shared);
+    Isolate* isolate, Handle<SharedFunctionInfo> shared,
+    UnoptimizedCompileState* state);
 
 }  // namespace test
 }  // namespace internal

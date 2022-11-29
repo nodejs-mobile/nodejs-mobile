@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 let types = [kWasmI32, kWasmF32, kWasmF64];
 let type_names = ["i32", "f32", "f64"];
@@ -37,7 +37,7 @@ types.forEach((type, type_idx) => {
 
         let body = [];
         for (let i = 0; i < num_params; ++i)
-          body.push(kExprGetLocal, (i + shift) % num_params);
+          body.push(kExprLocalGet, (i + shift) % num_params);
         for (let i = 0; i < num_const_params; ++i)
           body.push(...type_const[type_idx](num_params + i));
         body.push(kExprCallFunction, 0);

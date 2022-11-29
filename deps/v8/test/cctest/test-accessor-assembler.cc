@@ -18,21 +18,21 @@ namespace internal {
 using compiler::CodeAssemblerTester;
 using compiler::FunctionTester;
 using compiler::Node;
-using compiler::TNode;
 
 namespace {
 
 void TestStubCacheOffsetCalculation(StubCache::Table table) {
   Isolate* isolate(CcTest::InitIsolateOnce());
   const int kNumParams = 2;
-  CodeAssemblerTester data(isolate, kNumParams);
+  CodeAssemblerTester data(isolate, kNumParams + 1);  // Include receiver.
   AccessorAssembler m(data.state());
 
   {
-    Node* name = m.Parameter(0);
-    Node* map = m.Parameter(1);
-    Node* primary_offset = m.StubCachePrimaryOffsetForTesting(name, map);
-    Node* result;
+    auto name = m.Parameter<Name>(1);
+    auto map = m.Parameter<Map>(2);
+    TNode<IntPtrT> primary_offset =
+        m.StubCachePrimaryOffsetForTesting(name, map);
+    TNode<IntPtrT> result;
     if (table == StubCache::kPrimary) {
       result = primary_offset;
     } else {
@@ -60,7 +60,6 @@ void TestStubCacheOffsetCalculation(StubCache::Table table) {
   };
 
   Handle<Map> maps[] = {
-      Handle<Map>(Map(), isolate),
       factory->cell_map(),
       Map::Create(isolate, 0),
       factory->meta_map(),
@@ -108,7 +107,7 @@ TEST(StubCacheSecondaryOffset) {
 
 namespace {
 
-Handle<Code> CreateCodeOfKind(Code::Kind kind) {
+Handle<Code> CreateCodeOfKind(CodeKind kind) {
   Isolate* isolate(CcTest::InitIsolateOnce());
   CodeAssemblerTester data(isolate, kind);
   CodeStubAssembler m(data.state());
@@ -122,17 +121,16 @@ TEST(TryProbeStubCache) {
   using Label = CodeStubAssembler::Label;
   Isolate* isolate(CcTest::InitIsolateOnce());
   const int kNumParams = 3;
-  CodeAssemblerTester data(isolate, kNumParams);
+  CodeAssemblerTester data(isolate, kNumParams + 1);  // Include receiver.
   AccessorAssembler m(data.state());
 
   StubCache stub_cache(isolate);
   stub_cache.Clear();
 
   {
-    Node* receiver = m.Parameter(0);
-    TNode<Object> name = m.CAST(m.Parameter(1));
-    TNode<MaybeObject> expected_handler =
-        m.UncheckedCast<MaybeObject>(m.Parameter(2));
+    auto receiver = m.Parameter<Object>(1);
+    auto name = m.Parameter<Name>(2);
+    TNode<MaybeObject> expected_handler = m.UncheckedParameter<MaybeObject>(3);
 
     Label passed(&m), failed(&m);
 
@@ -205,12 +203,12 @@ TEST(TryProbeStubCache) {
 
   // Generate some number of handlers.
   for (int i = 0; i < 30; i++) {
-    handlers.push_back(CreateCodeOfKind(Code::STUB));
+    handlers.push_back(CreateCodeOfKind(CodeKind::FOR_TESTING));
   }
 
   // Ensure that GC does happen because from now on we are going to fill our
   // own stub cache instance with raw values.
-  DisallowHeapAllocation no_gc;
+  DisallowGarbageCollection no_gc;
 
   // Populate {stub_cache}.
   const int N = StubCache::kPrimaryTableSize + StubCache::kSecondaryTableSize;
@@ -219,7 +217,8 @@ TEST(TryProbeStubCache) {
     Handle<Name> name = names[index % names.size()];
     Handle<JSObject> receiver = receivers[index % receivers.size()];
     Handle<Code> handler = handlers[index % handlers.size()];
-    stub_cache.Set(*name, receiver->map(), MaybeObject::FromObject(*handler));
+    stub_cache.Set(*name, receiver->map(),
+                   MaybeObject::FromObject(ToCodeT(*handler)));
   }
 
   // Perform some queries.

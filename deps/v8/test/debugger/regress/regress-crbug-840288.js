@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 Debug = debug.Debug
 
 function listener(event, exec_state, event_data, data) {
   if (event == Debug.DebugEvent.AfterCompile) {
     // The actual source doesn't matter, just don't crash.
-    assertEquals("func $main\nend\n", event_data.script().source());
+    var source = event_data.script().source();
+    // Source will be empty for the script representing the entire module,
+    // disassembly for the script representing just the function.
+    assertTrue(source == "func $main\nend\n" || source == "");
   }
 };
 

@@ -19,7 +19,7 @@ void WriteToFile(const char* prefix, FILE* file, Isolate* isolate,
     Local<Value> arg = args[i];
     Local<String> str_obj;
 
-    if (arg->IsSymbol()) arg = Local<Symbol>::Cast(arg)->Name();
+    if (arg->IsSymbol()) arg = Local<Symbol>::Cast(arg)->Description(isolate);
     if (!arg->ToString(isolate->GetCurrentContext()).ToLocal(&str_obj)) return;
 
     v8::String::Utf8Value str(isolate, str_obj);
@@ -43,10 +43,7 @@ void D8Console::Assert(const debug::ConsoleCallArguments& args,
   // false-ish.
   if (args.Length() > 0 && args[0]->BooleanValue(isolate_)) return;
   WriteToFile("console.assert", stdout, isolate_, args);
-  isolate_->ThrowException(v8::Exception::Error(
-      v8::String::NewFromUtf8(isolate_, "console.assert failed",
-                              v8::NewStringType::kNormal)
-          .ToLocalChecked()));
+  isolate_->ThrowError("console.assert failed");
 }
 
 void D8Console::Log(const debug::ConsoleCallArguments& args,
@@ -76,6 +73,7 @@ void D8Console::Debug(const debug::ConsoleCallArguments& args,
 
 void D8Console::Time(const debug::ConsoleCallArguments& args,
                      const v8::debug::ConsoleContext&) {
+  if (internal::FLAG_correctness_fuzzer_suppressions) return;
   if (args.Length() == 0) {
     default_timer_ = base::TimeTicks::HighResolutionNow();
   } else {
@@ -97,6 +95,7 @@ void D8Console::Time(const debug::ConsoleCallArguments& args,
 
 void D8Console::TimeEnd(const debug::ConsoleCallArguments& args,
                         const v8::debug::ConsoleContext&) {
+  if (internal::FLAG_correctness_fuzzer_suppressions) return;
   base::TimeDelta delta;
   if (args.Length() == 0) {
     delta = base::TimeTicks::HighResolutionNow() - default_timer_;
@@ -112,6 +111,7 @@ void D8Console::TimeEnd(const debug::ConsoleCallArguments& args,
     auto find = timers_.find(string);
     if (find != timers_.end()) {
       delta = now - find->second;
+      timers_.erase(find);
     }
     printf("console.timeEnd: %s, %f\n", *utf8, delta.InMillisecondsF());
   }
@@ -119,6 +119,7 @@ void D8Console::TimeEnd(const debug::ConsoleCallArguments& args,
 
 void D8Console::TimeStamp(const debug::ConsoleCallArguments& args,
                           const v8::debug::ConsoleContext&) {
+  if (internal::FLAG_correctness_fuzzer_suppressions) return;
   base::TimeDelta delta = base::TimeTicks::HighResolutionNow() - default_timer_;
   if (args.Length() == 0) {
     printf("console.timeStamp: default, %f\n", delta.InMillisecondsF());
@@ -135,6 +136,7 @@ void D8Console::TimeStamp(const debug::ConsoleCallArguments& args,
 
 void D8Console::Trace(const debug::ConsoleCallArguments& args,
                       const v8::debug::ConsoleContext&) {
+  if (internal::FLAG_correctness_fuzzer_suppressions) return;
   i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate_);
   i_isolate->PrintStack(stderr, i::Isolate::kPrintStackConcise);
 }

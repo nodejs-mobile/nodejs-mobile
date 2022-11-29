@@ -28,9 +28,16 @@ class InvokeIntrinsicHelper {
   template <class... A>
   Handle<Object> Invoke(A... args) {
     CHECK(IntrinsicsHelper::IsSupported(function_id_));
-    BytecodeArrayBuilder builder(zone_, sizeof...(args), 0, nullptr);
-    RegisterList reg_list = InterpreterTester::NewRegisterList(
-        builder.Receiver().index(), sizeof...(args));
+    int parameter_count = sizeof...(args);
+    // Move the parameter to locals, since the order of the
+    // arguments in the stack is reversed.
+    BytecodeArrayBuilder builder(zone_, parameter_count + 1, parameter_count,
+                                 nullptr);
+    for (int i = 0; i < parameter_count; i++) {
+      builder.MoveRegister(builder.Parameter(i), builder.Local(i));
+    }
+    RegisterList reg_list =
+        InterpreterTester::NewRegisterList(0, parameter_count);
     builder.CallRuntime(function_id_, reg_list).Return();
     InterpreterTester tester(isolate_, builder.ToBytecodeArray(isolate_));
     auto callable = tester.GetCallable<A...>();
@@ -52,111 +59,6 @@ class InvokeIntrinsicHelper {
 };
 
 }  // namespace
-
-TEST(IsJSReceiver) {
-  HandleAndZoneScope handles;
-
-  InvokeIntrinsicHelper helper(handles.main_isolate(), handles.main_zone(),
-                               Runtime::kInlineIsJSReceiver);
-  Factory* factory = handles.main_isolate()->factory();
-
-  CHECK_EQ(*factory->true_value(),
-           *helper.Invoke(helper.NewObject("new Date()")));
-  CHECK_EQ(*factory->true_value(),
-           *helper.Invoke(helper.NewObject("(function() {})")));
-  CHECK_EQ(*factory->true_value(), *helper.Invoke(helper.NewObject("([1])")));
-  CHECK_EQ(*factory->true_value(), *helper.Invoke(helper.NewObject("({})")));
-  CHECK_EQ(*factory->true_value(), *helper.Invoke(helper.NewObject("(/x/)")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Undefined()));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Null()));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("'string'")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("42")));
-}
-
-TEST(IsArray) {
-  HandleAndZoneScope handles;
-
-  InvokeIntrinsicHelper helper(handles.main_isolate(), handles.main_zone(),
-                               Runtime::kInlineIsArray);
-  Factory* factory = handles.main_isolate()->factory();
-
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("new Date()")));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("(function() {})")));
-  CHECK_EQ(*factory->true_value(), *helper.Invoke(helper.NewObject("([1])")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("({})")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("(/x/)")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Undefined()));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Null()));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("'string'")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("42")));
-}
-
-TEST(IsSmi) {
-  HandleAndZoneScope handles;
-
-  InvokeIntrinsicHelper helper(handles.main_isolate(), handles.main_zone(),
-                               Runtime::kInlineIsSmi);
-  Factory* factory = handles.main_isolate()->factory();
-
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("new Date()")));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("(function() {})")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("([1])")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("({})")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("(/x/)")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Undefined()));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.Null()));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("'string'")));
-  CHECK_EQ(*factory->false_value(), *helper.Invoke(helper.NewObject("42.2")));
-  CHECK_EQ(*factory->false_value(),
-           *helper.Invoke(helper.NewObject("4294967297")));
-  CHECK_EQ(*factory->true_value(), *helper.Invoke(helper.NewObject("42")));
-}
-
-TEST(Call) {
-  HandleAndZoneScope handles;
-  Isolate* isolate = handles.main_isolate();
-  Factory* factory = isolate->factory();
-  InvokeIntrinsicHelper helper(isolate, handles.main_zone(),
-                               Runtime::kInlineCall);
-
-  CHECK_EQ(Smi::FromInt(20),
-           *helper.Invoke(helper.NewObject("(function() { return this.x; })"),
-                          helper.NewObject("({ x: 20 })")));
-  CHECK_EQ(Smi::FromInt(50),
-           *helper.Invoke(helper.NewObject("(function(arg1) { return arg1; })"),
-                          factory->undefined_value(),
-                          handle(Smi::FromInt(50), isolate)));
-  CHECK_EQ(
-      Smi::FromInt(20),
-      *helper.Invoke(
-          helper.NewObject("(function(a, b, c) { return a + b + c; })"),
-          factory->undefined_value(), handle(Smi::FromInt(10), isolate),
-          handle(Smi::FromInt(7), isolate), handle(Smi::FromInt(3), isolate)));
-}
-
-TEST(IntrinsicAsStubCall) {
-  HandleAndZoneScope handles;
-  Isolate* isolate = handles.main_isolate();
-  Factory* factory = isolate->factory();
-
-  InvokeIntrinsicHelper has_property_helper(isolate, handles.main_zone(),
-                                            Runtime::kInlineHasProperty);
-  CHECK_EQ(
-      *factory->true_value(),
-      *has_property_helper.Invoke(has_property_helper.NewObject("({ x: 20 })"),
-                                  has_property_helper.NewObject("'x'")));
-  CHECK_EQ(
-      *factory->false_value(),
-      *has_property_helper.Invoke(has_property_helper.NewObject("({ x: 20 })"),
-                                  has_property_helper.NewObject("'y'")));
-}
 
 }  // namespace interpreter
 }  // namespace internal

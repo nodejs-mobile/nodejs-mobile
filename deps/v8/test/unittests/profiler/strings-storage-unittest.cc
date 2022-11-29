@@ -108,5 +108,61 @@ TEST_F(StringsStorageWithIsolate, FormatAndGetShareStorage) {
   CHECK_EQ(stored_str, formatted_str);
 }
 
+TEST_F(StringsStorageWithIsolate, Refcounting) {
+  StringsStorage storage;
+
+  const char* a = storage.GetCopy("12");
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+
+  const char* b = storage.GetCopy("12");
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+
+  // Ensure that we deduplicate the string.
+  CHECK_EQ(a, b);
+
+  CHECK(storage.Release(a));
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+  CHECK(storage.Release(b));
+  CHECK_EQ(storage.GetStringCountForTesting(), 0);
+#if !DEBUG
+  CHECK(!storage.Release("12"));
+#endif  // !DEBUG
+
+  // Verify that other constructors refcount as intended.
+  const char* c = storage.GetFormatted("%d", 12);
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+
+  const char* d = storage.GetName(12);
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+
+  CHECK_EQ(c, d);
+
+  CHECK(storage.Release(c));
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+  CHECK(storage.Release(d));
+  CHECK_EQ(storage.GetStringCountForTesting(), 0);
+  CHECK(!storage.Release("12"));
+}
+
+TEST_F(StringsStorageWithIsolate, InvalidRelease) {
+  StringsStorage storage;
+
+  // If we attempt to release a string not being managed by the StringsStorage,
+  // return false.
+  CHECK(!storage.Release("12"));
+}
+
+TEST_F(StringsStorageWithIsolate, CopyAndConsShareStorage) {
+  StringsStorage storage;
+
+  Handle<String> str = isolate()->factory()->NewStringFromAsciiChecked("foo");
+
+  const char* copy_str = storage.GetCopy("get foo");
+  const char* cons_str = storage.GetConsName("get ", *str);
+
+  CHECK_EQ(storage.GetStringCountForTesting(), 1);
+  CHECK_EQ(copy_str, cons_str);
+}
+
 }  // namespace internal
 }  // namespace v8

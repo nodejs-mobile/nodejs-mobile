@@ -72,9 +72,8 @@ inline void Debug(WASI* wasi, Args&&... args) {
     }                                                                         \
   } while (0)
 
-
 using v8::Array;
-using v8::ArrayBuffer;
+using v8::BackingStore;
 using v8::BigInt;
 using v8::Context;
 using v8::Exception;
@@ -88,7 +87,7 @@ using v8::Object;
 using v8::String;
 using v8::Uint32;
 using v8::Value;
-
+using v8::WasmMemoryObject;
 
 static MaybeLocal<Value> WASIException(Local<Context> context,
                                        int errorno,
@@ -103,9 +102,9 @@ static MaybeLocal<Value> WASIException(Local<Context> context,
   js_msg =
       String::Concat(isolate, js_msg, FIXED_ONE_BYTE_STRING(isolate, ", "));
   js_msg = String::Concat(isolate, js_msg, js_syscall);
-  Local<Object> e =
-    Exception::Error(js_msg)->ToObject(context)
-      .ToLocalChecked();
+  Local<Object> e;
+  if (!Exception::Error(js_msg)->ToObject(context).ToLocal(&e))
+    return MaybeLocal<Value>();
 
   if (e->Set(context,
              env->errno_string(),
@@ -127,13 +126,11 @@ WASI::WASI(Environment* env,
   options->allocator = &alloc_info_;
   int err = uvwasi_init(&uvw_, options);
   if (err != UVWASI_ESUCCESS) {
-    Local<Context> context = env->context();
-    MaybeLocal<Value> exception = WASIException(context, err, "uvwasi_init");
-
-    if (exception.IsEmpty())
+    Local<Value> exception;
+    if (!WASIException(env->context(), err, "uvwasi_init").ToLocal(&exception))
       return;
 
-    context->GetIsolate()->ThrowException(exception.ToLocalChecked());
+    env->isolate()->ThrowException(exception);
   }
 }
 
@@ -237,11 +234,9 @@ void WASI::New(const FunctionCallbackInfo<Value>& args) {
     delete[] options.argv;
   }
 
-  if (options.envp != nullptr) {
-    for (uint32_t i = 0; options.envp[i]; i++)
-      free(const_cast<char*>(options.envp[i]));
-    delete[] options.envp;
-  }
+  for (uint32_t i = 0; options.envp[i]; i++)
+    free(const_cast<char*>(options.envp[i]));
+  delete[] options.envp;
 
   if (options.preopens != nullptr) {
     for (uint32_t i = 0; i < options.preopenc; i++) {
@@ -280,7 +275,8 @@ void WASI::ArgsGet(const FunctionCallbackInfo<Value>& args) {
 
   if (err == UVWASI_ESUCCESS) {
     for (size_t i = 0; i < wasi->uvw_.argc; i++) {
-      uint32_t offset = argv_buf_offset + (argv[i] - argv[0]);
+      uint32_t offset =
+          static_cast<uint32_t>(argv_buf_offset + (argv[i] - argv[0]));
       uvwasi_serdes_write_uint32_t(memory,
                                    argv_offset +
                                    (i * UVWASI_SERDES_SIZE_uint32_t),
@@ -411,7 +407,8 @@ void WASI::EnvironGet(const FunctionCallbackInfo<Value>& args) {
 
   if (err == UVWASI_ESUCCESS) {
     for (size_t i = 0; i < wasi->uvw_.envc; i++) {
-      uint32_t offset = environ_buf_offset + (environment[i] - environment[0]);
+      uint32_t offset = static_cast<uint32_t>(
+          environ_buf_offset + (environment[i] - environment[0]));
 
       uvwasi_serdes_write_uint32_t(memory,
                                    environ_offset +
@@ -1643,28 +1640,24 @@ void WASI::SockShutdown(const FunctionCallbackInfo<Value>& args) {
 
 void WASI::_SetMemory(const FunctionCallbackInfo<Value>& args) {
   WASI* wasi;
-  CHECK_EQ(args.Length(), 1);
-  CHECK(args[0]->IsObject());
   ASSIGN_OR_RETURN_UNWRAP(&wasi, args.This());
-  wasi->memory_.Reset(wasi->env()->isolate(), args[0].As<Object>());
+  CHECK_EQ(args.Length(), 1);
+  if (!args[0]->IsWasmMemoryObject()) {
+    return node::THROW_ERR_INVALID_ARG_TYPE(
+        wasi->env(),
+        "\"instance.exports.memory\" property must be a WebAssembly.Memory "
+        "object");
+  }
+  wasi->memory_.Reset(wasi->env()->isolate(), args[0].As<WasmMemoryObject>());
 }
 
 
 uvwasi_errno_t WASI::backingStore(char** store, size_t* byte_length) {
-  Environment* env = this->env();
-  Local<Object> memory = PersistentToLocal::Strong(this->memory_);
-  Local<Value> prop;
-
-  if (!memory->Get(env->context(), env->buffer_string()).ToLocal(&prop))
-    return UVWASI_EINVAL;
-
-  if (!prop->IsArrayBuffer())
-    return UVWASI_EINVAL;
-
-  Local<ArrayBuffer> ab = prop.As<ArrayBuffer>();
-  ArrayBuffer::Contents contents = ab->GetContents();
-  *byte_length = ab->ByteLength();
-  *store = static_cast<char*>(contents.Data());
+  Local<WasmMemoryObject> memory = PersistentToLocal::Strong(this->memory_);
+  std::shared_ptr<BackingStore> backing_store =
+      memory->Buffer()->GetBackingStore();
+  *byte_length = backing_store->ByteLength();
+  *store = static_cast<char*>(backing_store->Data());
   CHECK_NOT_NULL(*store);
   return UVWASI_ESUCCESS;
 }
@@ -1677,9 +1670,7 @@ static void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
 
   Local<FunctionTemplate> tmpl = env->NewFunctionTemplate(WASI::New);
-  auto wasi_wrap_string = FIXED_ONE_BYTE_STRING(env->isolate(), "WASI");
   tmpl->InstanceTemplate()->SetInternalFieldCount(WASI::kInternalFieldCount);
-  tmpl->SetClassName(wasi_wrap_string);
   tmpl->Inherit(BaseObject::GetConstructorTemplate(env));
 
   env->SetProtoMethod(tmpl, "args_get", WASI::ArgsGet);
@@ -1732,9 +1723,7 @@ static void Initialize(Local<Object> target,
 
   env->SetInstanceMethod(tmpl, "_setMemory", WASI::_SetMemory);
 
-  target->Set(env->context(),
-              wasi_wrap_string,
-              tmpl->GetFunction(context).ToLocalChecked()).ToChecked();
+  env->SetConstructorFunction(target, "WASI", tmpl);
 }
 
 

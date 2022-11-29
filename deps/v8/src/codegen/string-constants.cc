@@ -5,7 +5,6 @@
 #include "src/codegen/string-constants.h"
 
 #include "src/base/functional.h"
-#include "src/numbers/dtoa.h"
 #include "src/objects/objects.h"
 #include "src/objects/string-inl.h"
 
@@ -22,6 +21,7 @@ Handle<String> StringConstantBase::AllocateStringConstant(
   switch (kind()) {
     case StringConstantKind::kStringLiteral: {
       result = static_cast<const StringLiteral*>(this)->str();
+      CHECK(!result.is_null());
       break;
     }
     case StringConstantKind::kNumberToStringConstant: {
@@ -29,6 +29,7 @@ Handle<String> StringConstantBase::AllocateStringConstant(
       Handle<Object> num_obj =
           isolate->factory()->NewNumber(num_constant->num());
       result = isolate->factory()->NumberToString(num_obj);
+      CHECK(!result.is_null());
       break;
     }
     case StringConstantKind::kStringCons: {
@@ -174,7 +175,7 @@ size_t StringConstantBase::GetMaxStringConstantLength() const {
 size_t StringLiteral::GetMaxStringConstantLength() const { return length_; }
 
 size_t NumberToStringConstant::GetMaxStringConstantLength() const {
-  return kBase10MaximalLength + 1;
+  return kMaxDoubleStringLength;
 }
 
 size_t StringCons::GetMaxStringConstantLength() const {

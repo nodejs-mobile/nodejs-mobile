@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 
+#include "src/base/bit-field.h"
 #include "src/execution/isolate.h"
 #include "src/heap/factory.h"
 #include "src/objects/managed.h"
@@ -23,12 +24,15 @@
 
 namespace U_ICU_NAMESPACE {
 class ListFormatter;
-}
+}  // namespace U_ICU_NAMESPACE
 
 namespace v8 {
 namespace internal {
 
-class JSListFormat : public JSObject {
+#include "torque-generated/src/objects/js-list-format-tq.inc"
+
+class JSListFormat
+    : public TorqueGeneratedJSListFormat<JSListFormat, JSObject> {
  public:
   // Creates relative time format object with properties derived from input
   // locales and options.
@@ -54,10 +58,7 @@ class JSListFormat : public JSObject {
   Handle<String> StyleAsString() const;
   Handle<String> TypeAsString() const;
 
-  DECL_CAST(JSListFormat)
-
   // ListFormat accessors.
-  DECL_ACCESSORS(locale, String)
   DECL_ACCESSORS(icu_formatter, Managed<icu::ListFormatter>)
 
   // Style: identifying the relative time format style used.
@@ -82,12 +83,8 @@ class JSListFormat : public JSObject {
   inline void set_type(Type type);
   inline Type type() const;
 
-// Bit positions in |flags|.
-#define FLAGS_BIT_FIELDS(V, _) \
-  V(StyleBits, Style, 2, _)    \
-  V(TypeBits, Type, 2, _)
-  DEFINE_BIT_FIELDS(FLAGS_BIT_FIELDS)
-#undef FLAGS_BIT_FIELDS
+  // Bit positions in |flags|.
+  DEFINE_TORQUE_GENERATED_JS_LIST_FORMAT_FLAGS()
 
   STATIC_ASSERT(Style::LONG <= StyleBits::kMax);
   STATIC_ASSERT(Style::SHORT <= StyleBits::kMax);
@@ -96,17 +93,9 @@ class JSListFormat : public JSObject {
   STATIC_ASSERT(Type::DISJUNCTION <= TypeBits::kMax);
   STATIC_ASSERT(Type::UNIT <= TypeBits::kMax);
 
-  // [flags] Bit field containing various flags about the function.
-  DECL_INT_ACCESSORS(flags)
-
   DECL_PRINTER(JSListFormat)
-  DECL_VERIFIER(JSListFormat)
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JSLIST_FORMAT_FIELDS)
-
-  OBJECT_CONSTRUCTORS(JSListFormat, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSListFormat)
 };
 
 }  // namespace internal

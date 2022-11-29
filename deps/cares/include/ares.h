@@ -39,7 +39,7 @@
 #if defined(_AIX) || defined(__NOVELL_LIBC__) || defined(__NetBSD__) || \
     defined(__minix) || defined(__SYMBIAN32__) || defined(__INTEGRITY) || \
     defined(ANDROID) || defined(__ANDROID__) || defined(__OpenBSD__) || \
-    defined(__QNXNTO__)
+    defined(__QNXNTO__) || defined(__MVS__) || defined(__HAIKU__)
 #include <sys/select.h>
 #endif
 #if (defined(NETWARE) && !defined(__NOVELL_LIBC__))
@@ -528,6 +528,15 @@ struct ares_addr6ttl {
   int             ttl;
 };
 
+struct ares_caa_reply {
+  struct ares_caa_reply  *next;
+  int                     critical;
+  unsigned char          *property;
+  size_t                  plength;  /* plength excludes null termination */
+  unsigned char          *value;
+  size_t                  length;   /* length excludes null termination */
+};
+
 struct ares_srv_reply {
   struct ares_srv_reply  *next;
   char                   *host;
@@ -579,6 +588,14 @@ struct ares_soa_reply {
   unsigned int minttl;
 };
 
+struct ares_uri_reply {
+  struct ares_uri_reply  *next;
+  unsigned short          priority;
+  unsigned short          weight;
+  char                   *uri;
+  int                     ttl;
+};
+
 /*
  * Similar to addrinfo, but with extra ttl and missing canonname.
  */
@@ -608,6 +625,7 @@ struct ares_addrinfo_cname {
 struct ares_addrinfo {
   struct ares_addrinfo_cname *cnames;
   struct ares_addrinfo_node  *nodes;
+  char                       *name;
 };
 
 struct ares_addrinfo_hints {
@@ -636,6 +654,10 @@ CARES_EXTERN int ares_parse_aaaa_reply(const unsigned char *abuf,
                                        struct hostent **host,
                                        struct ares_addr6ttl *addrttls,
                                        int *naddrttls);
+
+CARES_EXTERN int ares_parse_caa_reply(const unsigned char* abuf,
+				      int alen,
+				      struct ares_caa_reply** caa_out);
 
 CARES_EXTERN int ares_parse_ptr_reply(const unsigned char *abuf,
                                       int alen,
@@ -671,6 +693,10 @@ CARES_EXTERN int ares_parse_naptr_reply(const unsigned char* abuf,
 CARES_EXTERN int ares_parse_soa_reply(const unsigned char* abuf,
 				      int alen,
 				      struct ares_soa_reply** soa_out);
+
+CARES_EXTERN int ares_parse_uri_reply(const unsigned char* abuf,
+                                      int alen,
+                                      struct ares_uri_reply** uri_out);
 
 CARES_EXTERN void ares_free_string(void *str);
 

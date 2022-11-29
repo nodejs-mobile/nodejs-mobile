@@ -5,17 +5,16 @@ const child_process = require('child_process');
 const cluster = require('cluster');
 
 if (!process.argv[2]) {
-  /* It seems Windows only allocate new console window for
-   * attaching processes spawned by detached processes. i.e.
-   * - If process D is spawned by process C with `detached: true`,
-   *   and process W is spawned by process D with `detached: false`,
-   *   W will get a new black console window popped up.
-   * - If D is spawned by C with `detached: false` or W is spawned
-   *   by D with `detached: true`, no console window will pop up for W.
-   *
-   * So, we have to spawn a detached process first to run the actual test.
-   */
-  const master = child_process.spawn(
+  // It seems Windows only allocate new console window for
+  // attaching processes spawned by detached processes. i.e.
+  // - If process D is spawned by process C with `detached: true`,
+  //   and process W is spawned by process D with `detached: false`,
+  //   W will get a new black console window popped up.
+  // - If D is spawned by C with `detached: false` or W is spawned
+  //   by D with `detached: true`, no console window will pop up for W.
+  //
+  // So, we have to spawn a detached process first to run the actual test.
+  const primary = child_process.spawn(
     process.argv[0],
     [process.argv[1], '--cluster'],
     { detached: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
@@ -24,7 +23,7 @@ if (!process.argv[2]) {
     workerOnline: common.mustCall((msg) => {
     }),
     mainWindowHandle: common.mustCall((msg) => {
-      assert.ok(/0\s*/.test(msg.value));
+      assert.match(msg.value, /0\s*/);
     }),
     workerExit: common.mustCall((msg) => {
       assert.strictEqual(msg.code, 0);
@@ -32,19 +31,19 @@ if (!process.argv[2]) {
     })
   };
 
-  master.on('message', (msg) => {
+  primary.on('message', (msg) => {
     const handler = messageHandlers[msg.type];
     assert.ok(handler);
     handler(msg);
   });
 
-  master.on('exit', common.mustCall((code, signal) => {
+  primary.on('exit', common.mustCall((code, signal) => {
     assert.strictEqual(code, 0);
     assert.strictEqual(signal, null);
   }));
 
-} else if (cluster.isMaster) {
-  cluster.setupMaster({
+} else if (cluster.isPrimary) {
+  cluster.setupPrimary({
     silent: true,
     windowsHide: true
   });

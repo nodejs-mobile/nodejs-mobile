@@ -13,8 +13,32 @@
 #include "src/objects/map.h"
 #include "src/objects/objects.h"
 
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/value-type.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 namespace v8 {
 namespace internal {
+
+class PropertyKey {
+ public:
+  inline PropertyKey(Isolate* isolate, double index);
+  // {name} might be a string representation of an element index.
+  inline PropertyKey(Isolate* isolate, Handle<Name> name);
+  // {valid_key} is a Name or Number.
+  inline PropertyKey(Isolate* isolate, Handle<Object> valid_key);
+  // {key} could be anything.
+  PropertyKey(Isolate* isolate, Handle<Object> key, bool* success);
+
+  inline bool is_element() const;
+  Handle<Name> name() const { return name_; }
+  size_t index() const { return index_; }
+  inline Handle<Name> GetName(Isolate* isolate);
+
+ private:
+  Handle<Name> name_;
+  size_t index_;
+};
 
 class V8_EXPORT_PRIVATE LookupIterator final {
  public:
@@ -45,53 +69,27 @@ class V8_EXPORT_PRIVATE LookupIterator final {
     BEFORE_PROPERTY = INTERCEPTOR
   };
 
+  // {name} is guaranteed to be a property name (and not e.g. "123").
   inline LookupIterator(Isolate* isolate, Handle<Object> receiver,
                         Handle<Name> name,
                         Configuration configuration = DEFAULT);
+  inline LookupIterator(Isolate* isolate, Handle<Object> receiver,
+                        Handle<Name> name, Handle<Object> lookup_start_object,
+                        Configuration configuration = DEFAULT);
 
-  inline LookupIterator(Handle<Object> receiver, Handle<Name> name,
-                        Handle<JSReceiver> holder,
+  inline LookupIterator(Isolate* isolate, Handle<Object> receiver, size_t index,
+                        Configuration configuration = DEFAULT);
+  inline LookupIterator(Isolate* isolate, Handle<Object> receiver, size_t index,
+                        Handle<Object> lookup_start_object,
                         Configuration configuration = DEFAULT);
 
   inline LookupIterator(Isolate* isolate, Handle<Object> receiver,
-                        Handle<Name> name, Handle<JSReceiver> holder,
+                        const PropertyKey& key,
                         Configuration configuration = DEFAULT);
-
   inline LookupIterator(Isolate* isolate, Handle<Object> receiver,
-                        uint32_t index, Configuration configuration = DEFAULT);
-
-  LookupIterator(Isolate* isolate, Handle<Object> receiver, uint32_t index,
-                 Handle<JSReceiver> holder,
-                 Configuration configuration = DEFAULT)
-      : configuration_(configuration),
-        interceptor_state_(InterceptorState::kUninitialized),
-        property_details_(PropertyDetails::Empty()),
-        isolate_(isolate),
-        receiver_(receiver),
-        initial_holder_(holder),
-        index_(index),
-        number_(static_cast<uint32_t>(DescriptorArray::kNotFound)) {
-    // kMaxUInt32 isn't a valid index.
-    DCHECK_NE(kMaxUInt32, index_);
-    Start<true>();
-  }
-
-  static inline LookupIterator PropertyOrElement(
-      Isolate* isolate, Handle<Object> receiver, Handle<Name> name,
-      Configuration configuration = DEFAULT);
-
-  static inline LookupIterator PropertyOrElement(
-      Isolate* isolate, Handle<Object> receiver, Handle<Name> name,
-      Handle<JSReceiver> holder, Configuration configuration = DEFAULT);
-
-  static LookupIterator PropertyOrElement(
-      Isolate* isolate, Handle<Object> receiver, Handle<Object> key,
-      bool* success, Handle<JSReceiver> holder,
-      Configuration configuration = DEFAULT);
-
-  static LookupIterator PropertyOrElement(
-      Isolate* isolate, Handle<Object> receiver, Handle<Object> key,
-      bool* success, Configuration configuration = DEFAULT);
+                        const PropertyKey& key,
+                        Handle<Object> lookup_start_object,
+                        Configuration configuration = DEFAULT);
 
   void Restart() {
     InterceptorState state = InterceptorState::kUninitialized;
@@ -101,14 +99,21 @@ class V8_EXPORT_PRIVATE LookupIterator final {
   Isolate* isolate() const { return isolate_; }
   State state() const { return state_; }
 
-  Handle<Name> name() const {
-    DCHECK(!IsElement());
-    return name_;
-  }
+  inline Handle<Name> name() const;
   inline Handle<Name> GetName();
-  uint32_t index() const { return index_; }
+  size_t index() const { return index_; }
+  uint32_t array_index() const {
+    DCHECK_LE(index_, JSArray::kMaxArrayIndex);
+    return static_cast<uint32_t>(index_);
+  }
 
-  bool IsElement() const { return index_ != kMaxUInt32; }
+  // Returns true if this LookupIterator has an index in the range
+  // [0, size_t::max).
+  bool IsElement() const { return index_ != kInvalidIndex; }
+  // Returns true if this LookupIterator has an index that counts as an
+  // element for the given object (up to kMaxArrayIndex for JSArrays,
+  // any integer for JSTypedArrays).
+  inline bool IsElement(JSReceiver object) const;
 
   bool IsFound() const { return state_ != NOT_FOUND; }
   void Next();
@@ -128,6 +133,8 @@ class V8_EXPORT_PRIVATE LookupIterator final {
   inline Handle<PropertyCell> transition_cell() const;
   template <class T>
   inline Handle<T> GetHolder() const;
+
+  Handle<Object> lookup_start_object() const { return lookup_start_object_; }
 
   bool HolderIsReceiver() const;
   bool HolderIsReceiverOrHiddenPrototype() const;
@@ -171,31 +178,50 @@ class V8_EXPORT_PRIVATE LookupIterator final {
   }
   PropertyLocation location() const { return property_details().location(); }
   PropertyConstness constness() const { return property_details().constness(); }
-  Handle<Map> GetFieldOwnerMap() const;
   FieldIndex GetFieldIndex() const;
-  Handle<FieldType> GetFieldType() const;
   int GetFieldDescriptorIndex() const;
   int GetAccessorIndex() const;
   Handle<PropertyCell> GetPropertyCell() const;
   Handle<Object> GetAccessors() const;
   inline Handle<InterceptorInfo> GetInterceptor() const;
   Handle<InterceptorInfo> GetInterceptorForFailedAccessCheck() const;
-  Handle<Object> GetDataValue() const;
+  Handle<Object> GetDataValue(AllocationPolicy allocation_policy =
+                                  AllocationPolicy::kAllocationAllowed) const;
   void WriteDataValue(Handle<Object> value, bool initializing_store);
   inline void UpdateProtector();
+  static inline void UpdateProtector(Isolate* isolate, Handle<Object> receiver,
+                                     Handle<Name> name);
+
+#if V8_ENABLE_WEBASSEMBLY
+  // Fetches type of WasmStruct's field or WasmArray's elements, it
+  // is used for preparing the value for storing into WasmObjects.
+  wasm::ValueType wasm_value_type() const;
+  void WriteDataValueToWasmObject(Handle<Object> value);
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   // Lookup a 'cached' private property for an accessor.
   // If not found returns false and leaves the LookupIterator unmodified.
+  bool TryLookupCachedProperty(Handle<AccessorPair> accessor);
   bool TryLookupCachedProperty();
-  bool LookupCachedProperty();
 
  private:
+  friend PropertyKey;
+
+  static const size_t kInvalidIndex = std::numeric_limits<size_t>::max();
+
+  bool LookupCachedProperty(Handle<AccessorPair> accessor);
+  inline LookupIterator(Isolate* isolate, Handle<Object> receiver,
+                        Handle<Name> name, size_t index,
+                        Handle<Object> lookup_start_object,
+                        Configuration configuration);
+
   // For |ForTransitionHandler|.
   LookupIterator(Isolate* isolate, Handle<Object> receiver, Handle<Name> name,
                  Handle<Map> transition_map, PropertyDetails details,
                  bool has_property);
 
-  void InternalUpdateProtector();
+  static void InternalUpdateProtector(Isolate* isolate, Handle<Object> receiver,
+                                      Handle<Name> name);
 
   enum class InterceptorState {
     kUninitialized,
@@ -207,6 +233,9 @@ class V8_EXPORT_PRIVATE LookupIterator final {
 
   V8_WARN_UNUSED_RESULT inline JSReceiver NextHolder(Map map);
 
+  bool is_js_array_element(bool is_element) const {
+    return is_element && index_ <= JSArray::kMaxArrayIndex;
+  }
   template <bool is_element>
   V8_EXPORT_PRIVATE void Start();
   template <bool is_element>
@@ -227,50 +256,110 @@ class V8_EXPORT_PRIVATE LookupIterator final {
   }
   template <bool is_element>
   void RestartInternal(InterceptorState interceptor_state);
-  Handle<Object> FetchValue() const;
+  Handle<Object> FetchValue(AllocationPolicy allocation_policy =
+                                AllocationPolicy::kAllocationAllowed) const;
   bool IsConstFieldValueEqualTo(Object value) const;
+  bool IsConstDictValueEqualTo(Object value) const;
+
   template <bool is_element>
   void ReloadPropertyInformation();
 
   template <bool is_element>
   bool SkipInterceptor(JSObject holder);
   template <bool is_element>
-  static inline InterceptorInfo GetInterceptor(Isolate* isolate,
-                                               JSObject holder);
+  inline InterceptorInfo GetInterceptor(JSObject holder) const;
 
   bool check_interceptor() const {
     return (configuration_ & kInterceptor) != 0;
   }
-  inline int descriptor_number() const;
-  inline int dictionary_entry() const;
+  inline InternalIndex descriptor_number() const;
+  inline InternalIndex dictionary_entry() const;
 
   static inline Configuration ComputeConfiguration(Isolate* isolate,
                                                    Configuration configuration,
                                                    Handle<Name> name);
 
   static Handle<JSReceiver> GetRootForNonJSReceiver(
-      Isolate* isolate, Handle<Object> receiver, uint32_t index = kMaxUInt32);
+      Isolate* isolate, Handle<Object> lookup_start_object,
+      size_t index = kInvalidIndex);
   static inline Handle<JSReceiver> GetRoot(Isolate* isolate,
-                                           Handle<Object> receiver,
-                                           uint32_t index = kMaxUInt32);
+                                           Handle<Object> lookup_start_object,
+                                           size_t index = kInvalidIndex);
 
   State NotFound(JSReceiver const holder) const;
 
   // If configuration_ becomes mutable, update
   // HolderIsReceiverOrHiddenPrototype.
   const Configuration configuration_;
-  State state_;
-  bool has_property_;
-  InterceptorState interceptor_state_;
-  PropertyDetails property_details_;
+  State state_ = NOT_FOUND;
+  bool has_property_ = false;
+  InterceptorState interceptor_state_ = InterceptorState::kUninitialized;
+  PropertyDetails property_details_ = PropertyDetails::Empty();
   Isolate* const isolate_;
   Handle<Name> name_;
   Handle<Object> transition_;
   const Handle<Object> receiver_;
   Handle<JSReceiver> holder_;
-  const Handle<JSReceiver> initial_holder_;
-  const uint32_t index_;
-  uint32_t number_;
+  const Handle<Object> lookup_start_object_;
+  const size_t index_;
+  InternalIndex number_ = InternalIndex::NotFound();
+};
+
+// Similar to the LookupIterator, but for concurrent accesses from a background
+// thread.
+//
+// Note: This is a work in progress, intended to bundle code related to
+// concurrent lookups here. In its current state, the class is obviously not an
+// 'iterator'. Still, keeping the name for now, with the intent to clarify
+// names and implementation once we've gotten some experience with more
+// involved logic.
+// TODO(jgruber, v8:7790): Consider using a LookupIterator-style interface.
+// TODO(jgruber, v8:7790): Consider merging back into the LookupIterator once
+// functionality and constraints are better known.
+class ConcurrentLookupIterator final : public AllStatic {
+ public:
+  // Tri-state to distinguish between 'not-present' and 'who-knows' failures.
+  enum Result {
+    kPresent,     // The value was found.
+    kNotPresent,  // No value exists.
+    kGaveUp,      // The operation can't be completed.
+  };
+
+  // Implements the own data property lookup for the specialized case of
+  // fixed_cow_array backing stores (these are only in use for array literal
+  // boilerplates). The contract is that the elements, elements kind, and array
+  // length passed to this function should all be read from the same JSArray
+  // instance; but due to concurrency it's possible that they may not be
+  // consistent among themselves (e.g. the elements kind may not match the
+  // given elements backing store). We are thus extra-careful to handle
+  // exceptional situations.
+  V8_EXPORT_PRIVATE static base::Optional<Object> TryGetOwnCowElement(
+      Isolate* isolate, FixedArray array_elements, ElementsKind elements_kind,
+      int array_length, size_t index);
+
+  // As above, the contract is that the elements and elements kind should be
+  // read from the same holder, but this function is implemented defensively to
+  // tolerate concurrency issues.
+  V8_EXPORT_PRIVATE static Result TryGetOwnConstantElement(
+      Object* result_out, Isolate* isolate, LocalIsolate* local_isolate,
+      JSObject holder, FixedArrayBase elements, ElementsKind elements_kind,
+      size_t index);
+
+  // Implements the own data property lookup for the specialized case of
+  // strings.
+  V8_EXPORT_PRIVATE static Result TryGetOwnChar(String* result_out,
+                                                Isolate* isolate,
+                                                LocalIsolate* local_isolate,
+                                                String string, size_t index);
+
+  // This method reimplements the following sequence in a concurrent setting:
+  //
+  // LookupIterator it(holder, isolate, name, LookupIterator::OWN);
+  // it.TryLookupCachedProperty();
+  // if (it.state() == LookupIterator::DATA) it.GetPropertyCell();
+  V8_EXPORT_PRIVATE static base::Optional<PropertyCell> TryGetPropertyCell(
+      Isolate* isolate, LocalIsolate* local_isolate,
+      Handle<JSGlobalObject> holder, Handle<Name> name);
 };
 
 }  // namespace internal

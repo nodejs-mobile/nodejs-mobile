@@ -38,6 +38,7 @@ namespace node {
   V(ELDHISTOGRAM)                                                             \
   V(FILEHANDLE)                                                               \
   V(FILEHANDLECLOSEREQ)                                                       \
+  V(FIXEDSIZEBLOBCOPY)                                                        \
   V(FSEVENTWRAP)                                                              \
   V(FSREQCALLBACK)                                                            \
   V(FSREQPROMISE)                                                             \
@@ -77,11 +78,20 @@ namespace node {
 
 #if HAVE_OPENSSL
 #define NODE_ASYNC_CRYPTO_PROVIDER_TYPES(V)                                   \
+  V(CHECKPRIMEREQUEST)                                                        \
   V(PBKDF2REQUEST)                                                            \
   V(KEYPAIRGENREQUEST)                                                        \
+  V(KEYGENREQUEST)                                                            \
+  V(KEYEXPORTREQUEST)                                                         \
+  V(CIPHERREQUEST)                                                            \
+  V(DERIVEBITSREQUEST)                                                        \
+  V(HASHREQUEST)                                                              \
   V(RANDOMBYTESREQUEST)                                                       \
+  V(RANDOMPRIMEREQUEST)                                                       \
   V(SCRYPTREQUEST)                                                            \
-  V(TLSWRAP)
+  V(SIGNREQUEST)                                                              \
+  V(TLSWRAP)                                                                  \
+  V(VERIFYREQUEST)
 #else
 #define NODE_ASYNC_CRYPTO_PROVIDER_TYPES(V)
 #endif  // HAVE_OPENSSL
@@ -100,6 +110,7 @@ namespace node {
 
 class Environment;
 class DestroyParam;
+class ExternalReferenceRegistry;
 
 class AsyncWrap : public BaseObject {
  public:
@@ -129,6 +140,7 @@ class AsyncWrap : public BaseObject {
   static v8::Local<v8::FunctionTemplate> GetConstructorTemplate(
       Environment* env);
 
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
   static void Initialize(v8::Local<v8::Object> target,
                          v8::Local<v8::Value> unused,
                          v8::Local<v8::Context> context,
@@ -215,11 +227,16 @@ class AsyncWrap : public BaseObject {
             ProviderType provider,
             double execution_async_id,
             bool silent);
+  AsyncWrap(Environment* env,
+            v8::Local<v8::Object> promise,
+            ProviderType provider,
+            double execution_async_id,
+            double trigger_async_id);
   ProviderType provider_type_ = PROVIDER_NONE;
   bool init_hook_ran_ = false;
   // Because the values may be Reset(), cannot be made const.
   double async_id_ = kInvalidAsyncId;
-  double trigger_async_id_;
+  double trigger_async_id_ = kInvalidAsyncId;
 };
 
 }  // namespace node

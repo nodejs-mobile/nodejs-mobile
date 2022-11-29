@@ -5,23 +5,17 @@
 #ifndef V8_TORQUE_CSA_GENERATOR_H_
 #define V8_TORQUE_CSA_GENERATOR_H_
 
-#include <iostream>
-
-#include "src/torque/cfg.h"
-#include "src/torque/declarable.h"
+#include "src/torque/torque-code-generator.h"
 
 namespace v8 {
 namespace internal {
 namespace torque {
 
-class CSAGenerator {
+class CSAGenerator : public TorqueCodeGenerator {
  public:
   CSAGenerator(const ControlFlowGraph& cfg, std::ostream& out,
                base::Optional<Builtin::Kind> linkage = base::nullopt)
-      : cfg_(cfg),
-        out_(out),
-        linkage_(linkage),
-        previous_position_(SourcePosition::Invalid()) {}
+      : TorqueCodeGenerator(cfg, out), linkage_(linkage) {}
   base::Optional<Stack<std::string>> EmitGraph(Stack<std::string> parameters);
 
   static constexpr const char* ARGUMENTS_VARIABLE_STRING = "arguments";
@@ -30,38 +24,27 @@ class CSAGenerator {
                            std::ostream& out);
 
  private:
-  const ControlFlowGraph& cfg_;
-  std::ostream& out_;
-  size_t fresh_id_ = 0;
   base::Optional<Builtin::Kind> linkage_;
-  SourcePosition previous_position_;
 
-  void EmitSourcePosition(SourcePosition pos, bool always_emit = false);
+  void EmitSourcePosition(SourcePosition pos,
+                          bool always_emit = false) override;
 
   std::string PreCallableExceptionPreparation(
       base::Optional<Block*> catch_block);
-  void PostCallableExceptionPreparation(const std::string& catch_name,
-                                        const Type* return_type,
-                                        base::Optional<Block*> catch_block,
-                                        Stack<std::string>* stack);
+  void PostCallableExceptionPreparation(
+      const std::string& catch_name, const Type* return_type,
+      base::Optional<Block*> catch_block, Stack<std::string>* stack,
+      const base::Optional<DefinitionLocation>& exception_object_definition);
 
-  std::string FreshNodeName() { return "tmp" + std::to_string(fresh_id_++); }
-  std::string FreshCatchName() { return "catch" + std::to_string(fresh_id_++); }
-  std::string BlockName(const Block* block) {
-    return "block" + std::to_string(block->id());
-  }
-
-  void ProcessArgumentsCommon(const TypeVector& parameter_types,
-                              std::vector<std::string>* args,
-                              std::vector<std::string>* constexpr_arguments,
-                              Stack<std::string>* stack);
+  std::vector<std::string> ProcessArgumentsCommon(
+      const TypeVector& parameter_types,
+      std::vector<std::string> constexpr_arguments, Stack<std::string>* stack);
 
   Stack<std::string> EmitBlock(const Block* block);
-  void EmitInstruction(const Instruction& instruction,
-                       Stack<std::string>* stack);
-#define EMIT_INSTRUCTION_DECLARATION(T) \
-  void EmitInstruction(const T& instruction, Stack<std::string>* stack);
-  TORQUE_INSTRUCTION_LIST(EMIT_INSTRUCTION_DECLARATION)
+#define EMIT_INSTRUCTION_DECLARATION(T)                                 \
+  void EmitInstruction(const T& instruction, Stack<std::string>* stack) \
+      override;
+  TORQUE_BACKEND_DEPENDENT_INSTRUCTION_LIST(EMIT_INSTRUCTION_DECLARATION)
 #undef EMIT_INSTRUCTION_DECLARATION
 };
 

@@ -5,6 +5,8 @@
 #ifndef V8_INSPECTOR_SEARCH_UTIL_H_
 #define V8_INSPECTOR_SEARCH_UTIL_H_
 
+#include <memory>
+
 #include "src/inspector/protocol/Debugger.h"
 #include "src/inspector/string-util.h"
 
@@ -19,6 +21,6 @@ searchInTextByLinesImpl(V8InspectorSession*, const String16& text,
                         const String16& query, bool caseSensitive,
                         bool isRegex);
 
-}  //  namespace v8_inspector
+}  // namespace v8_inspector
 
 #endif  // V8_INSPECTOR_SEARCH_UTIL_H_

@@ -16,6 +16,8 @@ namespace internal {
 
 enum InstanceType : uint16_t;
 
+#include "torque-generated/src/objects/allocation-site-tq.inc"
+
 class AllocationSite : public Struct {
  public:
   NEVER_READ_ONLY_SPACE
@@ -29,7 +31,7 @@ class AllocationSite : public Struct {
     kDontTenure = 1,
     kMaybeTenure = 2,
     kTenure = 3,
-    kZombie = 4,
+    kZombie = 4,  // See comment to IsZombie() for documentation.
     kLastPretenureDecisionValue = kZombie
   };
 
@@ -38,7 +40,9 @@ class AllocationSite : public Struct {
   // Contains either a Smi-encoded bitfield or a boilerplate. If it's a Smi the
   // AllocationSite is for a constructed Array.
   DECL_ACCESSORS(transition_info_or_boilerplate, Object)
-  DECL_ACCESSORS(boilerplate, JSObject)
+  DECL_RELEASE_ACQUIRE_ACCESSORS(transition_info_or_boilerplate, Object)
+  DECL_GETTER(boilerplate, JSObject)
+  DECL_RELEASE_ACQUIRE_ACCESSORS(boilerplate, JSObject)
   DECL_INT_ACCESSORS(transition_info)
 
   // nested_site threads a list of sites that represent nested literals
@@ -66,14 +70,14 @@ class AllocationSite : public Struct {
   bool IsNested();
 
   // transition_info bitfields, for constructed array transition info.
-  using ElementsKindBits = BitField<ElementsKind, 0, 5>;
-  using DoNotInlineBit = BitField<bool, 5, 1>;
-  // Unused bits 6-30.
+  using ElementsKindBits = base::BitField<ElementsKind, 0, 6>;
+  using DoNotInlineBit = base::BitField<bool, 6, 1>;
+  // Unused bits 7-30.
 
   // Bitfields for pretenure_data
-  using MementoFoundCountBits = BitField<int, 0, 26>;
-  using PretenureDecisionBits = BitField<PretenureDecision, 26, 3>;
-  using DeoptDependentCodeBit = BitField<bool, 29, 1>;
+  using MementoFoundCountBits = base::BitField<int, 0, 26>;
+  using PretenureDecisionBits = base::BitField<PretenureDecision, 26, 3>;
+  using DeoptDependentCodeBit = base::BitField<bool, 29, 1>;
   STATIC_ASSERT(PretenureDecisionBits::kMax >= kLastPretenureDecisionValue);
 
   // Increments the mementos found counter and returns true when the first
@@ -98,10 +102,14 @@ class AllocationSite : public Struct {
   inline int memento_create_count() const;
   inline void set_memento_create_count(int count);
 
-  // The pretenuring decision is made during gc, and the zombie state allows
-  // us to recognize when an allocation site is just being kept alive because
-  // a later traversal of new space may discover AllocationMementos that point
-  // to this AllocationSite.
+  // A "zombie" AllocationSite is one which has no more strong roots to
+  // it, and yet must be maintained until the next GC. The reason is that
+  // it may be that in new space there are AllocationMementos hanging around
+  // which point to the AllocationSite. If we scavenge these AllocationSites
+  // too soon, those AllocationMementos will end up pointing to garbage
+  // addresses. The garbage collector marks such AllocationSites as zombies
+  // when it discovers there are no roots, allowing the subsequent collection
+  // pass to recognize zombies and discard them later.
   inline bool IsZombie() const;
 
   inline bool IsMaybeTenure() const;
@@ -162,12 +170,9 @@ class AllocationSite : public Struct {
   OBJECT_CONSTRUCTORS(AllocationSite, Struct);
 };
 
-class AllocationMemento : public Struct {
+class AllocationMemento
+    : public TorqueGeneratedAllocationMemento<AllocationMemento, Struct> {
  public:
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize,
-                                TORQUE_GENERATED_ALLOCATION_MEMENTO_FIELDS)
-
   DECL_ACCESSORS(allocation_site, Object)
 
   inline bool IsValid() const;
@@ -175,11 +180,8 @@ class AllocationMemento : public Struct {
   inline Address GetAllocationSiteUnchecked() const;
 
   DECL_PRINTER(AllocationMemento)
-  DECL_VERIFIER(AllocationMemento)
 
-  DECL_CAST(AllocationMemento)
-
-  OBJECT_CONSTRUCTORS(AllocationMemento, Struct);
+  TQ_OBJECT_CONSTRUCTORS(AllocationMemento)
 };
 
 }  // namespace internal

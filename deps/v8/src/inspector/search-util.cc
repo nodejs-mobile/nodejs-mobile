@@ -36,7 +36,8 @@ String16 findMagicComment(const String16& content, const String16& name,
     if (content[pos + 2] != '#' && content[pos + 2] != '@') continue;
     if (content[pos + 3] != ' ' && content[pos + 3] != '\t') continue;
     equalSignPos = pos + 4 + nameLength;
-    if (equalSignPos < length && content[equalSignPos] != '=') continue;
+    if (equalSignPos >= length) continue;
+    if (content[equalSignPos] != '=') continue;
     if (multiline) {
       closingCommentPos = content.find("*/", equalSignPos + 1);
       if (closingCommentPos == String16::kNotFound) return String16();
@@ -46,6 +47,7 @@ String16 findMagicComment(const String16& content, const String16& name,
   }
 
   DCHECK(equalSignPos);
+  DCHECK_LT(equalSignPos, length);
   DCHECK(!multiline || closingCommentPos);
   size_t urlPos = equalSignPos + 1;
   String16 match = multiline
@@ -149,6 +151,7 @@ searchInTextByLinesImpl(V8InspectorSession* session, const String16& text,
       scriptRegexpMatchesByLines(*regex.get(), text);
 
   std::vector<std::unique_ptr<protocol::Debugger::SearchMatch>> result;
+  result.reserve(matches.size());
   for (const auto& match : matches)
     result.push_back(buildObjectForSearchMatch(match.first, match.second));
   return result;

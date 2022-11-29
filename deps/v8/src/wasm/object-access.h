@@ -2,11 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if !V8_ENABLE_WEBASSEMBLY
+#error This header should only be included if WebAssembly is enabled.
+#endif  // !V8_ENABLE_WEBASSEMBLY
+
 #ifndef V8_WASM_OBJECT_ACCESS_H_
 #define V8_WASM_OBJECT_ACCESS_H_
 
 #include "src/common/globals.h"
 #include "src/objects/fixed-array.h"
+#include "src/objects/js-function.h"
 #include "src/objects/js-objects.h"
 #include "src/objects/shared-function-info.h"
 
@@ -38,6 +43,11 @@ class ObjectAccess : public AllStatic {
   // object.
   static constexpr int FormalParameterCountOffsetInSharedFunctionInfo() {
     return ToTagged(SharedFunctionInfo::kFormalParameterCountOffset);
+  }
+
+  // Get the offset of the flags in a {SharedFunctionInfo} object.
+  static constexpr int FlagsOffsetInSharedFunctionInfo() {
+    return ToTagged(SharedFunctionInfo::kFlagsOffset);
   }
 };
 

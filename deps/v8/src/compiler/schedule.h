@@ -56,6 +56,8 @@ class V8_EXPORT_PRIVATE BasicBlock final
   };
 
   BasicBlock(Zone* zone, Id id);
+  BasicBlock(const BasicBlock&) = delete;
+  BasicBlock& operator=(const BasicBlock&) = delete;
 
   Id id() const { return id_; }
 #if DEBUG
@@ -74,6 +76,7 @@ class V8_EXPORT_PRIVATE BasicBlock final
   BasicBlock* PredecessorAt(size_t index) { return predecessors_[index]; }
   void ClearPredecessors() { predecessors_.clear(); }
   void AddPredecessor(BasicBlock* predecessor);
+  void RemovePredecessor(size_t index);
 
   // Successors.
   BasicBlockVector& successors() { return successors_; }
@@ -114,6 +117,11 @@ class V8_EXPORT_PRIVATE BasicBlock final
     nodes_.insert(insertion_point, insertion_start, insertion_end);
   }
 
+  // Trim basic block to end at {new_end}.
+  void TrimNodes(iterator new_end);
+
+  void ResetRPOInfo();
+
   // Accessors.
   Control control() const { return control_; }
   void set_control(Control control);
@@ -148,6 +156,8 @@ class V8_EXPORT_PRIVATE BasicBlock final
   int32_t rpo_number() const { return rpo_number_; }
   void set_rpo_number(int32_t rpo_number);
 
+  NodeVector* nodes() { return &nodes_; }
+
   // Loop membership helpers.
   inline bool IsLoopHeader() const { return loop_end_ != nullptr; }
   bool LoopContains(BasicBlock* block) const;
@@ -179,8 +189,6 @@ class V8_EXPORT_PRIVATE BasicBlock final
   AssemblerDebugInfo debug_info_;
 #endif
   Id id_;
-
-  DISALLOW_COPY_AND_ASSIGN(BasicBlock);
 };
 
 std::ostream& operator<<(std::ostream&, const BasicBlock&);
@@ -194,6 +202,8 @@ std::ostream& operator<<(std::ostream&, const BasicBlock::Id&);
 class V8_EXPORT_PRIVATE Schedule final : public NON_EXPORTED_BASE(ZoneObject) {
  public:
   explicit Schedule(Zone* zone, size_t node_count_hint = 0);
+  Schedule(const Schedule&) = delete;
+  Schedule& operator=(const Schedule&) = delete;
 
   // Return the block which contains {node}, if any.
   BasicBlock* block(Node* node) const;
@@ -268,6 +278,7 @@ class V8_EXPORT_PRIVATE Schedule final : public NON_EXPORTED_BASE(ZoneObject) {
   Zone* zone() const { return zone_; }
 
  private:
+  friend class GraphAssembler;
   friend class Scheduler;
   friend class BasicBlockInstrumentor;
   friend class RawMachineAssembler;
@@ -298,8 +309,6 @@ class V8_EXPORT_PRIVATE Schedule final : public NON_EXPORTED_BASE(ZoneObject) {
   BasicBlockVector rpo_order_;        // Reverse-post-order block list.
   BasicBlock* start_;
   BasicBlock* end_;
-
-  DISALLOW_COPY_AND_ASSIGN(Schedule);
 };
 
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, const Schedule&);

@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "src/base/platform/wrappers.h"
 #include "src/common/globals.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-aix.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-generic.h"
@@ -24,6 +25,10 @@ DataDirective PointerSizeDirective() {
   }
 }
 
+int PlatformEmbeddedFileWriterBase::HexLiteral(uint64_t value) {
+  return fprintf(fp_, "0x%" PRIx64, value);
+}
+
 int DataDirectiveSize(DataDirective directive) {
   switch (directive) {
     case kByte:
@@ -39,24 +44,37 @@ int DataDirectiveSize(DataDirective directive) {
 }
 
 int PlatformEmbeddedFileWriterBase::WriteByteChunk(const uint8_t* data) {
-  DCHECK_EQ(ByteChunkDataDirective(), kOcta);
+  size_t kSize = DataDirectiveSize(ByteChunkDataDirective());
+  size_t kHalfSize = kSize / 2;
+  uint64_t high = 0, low = 0;
 
-  static constexpr size_t kSize = kInt64Size;
-
-  uint64_t part1, part2;
-  // Use memcpy for the reads since {data} is not guaranteed to be aligned.
+  switch (kSize) {
+    case 1:
+      low = *data;
+      break;
+    case 4:
+      low = *reinterpret_cast<const uint32_t*>(data);
+      break;
+    case 8:
+      low = *reinterpret_cast<const uint64_t*>(data);
+      break;
+    case 16:
 #ifdef V8_TARGET_BIG_ENDIAN
-  memcpy(&part1, data, kSize);
-  memcpy(&part2, data + kSize, kSize);
+      memcpy(&high, data, kHalfSize);
+      memcpy(&low, data + kHalfSize, kHalfSize);
 #else
-  memcpy(&part1, data + kSize, kSize);
-  memcpy(&part2, data, kSize);
+      memcpy(&high, data + kHalfSize, kHalfSize);
+      memcpy(&low, data, kHalfSize);
 #endif  // V8_TARGET_BIG_ENDIAN
+      break;
+    default:
+      UNREACHABLE();
+  }
 
-  if (part1 != 0) {
-    return fprintf(fp(), "0x%" PRIx64 "%016" PRIx64, part1, part2);
+  if (high != 0) {
+    return fprintf(fp(), "0x%" PRIx64 "%016" PRIx64, high, low);
   } else {
-    return fprintf(fp(), "0x%" PRIx64, part2);
+    return fprintf(fp(), "0x%" PRIx64, low);
   }
 }
 
@@ -123,6 +141,8 @@ EmbeddedTargetOs ToEmbeddedTargetOs(const char* s) {
     return EmbeddedTargetOs::kMac;
   } else if (string == "win") {
     return EmbeddedTargetOs::kWin;
+  } else if (string == "starboard") {
+    return EmbeddedTargetOs::kStarboard;
   } else {
     return EmbeddedTargetOs::kGeneric;
   }
@@ -135,17 +155,38 @@ std::unique_ptr<PlatformEmbeddedFileWriterBase> NewPlatformEmbeddedFileWriter(
   auto embedded_target_arch = ToEmbeddedTargetArch(target_arch);
   auto embedded_target_os = ToEmbeddedTargetOs(target_os);
 
+  if (embedded_target_os == EmbeddedTargetOs::kStarboard) {
+    // target OS is "Starboard" for all starboard build so we need to
+    // use host OS macros to decide which writer to use.
+    // Cobalt also has Windows-based Posix target platform,
+    // in which case generic writer should be used.
+    switch (DefaultEmbeddedTargetOs()) {
+      case EmbeddedTargetOs::kMac:
+#if defined(V8_TARGET_OS_WIN)
+      case EmbeddedTargetOs::kWin:
+        // V8_TARGET_OS_WIN is used to enable WINDOWS-specific assembly code,
+        // for windows-hosted non-windows targets, we should still fallback to
+        // the generic writer.
+#endif
+        embedded_target_os = DefaultEmbeddedTargetOs();
+        break;
+      default:
+        // In the block below, we will use WriterGeneric for other cases.
+        break;
+    }
+  }
+
   if (embedded_target_os == EmbeddedTargetOs::kAIX) {
-    return base::make_unique<PlatformEmbeddedFileWriterAIX>(
-        embedded_target_arch, embedded_target_os);
+    return std::make_unique<PlatformEmbeddedFileWriterAIX>(embedded_target_arch,
+                                                           embedded_target_os);
   } else if (embedded_target_os == EmbeddedTargetOs::kMac) {
-    return base::make_unique<PlatformEmbeddedFileWriterMac>(
-        embedded_target_arch, embedded_target_os);
+    return std::make_unique<PlatformEmbeddedFileWriterMac>(embedded_target_arch,
+                                                           embedded_target_os);
   } else if (embedded_target_os == EmbeddedTargetOs::kWin) {
-    return base::make_unique<PlatformEmbeddedFileWriterWin>(
-        embedded_target_arch, embedded_target_os);
+    return std::make_unique<PlatformEmbeddedFileWriterWin>(embedded_target_arch,
+                                                           embedded_target_os);
   } else {
-    return base::make_unique<PlatformEmbeddedFileWriterGeneric>(
+    return std::make_unique<PlatformEmbeddedFileWriterGeneric>(
         embedded_target_arch, embedded_target_os);
   }
 

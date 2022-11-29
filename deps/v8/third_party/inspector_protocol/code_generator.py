@@ -112,16 +112,9 @@ def read_config():
       ".lib": False,
       ".lib.export_macro": "",
       ".lib.export_header": False,
-      # The encoding lib consists of encoding/encoding.h and
-      # encoding/encoding.cc in its subdirectory, which binaries
-      # must link / depend on.
-      ".encoding_lib.header": os.path.join(inspector_protocol_dir,
-                                           "encoding/encoding.h"),
-      ".encoding_lib.namespace": "",
-      # Ditto for bindings, see bindings/bindings.h.
-      ".bindings_lib.header": os.path.join(inspector_protocol_dir,
-                                           "bindings/bindings.h"),
-      ".bindings_lib.namespace": ""
+      ".crdtp": False,
+      ".crdtp.dir": os.path.join(inspector_protocol_dir, "crdtp"),
+      ".crdtp.namespace": "crdtp",
     }
     for key_value in config_values:
       parts = key_value.split("=")
@@ -378,7 +371,6 @@ class Protocol(object):
                                  for rule in config.imported.options]
 
     self.patch_full_qualified_refs()
-    self.create_notification_types()
     self.create_type_definitions()
     self.generate_used_types()
 
@@ -441,8 +433,6 @@ class Protocol(object):
         for event in domain["events"]:
           if self.generate_event(domain_name, event["name"]):
             all_refs |= self.all_references(event)
-            all_refs.add('%s.%sNotification' % (domain_name,
-                                                to_title_case(event["name"])))
 
     dependencies = self.generate_type_dependencies()
     queue = set(all_refs)
@@ -463,20 +453,6 @@ class Protocol(object):
         if len(related_types):
           dependencies[domain_name + "." + type["id"]] = related_types
     return dependencies
-
-  def create_notification_types(self):
-    for domain in self.json_api["domains"]:
-      if "events" in domain:
-        for event in domain["events"]:
-          event_type = dict()
-          event_type["description"] = "Wrapper for notification params"
-          event_type["type"] = "object"
-          event_type["id"] = to_title_case(event["name"]) + "Notification"
-          if "parameters" in event:
-            event_type["properties"] = copy.deepcopy(event["parameters"])
-          if "types" not in domain:
-            domain["types"] = list()
-          domain["types"].append(event_type)
 
   def create_type_definitions(self):
     imported_namespace = ""
@@ -662,26 +638,20 @@ def main():
     # Note these should be sorted in the right order.
     # TODO(dgozman): sort them programmatically based on commented includes.
     protocol_h_templates = [
-      "ErrorSupport_h.template",
       "Values_h.template",
       "Object_h.template",
       "ValueConversions_h.template",
-      "DispatcherBase_h.template",
-      "Parser_h.template",
     ]
 
     protocol_cpp_templates = [
       "Protocol_cpp.template",
-      "ErrorSupport_cpp.template",
       "Values_cpp.template",
       "Object_cpp.template",
-      "DispatcherBase_cpp.template",
-      "Parser_cpp.template",
+      "ValueConversions_cpp.template",
     ]
 
     forward_h_templates = [
       "Forward_h.template",
-      "FrontendChannel_h.template",
     ]
 
     base_string_adapter_h_templates = [

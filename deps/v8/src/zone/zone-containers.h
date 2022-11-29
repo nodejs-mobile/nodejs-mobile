@@ -66,8 +66,8 @@ class ZoneDeque : public std::deque<T, RecyclingZoneAllocator<T>> {
 
 // A wrapper subclass for std::list to make it easy to construct one
 // that uses a zone allocator.
-// TODO(mstarzinger): This should be renamed to ZoneList once we got rid of our
-// own home-grown ZoneList that actually is a ZoneVector.
+// TODO(all): This should be renamed to ZoneList once we got rid of our own
+// home-grown ZoneList that actually is a ZoneVector.
 template <typename T>
 class ZoneLinkedList : public std::list<T, ZoneAllocator<T>> {
  public:
@@ -176,9 +176,9 @@ class ZoneUnorderedSet
     : public std::unordered_set<K, Hash, KeyEqual, ZoneAllocator<K>> {
  public:
   // Constructs an empty map.
-  explicit ZoneUnorderedSet(Zone* zone)
+  explicit ZoneUnorderedSet(Zone* zone, size_t bucket_count = 100)
       : std::unordered_set<K, Hash, KeyEqual, ZoneAllocator<K>>(
-            100, Hash(), KeyEqual(), ZoneAllocator<K>(zone)) {}
+            bucket_count, Hash(), KeyEqual(), ZoneAllocator<K>(zone)) {}
 };
 
 // A wrapper subclass for std::multimap to make it easy to construct one that

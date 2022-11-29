@@ -21,8 +21,6 @@ class GCIdleTimeHandlerTest : public ::testing::Test {
 
   GCIdleTimeHeapState DefaultHeapState() {
     GCIdleTimeHeapState result;
-    result.contexts_disposed = 0;
-    result.contexts_disposal_rate = GCIdleTimeHandler::kHighContextDisposalRate;
     result.incremental_marking_stopped = false;
     result.size_of_objects = kSizeOfObjects;
     return result;
@@ -30,7 +28,6 @@ class GCIdleTimeHandlerTest : public ::testing::Test {
 
   static const size_t kSizeOfObjects = 100 * MB;
   static const size_t kMarkCompactSpeed = 200 * KB;
-  static const size_t kMarkingSpeed = 200 * KB;
 
  private:
   GCIdleTimeHandler handler_;
@@ -60,7 +57,7 @@ TEST(GCIdleTimeHandler, EstimateMarkingStepSizeNonZero) {
 
 TEST(GCIdleTimeHandler, EstimateMarkingStepSizeOverflow1) {
   size_t step_size = GCIdleTimeHandler::EstimateMarkingStepSize(
-      10, std::numeric_limits<size_t>::max());
+      10, static_cast<double>(std::numeric_limits<size_t>::max()));
   EXPECT_EQ(static_cast<size_t>(GCIdleTimeHandler::kMaximumMarkingStepSize),
             step_size);
 }
@@ -68,97 +65,9 @@ TEST(GCIdleTimeHandler, EstimateMarkingStepSizeOverflow1) {
 
 TEST(GCIdleTimeHandler, EstimateMarkingStepSizeOverflow2) {
   size_t step_size = GCIdleTimeHandler::EstimateMarkingStepSize(
-      std::numeric_limits<size_t>::max(), 10);
+      static_cast<double>(std::numeric_limits<size_t>::max()), 10);
   EXPECT_EQ(static_cast<size_t>(GCIdleTimeHandler::kMaximumMarkingStepSize),
             step_size);
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, ShouldDoFinalIncrementalMarkCompact) {
-  size_t idle_time_ms = 16;
-  EXPECT_TRUE(GCIdleTimeHandler::ShouldDoFinalIncrementalMarkCompact(
-      idle_time_ms, 0, 0));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, DontDoFinalIncrementalMarkCompact) {
-  size_t idle_time_ms = 1;
-  EXPECT_FALSE(GCIdleTimeHandler::ShouldDoFinalIncrementalMarkCompact(
-      idle_time_ms, kSizeOfObjects, kMarkingSpeed));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, ContextDisposeLowRate) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.incremental_marking_stopped = true;
-  double idle_time_ms = 0;
-  EXPECT_EQ(GCIdleTimeAction::kDone,
-            handler()->Compute(idle_time_ms, heap_state));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, ContextDisposeHighRate) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.contexts_disposal_rate =
-      GCIdleTimeHandler::kHighContextDisposalRate - 1;
-  heap_state.incremental_marking_stopped = true;
-  double idle_time_ms = 0;
-  EXPECT_EQ(GCIdleTimeAction::kFullGC,
-            handler()->Compute(idle_time_ms, heap_state));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, AfterContextDisposeZeroIdleTime) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.contexts_disposal_rate = 1.0;
-  heap_state.incremental_marking_stopped = true;
-  double idle_time_ms = 0;
-  EXPECT_EQ(GCIdleTimeAction::kFullGC,
-            handler()->Compute(idle_time_ms, heap_state));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, AfterContextDisposeSmallIdleTime1) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.contexts_disposal_rate =
-      GCIdleTimeHandler::kHighContextDisposalRate;
-  size_t speed = kMarkCompactSpeed;
-  double idle_time_ms = static_cast<double>(kSizeOfObjects / speed - 1);
-  EXPECT_EQ(GCIdleTimeAction::kIncrementalStep,
-            handler()->Compute(idle_time_ms, heap_state));
-}
-
-
-TEST_F(GCIdleTimeHandlerTest, AfterContextDisposeSmallIdleTime2) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.contexts_disposal_rate =
-      GCIdleTimeHandler::kHighContextDisposalRate;
-  size_t speed = kMarkCompactSpeed;
-  double idle_time_ms = static_cast<double>(kSizeOfObjects / speed - 1);
-  EXPECT_EQ(GCIdleTimeAction::kIncrementalStep,
-            handler()->Compute(idle_time_ms, heap_state));
-}
-
-TEST_F(GCIdleTimeHandlerTest, AfterContextDisposeLargeHeap) {
-  if (!handler()->Enabled()) return;
-  GCIdleTimeHeapState heap_state = DefaultHeapState();
-  heap_state.contexts_disposed = 1;
-  heap_state.contexts_disposal_rate = 1.0;
-  heap_state.incremental_marking_stopped = true;
-  heap_state.size_of_objects = 101 * MB;
-  double idle_time_ms = 0;
-  EXPECT_EQ(GCIdleTimeAction::kDone,
-            handler()->Compute(idle_time_ms, heap_state));
 }
 
 TEST_F(GCIdleTimeHandlerTest, IncrementalMarking1) {

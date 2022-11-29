@@ -9,7 +9,6 @@ const { strictEqual } = require('assert');
 const eyecatcher = 'nou, houdoe he?';
 
 if (process.argv[2] === 'child') {
-  common.disableCrashOnUnhandledRejection();
   const { Session } = require('inspector');
   const { promisify } = require('util');
   const { internalBinding } = require('internal/test/binding');
@@ -25,13 +24,13 @@ if (process.argv[2] === 'child') {
     await session.post('Debugger.setAsyncCallStackDepth', { maxDepth: 42 });
     strictEqual(enabled, 1);
     throw new Error(eyecatcher);
-  })();
+  })().finally(common.mustCall());
 } else {
   const { spawnSync } = require('child_process');
   const options = { encoding: 'utf8' };
   const proc = spawnSync(
     process.execPath, ['--expose-internals', __filename, 'child'], options);
-  strictEqual(proc.status, 0);
+  strictEqual(proc.status, 1);
   strictEqual(proc.signal, null);
   strictEqual(proc.stderr.includes(eyecatcher), true);
 }

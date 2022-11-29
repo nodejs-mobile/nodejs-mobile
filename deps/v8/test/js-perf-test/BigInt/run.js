@@ -4,17 +4,14 @@
 
 "use strict";
 
-load('../base.js');
-load('test-config.js');
-load('to-boolean.js');
-load('add.js');
-load('as-uint-n.js');
-
+d8.file.execute('../base.js');
+d8.file.execute(arguments[0] + '.js');
 
 var success = true;
 
+
 function PrintResult(name, result) {
-  print(name + '-BigInt(Score): ' + result);
+  print(`BigInt-${name}(Score): ${result}`);
 }
 
 

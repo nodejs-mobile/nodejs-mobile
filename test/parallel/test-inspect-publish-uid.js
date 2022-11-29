@@ -10,7 +10,7 @@ const { spawnSync } = require('child_process');
   await testArg('stderr');
   await testArg('http');
   await testArg('http,stderr');
-})();
+})().then(common.mustCall());
 
 async function testArg(argValue) {
   console.log('Checks ' + argValue + '..');
@@ -20,7 +20,7 @@ async function testArg(argValue) {
   const nodeProcess = spawnSync(process.execPath, [
     '--inspect=0',
     `--inspect-publish-uid=${argValue}`,
-    '-e', `(${scriptMain.toString()})(${hasHttp ? 200 : 404})`
+    '-e', `(${scriptMain.toString()})(${hasHttp ? 200 : 404})`,
   ]);
   const hasWebSocketInStderr = checkStdError(
     nodeProcess.stderr.toString('utf8'));

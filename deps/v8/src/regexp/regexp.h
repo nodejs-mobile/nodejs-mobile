@@ -6,6 +6,7 @@
 #define V8_REGEXP_REGEXP_H_
 
 #include "src/objects/js-regexp.h"
+#include "src/regexp/regexp-error.h"
 
 namespace v8 {
 namespace internal {
@@ -15,6 +16,7 @@ class RegExpTree;
 
 enum class RegExpCompilationTarget : int { kBytecode, kNative };
 
+// TODO(jgruber): Do not expose in regexp.h.
 // TODO(jgruber): Consider splitting between ParseData and CompileData.
 struct RegExpCompileData {
   // The parsed AST as produced by the RegExpParser.
@@ -25,7 +27,7 @@ struct RegExpCompileData {
 
   // Either the generated code as produced by the compiler or a trampoline
   // to the interpreter.
-  Object code;
+  Handle<Object> code;
 
   // True, iff the pattern is a 'simple' atom with zero captures. In other
   // words, the pattern consists of a string with no metacharacters and special
@@ -41,7 +43,11 @@ struct RegExpCompileData {
 
   // The error message. Only used if an error occurred during parsing or
   // compilation.
-  Handle<String> error;
+  RegExpError error = RegExpError::kNone;
+
+  // The position at which the error was detected. Only used if an
+  // error occurred.
+  int error_pos = 0;
 
   // The number of capture groups, without the global capture \0.
   int capture_count = 0;
@@ -55,10 +61,7 @@ struct RegExpCompileData {
 
 class RegExp final : public AllStatic {
  public:
-  // Whether the irregexp engine generates native code or interpreter bytecode.
-  static bool CanGenerateNativeCode() {
-    return !FLAG_regexp_interpret_all || FLAG_regexp_tier_up;
-  }
+  // Whether the irregexp engine generates interpreter bytecode.
   static bool CanGenerateBytecode() {
     return FLAG_regexp_interpret_all || FLAG_regexp_tier_up;
   }
@@ -69,40 +72,58 @@ class RegExp final : public AllStatic {
   // Returns false if compilation fails.
   V8_WARN_UNUSED_RESULT static MaybeHandle<Object> Compile(
       Isolate* isolate, Handle<JSRegExp> re, Handle<String> pattern,
-      JSRegExp::Flags flags);
+      JSRegExp::Flags flags, uint32_t backtrack_limit);
+
+  // Ensures that a regexp is fully compiled and ready to be executed on a
+  // subject string.  Returns true on success. Return false on failure, and
+  // then an exception will be pending.
+  V8_WARN_UNUSED_RESULT static bool EnsureFullyCompiled(Isolate* isolate,
+                                                        Handle<JSRegExp> re,
+                                                        Handle<String> subject);
 
   enum CallOrigin : int {
     kFromRuntime = 0,
     kFromJs = 1,
   };
 
+  enum class ExecQuirks {
+    kNone,
+    // Used to work around an issue in the RegExpPrototypeSplit fast path,
+    // which diverges from the spec by not creating a sticky copy of the RegExp
+    // instance and calling `exec` in a loop. If called in this context, we
+    // must not update the last_match_info on a successful match at the subject
+    // string end. See crbug.com/1075514 for more information.
+    kTreatMatchAtEndAsFailure,
+  };
+
   // See ECMA-262 section 15.10.6.2.
   // This function calls the garbage collector if necessary.
   V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT static MaybeHandle<Object> Exec(
       Isolate* isolate, Handle<JSRegExp> regexp, Handle<String> subject,
-      int index, Handle<RegExpMatchInfo> last_match_info);
+      int index, Handle<RegExpMatchInfo> last_match_info,
+      ExecQuirks exec_quirks = ExecQuirks::kNone);
+
+  V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT static MaybeHandle<Object>
+  ExperimentalOneshotExec(Isolate* isolate, Handle<JSRegExp> regexp,
+                          Handle<String> subject, int index,
+                          Handle<RegExpMatchInfo> last_match_info,
+                          ExecQuirks exec_quirks = ExecQuirks::kNone);
 
   // Integral return values used throughout regexp code layers.
   static constexpr int kInternalRegExpFailure = 0;
   static constexpr int kInternalRegExpSuccess = 1;
   static constexpr int kInternalRegExpException = -1;
   static constexpr int kInternalRegExpRetry = -2;
+  static constexpr int kInternalRegExpFallbackToExperimental = -3;
+  static constexpr int kInternalRegExpSmallestResult = -3;
 
   enum IrregexpResult : int32_t {
     RE_FAILURE = kInternalRegExpFailure,
     RE_SUCCESS = kInternalRegExpSuccess,
     RE_EXCEPTION = kInternalRegExpException,
+    RE_RETRY = kInternalRegExpRetry,
+    RE_FALLBACK_TO_EXPERIMENTAL = kInternalRegExpFallbackToExperimental,
   };
-
-  // Prepare a RegExp for being executed one or more times (using
-  // IrregexpExecOnce) on the subject.
-  // This ensures that the regexp is compiled for the subject, and that
-  // the subject is flat.
-  // Returns the number of integer spaces required by IrregexpExecOnce
-  // as its "registers" argument.  If the regexp cannot be compiled,
-  // an exception is set as pending, and this function returns negative.
-  static int IrregexpPrepare(Isolate* isolate, Handle<JSRegExp> regexp,
-                             Handle<String> subject);
 
   // Set last match info.  If match is nullptr, then setting captures is
   // omitted.
@@ -121,6 +142,16 @@ class RegExp final : public AllStatic {
                                                    RegExpNode* node);
 
   static const int kRegExpTooLargeToOptimize = 20 * KB;
+
+  V8_WARN_UNUSED_RESULT
+  static MaybeHandle<Object> ThrowRegExpException(Isolate* isolate,
+                                                  Handle<JSRegExp> re,
+                                                  Handle<String> pattern,
+                                                  RegExpError error);
+  static void ThrowRegExpException(Isolate* isolate, Handle<JSRegExp> re,
+                                   RegExpError error_text);
+
+  static bool IsUnmodifiedRegExp(Isolate* isolate, Handle<JSRegExp> regexp);
 };
 
 // Uses a special global mode of irregexp-generated code to perform a global

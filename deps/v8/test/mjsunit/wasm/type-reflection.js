@@ -4,7 +4,7 @@
 
 // Flags: --experimental-wasm-type-reflection --expose-gc
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 (function TestInvalidArgumentToType() {
   ["abc", 123, {}, _ => 0].forEach(function(invalidInput) {
@@ -343,6 +343,39 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
     () => new WebAssembly.Function({parameters:[], results:[]}, _ => 0));
 })();
 
+(function TestFunctionConstructorWithWasmExportedFunction() {
+  let builder = new WasmModuleBuilder();
+
+  builder.addFunction('func1', kSig_v_i).addBody([]).exportFunc();
+  builder.addFunction('func2', kSig_v_v).addBody([]).exportFunc();
+
+  const instance = builder.instantiate();
+  assertThrows(
+      () => new WebAssembly.Function(
+          {parameters: [], results: []}, instance.exports.func1),
+      TypeError,
+      'WebAssembly.Function(): The signature of Argument 1 (a ' +
+      'WebAssembly function) does not match the signature specified in ' +
+      'Argument 0');
+
+  assertDoesNotThrow(
+      () => new WebAssembly.Function(
+          {parameters: [], results: []}, instance.exports.func2));
+})();
+
+(function TestFunctionConstructorWithWasmJSFunction() {
+  const func = new WebAssembly.Function({parameters: [], results: []}, _ => 0);
+
+  assertDoesNotThrow(
+      () => new WebAssembly.Function({parameters: [], results: []}, func));
+  assertThrows(
+      () => new WebAssembly.Function({parameters: ['i32'], results: []}, func),
+      TypeError,
+      'WebAssembly.Function(): The signature of Argument 1 (a ' +
+          'WebAssembly function) does not match the signature specified in ' +
+          'Argument 0');
+})();
+
 (function TestFunctionConstructorNonArray1() {
   let log = [];  // Populated with a log of accesses.
   let two = { toString: () => "2" };  // Just a fancy "2".
@@ -516,12 +549,6 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
   });
 })();
 
-(function TestFunctionConstructedIncompatibleSig() {
-  let fun = new WebAssembly.Function({parameters:["i64"], results:[]}, _ => 0);
-  assertThrows(() => fun(), TypeError,
-    /wasm function signature contains illegal type/);
-})();
-
 (function TestFunctionTableSetAndCall() {
   let builder = new WasmModuleBuilder();
   let fun1 = new WebAssembly.Function({parameters:[], results:["i32"]}, _ => 7);
@@ -533,7 +560,7 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
   table.set(0, fun1);
   builder.addFunction('main', kSig_i_i)
       .addBody([
-        kExprGetLocal, 0,
+        kExprLocalGet, 0,
         kExprCallIndirect, sig_index, table_index
       ])
       .exportFunc();
@@ -545,29 +572,25 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
   assertTraps(kTrapFuncSigMismatch, () => instance.exports.main(1));
 })();
 
-(function TestFunctionTableSetIncompatibleSig() {
+(function TestFunctionTableSetI64() {
   let builder = new WasmModuleBuilder();
-  let fun = new WebAssembly.Function({parameters:[], results:["i64"]}, _ => 0);
+  let fun = new WebAssembly.Function({parameters:[], results:["i64"]}, _ => 0n);
   let table = new WebAssembly.Table({element: "anyfunc", initial: 2});
   let table_index = builder.addImportedTable("m", "table", 2);
   let sig_index = builder.addType(kSig_l_v);
   table.set(0, fun);
   builder.addFunction('main', kSig_v_i)
       .addBody([
-        kExprGetLocal, 0,
+        kExprLocalGet, 0,
         kExprCallIndirect, sig_index, table_index,
         kExprDrop
       ])
       .exportFunc();
   let instance = builder.instantiate({ m: { table: table }});
-  assertThrows(
-    () => instance.exports.main(0), TypeError,
-    /wasm function signature contains illegal type/);
+  assertDoesNotThrow(() => instance.exports.main(0));
   assertTraps(kTrapFuncSigMismatch, () => instance.exports.main(1));
   table.set(1, fun);
-  assertThrows(
-    () => instance.exports.main(1), TypeError,
-    /wasm function signature contains illegal type/);
+  assertDoesNotThrow(() => instance.exports.main(1));
 })();
 
 (function TestFunctionModuleImportMatchingSig() {

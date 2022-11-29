@@ -5,10 +5,10 @@
 #include <memory>
 
 #include "include/v8.h"
-
 #include "src/codegen/code-desc.h"
 #include "src/execution/isolate.h"
 #include "src/handles/handles-inl.h"
+#include "src/heap/heap-inl.h"
 #include "test/cctest/cctest.h"
 
 namespace v8 {
@@ -20,7 +20,8 @@ namespace {
 // This needs to be large enough to create a new nosnap Isolate, but smaller
 // than kMaximalCodeRangeSize so we can recover from the OOM.
 constexpr int kInstructionSize = 100 * MB;
-STATIC_ASSERT(kInstructionSize < kMaximalCodeRangeSize || !kRequiresCodeRange);
+STATIC_ASSERT(kInstructionSize < kMaximalCodeRangeSize ||
+              !kPlatformRequiresCodeRange);
 
 size_t NearHeapLimitCallback(void* raw_bool, size_t current_heap_limit,
                              size_t initial_heap_limit) {
@@ -59,7 +60,8 @@ TEST(Factory_CodeBuilder) {
   HandleScope scope(isolate);
 
   // Create a big function that ends up in CODE_LO_SPACE.
-  const int instruction_size = kMaxRegularHeapObjectSize + 1;
+  const int instruction_size =
+      isolate->heap()->MaxRegularHeapObjectSize(AllocationType::kCode) + 1;
   std::unique_ptr<byte[]> instructions(new byte[instruction_size]);
 
   CodeDesc desc;
@@ -72,7 +74,7 @@ TEST(Factory_CodeBuilder) {
   desc.unwinding_info_size = 0;
   desc.origin = nullptr;
   Handle<Code> code =
-      Factory::CodeBuilder(isolate, desc, Code::WASM_FUNCTION).Build();
+      Factory::CodeBuilder(isolate, desc, CodeKind::WASM_FUNCTION).Build();
 
   CHECK(isolate->heap()->InSpace(*code, CODE_LO_SPACE));
 #if VERIFY_HEAP
@@ -88,9 +90,9 @@ UNINITIALIZED_TEST(Factory_CodeBuilder_BuildOOM) {
   desc.instr_size = kInstructionSize;
   desc.buffer = instructions.get();
 
-  const Handle<Code> code =
-      Factory::CodeBuilder(isolate_scope.isolate(), desc, Code::WASM_FUNCTION)
-          .Build();
+  const Handle<Code> code = Factory::CodeBuilder(isolate_scope.isolate(), desc,
+                                                 CodeKind::WASM_FUNCTION)
+                                .Build();
 
   CHECK(!code.is_null());
   CHECK(isolate_scope.oom_triggered());
@@ -105,7 +107,8 @@ UNINITIALIZED_TEST(Factory_CodeBuilder_TryBuildOOM) {
   desc.buffer = instructions.get();
 
   const MaybeHandle<Code> code =
-      Factory::CodeBuilder(isolate_scope.isolate(), desc, Code::WASM_FUNCTION)
+      Factory::CodeBuilder(isolate_scope.isolate(), desc,
+                           CodeKind::WASM_FUNCTION)
           .TryBuild();
 
   CHECK(code.is_null());

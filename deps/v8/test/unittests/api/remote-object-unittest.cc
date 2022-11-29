@@ -39,7 +39,7 @@ TEST_F(RemoteObjectTest, CreationContextOfRemoteContext) {
 
   Local<Object> remote_context =
       Context::NewRemoteContext(isolate(), global_template).ToLocalChecked();
-  EXPECT_TRUE(remote_context->CreationContext().IsEmpty());
+  EXPECT_TRUE(remote_context->GetCreationContext().IsEmpty());
 }
 
 TEST_F(RemoteObjectTest, CreationContextOfRemoteObject) {
@@ -51,7 +51,7 @@ TEST_F(RemoteObjectTest, CreationContextOfRemoteObject) {
 
   Local<Object> remote_object =
       constructor_template->NewRemoteInstance().ToLocalChecked();
-  EXPECT_TRUE(remote_object->CreationContext().IsEmpty());
+  EXPECT_TRUE(remote_object->GetCreationContext().IsEmpty());
 }
 
 TEST_F(RemoteObjectTest, RemoteContextInstanceChecks) {
@@ -96,24 +96,6 @@ TEST_F(RemoteObjectTest, TypeOfRemoteObject) {
       constructor_template->NewRemoteInstance().ToLocalChecked();
   String::Utf8Value result(isolate(), remote_object->TypeOf(isolate()));
   EXPECT_STREQ("object", *result);
-}
-
-TEST_F(RemoteObjectTest, ClassOf) {
-  Local<FunctionTemplate> constructor_template =
-      FunctionTemplate::New(isolate(), Constructor);
-  constructor_template->InstanceTemplate()->SetAccessCheckCallbackAndHandler(
-      AccessCheck, NamedPropertyHandlerConfiguration(NamedGetter),
-      IndexedPropertyHandlerConfiguration());
-  constructor_template->SetClassName(
-      String::NewFromUtf8(isolate(), "test_class", NewStringType::kNormal)
-          .ToLocalChecked());
-
-  Local<Object> remote_object =
-      constructor_template->NewRemoteInstance().ToLocalChecked();
-  Local<String> class_name = Utils::ToLocal(
-      i::handle(Utils::OpenHandle(*remote_object)->class_name(), i_isolate()));
-  String::Utf8Value result(isolate(), class_name);
-  EXPECT_STREQ("test_class", *result);
 }
 
 }  // namespace remote_object_unittest

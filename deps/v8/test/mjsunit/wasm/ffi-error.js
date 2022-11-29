@@ -4,7 +4,7 @@
 
 // Flags: --expose-wasm
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 function CreateDefaultBuilder() {
   const builder = new WasmModuleBuilder();
@@ -13,8 +13,8 @@ function CreateDefaultBuilder() {
   builder.addImport('mod', 'fun', sig_index);
   builder.addFunction('main', sig_index)
       .addBody([
-        kExprGetLocal, 0,      // --
-        kExprGetLocal, 1,      // --
+        kExprLocalGet, 0,      // --
+        kExprLocalGet, 1,      // --
         kExprCallFunction, 0,  // --
       ])                       // --
       .exportFunc();
@@ -76,7 +76,7 @@ function checkFailingInstantiation(
   let sig_index = kSig_i_dd;
   builder.addFunction('exp', kSig_i_i)
       .addBody([
-        kExprGetLocal,
+        kExprLocalGet,
         0,
       ])  // --
       .exportFunc();
@@ -119,43 +119,41 @@ function checkFailingInstantiation(
       instance => assertEquals(33, instance.exports.main()));
 })();
 
-(function I64InSignatureThrows() {
+(function I64InSignature() {
   print(arguments.callee.name);
   let builder = new WasmModuleBuilder();
 
   builder.addMemory(1, 1, true);
   builder.addFunction('function_with_invalid_signature', kSig_l_ll)
     .addBody([           // --
-      kExprGetLocal, 0,  // --
-      kExprGetLocal, 1,  // --
+      kExprLocalGet, 0,  // --
+      kExprLocalGet, 1,  // --
       kExprI64Sub])      // --
     .exportFunc()
 
   checkSuccessfulInstantiation(
       builder, undefined,
-      instance => assertThrows(function() {
-        instance.exports.function_with_invalid_signature(33, 88);
-      }, TypeError, 'wasm function signature contains illegal type'));
+      instance => assertEquals(
+        instance.exports.function_with_invalid_signature(33n, 88n), -55n));
 })();
 
-(function I64ParamsInSignatureThrows() {
+(function I64ParamsInSignature() {
   print(arguments.callee.name);
   let builder = new WasmModuleBuilder();
 
   builder.addMemory(1, 1, true);
   builder.addFunction('function_with_invalid_signature', kSig_i_l)
-      .addBody([kExprGetLocal, 0, kExprI32ConvertI64])
+      .addBody([kExprLocalGet, 0, kExprI32ConvertI64])
       .exportFunc();
 
   checkSuccessfulInstantiation(
       builder, undefined,
-      instance => assertThrows(
-          _ => instance.exports.function_with_invalid_signature(12), TypeError,
-          'wasm function signature contains illegal type'));
+      instance => assertEquals(12,
+          instance.exports.function_with_invalid_signature(12n)));
 
 })();
 
-(function I64JSImportThrows() {
+(function I64JSImport() {
   print(arguments.callee.name);
   let builder = new WasmModuleBuilder();
   let sig_index = builder.addType(kSig_i_i);
@@ -163,19 +161,17 @@ function checkFailingInstantiation(
   let index = builder.addImport('', 'func', sig_i64_index);
   builder.addFunction('main', sig_index)
       .addBody([
-        kExprGetLocal, 0, kExprI64SConvertI32, kExprCallFunction, index  // --
+        kExprLocalGet, 0, kExprI64SConvertI32, kExprCallFunction, index  // --
       ])                                                                 // --
       .exportFunc();
 
   checkSuccessfulInstantiation(
       builder, {'': {func: _ => {}}},
-      instance => assertThrows(
-          instance.exports.main, TypeError,
-          'wasm function signature contains illegal type'));
+      instance => assertEquals(0, instance.exports.main(1)));
 
 })();
 
-(function ImportI64ParamWithF64ReturnThrows() {
+(function ImportI64ParamWithF64Return() {
   print(arguments.callee.name);
   // This tests that we generate correct code by using the correct return
   // register. See bug 6096.
@@ -186,11 +182,8 @@ function checkFailingInstantiation(
       .exportFunc();
 
   checkSuccessfulInstantiation(
-      builder, {'': {f: i => i}},
-      instance => assertThrows(
-          instance.exports.main, TypeError,
-          'wasm function signature contains illegal type'));
-
+      builder, {'': {f: i => Number(i)}},
+      instance => assertDoesNotThrow(instance.exports.main));
 })();
 
 (function ImportI64Return() {
@@ -204,11 +197,8 @@ function checkFailingInstantiation(
       .exportFunc();
 
   checkSuccessfulInstantiation(
-      builder, {'': {f: _ => 1}},
-      instance => assertThrows(
-          instance.exports.main, TypeError,
-          'wasm function signature contains illegal type'));
-
+      builder, {'': {f: _ => 1n}},
+      instance => assertDoesNotThrow(instance.exports.main));
 })();
 
 (function ImportSymbolToNumberThrows() {

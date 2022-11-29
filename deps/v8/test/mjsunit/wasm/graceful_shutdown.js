@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --no-wait-for-wasm
+// Flags: --expose-wasm --no-wait-for-background-tasks
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 (function CompileFunctionsTest() {
   // Create a big module.
@@ -14,7 +14,7 @@ load("test/mjsunit/wasm/wasm-module-builder.js");
   for (i = 0; i < 100; i++) {
     builder.addFunction("sub" + i, kSig_i_i)
       .addBody([                // --
-        kExprGetLocal, 0,       // --
+        kExprLocalGet, 0,       // --
         kExprI32Const, i % 61,  // --
         kExprI32Sub])           // --
       .exportFunc()

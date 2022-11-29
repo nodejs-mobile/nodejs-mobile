@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-let {session, contextGroup, Protocol} = InspectorTest.start('Tests imports in wasm');
+utils.load('test/inspector/wasm-inspector-test.js');
 
-utils.load('test/mjsunit/wasm/wasm-module-builder.js');
+let {session, contextGroup, Protocol} = InspectorTest.start('Tests imports in wasm');
 
 // Build two modules A and B. A defines function func, which contains a
 // breakpoint. This function is then imported by B and called via main. The
@@ -12,10 +12,9 @@ utils.load('test/mjsunit/wasm/wasm-module-builder.js');
 // This failed before (http://crbug.com/v8/5971).
 
 var builder_a = new WasmModuleBuilder();
-var func_idx = builder_a.addFunction('func', kSig_v_v)
+var func = builder_a.addFunction('func', kSig_v_v)
                    .addBody([kExprNop])
-                   .exportFunc()
-                   .index;
+                   .exportFunc();
 var module_a_bytes = builder_a.toArray();
 
 var builder_b = new WasmModuleBuilder();
@@ -37,21 +36,19 @@ function instantiate(bytes, imp) {
   instances.push(new WebAssembly.Instance(module, imp));
 }
 
-var evalWithUrl = (code, url) => Protocol.Runtime.evaluate(
-    {'expression': code + '\n//# sourceURL=v8://test/' + url});
-
 session.setupScriptMap();
 
 // Main promise chain:
-Protocol.Debugger.enable()
+Protocol.Runtime.enable()
+    .then(() => Protocol.Debugger.enable())
     .then(() => InspectorTest.log('Installing code and global variable.'))
     .then(
-        () => evalWithUrl(
+        () => WasmInspectorTest.evalWithUrl(
             'var instances = [];\n' + instantiate.toString(), 'setup'))
     .then(() => InspectorTest.log('Calling instantiate function for module A.'))
     .then(
         () =>
-            (evalWithUrl(
+            (WasmInspectorTest.evalWithUrl(
                  'instantiate(' + JSON.stringify(module_a_bytes) + ')',
                  'instantiateA'),
              0))
@@ -60,19 +57,20 @@ Protocol.Debugger.enable()
     .then(url => (InspectorTest.log('Setting breakpoint in line 1:'), url))
     .then(
         url =>
-            Protocol.Debugger.setBreakpointByUrl({lineNumber: 1, url: url}))
+            Protocol.Debugger.setBreakpointByUrl(
+                {lineNumber: 0, columnNumber: func.body_offset, url: url}))
     .then(printFailure)
     .then(msg => session.logSourceLocations(msg.result.locations))
     .then(() => InspectorTest.log('Calling instantiate function for module B.'))
     .then(
         () =>
-            (evalWithUrl(
+            (WasmInspectorTest.evalWithUrl(
                  'instantiate(' + JSON.stringify(module_b_bytes) +
                      ', {imp: {f: instances[0].exports.func}})',
                  'instantiateB'),
              0))
     .then(() => InspectorTest.log('Calling main function on module B.'))
-    .then(() => evalWithUrl('instances[1].exports.main()', 'runWasm'))
+    .then(() => WasmInspectorTest.evalWithUrl('instances[1].exports.main()', 'runWasm'))
     .then(() => InspectorTest.log('exports.main returned.'))
     .then(() => InspectorTest.log('Finished.'))
     .then(InspectorTest.completeTest);
@@ -89,7 +87,7 @@ Protocol.Debugger.oncePaused()
     .then(
         () => InspectorTest.log(
             'Getting current stack trace via "new Error().stack".'))
-    .then(() => evalWithUrl('new Error().stack', 'getStack'))
+    .then(() => WasmInspectorTest.evalWithUrl('new Error().stack', 'getStack'))
     .then(msg => InspectorTest.log(msg.result.result.value))
     .then(Protocol.Debugger.resume);
 

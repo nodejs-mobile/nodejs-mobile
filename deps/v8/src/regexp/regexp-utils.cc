@@ -84,7 +84,7 @@ MaybeHandle<Object> RegExpUtils::RegExpExec(Isolate* isolate,
 
   if (exec->IsCallable()) {
     const int argc = 1;
-    ScopedVector<Handle<Object>> argv(argc);
+    base::ScopedVector<Handle<Object>> argv(argc);
     argv[0] = string;
 
     Handle<Object> result;
@@ -113,7 +113,7 @@ MaybeHandle<Object> RegExpUtils::RegExpExec(Isolate* isolate,
     Handle<JSFunction> regexp_exec = isolate->regexp_exec_function();
 
     const int argc = 1;
-    ScopedVector<Handle<Object>> argv(argc);
+    base::ScopedVector<Handle<Object>> argv(argc);
     argv[0] = string;
 
     return Execution::Call(isolate, regexp_exec, regexp, argc, argv.begin());
@@ -171,11 +171,11 @@ bool RegExpUtils::IsUnmodifiedRegExp(Isolate* isolate, Handle<Object> obj) {
   // Check that the "exec" method is unmodified.
   // Check that the index refers to "exec" method (this has to be consistent
   // with the init order in the bootstrapper).
+  InternalIndex kExecIndex(JSRegExp::kExecFunctionDescriptorIndex);
   DCHECK_EQ(*(isolate->factory()->exec_string()),
-            proto_map.instance_descriptors().GetKey(
-                JSRegExp::kExecFunctionDescriptorIndex));
-  if (proto_map.instance_descriptors()
-          .GetDetails(JSRegExp::kExecFunctionDescriptorIndex)
+            proto_map.instance_descriptors(isolate).GetKey(kExecIndex));
+  if (proto_map.instance_descriptors(isolate)
+          .GetDetails(kExecIndex)
           .constness() != PropertyConstness::kConst) {
     return false;
   }
@@ -186,10 +186,7 @@ bool RegExpUtils::IsUnmodifiedRegExp(Isolate* isolate, Handle<Object> obj) {
   // property. Similar spots in CSA would use BranchIfFastRegExp_Strict in this
   // case.
 
-  if (!Protectors::IsRegExpSpeciesLookupChainProtectorIntact(
-          recv.GetCreationContext())) {
-    return false;
-  }
+  if (!Protectors::IsRegExpSpeciesLookupChainIntact(isolate)) return false;
 
   // The smi check is required to omit ToLength(lastIndex) calls with possible
   // user-code execution on the fast path.

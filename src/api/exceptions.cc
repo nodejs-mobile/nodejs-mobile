@@ -11,11 +11,11 @@
 
 namespace node {
 
+using v8::Context;
 using v8::Exception;
 using v8::Integer;
 using v8::Isolate;
 using v8::Local;
-using v8::NewStringType;
 using v8::Object;
 using v8::String;
 using v8::Value;
@@ -42,8 +42,7 @@ Local<Value> ErrnoException(Isolate* isolate,
   Local<String> path_string;
   if (path != nullptr) {
     // FIXME(bnoordhuis) It's questionable to interpret the file path as UTF-8.
-    path_string = String::NewFromUtf8(isolate, path, NewStringType::kNormal)
-                      .ToLocalChecked();
+    path_string = String::NewFromUtf8(isolate, path).ToLocalChecked();
   }
 
   if (path_string.IsEmpty() == false) {
@@ -53,18 +52,19 @@ Local<Value> ErrnoException(Isolate* isolate,
   }
   e = Exception::Error(cons);
 
+  Local<Context> context = env->context();
   Local<Object> obj = e.As<Object>();
-  obj->Set(env->context(),
+  obj->Set(context,
            env->errno_string(),
            Integer::New(isolate, errorno)).Check();
-  obj->Set(env->context(), env->code_string(), estring).Check();
+  obj->Set(context, env->code_string(), estring).Check();
 
   if (path_string.IsEmpty() == false) {
-    obj->Set(env->context(), env->path_string(), path_string).Check();
+    obj->Set(context, env->path_string(), path_string).Check();
   }
 
   if (syscall != nullptr) {
-    obj->Set(env->context(),
+    obj->Set(context,
              env->syscall_string(),
              OneByteString(isolate, syscall)).Check();
   }
@@ -78,16 +78,13 @@ static Local<String> StringFromPath(Isolate* isolate, const char* path) {
     return String::Concat(
         isolate,
         FIXED_ONE_BYTE_STRING(isolate, "\\\\"),
-        String::NewFromUtf8(isolate, path + 8, NewStringType::kNormal)
-            .ToLocalChecked());
+        String::NewFromUtf8(isolate, path + 8).ToLocalChecked());
   } else if (strncmp(path, "\\\\?\\", 4) == 0) {
-    return String::NewFromUtf8(isolate, path + 4, NewStringType::kNormal)
-        .ToLocalChecked();
+    return String::NewFromUtf8(isolate, path + 4).ToLocalChecked();
   }
 #endif
 
-  return String::NewFromUtf8(isolate, path, NewStringType::kNormal)
-      .ToLocalChecked();
+  return String::NewFromUtf8(isolate, path).ToLocalChecked();
 }
 
 
@@ -140,15 +137,16 @@ Local<Value> UVException(Isolate* isolate,
     Exception::Error(js_msg)->ToObject(isolate->GetCurrentContext())
       .ToLocalChecked();
 
-  e->Set(env->context(),
+  Local<Context> context = env->context();
+  e->Set(context,
          env->errno_string(),
          Integer::New(isolate, errorno)).Check();
-  e->Set(env->context(), env->code_string(), js_code).Check();
-  e->Set(env->context(), env->syscall_string(), js_syscall).Check();
+  e->Set(context, env->code_string(), js_code).Check();
+  e->Set(context, env->syscall_string(), js_syscall).Check();
   if (!js_path.IsEmpty())
-    e->Set(env->context(), env->path_string(), js_path).Check();
+    e->Set(context, env->path_string(), js_path).Check();
   if (!js_dest.IsEmpty())
-    e->Set(env->context(), env->dest_string(), js_dest).Check();
+    e->Set(context, env->dest_string(), js_dest).Check();
 
   return e;
 }
@@ -206,8 +204,7 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
     Local<String> cons2 = String::Concat(
         isolate,
         cons1,
-        String::NewFromUtf8(isolate, path, NewStringType::kNormal)
-            .ToLocalChecked());
+        String::NewFromUtf8(isolate, path).ToLocalChecked());
     Local<String> cons3 =
         String::Concat(isolate, cons2, FIXED_ONE_BYTE_STRING(isolate, "'"));
     e = Exception::Error(cons3);
@@ -215,20 +212,20 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
     e = Exception::Error(message);
   }
 
+  Local<Context> context = env->context();
   Local<Object> obj = e.As<Object>();
-  obj->Set(env->context(), env->errno_string(), Integer::New(isolate, errorno))
+  obj->Set(context, env->errno_string(), Integer::New(isolate, errorno))
       .Check();
 
   if (path != nullptr) {
-    obj->Set(env->context(),
+    obj->Set(context,
              env->path_string(),
-             String::NewFromUtf8(isolate, path, NewStringType::kNormal)
-                 .ToLocalChecked())
+             String::NewFromUtf8(isolate, path).ToLocalChecked())
         .Check();
   }
 
   if (syscall != nullptr) {
-    obj->Set(env->context(),
+    obj->Set(context,
              env->syscall_string(),
              OneByteString(isolate, syscall))
         .Check();
@@ -240,7 +237,7 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
 
   return e;
 }
-#endif
+#endif  // _WIN32
 
 // Implement the legacy name exposed in node.h. This has not been in fact
 // fatal any more, as the user can handle the exception in the

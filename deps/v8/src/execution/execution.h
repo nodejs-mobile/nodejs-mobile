@@ -54,21 +54,23 @@ class Execution final : public AllStatic {
   V8_EXPORT_PRIVATE static MaybeHandle<Object> TryCall(
       Isolate* isolate, Handle<Object> callable, Handle<Object> receiver,
       int argc, Handle<Object> argv[], MessageHandling message_handling,
-      MaybeHandle<Object>* exception_out);
+      MaybeHandle<Object>* exception_out, bool reschedule_terminate = true);
   // Convenience method for performing RunMicrotasks
   static MaybeHandle<Object> TryRunMicrotasks(
       Isolate* isolate, MicrotaskQueue* microtask_queue,
       MaybeHandle<Object>* exception_out);
 
+#if V8_ENABLE_WEBASSEMBLY
   // Call a Wasm function identified by {wasm_call_target} through the
   // provided {wrapper_code}, which must match the function's signature.
   // Upon return, either isolate->has_pending_exception() is true, or
   // the function's return values are in {packed_args}.
   V8_EXPORT_PRIVATE static void CallWasm(Isolate* isolate,
-                                         Handle<Code> wrapper_code,
+                                         Handle<CodeT> wrapper_code,
                                          Address wasm_call_target,
                                          Handle<Object> object_ref,
                                          Address packed_args);
+#endif  // V8_ENABLE_WEBASSEMBLY
 };
 
 }  // namespace internal

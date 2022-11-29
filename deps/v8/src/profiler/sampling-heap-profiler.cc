@@ -9,7 +9,6 @@
 
 #include "src/api/api-inl.h"
 #include "src/base/ieee754.h"
-#include "src/base/template-utils.h"
 #include "src/base/utils/random-number-generator.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate.h"
@@ -73,35 +72,23 @@ SamplingHeapProfiler::~SamplingHeapProfiler() {
 }
 
 void SamplingHeapProfiler::SampleObject(Address soon_object, size_t size) {
-  DisallowHeapAllocation no_allocation;
+  DisallowGarbageCollection no_gc;
+
+  // Check if the area is iterable by confirming that it starts with a map.
+  DCHECK(HeapObject::FromAddress(soon_object).map().IsMap());
 
   HandleScope scope(isolate_);
   HeapObject heap_object = HeapObject::FromAddress(soon_object);
   Handle<Object> obj(heap_object, isolate_);
-
-  // Mark the new block as FreeSpace to make sure the heap is iterable while we
-  // are taking the sample.
-  heap_->CreateFillerObjectAt(soon_object, static_cast<int>(size),
-                              ClearRecordedSlots::kNo);
 
   Local<v8::Value> loc = v8::Utils::ToLocal(obj);
 
   AllocationNode* node = AddStack();
   node->allocations_[size]++;
   auto sample =
-      base::make_unique<Sample>(size, node, loc, this, next_sample_id());
+      std::make_unique<Sample>(size, node, loc, this, next_sample_id());
   sample->global.SetWeak(sample.get(), OnWeakCallback,
                          WeakCallbackType::kParameter);
-#if __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated"
-#endif
-  // MarkIndependent is marked deprecated but we still rely on it here
-  // temporarily.
-  sample->global.MarkIndependent();
-#if __clang__
-#pragma clang diagnostic pop
-#endif
   samples_.emplace(sample.get(), std::move(sample));
 }
 
@@ -136,7 +123,7 @@ SamplingHeapProfiler::AllocationNode* SamplingHeapProfiler::FindOrAddChildNode(
     DCHECK_EQ(strcmp(child->name_, name), 0);
     return child;
   }
-  auto new_child = base::make_unique<AllocationNode>(
+  auto new_child = std::make_unique<AllocationNode>(
       parent, name, script_id, start_position, next_node_id());
   return parent->AddChildNode(id, std::move(new_child));
 }
@@ -189,6 +176,9 @@ SamplingHeapProfiler::AllocationNode* SamplingHeapProfiler::AddStack() {
       case IDLE:
         name = "(IDLE)";
         break;
+      // Treat atomics wait as a normal JS event; we don't care about the
+      // difference for allocations.
+      case ATOMICS_WAIT:
       case JS:
         name = "(JS)";
         break;
@@ -200,7 +190,7 @@ SamplingHeapProfiler::AllocationNode* SamplingHeapProfiler::AddStack() {
   // the first element in the list.
   for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
     SharedFunctionInfo shared = *it;
-    const char* name = this->names()->GetName(shared.DebugName());
+    const char* name = this->names()->GetCopy(shared.DebugNameCStr().get());
     int script_id = v8::UnboundScript::kNoScriptId;
     if (shared.script().IsScript()) {
       Script script = Script::cast(shared.script());
@@ -229,13 +219,10 @@ v8::AllocationProfile::Node* SamplingHeapProfiler::TranslateAllocationNode(
   int column = v8::AllocationProfile::kNoColumnNumberInfo;
   std::vector<v8::AllocationProfile::Allocation> allocations;
   allocations.reserve(node->allocations_.size());
-  if (node->script_id_ != v8::UnboundScript::kNoScriptId &&
-      scripts.find(node->script_id_) != scripts.end()) {
-    // Cannot use std::map<T>::at because it is not available on android.
-    auto non_const_scripts =
-        const_cast<std::map<int, Handle<Script>>&>(scripts);
-    Handle<Script> script = non_const_scripts[node->script_id_];
-    if (!script.is_null()) {
+  if (node->script_id_ != v8::UnboundScript::kNoScriptId) {
+    auto script_iterator = scripts.find(node->script_id_);
+    if (script_iterator != scripts.end()) {
+      Handle<Script> script = script_iterator->second;
       if (script->name().IsName()) {
         Name name = Name::cast(script->name());
         script_name = ToApiHandle<v8::String>(

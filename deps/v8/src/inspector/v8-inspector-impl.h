@@ -33,14 +33,14 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <unordered_map>
 
+#include "include/v8-inspector.h"
 #include "src/base/macros.h"
 #include "src/base/platform/mutex.h"
 #include "src/inspector/injected-script.h"
 #include "src/inspector/protocol/Protocol.h"
-
-#include "include/v8-inspector.h"
 
 namespace v8_inspector {
 
@@ -58,6 +58,8 @@ class V8InspectorImpl : public V8Inspector {
  public:
   V8InspectorImpl(v8::Isolate*, V8InspectorClient*);
   ~V8InspectorImpl() override;
+  V8InspectorImpl(const V8InspectorImpl&) = delete;
+  V8InspectorImpl& operator=(const V8InspectorImpl&) = delete;
 
   v8::Isolate* isolate() const { return m_isolate; }
   V8InspectorClient* client() { return m_client; }
@@ -65,18 +67,20 @@ class V8InspectorImpl : public V8Inspector {
   int contextGroupId(v8::Local<v8::Context>) const;
   int contextGroupId(int contextId) const;
   uint64_t isolateId() const { return m_isolateId; }
+  int resolveUniqueContextId(V8DebuggerId uniqueId) const;
 
   v8::MaybeLocal<v8::Value> compileAndRunInternalScript(v8::Local<v8::Context>,
                                                         v8::Local<v8::String>);
   v8::MaybeLocal<v8::Script> compileScript(v8::Local<v8::Context>,
                                            const String16& code,
                                            const String16& fileName);
-  v8::Local<v8::Context> regexContext();
+  v8::MaybeLocal<v8::Context> regexContext();
+  v8::MaybeLocal<v8::Context> exceptionMetaDataContext();
 
   // V8Inspector implementation.
   std::unique_ptr<V8InspectorSession> connect(int contextGroupId,
                                               V8Inspector::Channel*,
-                                              const StringView& state) override;
+                                              StringView state) override;
   void contextCreated(const V8ContextInfo&) override;
   void contextDestroyed(v8::Local<v8::Context>) override;
   v8::MaybeLocal<v8::Context> contextById(int contextId) override;
@@ -84,27 +88,34 @@ class V8InspectorImpl : public V8Inspector {
   void resetContextGroup(int contextGroupId) override;
   void idleStarted() override;
   void idleFinished() override;
-  unsigned exceptionThrown(v8::Local<v8::Context>, const StringView& message,
+  unsigned exceptionThrown(v8::Local<v8::Context>, StringView message,
                            v8::Local<v8::Value> exception,
-                           const StringView& detailedMessage,
-                           const StringView& url, unsigned lineNumber,
-                           unsigned columnNumber, std::unique_ptr<V8StackTrace>,
+                           StringView detailedMessage, StringView url,
+                           unsigned lineNumber, unsigned columnNumber,
+                           std::unique_ptr<V8StackTrace>,
                            int scriptId) override;
   void exceptionRevoked(v8::Local<v8::Context>, unsigned exceptionId,
-                        const StringView& message) override;
+                        StringView message) override;
   std::unique_ptr<V8StackTrace> createStackTrace(
       v8::Local<v8::StackTrace>) override;
   std::unique_ptr<V8StackTrace> captureStackTrace(bool fullStack) override;
-  void asyncTaskScheduled(const StringView& taskName, void* task,
+  void asyncTaskScheduled(StringView taskName, void* task,
                           bool recurring) override;
   void asyncTaskCanceled(void* task) override;
   void asyncTaskStarted(void* task) override;
   void asyncTaskFinished(void* task) override;
   void allAsyncTasksCanceled() override;
 
-  V8StackTraceId storeCurrentStackTrace(const StringView& description) override;
+  V8StackTraceId storeCurrentStackTrace(StringView description) override;
   void externalAsyncTaskStarted(const V8StackTraceId& parent) override;
   void externalAsyncTaskFinished(const V8StackTraceId& parent) override;
+
+  std::shared_ptr<Counters> enableCounters() override;
+
+  bool associateExceptionData(v8::Local<v8::Context>,
+                              v8::Local<v8::Value> exception,
+                              v8::Local<v8::Name> key,
+                              v8::Local<v8::Value> value) override;
 
   unsigned nextExceptionId() { return ++m_lastExceptionId; }
   void enableStackCapturingIfNeeded();
@@ -124,6 +135,9 @@ class V8InspectorImpl : public V8Inspector {
   void forEachSession(
       int contextGroupId,
       const std::function<void(V8InspectorSessionImpl*)>& callback);
+  int64_t generateUniqueId();
+  v8::MaybeLocal<v8::Object> getAssociatedExceptionData(
+      v8::Local<v8::Value> exception);
 
   class EvaluateScope {
    public:
@@ -143,10 +157,14 @@ class V8InspectorImpl : public V8Inspector {
   };
 
  private:
+  friend class Counters;
+
   v8::Isolate* m_isolate;
   V8InspectorClient* m_client;
   std::unique_ptr<V8Debugger> m_debugger;
   v8::Global<v8::Context> m_regexContext;
+  v8::Global<v8::Context> m_exceptionMetaDataContext;
+  v8::Global<v8::debug::WeakMap> m_exceptionMetaData;
   int m_capturingStackTracesCount;
   unsigned m_lastExceptionId;
   int m_lastContextId;
@@ -170,10 +188,11 @@ class V8InspectorImpl : public V8Inspector {
   ConsoleStorageMap m_consoleStorageMap;
 
   std::unordered_map<int, int> m_contextIdToGroupIdMap;
+  std::map<std::pair<int64_t, int64_t>, int> m_uniqueIdToContextId;
 
   std::unique_ptr<V8Console> m_console;
 
-  DISALLOW_COPY_AND_ASSIGN(V8InspectorImpl);
+  Counters* m_counters = nullptr;
 };
 
 }  // namespace v8_inspector

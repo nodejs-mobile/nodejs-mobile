@@ -1,5 +1,4 @@
-Node.js for Mobile Apps
-====================================
+# Node.js for Mobile Apps
 
 This is the main repository for [Node.js for Mobile Apps](https://code.janeasystems.com/nodejs-mobile), a toolkit for integrating Node.js into mobile applications.
 
@@ -82,11 +81,12 @@ git checkout mobile-master
 
 #### 2a) Using the Android helper script:
 
-The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/android-ndk-r21b`). The second argument is optional and is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. If no target architecture is provided, it will build all available architectures.
-Run:
+The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/android-ndk-r21b`). The second argument is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. If you provide `x`, then it will build all available architectures. The third argument must be the Android SDK version as a two-digit number. All three arguments are required.
+
+Run (example arguments):
 
 ```sh
-./tools/android_build.sh ~/android-ndk-r21b
+./tools/android_build.sh ~/android-ndk-r21b x 23
 ```
 
 When done, each built shared library will be placed in `out_android/$(ARCHITECTURE)/libnode.so`.
@@ -164,7 +164,6 @@ The helper script builds the `tools/ios-framework/NodeMobile.xcodeproj` Xcode pr
   - The framework to run on the iOS simulator: `out_ios/Release-iphonesimulator/NodeMobile.framework`
   - The universal framework, that runs on iOS devices and simulators: `out_ios/Release-universal/NodeMobile.framework`
 
-While the universal framework is useful for faster Application development, due to supporting both iOS devices and simulators, frameworks containing simulator strips will not be accepted on the App Store. Before trying to submit your application, it would be advisable to use the `Release-iphoneos/NodeMobile.framework` in your submission archive or strip the x64 slices from the universal framework's binaries before submitting.
 
 ## Running tests
 Please see the [TESTING.md](./doc_mobile/TESTING.md) file in the `doc_mobile` folder in this source distribution.

@@ -12,11 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "unicode/putil.h"
-#include "unicode/udata.h"
-
 #include "src/base/build_config.h"
 #include "src/base/file-utils.h"
+#include "src/base/platform/wrappers.h"
+#include "unicode/putil.h"
+#include "unicode/udata.h"
 
 #define ICU_UTIL_DATA_FILE 0
 #define ICU_UTIL_DATA_STATIC 1
@@ -40,25 +40,22 @@ bool InitializeICUDefaultLocation(const char* exec_path,
                                   const char* icu_data_file) {
 #if !defined(V8_INTL_SUPPORT)
   return true;
-#else
-#if ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
+#elif ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
   if (icu_data_file) {
     return InitializeICU(icu_data_file);
   }
-  char* icu_data_file_default;
 #if defined(V8_TARGET_LITTLE_ENDIAN)
-  base::RelativePath(&icu_data_file_default, exec_path, "icudtl.dat");
+  std::unique_ptr<char[]> icu_data_file_default =
+      base::RelativePath(exec_path, "icudtl.dat");
 #elif defined(V8_TARGET_BIG_ENDIAN)
-  base::RelativePath(&icu_data_file_default, exec_path, "icudtb.dat");
+  std::unique_ptr<char[]> icu_data_file_default =
+      base::RelativePath(exec_path, "icudtb.dat");
 #else
 #error Unknown byte ordering
 #endif
-  bool result = InitializeICU(icu_data_file_default);
-  free(icu_data_file_default);
-  return result;
+  return InitializeICU(icu_data_file_default.get());
 #else
   return InitializeICU(nullptr);
-#endif
 #endif
 }
 
@@ -74,7 +71,7 @@ bool InitializeICU(const char* icu_data_file) {
 
   if (g_icu_data_ptr) return true;
 
-  FILE* inf = fopen(icu_data_file, "rb");
+  FILE* inf = base::Fopen(icu_data_file, "rb");
   if (!inf) return false;
 
   fseek(inf, 0, SEEK_END);
@@ -85,10 +82,10 @@ bool InitializeICU(const char* icu_data_file) {
   if (fread(g_icu_data_ptr, 1, size, inf) != size) {
     delete[] g_icu_data_ptr;
     g_icu_data_ptr = nullptr;
-    fclose(inf);
+    base::Fclose(inf);
     return false;
   }
-  fclose(inf);
+  base::Fclose(inf);
 
   atexit(free_icu_data_ptr);
 

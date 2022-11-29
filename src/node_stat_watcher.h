@@ -30,15 +30,20 @@
 #include "v8.h"
 
 namespace node {
+namespace fs {
+class BindingData;
+}
 
 class Environment;
+class ExternalReferenceRegistry;
 
 class StatWatcher : public HandleWrap {
  public:
   static void Initialize(Environment* env, v8::Local<v8::Object> target);
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
 
  protected:
-  StatWatcher(Environment* env,
+  StatWatcher(fs::BindingData* binding_data,
               v8::Local<v8::Object> wrap,
               bool use_bigint);
 
@@ -57,6 +62,7 @@ class StatWatcher : public HandleWrap {
 
   uv_fs_poll_t watcher_;
   const bool use_bigint_;
+  BaseObjectPtr<fs::BindingData> binding_data_;
 };
 
 }  // namespace node

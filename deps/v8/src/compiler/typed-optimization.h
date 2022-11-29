@@ -30,6 +30,8 @@ class V8_EXPORT_PRIVATE TypedOptimization final
   TypedOptimization(Editor* editor, CompilationDependencies* dependencies,
                     JSGraph* jsgraph, JSHeapBroker* broker);
   ~TypedOptimization() override;
+  TypedOptimization(const TypedOptimization&) = delete;
+  TypedOptimization& operator=(const TypedOptimization&) = delete;
 
   const char* reducer_name() const override { return "TypedOptimization"; }
 
@@ -37,6 +39,8 @@ class V8_EXPORT_PRIVATE TypedOptimization final
 
  private:
   Reduction ReduceConvertReceiver(Node* node);
+  Reduction ReduceMaybeGrowFastElements(Node* node);
+  Reduction ReduceCheckBounds(Node* node);
   Reduction ReduceCheckHeapObject(Node* node);
   Reduction ReduceCheckMaps(Node* node);
   Reduction ReduceCheckNumber(Node* node);
@@ -60,6 +64,7 @@ class V8_EXPORT_PRIVATE TypedOptimization final
   Reduction ReduceToBoolean(Node* node);
   Reduction ReduceSpeculativeNumberAdd(Node* node);
   Reduction ReduceSpeculativeNumberMultiply(Node* node);
+  Reduction ReduceSpeculativeNumberPow(Node* node);
   Reduction ReduceSpeculativeNumberBinop(Node* node);
   Reduction ReduceSpeculativeNumberComparison(Node* node);
 
@@ -87,8 +92,6 @@ class V8_EXPORT_PRIVATE TypedOptimization final
   Type const true_type_;
   Type const false_type_;
   TypeCache const* type_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(TypedOptimization);
 };
 
 }  // namespace compiler

@@ -33,18 +33,15 @@ constexpr size_t kMaxPCRelativeCodeRangeInMB = 128;
 constexpr uint8_t kInstrSize = 4;
 constexpr uint8_t kInstrSizeLog2 = 2;
 constexpr uint8_t kLoadLiteralScaleLog2 = 2;
+constexpr uint8_t kLoadLiteralScale = 1 << kLoadLiteralScaleLog2;
 constexpr int kMaxLoadLiteralRange = 1 * MB;
 
 const int kNumberOfRegisters = 32;
 const int kNumberOfVRegisters = 32;
-// Callee saved registers are x19-x30(lr).
-const int kNumberOfCalleeSavedRegisters = 11;
-const int kFirstCalleeSavedRegisterIndex = 19;
+// Callee saved registers are x19-x28.
+const int kNumberOfCalleeSavedRegisters = 10;
 // Callee saved FP registers are d8-d15.
 const int kNumberOfCalleeSavedVRegisters = 8;
-const int kFirstCalleeSavedVRegisterIndex = 8;
-// Callee saved registers with no specific purpose in JS are x19-x25.
-const size_t kJSCalleeSavedRegList = 0x03f80000;
 const int kWRegSizeInBits = 32;
 const int kWRegSizeInBitsLog2 = 5;
 const int kWRegSize = kWRegSizeInBits >> 3;
@@ -146,7 +143,8 @@ const unsigned kFloat16ExponentBias = 15;
 // Actual value of root register is offset from the root array's start
 // to take advantage of negative displacement values.
 // TODO(sigurds): Choose best value.
-constexpr int kRootRegisterBias = 256;
+// TODO(ishell): Choose best value for ptr-compr.
+constexpr int kRootRegisterBias = kSystemPointerSize == kTaggedSize ? 256 : 0;
 
 using float16 = uint16_t;
 
@@ -387,7 +385,36 @@ enum SystemHint {
   WFI = 3,
   SEV = 4,
   SEVL = 5,
-  CSDB = 20
+  CSDB = 20,
+  BTI = 32,
+  BTI_c = 34,
+  BTI_j = 36,
+  BTI_jc = 38
+};
+
+// In a guarded page, only BTI and PACI[AB]SP instructions are allowed to be
+// the target of indirect branches. Details on which kinds of branches each
+// instruction allows follow in the comments below:
+enum class BranchTargetIdentifier {
+  // Do not emit a BTI instruction.
+  kNone,
+
+  // Emit a BTI instruction. Cannot be the target of indirect jumps/calls.
+  kBti,
+
+  // Emit a "BTI c" instruction. Can be the target of indirect jumps (BR) with
+  // x16/x17 as the target register, or indirect calls (BLR).
+  kBtiCall,
+
+  // Emit a "BTI j" instruction. Can be the target of indirect jumps (BR).
+  kBtiJump,
+
+  // Emit a "BTI jc" instruction, which is a combination of "BTI j" and "BTI c".
+  kBtiJumpCall,
+
+  // Emit a PACIBSP instruction, which acts like a "BTI c" or a "BTI jc",
+  // based on the value of SCTLR_EL1.BT0.
+  kPacibsp
 };
 
 enum BarrierDomain {
@@ -766,10 +793,10 @@ enum SystemPAuthOp : uint32_t {
   SystemPAuthFixed = 0xD503211F,
   SystemPAuthFMask = 0xFFFFFD1F,
   SystemPAuthMask = 0xFFFFFFFF,
-  PACIA1716 = SystemPAuthFixed | 0x00000100,
-  AUTIA1716 = SystemPAuthFixed | 0x00000180,
-  PACIASP = SystemPAuthFixed | 0x00000320,
-  AUTIASP = SystemPAuthFixed | 0x000003A0
+  PACIB1716 = SystemPAuthFixed | 0x00000140,
+  AUTIB1716 = SystemPAuthFixed | 0x000001C0,
+  PACIBSP = SystemPAuthFixed | 0x00000360,
+  AUTIBSP = SystemPAuthFixed | 0x000003E0
 };
 
 // Any load or store (including pair).
@@ -1298,7 +1325,8 @@ enum FPIntegerConvertOp : uint32_t {
   FMOV_xd = FMOV_ws | SixtyFourBits | FP64,
   FMOV_dx = FMOV_sw | SixtyFourBits | FP64,
   FMOV_d1_x = FPIntegerConvertFixed | SixtyFourBits | 0x008F0000,
-  FMOV_x_d1 = FPIntegerConvertFixed | SixtyFourBits | 0x008E0000
+  FMOV_x_d1 = FPIntegerConvertFixed | SixtyFourBits | 0x008E0000,
+  FJCVTZS = FPIntegerConvertFixed | FP64 | 0x001E0000
 };
 
 // Conversion between fixed point and floating point.

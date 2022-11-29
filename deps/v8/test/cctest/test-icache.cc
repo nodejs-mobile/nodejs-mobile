@@ -9,6 +9,10 @@
 #include "test/cctest/cctest.h"
 #include "test/common/assembler-tester.h"
 
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/code-space-access.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
+
 namespace v8 {
 namespace internal {
 namespace test_icache {
@@ -34,6 +38,7 @@ static void FloodWithInc(Isolate* isolate, TestingAssemblerBuffer* buffer) {
     __ addl(rax, Immediate(1));
   }
 #elif V8_TARGET_ARCH_ARM64
+  __ CodeEntry();
   for (int i = 0; i < kNumInstr; ++i) {
     __ Add(x0, x0, Operand(1));
   }
@@ -51,13 +56,17 @@ static void FloodWithInc(Isolate* isolate, TestingAssemblerBuffer* buffer) {
   for (int i = 0; i < kNumInstr; ++i) {
     __ Addu(v0, v0, Operand(1));
   }
-#elif V8_TARGET_ARCH_PPC
+#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
   for (int i = 0; i < kNumInstr; ++i) {
     __ addi(r3, r3, Operand(1));
   }
 #elif V8_TARGET_ARCH_S390
   for (int i = 0; i < kNumInstr; ++i) {
     __ agfi(r2, Operand(1));
+  }
+#elif V8_TARGET_ARCH_RISCV64
+  for (int i = 0; i < kNumInstr; ++i) {
+    __ Add32(a0, a0, Operand(1));
   }
 #else
 #error Unsupported architecture
@@ -73,6 +82,8 @@ static void FloodWithNop(Isolate* isolate, TestingAssemblerBuffer* buffer) {
   __ mov(eax, Operand(esp, kSystemPointerSize));
 #elif V8_TARGET_ARCH_X64
   __ movl(rax, arg_reg_1);
+#elif V8_TARGET_ARCH_ARM64
+  __ CodeEntry();
 #elif V8_TARGET_ARCH_MIPS
   __ mov(v0, a0);
 #elif V8_TARGET_ARCH_MIPS64
@@ -162,6 +173,7 @@ CONDITIONAL_TEST(TestFlushICacheOfExecutable) {
 
 #undef CONDITIONAL_TEST
 
+#if V8_ENABLE_WEBASSEMBLY
 // Order of operation for this test case:
 //   perm(RWX) -> exec -> patch -> flush -> exec
 TEST(TestFlushICacheOfWritableAndExecutable) {
@@ -169,21 +181,35 @@ TEST(TestFlushICacheOfWritableAndExecutable) {
   HandleScope handles(isolate);
 
   for (int i = 0; i < kNumIterations; ++i) {
-    auto buffer = AllocateAssemblerBuffer(kBufferSize);
+    auto buffer = AllocateAssemblerBuffer(kBufferSize, nullptr,
+                                          VirtualMemory::kMapAsJittable);
 
     // Allow calling the function from C++.
     auto f = GeneratedCode<F0>::FromBuffer(isolate, buffer->start());
 
     CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
                          buffer->size(), v8::PageAllocator::kReadWriteExecute));
-    FloodWithInc(isolate, buffer.get());
-    FlushInstructionCache(buffer->start(), buffer->size());
+    {
+#if defined(V8_OS_MACOSX) && defined(V8_HOST_ARCH_ARM64)
+      // Make sure to switch memory to writable on M1 hardware.
+      wasm::CodeSpaceWriteScope code_space_write_scope(nullptr);
+#endif
+      FloodWithInc(isolate, buffer.get());
+      FlushInstructionCache(buffer->start(), buffer->size());
+    }
     CHECK_EQ(23 + kNumInstr, f.Call(23));  // Call into generated code.
-    FloodWithNop(isolate, buffer.get());
-    FlushInstructionCache(buffer->start(), buffer->size());
+    {
+#if defined(V8_OS_MACOSX) && defined(V8_HOST_ARCH_ARM64)
+      // Make sure to switch memory to writable on M1 hardware.
+      wasm::CodeSpaceWriteScope code_space_write_scope(nullptr);
+#endif
+      FloodWithNop(isolate, buffer.get());
+      FlushInstructionCache(buffer->start(), buffer->size());
+    }
     CHECK_EQ(23, f.Call(23));  // Call into generated code.
   }
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 #undef __
 

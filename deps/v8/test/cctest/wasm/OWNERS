@@ -1,5 +1,1 @@
-ahaas@chromium.org
-clemensh@chromium.org
-titzer@chromium.org
-
-# COMPONENT: Blink>JavaScript>WebAssembly
+file:../../../src/wasm/OWNERS

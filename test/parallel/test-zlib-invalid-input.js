@@ -30,7 +30,7 @@ const nonStringInputs = [
   1,
   true,
   { a: 1 },
-  ['a']
+  ['a'],
 ];
 
 // zlib.Unzip classes need to get valid data, or else they'll throw.
@@ -39,14 +39,15 @@ const unzips = [
   zlib.Gunzip(),
   zlib.Inflate(),
   zlib.InflateRaw(),
-  zlib.BrotliDecompress()
+  zlib.BrotliDecompress(),
 ];
 
 nonStringInputs.forEach(common.mustCall((input) => {
-  // zlib.gunzip should not throw an error when called with bad input.
-  zlib.gunzip(input, (err, buffer) => {
-    // zlib.gunzip should pass the error to the callback.
-    assert.ok(err);
+  assert.throws(() => {
+    zlib.gunzip(input);
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_TYPE'
   });
 }, nonStringInputs.length));
 

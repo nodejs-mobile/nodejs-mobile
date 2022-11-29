@@ -18,20 +18,18 @@ namespace compiler {
 RawMachineAssembler::RawMachineAssembler(
     Isolate* isolate, Graph* graph, CallDescriptor* call_descriptor,
     MachineRepresentation word, MachineOperatorBuilder::Flags flags,
-    MachineOperatorBuilder::AlignmentRequirements alignment_requirements,
-    PoisoningMitigationLevel poisoning_level)
+    MachineOperatorBuilder::AlignmentRequirements alignment_requirements)
     : isolate_(isolate),
       graph_(graph),
-      schedule_(new (zone()) Schedule(zone())),
-      source_positions_(new (zone()) SourcePositionTable(graph)),
+      schedule_(zone()->New<Schedule>(zone())),
+      source_positions_(zone()->New<SourcePositionTable>(graph)),
       machine_(zone(), word, flags, alignment_requirements),
       common_(zone()),
       simplified_(zone()),
       call_descriptor_(call_descriptor),
       target_parameter_(nullptr),
       parameters_(parameter_count(), zone()),
-      current_block_(schedule()->start()),
-      poisoning_level_(poisoning_level) {
+      current_block_(schedule()->start()) {
   int param_count = static_cast<int>(parameter_count());
   // Add an extra input for the JSFunction parameter to the start node.
   graph->SetStart(graph->NewNode(common_.Start(param_count + 1)));
@@ -47,11 +45,22 @@ RawMachineAssembler::RawMachineAssembler(
   source_positions_->AddDecorator();
 }
 
-void RawMachineAssembler::SetSourcePosition(const char* file, int line) {
-  int file_id = isolate()->LookupOrAddExternallyCompiledFilename(file);
-  SourcePosition p = SourcePosition::External(line, file_id);
-  DCHECK(p.ExternalLine() == line);
+void RawMachineAssembler::SetCurrentExternalSourcePosition(
+    FileAndLine file_and_line) {
+  int file_id =
+      isolate()->LookupOrAddExternallyCompiledFilename(file_and_line.first);
+  SourcePosition p = SourcePosition::External(file_and_line.second, file_id);
+  DCHECK(p.ExternalLine() == file_and_line.second);
   source_positions()->SetCurrentPosition(p);
+}
+
+FileAndLine RawMachineAssembler::GetCurrentExternalSourcePosition() const {
+  SourcePosition p = source_positions_->GetCurrentPosition();
+  if (!p.IsKnown()) return {nullptr, -1};
+  int file_id = p.ExternalFileId();
+  const char* file_name = isolate()->GetExternallyCompiledFilename(file_id);
+  int line = p.ExternalLine();
+  return {file_name, line};
 }
 
 Node* RawMachineAssembler::NullConstant() {
@@ -373,6 +382,7 @@ Node* RawMachineAssembler::CreateNodeFromPredecessors(
     return sidetable[predecessors.front()->id().ToSize()];
   }
   std::vector<Node*> inputs;
+  inputs.reserve(predecessors.size());
   for (BasicBlock* predecessor : predecessors) {
     inputs.push_back(sidetable[predecessor->id().ToSize()]);
   }
@@ -399,6 +409,7 @@ void RawMachineAssembler::MakePhiBinary(Node* phi, int split_point,
     left_input = NodeProperties::GetValueInput(phi, 0);
   } else {
     std::vector<Node*> inputs;
+    inputs.reserve(left_input_count);
     for (int i = 0; i < left_input_count; ++i) {
       inputs.push_back(NodeProperties::GetValueInput(phi, i));
     }
@@ -459,7 +470,7 @@ void RawMachineAssembler::MarkControlDeferred(Node* control_node) {
         return;
       case IrOpcode::kIfTrue: {
         Node* branch = NodeProperties::GetControlInput(control_node);
-        BranchHint hint = BranchOperatorInfoOf(branch->op()).hint;
+        BranchHint hint = BranchHintOf(branch->op());
         if (hint == BranchHint::kTrue) {
           // The other possibility is also deferred, so the responsible branch
           // has to be before.
@@ -472,7 +483,7 @@ void RawMachineAssembler::MarkControlDeferred(Node* control_node) {
       }
       case IrOpcode::kIfFalse: {
         Node* branch = NodeProperties::GetControlInput(control_node);
-        BranchHint hint = BranchOperatorInfoOf(branch->op()).hint;
+        BranchHint hint = BranchHintOf(branch->op());
         if (hint == BranchHint::kFalse) {
           // The other possibility is also deferred, so the responsible branch
           // has to be before.
@@ -503,11 +514,10 @@ void RawMachineAssembler::MarkControlDeferred(Node* control_node) {
     }
   }
 
-  BranchOperatorInfo info = BranchOperatorInfoOf(responsible_branch->op());
-  if (info.hint == new_branch_hint) return;
-  NodeProperties::ChangeOp(
-      responsible_branch,
-      common()->Branch(new_branch_hint, info.is_safety_check));
+  BranchHint hint = BranchHintOf(responsible_branch->op());
+  if (hint == new_branch_hint) return;
+  NodeProperties::ChangeOp(responsible_branch,
+                           common()->Branch(new_branch_hint));
 }
 
 Node* RawMachineAssembler::TargetParameter() {
@@ -531,9 +541,7 @@ void RawMachineAssembler::Goto(RawMachineLabel* label) {
 void RawMachineAssembler::Branch(Node* condition, RawMachineLabel* true_val,
                                  RawMachineLabel* false_val) {
   DCHECK(current_block_ != schedule()->end());
-  Node* branch = MakeNode(
-      common()->Branch(BranchHint::kNone, IsSafetyCheck::kNoSafetyCheck), 1,
-      &condition);
+  Node* branch = MakeNode(common()->Branch(BranchHint::kNone), 1, &condition);
   BasicBlock* true_block = schedule()->NewBasicBlock();
   BasicBlock* false_block = schedule()->NewBasicBlock();
   schedule()->AddBranch(CurrentBlock(), branch, true_block, false_block);
@@ -621,6 +629,21 @@ void RawMachineAssembler::Return(int count, Node* vs[]) {
 }
 
 void RawMachineAssembler::PopAndReturn(Node* pop, Node* value) {
+  // PopAndReturn is supposed to be using ONLY in CSA/Torque builtins for
+  // dropping ALL JS arguments that are currently located on the stack.
+  // The check below ensures that there are no directly accessible stack
+  // parameters from current builtin, which implies that the builtin with
+  // JS calling convention (TFJ) was created with kDontAdaptArgumentsSentinel.
+  // This simplifies semantics of this instruction because in case of presence
+  // of directly accessible stack parameters it's impossible to distinguish
+  // the following cases:
+  // 1) stack parameter is included in JS arguments (and therefore it will be
+  //    dropped as a part of 'pop' number of arguments),
+  // 2) stack parameter is NOT included in JS arguments (and therefore it should
+  //    be dropped in ADDITION to the 'pop' number of arguments).
+  // Additionally, in order to simplify assembly code, PopAndReturn is also
+  // not allowed in builtins with stub linkage and parameters on stack.
+  CHECK_EQ(call_descriptor()->ParameterSlotCount(), 0);
   Node* values[] = {pop, value};
   Node* ret = MakeNode(common()->Return(1), 2, values);
   schedule()->AddReturn(CurrentBlock(), ret);
@@ -669,8 +692,8 @@ void RawMachineAssembler::Comment(const std::string& msg) {
   AddNode(machine()->Comment(zone_buffer));
 }
 
-void RawMachineAssembler::StaticAssert(Node* value) {
-  AddNode(common()->StaticAssert(), value);
+void RawMachineAssembler::StaticAssert(Node* value, const char* source) {
+  AddNode(common()->StaticAssert(source), value);
 }
 
 Node* RawMachineAssembler::CallN(CallDescriptor* call_descriptor,
@@ -690,38 +713,43 @@ Node* RawMachineAssembler::CallNWithFrameState(CallDescriptor* call_descriptor,
   return AddNode(common()->Call(call_descriptor), input_count, inputs);
 }
 
-Node* RawMachineAssembler::TailCallN(CallDescriptor* call_descriptor,
-                                     int input_count, Node* const* inputs) {
+void RawMachineAssembler::TailCallN(CallDescriptor* call_descriptor,
+                                    int input_count, Node* const* inputs) {
   // +1 is for target.
   DCHECK_EQ(input_count, call_descriptor->ParameterCount() + 1);
   Node* tail_call =
       MakeNode(common()->TailCall(call_descriptor), input_count, inputs);
   schedule()->AddTailCall(CurrentBlock(), tail_call);
   current_block_ = nullptr;
-  return tail_call;
 }
 
 namespace {
 
+enum FunctionDescriptorMode { kHasFunctionDescriptor, kNoFunctionDescriptor };
+
 Node* CallCFunctionImpl(
-    RawMachineAssembler* rasm, Node* function, MachineType return_type,
+    RawMachineAssembler* rasm, Node* function,
+    base::Optional<MachineType> return_type,
     std::initializer_list<RawMachineAssembler::CFunctionArg> args,
     bool caller_saved_regs, SaveFPRegsMode mode,
-    bool has_function_descriptor = kHasFunctionDescriptor) {
+    FunctionDescriptorMode no_function_descriptor) {
   static constexpr std::size_t kNumCArgs = 10;
 
-  MachineSignature::Builder builder(rasm->zone(), 1, args.size());
-  builder.AddReturn(return_type);
+  MachineSignature::Builder builder(rasm->zone(), return_type ? 1 : 0,
+                                    args.size());
+  if (return_type) {
+    builder.AddReturn(*return_type);
+  }
   for (const auto& arg : args) builder.AddParam(arg.first);
 
-  auto call_descriptor = Linkage::GetSimplifiedCDescriptor(
-      rasm->zone(), builder.Build(),
-      caller_saved_regs ? CallDescriptor::kCallerSavedRegisters
-                        : CallDescriptor::kNoFlags);
-
-  if (caller_saved_regs) call_descriptor->set_save_fp_mode(mode);
-
-  call_descriptor->set_has_function_descriptor(has_function_descriptor);
+  bool caller_saved_fp_regs =
+      caller_saved_regs && (mode == SaveFPRegsMode::kSave);
+  CallDescriptor::Flags flags = CallDescriptor::kNoFlags;
+  if (caller_saved_regs) flags |= CallDescriptor::kCallerSavedRegisters;
+  if (caller_saved_fp_regs) flags |= CallDescriptor::kCallerSavedFPRegisters;
+  if (no_function_descriptor) flags |= CallDescriptor::kNoFunctionDescriptor;
+  auto call_descriptor =
+      Linkage::GetSimplifiedCDescriptor(rasm->zone(), builder.Build(), flags);
 
   base::SmallVector<Node*, kNumCArgs> nodes(args.size() + 1);
   nodes[0] = function;
@@ -737,23 +765,24 @@ Node* CallCFunctionImpl(
 }  // namespace
 
 Node* RawMachineAssembler::CallCFunction(
-    Node* function, MachineType return_type,
+    Node* function, base::Optional<MachineType> return_type,
     std::initializer_list<RawMachineAssembler::CFunctionArg> args) {
   return CallCFunctionImpl(this, function, return_type, args, false,
-                           kDontSaveFPRegs);
+                           SaveFPRegsMode::kIgnore, kHasFunctionDescriptor);
 }
 
 Node* RawMachineAssembler::CallCFunctionWithoutFunctionDescriptor(
     Node* function, MachineType return_type,
     std::initializer_list<RawMachineAssembler::CFunctionArg> args) {
   return CallCFunctionImpl(this, function, return_type, args, false,
-                           kDontSaveFPRegs, kNoFunctionDescriptor);
+                           SaveFPRegsMode::kIgnore, kNoFunctionDescriptor);
 }
 
 Node* RawMachineAssembler::CallCFunctionWithCallerSavedRegisters(
     Node* function, MachineType return_type, SaveFPRegsMode mode,
     std::initializer_list<RawMachineAssembler::CFunctionArg> args) {
-  return CallCFunctionImpl(this, function, return_type, args, true, mode);
+  return CallCFunctionImpl(this, function, return_type, args, true, mode,
+                           kHasFunctionDescriptor);
 }
 
 BasicBlock* RawMachineAssembler::Use(RawMachineLabel* label) {
@@ -809,8 +838,7 @@ BasicBlock* RawMachineAssembler::CurrentBlock() {
 
 Node* RawMachineAssembler::Phi(MachineRepresentation rep, int input_count,
                                Node* const* inputs) {
-  Node** buffer = new (zone()->New(sizeof(Node*) * (input_count + 1)))
-      Node*[input_count + 1];
+  Node** buffer = zone()->NewArray<Node*>(input_count + 1);
   std::copy(inputs, inputs + input_count, buffer);
   buffer[input_count] = graph()->start();
   return AddNode(common()->Phi(rep, input_count), input_count + 1, buffer);

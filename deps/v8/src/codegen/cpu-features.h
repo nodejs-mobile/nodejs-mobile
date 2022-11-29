@@ -13,52 +13,68 @@ namespace internal {
 
 // CPU feature flags.
 enum CpuFeature {
-  // x86
+#if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X64
   SSE4_2,
   SSE4_1,
   SSSE3,
   SSE3,
   SAHF,
   AVX,
+  AVX2,
   FMA3,
   BMI1,
   BMI2,
   LZCNT,
   POPCNT,
   ATOM,
-  // ARM
+
+#elif V8_TARGET_ARCH_ARM
   // - Standard configurations. The baseline is ARMv6+VFPv2.
   ARMv7,        // ARMv7-A + VFPv3-D32 + NEON
   ARMv7_SUDIV,  // ARMv7-A + VFPv4-D32 + NEON + SUDIV
   ARMv8,        // ARMv8-A (+ all of the above)
-  // MIPS, MIPS64
+
+  // ARM feature aliases (based on the standard configurations above).
+  VFPv3 = ARMv7,
+  NEON = ARMv7,
+  VFP32DREGS = ARMv7,
+  SUDIV = ARMv7_SUDIV,
+
+#elif V8_TARGET_ARCH_ARM64
+  JSCVT,
+
+#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
   FPU,
   FP64FPU,
   MIPSr1,
   MIPSr2,
   MIPSr6,
   MIPS_SIMD,  // MSA instructions
-  // PPC
-  FPR_GPR_MOV,
-  LWSYNC,
-  ISELECT,
-  VSX,
-  MODULO,
-  // S390
+
+#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+  PPC_6_PLUS,
+  PPC_7_PLUS,
+  PPC_8_PLUS,
+  PPC_9_PLUS,
+  PPC_10_PLUS,
+
+#elif V8_TARGET_ARCH_S390X
+  FPU,
   DISTINCT_OPS,
   GENERAL_INSTR_EXT,
   FLOATING_POINT_EXT,
   VECTOR_FACILITY,
   VECTOR_ENHANCE_FACILITY_1,
+  VECTOR_ENHANCE_FACILITY_2,
   MISC_INSTR_EXT2,
 
-  NUMBER_OF_CPU_FEATURES,
+#elif V8_TARGET_ARCH_RISCV64
+  FPU,
+  FP64FPU,
+  RISCV_SIMD,
+#endif
 
-  // ARM feature aliases (based on the standard configurations above).
-  VFPv3 = ARMv7,
-  NEON = ARMv7,
-  VFP32DREGS = ARMv7,
-  SUDIV = ARMv7_SUDIV
+  NUMBER_OF_CPU_FEATURES
 };
 
 // CpuFeatures keeps track of which features are supported by the target CPU.
@@ -72,6 +88,9 @@ enum CpuFeature {
 //   }
 class V8_EXPORT_PRIVATE CpuFeatures : public AllStatic {
  public:
+  CpuFeatures(const CpuFeatures&) = delete;
+  CpuFeatures& operator=(const CpuFeatures&) = delete;
+
   static void Probe(bool cross_compile) {
     STATIC_ASSERT(NUMBER_OF_CPU_FEATURES <= kBitsPerInt);
     if (initialized_) return;
@@ -88,9 +107,12 @@ class V8_EXPORT_PRIVATE CpuFeatures : public AllStatic {
     return (supported_ & (1u << f)) != 0;
   }
 
-  static inline bool SupportsOptimizer();
+  static void SetSupported(CpuFeature f) { supported_ |= 1u << f; }
+  static void SetUnsupported(CpuFeature f) { supported_ &= ~(1u << f); }
 
-  static inline bool SupportsWasmSimd128();
+  static bool SupportsWasmSimd128();
+
+  static inline bool SupportsOptimizer();
 
   static inline unsigned icache_line_size() {
     DCHECK_NE(icache_line_size_, 0);
@@ -118,7 +140,10 @@ class V8_EXPORT_PRIVATE CpuFeatures : public AllStatic {
   static unsigned icache_line_size_;
   static unsigned dcache_line_size_;
   static bool initialized_;
-  DISALLOW_COPY_AND_ASSIGN(CpuFeatures);
+  // This variable is only used for certain archs to query SupportWasmSimd128()
+  // at runtime in builtins using an extern ref. Other callers should use
+  // CpuFeatures::SupportWasmSimd128().
+  static bool supports_wasm_simd_128_;
 };
 
 }  // namespace internal

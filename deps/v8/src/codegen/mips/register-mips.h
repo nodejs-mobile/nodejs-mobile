@@ -194,7 +194,7 @@ class Register : public RegisterBase<Register, kRegAfterLast> {
 // s3: scratch register
 // s4: scratch register 2
 #define DECLARE_REGISTER(R) \
-  constexpr Register R = Register::from_code<kRegCode_##R>();
+  constexpr Register R = Register::from_code(kRegCode_##R);
 GENERAL_REGISTERS(DECLARE_REGISTER)
 #undef DECLARE_REGISTER
 constexpr Register no_reg = Register::no_reg();
@@ -203,7 +203,12 @@ int ToNumber(Register reg);
 
 Register ToRegister(int num);
 
-constexpr bool kPadArguments = false;
+// Returns the number of padding slots needed for stack pointer alignment.
+constexpr int ArgumentPaddingSlots(int argument_count) {
+  // No argument padding required.
+  return 0;
+}
+
 constexpr bool kSimpleFPAliasing = true;
 constexpr bool kSimdMaskRegisters = false;
 
@@ -265,7 +270,7 @@ using FloatRegister = FPURegister;
 using DoubleRegister = FPURegister;
 
 #define DECLARE_DOUBLE_REGISTER(R) \
-  constexpr DoubleRegister R = DoubleRegister::from_code<kDoubleCode_##R>();
+  constexpr DoubleRegister R = DoubleRegister::from_code(kDoubleCode_##R);
 DOUBLE_REGISTERS(DECLARE_DOUBLE_REGISTER)
 #undef DECLARE_DOUBLE_REGISTER
 
@@ -275,7 +280,7 @@ constexpr DoubleRegister no_dreg = DoubleRegister::no_reg();
 using Simd128Register = MSARegister;
 
 #define DECLARE_SIMD128_REGISTER(R) \
-  constexpr Simd128Register R = Simd128Register::from_code<kMsaCode_##R>();
+  constexpr Simd128Register R = Simd128Register::from_code(kMsaCode_##R);
 SIMD128_REGISTERS(DECLARE_SIMD128_REGISTER)
 #undef DECLARE_SIMD128_REGISTER
 
@@ -357,7 +362,6 @@ constexpr Register kReturnRegister2 = a0;
 constexpr Register kJSFunctionRegister = a1;
 constexpr Register kContextRegister = s7;
 constexpr Register kAllocateSizeRegister = a0;
-constexpr Register kSpeculationPoisonRegister = t3;
 constexpr Register kInterpreterAccumulatorRegister = v0;
 constexpr Register kInterpreterBytecodeOffsetRegister = t4;
 constexpr Register kInterpreterBytecodeArrayRegister = t5;
@@ -375,6 +379,8 @@ constexpr Register kRuntimeCallArgCountRegister = a0;
 constexpr Register kRuntimeCallArgvRegister = a2;
 constexpr Register kWasmInstanceRegister = a0;
 constexpr Register kWasmCompileLazyFuncIndexRegister = t0;
+
+constexpr DoubleRegister kFPReturnRegister0 = f0;
 
 }  // namespace internal
 }  // namespace v8

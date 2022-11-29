@@ -6,6 +6,7 @@
 
 #include <fstream>
 
+#include "include/cppgc/platform.h"
 #include "src/api/api.h"
 #include "src/base/atomicops.h"
 #include "src/base/once.h"
@@ -23,10 +24,16 @@
 #include "src/objects/elements.h"
 #include "src/objects/objects-inl.h"
 #include "src/profiler/heap-profiler.h"
-#include "src/snapshot/natives.h"
 #include "src/snapshot/snapshot.h"
 #include "src/tracing/tracing-category-observer.h"
+
+#if V8_ENABLE_WEBASSEMBLY
 #include "src/wasm/wasm-engine.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_SYSTEM_INSTRUMENTATION)
+#include "src/diagnostics/system-jit-win.h"
+#endif
 
 namespace v8 {
 namespace internal {
@@ -46,7 +53,9 @@ bool V8::Initialize() {
 }
 
 void V8::TearDown() {
+#if V8_ENABLE_WEBASSEMBLY
   wasm::WasmEngine::GlobalTearDown();
+#endif  // V8_ENABLE_WEBASSEMBLY
 #if defined(USE_SIMULATOR)
   Simulator::GlobalTearDown();
 #endif
@@ -56,7 +65,46 @@ void V8::TearDown() {
   FlagList::ResetAllFlags();  // Frees memory held by string arguments.
 }
 
+#define DISABLE_FLAG(flag)                                                    \
+  if (FLAG_##flag) {                                                          \
+    PrintF(stderr,                                                            \
+           "Warning: disabling flag --" #flag " due to conflicting flags\n"); \
+    FLAG_##flag = false;                                                      \
+  }
+
 void V8::InitializeOncePerProcessImpl() {
+  // Update logging information before enforcing flag implications.
+  bool* log_all_flags[] = {&FLAG_turbo_profiling_log_builtins,
+                           &FLAG_log_all,
+                           &FLAG_log_api,
+                           &FLAG_log_code,
+                           &FLAG_log_code_disassemble,
+                           &FLAG_log_handles,
+                           &FLAG_log_suspect,
+                           &FLAG_log_source_code,
+                           &FLAG_log_function_events,
+                           &FLAG_log_internal_timer_events,
+                           &FLAG_log_deopt,
+                           &FLAG_log_ic,
+                           &FLAG_log_maps};
+  if (FLAG_log_all) {
+    // Enable all logging flags
+    for (auto* flag : log_all_flags) {
+      *flag = true;
+    }
+    FLAG_log = true;
+  } else if (!FLAG_log) {
+    // Enable --log if any log flag is set.
+    for (const auto* flag : log_all_flags) {
+      if (!*flag) continue;
+      FLAG_log = true;
+      break;
+    }
+    // Profiling flags depend on logging.
+    FLAG_log |= FLAG_perf_prof || FLAG_perf_basic_prof || FLAG_ll_prof ||
+                FLAG_prof || FLAG_prof_cpp;
+  }
+
   FlagList::EnforceFlagImplications();
 
   if (FLAG_predictable && FLAG_random_seed == 0) {
@@ -86,21 +134,45 @@ void V8::InitializeOncePerProcessImpl() {
   // continue exposing wasm on correctness fuzzers even in jitless mode.
   // TODO(jgruber): Remove this once / if wasm can run without executable
   // memory.
+#if V8_ENABLE_WEBASSEMBLY
   if (FLAG_jitless && !FLAG_correctness_fuzzer_suppressions) {
-    FLAG_expose_wasm = false;
+    DISABLE_FLAG(expose_wasm);
+  }
+#endif
+
+  // When fuzzing and concurrent compilation is enabled, disable Turbofan
+  // tracing flags since reading/printing heap state is not thread-safe and
+  // leads to false positives on TSAN bots.
+  // TODO(chromium:1205289): Teach relevant fuzzers to not pass TF tracing
+  // flags instead, and remove this section.
+  if (FLAG_fuzzing && FLAG_concurrent_recompilation) {
+    DISABLE_FLAG(trace_turbo);
+    DISABLE_FLAG(trace_turbo_graph);
+    DISABLE_FLAG(trace_turbo_scheduled);
+    DISABLE_FLAG(trace_turbo_reduction);
+    DISABLE_FLAG(trace_turbo_trimming);
+    DISABLE_FLAG(trace_turbo_jt);
+    DISABLE_FLAG(trace_turbo_ceq);
+    DISABLE_FLAG(trace_turbo_loop);
+    DISABLE_FLAG(trace_turbo_alloc);
+    DISABLE_FLAG(trace_all_uses);
+    DISABLE_FLAG(trace_representation);
+    DISABLE_FLAG(trace_turbo_stack_accesses);
   }
 
   // The --jitless and --interpreted-frames-native-stack flags are incompatible
   // since the latter requires code generation while the former prohibits code
   // generation.
-  CHECK_WITH_MSG(!FLAG_interpreted_frames_native_stack || !FLAG_jitless,
-                 "The --jitless and --interpreted-frames-native-stack flags "
-                 "are incompatible.");
+  CHECK(!FLAG_interpreted_frames_native_stack || !FLAG_jitless);
 
   base::OS::Initialize(FLAG_hard_abort, FLAG_gc_fake_mmap);
 
   if (FLAG_random_seed) SetRandomMmapSeed(FLAG_random_seed);
 
+#if defined(V8_USE_PERFETTO)
+  if (perfetto::Tracing::IsInitialized()) TrackEvent::Register();
+#endif
+  IsolateAllocator::InitializeOncePerProcess();
   Isolate::InitializeOncePerProcess();
 
 #if defined(USE_SIMULATOR)
@@ -110,7 +182,11 @@ void V8::InitializeOncePerProcessImpl() {
   ElementsAccessor::InitializeOncePerProcess();
   Bootstrapper::InitializeOncePerProcess();
   CallDescriptors::InitializeOncePerProcess();
+#if V8_ENABLE_WEBASSEMBLY
   wasm::WasmEngine::InitializeOncePerProcess();
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+  ExternalReferenceTable::InitializeOncePerProcess();
 }
 
 void V8::InitializeOncePerProcess() {
@@ -123,10 +199,21 @@ void V8::InitializePlatform(v8::Platform* platform) {
   platform_ = platform;
   v8::base::SetPrintStackTrace(platform_->GetStackTracePrinter());
   v8::tracing::TracingCategoryObserver::SetUp();
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_SYSTEM_INSTRUMENTATION)
+  if (FLAG_enable_system_instrumentation) {
+    // TODO(sartang@microsoft.com): Move to platform specific diagnostics object
+    v8::internal::ETWJITInterface::Register();
+  }
+#endif
 }
 
 void V8::ShutdownPlatform() {
   CHECK(platform_);
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_SYSTEM_INSTRUMENTATION)
+  if (FLAG_enable_system_instrumentation) {
+    v8::internal::ETWJITInterface::Unregister();
+  }
+#endif
   v8::tracing::TracingCategoryObserver::TearDown();
   v8::base::SetPrintStackTrace(nullptr);
   platform_ = nullptr;
@@ -142,14 +229,6 @@ v8::Platform* V8::GetCurrentPlatform() {
 void V8::SetPlatformForTesting(v8::Platform* platform) {
   base::Relaxed_Store(reinterpret_cast<base::AtomicWord*>(&platform_),
                       reinterpret_cast<base::AtomicWord>(platform));
-}
-
-void V8::SetNativesBlob(StartupData* natives_blob) {
-#ifdef V8_USE_EXTERNAL_STARTUP_DATA
-  base::CallOnce(&init_natives_once, &SetNativesFromFile, natives_blob);
-#else
-  UNREACHABLE();
-#endif
 }
 
 void V8::SetSnapshotBlob(StartupData* snapshot_blob) {

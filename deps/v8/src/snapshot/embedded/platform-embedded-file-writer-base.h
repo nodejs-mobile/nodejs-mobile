@@ -9,6 +9,8 @@
 #include <cstdio>  // For FILE.
 #include <memory>
 
+#include "src/flags/flags.h"  // For ENABLE_CONTROL_FLOW_INTEGRITY_BOOL
+
 namespace v8 {
 namespace internal {
 
@@ -30,6 +32,7 @@ enum class EmbeddedTargetOs {
   kFuchsia,
   kMac,
   kWin,
+  kStarboard,
   kGeneric,  // Everything not covered above falls in here.
 };
 
@@ -60,14 +63,15 @@ class PlatformEmbeddedFileWriterBase {
   virtual void DeclareUint32(const char* name, uint32_t value) = 0;
   virtual void DeclarePointerToSymbol(const char* name, const char* target) = 0;
 
+  virtual void DeclareSymbolGlobal(const char* name) = 0;
   virtual void DeclareLabel(const char* name) = 0;
 
   virtual void SourceInfo(int fileid, const char* filename, int line) = 0;
-  virtual void DeclareFunctionBegin(const char* name) = 0;
+  virtual void DeclareFunctionBegin(const char* name, uint32_t size) = 0;
   virtual void DeclareFunctionEnd(const char* name) = 0;
 
   // Returns the number of printed characters.
-  virtual int HexLiteral(uint64_t value) = 0;
+  virtual int HexLiteral(uint64_t value);
 
   virtual void Comment(const char* string) = 0;
   virtual void Newline() { fprintf(fp_, "\n"); }

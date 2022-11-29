@@ -7,6 +7,7 @@
 #include "src/ast/ast-source-ranges.h"
 #include "src/ast/ast.h"
 #include "src/base/hashmap.h"
+#include "src/common/globals.h"
 #include "src/debug/debug.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/frames-inl.h"
@@ -44,7 +45,7 @@ class SharedToCounterMap
     return static_cast<uint32_t>(key.ptr());
   }
 
-  DisallowHeapAllocation no_gc;
+  DISALLOW_GARBAGE_COLLECTION(no_gc)
 };
 
 namespace {
@@ -61,8 +62,7 @@ bool CompareCoverageBlock(const CoverageBlock& a, const CoverageBlock& b) {
   return a.start < b.start;
 }
 
-void SortBlockData(
-    std::vector<CoverageBlock>& v) {  // NOLINT(runtime/references)
+void SortBlockData(std::vector<CoverageBlock>& v) {
   // Sort according to the block nesting structure.
   std::sort(v.begin(), v.end(), CompareCoverageBlock);
 }
@@ -74,12 +74,12 @@ std::vector<CoverageBlock> GetSortedBlockData(SharedFunctionInfo shared) {
       CoverageInfo::cast(shared.GetDebugInfo().coverage_info());
 
   std::vector<CoverageBlock> result;
-  if (coverage_info.SlotCount() == 0) return result;
+  if (coverage_info.slot_count() == 0) return result;
 
-  for (int i = 0; i < coverage_info.SlotCount(); i++) {
-    const int start_pos = coverage_info.StartSourcePosition(i);
-    const int until_pos = coverage_info.EndSourcePosition(i);
-    const int count = coverage_info.BlockCount(i);
+  for (int i = 0; i < coverage_info.slot_count(); i++) {
+    const int start_pos = coverage_info.slots_start_source_position(i);
+    const int until_pos = coverage_info.slots_end_source_position(i);
+    const int count = coverage_info.slots_block_count(i);
 
     DCHECK_NE(kNoSourcePosition, start_pos);
     result.emplace_back(start_pos, until_pos, count);
@@ -385,7 +385,7 @@ void ResetAllBlockCounts(SharedFunctionInfo shared) {
   CoverageInfo coverage_info =
       CoverageInfo::cast(shared.GetDebugInfo().coverage_info());
 
-  for (int i = 0; i < coverage_info.SlotCount(); i++) {
+  for (int i = 0; i < coverage_info.slot_count(); i++) {
     coverage_info.ResetBlockCount(i);
   }
 }
@@ -517,7 +517,7 @@ void CollectAndMaybeResetCounts(Isolate* isolate,
         SharedFunctionInfo shared = vector.shared_function_info();
         DCHECK(shared.IsSubjectToDebugging());
         uint32_t count = static_cast<uint32_t>(vector.invocation_count());
-        if (reset_count) vector.clear_invocation_count();
+        if (reset_count) vector.clear_invocation_count(kRelaxedStore);
         counter_map->Add(shared, count);
       }
       break;
@@ -568,23 +568,27 @@ void CollectAndMaybeResetCounts(Isolate* isolate,
 // A {SFI, count} tuple is used to sort by source range (stored on
 // the SFI) and call count (in the counter map).
 struct SharedFunctionInfoAndCount {
-  SharedFunctionInfoAndCount(SharedFunctionInfo info, uint32_t count)
+  SharedFunctionInfoAndCount(Handle<SharedFunctionInfo> info, uint32_t count)
       : info(info),
         count(count),
-        start(StartPosition(info)),
-        end(info.EndPosition()) {}
+        start(StartPosition(*info)),
+        end(info->EndPosition()) {}
 
   // Sort by:
   // - start, ascending.
   // - end, descending.
-  // - count, ascending.
+  // - info.is_toplevel() first
+  // - count, descending.
   bool operator<(const SharedFunctionInfoAndCount& that) const {
     if (this->start != that.start) return this->start < that.start;
     if (this->end != that.end) return this->end > that.end;
-    return this->count < that.count;
+    if (this->info->is_toplevel() != that.info->is_toplevel()) {
+      return this->info->is_toplevel();
+    }
+    return this->count > that.count;
   }
 
-  SharedFunctionInfo info;
+  Handle<SharedFunctionInfo> info;
   uint32_t count;
   int start;
   int end;
@@ -619,24 +623,27 @@ std::unique_ptr<Coverage> Coverage::Collect(
   // Iterate shared function infos of every script and build a mapping
   // between source ranges and invocation counts.
   std::unique_ptr<Coverage> result(new Coverage());
-  Script::Iterator scripts(isolate);
-  for (Script script = scripts.Next(); !script.is_null();
-       script = scripts.Next()) {
-    if (!script.IsUserJavaScript()) continue;
 
+  std::vector<Handle<Script>> scripts;
+  Script::Iterator scriptIt(isolate);
+  for (Script script = scriptIt.Next(); !script.is_null();
+       script = scriptIt.Next()) {
+    if (script.IsUserJavaScript()) scripts.push_back(handle(script, isolate));
+  }
+
+  for (Handle<Script> script : scripts) {
     // Create and add new script data.
-    Handle<Script> script_handle(script, isolate);
-    result->emplace_back(script_handle);
+    result->emplace_back(script);
     std::vector<CoverageFunction>* functions = &result->back().functions;
 
     std::vector<SharedFunctionInfoAndCount> sorted;
 
     {
       // Sort functions by start position, from outer to inner functions.
-      SharedFunctionInfo::ScriptIterator infos(isolate, *script_handle);
+      SharedFunctionInfo::ScriptIterator infos(isolate, *script);
       for (SharedFunctionInfo info = infos.Next(); !info.is_null();
            info = infos.Next()) {
-        sorted.emplace_back(info, counter_map.Get(info));
+        sorted.emplace_back(handle(info, isolate), counter_map.Get(info));
       }
       std::sort(sorted.begin(), sorted.end());
     }
@@ -646,19 +653,37 @@ std::unique_ptr<Coverage> Coverage::Collect(
 
     // Use sorted list to reconstruct function nesting.
     for (const SharedFunctionInfoAndCount& v : sorted) {
-      SharedFunctionInfo info = v.info;
+      Handle<SharedFunctionInfo> info = v.info;
       int start = v.start;
       int end = v.end;
       uint32_t count = v.count;
 
       // Find the correct outer function based on start position.
       //
-      // This is not robust when considering two functions with identical source
-      // ranges. In this case, it is unclear which function is the inner / outer
-      // function. Above, we ensure that such functions are sorted in ascending
-      // `count` order, so at least our `parent_is_covered` optimization below
-      // should be fine.
-      // TODO(jgruber): Consider removing the optimization.
+      // This is, in general, not robust when considering two functions with
+      // identical source ranges; then the notion of inner and outer is unclear.
+      // Identical source ranges arise when the source range of top-most entity
+      // (e.g. function) in the script is identical to the whole script, e.g.
+      // <script>function foo() {}<script>. The script has its own shared
+      // function info, which has the same source range as the SFI for `foo`.
+      // Node.js creates an additional wrapper for scripts (again with identical
+      // source range) and those wrappers will have a call count of zero even if
+      // the wrapped script was executed (see v8:9212). We mitigate this issue
+      // by sorting top-level SFIs first among SFIs with the same source range:
+      // This ensures top-level SFIs are processed first. If a top-level SFI has
+      // a non-zero call count, it gets recorded due to `function_is_relevant`
+      // below (e.g. script wrappers), while top-level SFIs with zero call count
+      // do not get reported (this ensures node's extra wrappers do not get
+      // reported). If two SFIs with identical source ranges get reported, we
+      // report them in decreasing order of call count, as in all known cases
+      // this corresponds to the nesting order. In the case of the script tag
+      // example above, we report the zero call count of `foo` last. As it turns
+      // out, embedders started to rely on functions being reported in nesting
+      // order.
+      // TODO(jgruber):  Investigate whether it is possible to remove node's
+      // extra  top-level wrapper script, or change its source range, or ensure
+      // that it follows the invariant that nesting order is descending count
+      // order for SFIs with identical source ranges.
       while (!nesting.empty() && functions->at(nesting.back()).end <= start) {
         nesting.pop_back();
       }
@@ -670,8 +695,8 @@ std::unique_ptr<Coverage> Coverage::Collect(
             break;
           case v8::debug::CoverageMode::kBlockBinary:
           case v8::debug::CoverageMode::kPreciseBinary:
-            count = info.has_reported_binary_coverage() ? 0 : 1;
-            info.set_has_reported_binary_coverage(true);
+            count = info->has_reported_binary_coverage() ? 0 : 1;
+            info->set_has_reported_binary_coverage(true);
             break;
           case v8::debug::CoverageMode::kBestEffort:
             count = 1;
@@ -679,11 +704,11 @@ std::unique_ptr<Coverage> Coverage::Collect(
         }
       }
 
-      Handle<String> name(info.DebugName(), isolate);
+      Handle<String> name = SharedFunctionInfo::DebugName(info);
       CoverageFunction function(start, end, count, name);
 
-      if (IsBlockMode(collectionMode) && info.HasCoverageInfo()) {
-        CollectBlockCoverage(&function, info, collectionMode);
+      if (IsBlockMode(collectionMode) && info->HasCoverageInfo()) {
+        CollectBlockCoverage(&function, *info, collectionMode);
       }
 
       // Only include a function range if itself or its parent function is
@@ -705,7 +730,7 @@ std::unique_ptr<Coverage> Coverage::Collect(
       }
 
       if (FLAG_trace_block_coverage) {
-        PrintBlockCoverage(&function, info, has_nonempty_source_range,
+        PrintBlockCoverage(&function, *info, has_nonempty_source_range,
                            function_is_relevant);
       }
     }
@@ -722,6 +747,10 @@ void Coverage::SelectMode(Isolate* isolate, debug::CoverageMode mode) {
     // generated for a function, which can interfere with lazy source positions,
     // so just force source position collection whenever there's such a change.
     isolate->CollectSourcePositionsForAllBytecodeArrays();
+    // Changing the coverage mode changes the generated bytecode and hence it is
+    // not safe to flush bytecode. Set a flag here, so we can disable bytecode
+    // flushing.
+    isolate->set_disable_bytecode_flushing(true);
   }
 
   switch (mode) {
@@ -765,13 +794,16 @@ void Coverage::SelectMode(Isolate* isolate, debug::CoverageMode mode) {
             shared.set_has_reported_binary_coverage(false);
           } else if (o.IsFeedbackVector()) {
             // In any case, clear any collected invocation counts.
-            FeedbackVector::cast(o).clear_invocation_count();
+            FeedbackVector::cast(o).clear_invocation_count(kRelaxedStore);
           }
         }
       }
 
       for (Handle<JSFunction> func : funcs_needing_feedback_vector) {
-        JSFunction::EnsureFeedbackVector(func);
+        IsCompiledScope is_compiled_scope(
+            func->shared().is_compiled_scope(isolate));
+        CHECK(is_compiled_scope.is_compiled());
+        JSFunction::EnsureFeedbackVector(func, &is_compiled_scope);
       }
 
       // Root all feedback vectors to avoid early collection.

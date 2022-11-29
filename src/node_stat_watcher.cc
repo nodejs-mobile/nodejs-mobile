@@ -19,10 +19,11 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-#include "memory_tracker-inl.h"
 #include "node_stat_watcher.h"
 #include "async_wrap-inl.h"
 #include "env-inl.h"
+#include "memory_tracker-inl.h"
+#include "node_external_reference.h"
 #include "node_file-inl.h"
 #include "util-inl.h"
 
@@ -38,7 +39,6 @@ using v8::HandleScope;
 using v8::Integer;
 using v8::Local;
 using v8::Object;
-using v8::String;
 using v8::Uint32;
 using v8::Value;
 
@@ -49,27 +49,29 @@ void StatWatcher::Initialize(Environment* env, Local<Object> target) {
   Local<FunctionTemplate> t = env->NewFunctionTemplate(StatWatcher::New);
   t->InstanceTemplate()->SetInternalFieldCount(
       StatWatcher::kInternalFieldCount);
-  Local<String> statWatcherString =
-      FIXED_ONE_BYTE_STRING(env->isolate(), "StatWatcher");
-  t->SetClassName(statWatcherString);
   t->Inherit(HandleWrap::GetConstructorTemplate(env));
 
   env->SetProtoMethod(t, "start", StatWatcher::Start);
 
-  target->Set(env->context(), statWatcherString,
-              t->GetFunction(env->context()).ToLocalChecked()).Check();
+  env->SetConstructorFunction(target, "StatWatcher", t);
 }
 
+void StatWatcher::RegisterExternalReferences(
+    ExternalReferenceRegistry* registry) {
+  registry->Register(StatWatcher::New);
+  registry->Register(StatWatcher::Start);
+}
 
-StatWatcher::StatWatcher(Environment* env,
+StatWatcher::StatWatcher(fs::BindingData* binding_data,
                          Local<Object> wrap,
                          bool use_bigint)
-    : HandleWrap(env,
+    : HandleWrap(binding_data->env(),
                  wrap,
                  reinterpret_cast<uv_handle_t*>(&watcher_),
                  AsyncWrap::PROVIDER_STATWATCHER),
-      use_bigint_(use_bigint) {
-  CHECK_EQ(0, uv_fs_poll_init(env->event_loop(), &watcher_));
+      use_bigint_(use_bigint),
+      binding_data_(binding_data) {
+  CHECK_EQ(0, uv_fs_poll_init(env()->event_loop(), &watcher_));
 }
 
 
@@ -82,8 +84,10 @@ void StatWatcher::Callback(uv_fs_poll_t* handle,
   HandleScope handle_scope(env->isolate());
   Context::Scope context_scope(env->context());
 
-  Local<Value> arr = fs::FillGlobalStatsArray(env, wrap->use_bigint_, curr);
-  USE(fs::FillGlobalStatsArray(env, wrap->use_bigint_, prev, true));
+  Local<Value> arr = fs::FillGlobalStatsArray(
+      wrap->binding_data_.get(), wrap->use_bigint_, curr);
+  USE(fs::FillGlobalStatsArray(
+      wrap->binding_data_.get(), wrap->use_bigint_, prev, true));
 
   Local<Value> argv[2] = { Integer::New(env->isolate(), status), arr };
   wrap->MakeCallback(env->onchange_string(), arraysize(argv), argv);
@@ -92,8 +96,9 @@ void StatWatcher::Callback(uv_fs_poll_t* handle,
 
 void StatWatcher::New(const FunctionCallbackInfo<Value>& args) {
   CHECK(args.IsConstructCall());
-  Environment* env = Environment::GetCurrent(args);
-  new StatWatcher(env, args.This(), args[0]->IsTrue());
+  fs::BindingData* binding_data =
+      Environment::GetBindingData<fs::BindingData>(args);
+  new StatWatcher(binding_data, args.This(), args[0]->IsTrue());
 }
 
 // wrap.start(filename, interval)

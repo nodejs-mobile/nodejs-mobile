@@ -6,6 +6,8 @@
 #define V8_BASE_ATOMIC_UTILS_H_
 
 #include <limits.h>
+
+#include <atomic>
 #include <type_traits>
 
 #include "src/base/atomicops.h"
@@ -104,19 +106,40 @@ class AsAtomicImpl {
         cast_helper<T>::to_storage_type(new_value)));
   }
 
+  template <typename T>
+  static T Relaxed_CompareAndSwap(
+      T* addr, typename std::remove_reference<T>::type old_value,
+      typename std::remove_reference<T>::type new_value) {
+    STATIC_ASSERT(sizeof(T) <= sizeof(AtomicStorageType));
+    return cast_helper<T>::to_return_type(base::Relaxed_CompareAndSwap(
+        to_storage_addr(addr), cast_helper<T>::to_storage_type(old_value),
+        cast_helper<T>::to_storage_type(new_value)));
+  }
+
+  template <typename T>
+  static T AcquireRelease_CompareAndSwap(
+      T* addr, typename std::remove_reference<T>::type old_value,
+      typename std::remove_reference<T>::type new_value) {
+    STATIC_ASSERT(sizeof(T) <= sizeof(AtomicStorageType));
+    return cast_helper<T>::to_return_type(base::AcquireRelease_CompareAndSwap(
+        to_storage_addr(addr), cast_helper<T>::to_storage_type(old_value),
+        cast_helper<T>::to_storage_type(new_value)));
+  }
+
   // Atomically sets bits selected by the mask to the given value.
   // Returns false if the bits are already set as needed.
   template <typename T>
   static bool SetBits(T* addr, T bits, T mask) {
     STATIC_ASSERT(sizeof(T) <= sizeof(AtomicStorageType));
     DCHECK_EQ(bits & ~mask, static_cast<T>(0));
-    T old_value;
-    T new_value;
+    T old_value = Relaxed_Load(addr);
+    T new_value, old_value_before_cas;
     do {
-      old_value = Relaxed_Load(addr);
       if ((old_value & mask) == bits) return false;
       new_value = (old_value & ~mask) | bits;
-    } while (Release_CompareAndSwap(addr, old_value, new_value) != old_value);
+      old_value_before_cas = old_value;
+      old_value = Release_CompareAndSwap(addr, old_value, new_value);
+    } while (old_value != old_value_before_cas);
     return true;
   }
 
@@ -168,18 +191,32 @@ using AsAtomicPointer = AsAtomicPointerImpl<base::AtomicWord>;
 
 template <typename T,
           typename = typename std::enable_if<std::is_unsigned<T>::value>::type>
-inline void CheckedIncrement(std::atomic<T>* number, T amount) {
-  const T old = number->fetch_add(amount);
+inline void CheckedIncrement(
+    std::atomic<T>* number, T amount,
+    std::memory_order order = std::memory_order_seq_cst) {
+  const T old = number->fetch_add(amount, order);
   DCHECK_GE(old + amount, old);
   USE(old);
 }
 
 template <typename T,
           typename = typename std::enable_if<std::is_unsigned<T>::value>::type>
-inline void CheckedDecrement(std::atomic<T>* number, T amount) {
-  const T old = number->fetch_sub(amount);
+inline void CheckedDecrement(
+    std::atomic<T>* number, T amount,
+    std::memory_order order = std::memory_order_seq_cst) {
+  const T old = number->fetch_sub(amount, order);
   DCHECK_GE(old, amount);
   USE(old);
+}
+
+template <typename T>
+V8_INLINE std::atomic<T>* AsAtomicPtr(T* t) {
+  return reinterpret_cast<std::atomic<T>*>(t);
+}
+
+template <typename T>
+V8_INLINE const std::atomic<T>* AsAtomicPtr(const T* t) {
+  return reinterpret_cast<const std::atomic<T>*>(t);
 }
 
 }  // namespace base

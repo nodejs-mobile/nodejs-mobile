@@ -22,6 +22,7 @@
 #include "handle_wrap.h"
 #include "async_wrap-inl.h"
 #include "env-inl.h"
+#include "node_external_reference.h"
 #include "util-inl.h"
 
 namespace node {
@@ -84,7 +85,23 @@ void HandleWrap::Close(Local<Value> close_callback) {
 
 
 void HandleWrap::OnGCCollect() {
-  Close();
+  // When all references to a HandleWrap are lost and the object is supposed to
+  // be destroyed, we first call Close() to clean up the underlying libuv
+  // handle. The OnClose callback then acquires and destroys another reference
+  // to that object, and when that reference is lost, we perform the default
+  // action (i.e. destroying `this`).
+  if (state_ != kClosed) {
+    Close();
+  } else {
+    BaseObject::OnGCCollect();
+  }
+}
+
+
+bool HandleWrap::IsNotIndicativeOfMemoryLeakAtExit() const {
+  return IsWeakOrDetached() ||
+         !HandleWrap::HasRef(this) ||
+         !uv_is_active(GetHandle());
 }
 
 
@@ -152,5 +169,15 @@ Local<FunctionTemplate> HandleWrap::GetConstructorTemplate(Environment* env) {
   return tmpl;
 }
 
+void HandleWrap::RegisterExternalReferences(
+    ExternalReferenceRegistry* registry) {
+  registry->Register(HandleWrap::Close);
+  registry->Register(HandleWrap::HasRef);
+  registry->Register(HandleWrap::Ref);
+  registry->Register(HandleWrap::Unref);
+}
 
 }  // namespace node
+
+NODE_MODULE_EXTERNAL_REFERENCE(handle_wrap,
+                               node::HandleWrap::RegisterExternalReferences)

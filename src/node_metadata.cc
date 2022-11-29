@@ -1,6 +1,7 @@
 #include "node_metadata.h"
 #include "ares.h"
 #include "brotli/encode.h"
+#include "llhttp.h"
 #include "nghttp2/nghttp2ver.h"
 #include "node.h"
 #include "util.h"
@@ -11,6 +12,11 @@
 #if HAVE_OPENSSL
 #include <openssl/opensslv.h>
 #endif  // HAVE_OPENSSL
+
+#ifdef OPENSSL_INFO_QUIC
+#include <ngtcp2/version.h>
+#include <nghttp3/version.h>
+#endif
 
 #ifdef NODE_HAVE_I18N_SUPPORT
 #include <unicode/timezone.h>
@@ -76,8 +82,12 @@ Metadata::Versions::Versions() {
   modules = NODE_STRINGIFY(NODE_MODULE_VERSION);
   nghttp2 = NGHTTP2_VERSION;
   napi = NODE_STRINGIFY(NAPI_VERSION);
-  llhttp = per_process::llhttp_version;
-  http_parser = per_process::http_parser_version;
+  llhttp =
+      NODE_STRINGIFY(LLHTTP_VERSION_MAJOR)
+      "."
+      NODE_STRINGIFY(LLHTTP_VERSION_MINOR)
+      "."
+      NODE_STRINGIFY(LLHTTP_VERSION_PATCH);
 #ifdef NODE_MOBILE
   mobile = NODE_MOBILE_VERSION_STRING;
 #endif  // NODE_MOBILE
@@ -97,6 +107,11 @@ Metadata::Versions::Versions() {
   icu = U_ICU_VERSION;
   unicode = U_UNICODE_VERSION;
 #endif  // NODE_HAVE_I18N_SUPPORT
+
+#ifdef OPENSSL_INFO_QUIC
+  ngtcp2 = NGTCP2_VERSION;
+  nghttp3 = NGHTTP3_VERSION;
+#endif
 }
 
 Metadata::Release::Release() : name(NODE_RELEASE) {

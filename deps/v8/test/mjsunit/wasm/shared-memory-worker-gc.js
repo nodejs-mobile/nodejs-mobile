@@ -2,20 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-threads
+// Flags: --experimental-wasm-threads --expose-gc
 
-const kNumMessages = 5000;
+const kNumMessages = 1000;
 
 function AllocMemory(pages = 1, max = pages) {
   return new WebAssembly.Memory({initial : pages, maximum : max, shared : true});
 }
 
 (function RunTest() {
-  let worker = new Worker(
-`onmessage =
-   function(msg) {
-     if (msg.memory) postMessage({memory : msg.memory});
-}`, {type : 'string'});
+  function workerCode() {
+    onmessage =
+      function(msg) {
+        if (msg.memory) postMessage({memory : msg.memory});
+        gc();
+      }
+  }
+
+  let worker = new Worker(workerCode);
 
   let time = performance.now();
 
@@ -30,5 +34,6 @@ function AllocMemory(pages = 1, max = pages) {
     if (msg.memory) {
       assertInstanceof(msg.memory, WebAssembly.Memory);
     }
+    gc();
   }
 })();

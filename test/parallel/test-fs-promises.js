@@ -16,6 +16,7 @@ const {
   link,
   lchmod,
   lstat,
+  lutimes,
   mkdir,
   mkdtemp,
   open,
@@ -47,17 +48,33 @@ assert.strictEqual(
 );
 
 {
-  access(__filename, 'r')
+  access(__filename, 0)
     .then(common.mustCall());
 
-  access('this file does not exist', 'r')
-    .then(common.mustNotCall())
-    .catch(common.expectsError({
+  assert.rejects(
+    access('this file does not exist', 0),
+    {
       code: 'ENOENT',
       name: 'Error',
-      message:
-        /^ENOENT: no such file or directory, access/
-    }));
+      message: /^ENOENT: no such file or directory, access/
+    }
+  );
+
+  assert.rejects(
+    access(__filename, 8),
+    {
+      code: 'ERR_OUT_OF_RANGE',
+      message: /"mode".*must be an integer >= 0 && <= 7\. Received 8$/
+    }
+  );
+
+  assert.rejects(
+    access(__filename, { [Symbol.toPrimitive]() { return 5; } }),
+    {
+      code: 'ERR_INVALID_ARG_TYPE',
+      message: /"mode" argument.+integer\. Received an instance of Object$/
+    }
+  );
 }
 
 function verifyStatObject(stat) {
@@ -68,7 +85,7 @@ function verifyStatObject(stat) {
 
 async function getHandle(dest) {
   await copyFile(fixtures.path('baz.js'), dest);
-  await access(dest, 'r');
+  await access(dest);
 
   return open(dest, 'r+');
 }
@@ -83,6 +100,7 @@ async function getHandle(dest) {
     {
       const handle = await getHandle(dest);
       assert.strictEqual(typeof handle, 'object');
+      await handle.close();
     }
 
     // file stats
@@ -106,6 +124,7 @@ async function getHandle(dest) {
 
       await handle.datasync();
       await handle.sync();
+      await handle.close();
     }
 
     // Test fs.read promises when length to read is zero bytes
@@ -119,6 +138,14 @@ async function getHandle(dest) {
       assert.strictEqual(ret.bytesRead, 0);
 
       await unlink(dest);
+      await handle.close();
+    }
+
+    // Use fallback buffer allocation when input not buffer
+    {
+      const handle = await getHandle(dest);
+      const ret = await handle.read(0, 0, 0, 0);
+      assert.strictEqual(ret.buffer.length, 16384);
     }
 
     // Bytes written to file match buffer
@@ -130,6 +157,7 @@ async function getHandle(dest) {
       const ret = await handle.read(Buffer.alloc(bufLen), 0, bufLen, 0);
       assert.strictEqual(ret.bytesRead, bufLen);
       assert.deepStrictEqual(ret.buffer, buf);
+      await handle.close();
     }
 
     // Truncate file to specified length
@@ -142,7 +170,8 @@ async function getHandle(dest) {
       assert.strictEqual(ret.bytesRead, bufLen);
       assert.deepStrictEqual(ret.buffer, buf);
       await truncate(dest, 5);
-      assert.deepStrictEqual((await readFile(dest)).toString(), 'hello');
+      assert.strictEqual((await readFile(dest)).toString(), 'hello');
+      await handle.close();
     }
 
     // Invalid change of ownership
@@ -162,25 +191,27 @@ async function getHandle(dest) {
 
       assert.rejects(
         async () => {
-          await chown(dest, 1, -1);
+          await chown(dest, 1, -2);
         },
         {
           code: 'ERR_OUT_OF_RANGE',
           name: 'RangeError',
           message: 'The value of "gid" is out of range. ' +
-                  'It must be >= 0 && < 4294967296. Received -1'
+                  'It must be >= -1 && <= 4294967295. Received -2'
         });
 
       assert.rejects(
         async () => {
-          await handle.chown(1, -1);
+          await handle.chown(1, -2);
         },
         {
           code: 'ERR_OUT_OF_RANGE',
           name: 'RangeError',
           message: 'The value of "gid" is out of range. ' +
-                    'It must be >= 0 && < 4294967296. Received -1'
+                    'It must be >= -1 && <= 4294967295. Received -2'
         });
+
+      await handle.close();
     }
 
     // Set modification times
@@ -201,6 +232,19 @@ async function getHandle(dest) {
       }
 
       await handle.close();
+    }
+
+    // Set modification times with lutimes
+    {
+      const a_time = new Date();
+      a_time.setMinutes(a_time.getMinutes() - 1);
+      const m_time = new Date();
+      m_time.setHours(m_time.getHours() - 1);
+      await lutimes(dest, a_time, m_time);
+      const stats = await stat(dest);
+
+      assert.strictEqual(a_time.toString(), stats.atime.toString());
+      assert.strictEqual(m_time.toString(), stats.mtime.toString());
     }
 
     // create symlink
@@ -239,12 +283,21 @@ async function getHandle(dest) {
                 name: 'Error',
                 message: 'The lchmod() method is not implemented'
               })
-            )
+            ),
           ]);
         }
 
         await unlink(newLink);
       }
+    }
+
+    // specify symlink type
+    {
+      const dir = path.join(tmpDir, nextdir());
+      await symlink(tmpDir, dir, 'dir');
+      const stats = await lstat(dir);
+      assert.strictEqual(stats.isSymbolicLink(), true);
+      await unlink(dir);
     }
 
     // create hard link
@@ -272,6 +325,14 @@ async function getHandle(dest) {
       assert.notStrictEqual(list.indexOf('foo.js'), -1);
       await rmdir(newDir);
       await unlink(newFile);
+    }
+
+    // Use fallback encoding when input is null
+    {
+      const newFile = path.resolve(tmpDir, 'dogs_running.js');
+      await writeFile(newFile, 'dogs running', { encoding: null });
+      const fileExists = fs.existsSync(newFile);
+      assert.strictEqual(fileExists, true);
     }
 
     // `mkdir` when options is number.
@@ -302,7 +363,7 @@ async function getHandle(dest) {
     {
       const dir = path.join(tmpDir, nextdir(), nextdir());
       await mkdir(path.dirname(dir));
-      await writeFile(dir);
+      await writeFile(dir, '');
       assert.rejects(
         mkdir(dir, { recursive: true }),
         {
@@ -319,7 +380,7 @@ async function getHandle(dest) {
       const file = path.join(tmpDir, nextdir(), nextdir());
       const dir = path.join(file, nextdir(), nextdir());
       await mkdir(path.dirname(file));
-      await writeFile(file);
+      await writeFile(file, '');
       assert.rejects(
         mkdir(dir, { recursive: true }),
         {
@@ -376,6 +437,32 @@ async function getHandle(dest) {
       );
     }
 
+    // Regression test for https://github.com/nodejs/node/issues/38168
+    {
+      const handle = await getHandle(dest);
+
+      assert.rejects(
+        async () => handle.write('abc', 0, 'hex'),
+        {
+          code: 'ERR_INVALID_ARG_VALUE',
+          message: /'encoding' is invalid for data of length 3/
+        }
+      );
+
+      const ret = await handle.write('abcd', 0, 'hex');
+      assert.strictEqual(ret.bytesWritten, 2);
+      await handle.close();
+    }
+
+    // Test prototype methods calling with contexts other than FileHandle
+    {
+      const handle = await getHandle(dest);
+      assert.rejects(() => handle.stat.call({}), {
+        code: 'ERR_INTERNAL_ASSERTION',
+        message: /handle must be an instance of FileHandle/
+      });
+      await handle.close();
+    }
   }
 
   doTest().then(common.mustCall());

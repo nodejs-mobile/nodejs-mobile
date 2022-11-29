@@ -5,8 +5,7 @@
 #ifndef V8_OBJECTS_ODDBALL_H_
 #define V8_OBJECTS_ODDBALL_H_
 
-#include "src/objects/heap-object.h"
-#include "torque-generated/class-definitions-tq.h"
+#include "src/objects/primitive-heap-object.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -14,8 +13,10 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/oddball-tq.inc"
+
 // The Oddball describes objects null, undefined, true, and false.
-class Oddball : public TorqueGeneratedOddball<Oddball, HeapObject> {
+class Oddball : public TorqueGeneratedOddball<Oddball, PrimitiveHeapObject> {
  public:
   // [to_number_raw]: Cached raw to_number computed at startup.
   inline void set_to_number_raw_as_bits(uint64_t bits);
@@ -48,15 +49,15 @@ class Oddball : public TorqueGeneratedOddball<Oddball, HeapObject> {
   static const byte kOptimizedOut = 9;
   static const byte kStaleRegister = 10;
   static const byte kSelfReferenceMarker = 10;
+  static const byte kBasicBlockCountersMarker = 11;
 
-  static_assert(kStartOfWeakFieldsOffset == kEndOfWeakFieldsOffset,
-                "Ensure BodyDescriptor does not need to handle weak fields.");
-  using BodyDescriptor = FixedBodyDescriptor<kStartOfStrongFieldsOffset,
-                                             kEndOfStrongFieldsOffset, kSize>;
+  class BodyDescriptor;
 
   STATIC_ASSERT(kKindOffset == Internals::kOddballKindOffset);
   STATIC_ASSERT(kNull == Internals::kNullOddballKind);
   STATIC_ASSERT(kUndefined == Internals::kUndefinedOddballKind);
+
+  DECL_PRINTER(Oddball)
 
   TQ_OBJECT_CONSTRUCTORS(Oddball)
 };

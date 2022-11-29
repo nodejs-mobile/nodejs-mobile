@@ -7,6 +7,7 @@
 #include "src/ast/ast.h"
 #include "src/objects/objects-inl.h"
 #include "src/regexp/regexp-bytecode-generator-inl.h"
+#include "src/regexp/regexp-bytecode-peephole.h"
 #include "src/regexp/regexp-bytecodes.h"
 #include "src/regexp/regexp-macro-assembler.h"
 
@@ -15,9 +16,10 @@ namespace internal {
 
 RegExpBytecodeGenerator::RegExpBytecodeGenerator(Isolate* isolate, Zone* zone)
     : RegExpMacroAssembler(isolate, zone),
-      buffer_(Vector<byte>::New(1024)),
+      buffer_(base::Vector<byte>::New(1024)),
       pc_(0),
       advance_current_end_(kInvalidPC),
+      jump_edges_(zone),
       isolate_(isolate) {}
 
 RegExpBytecodeGenerator::~RegExpBytecodeGenerator() {
@@ -39,6 +41,7 @@ void RegExpBytecodeGenerator::Bind(Label* l) {
       int fixup = pos;
       pos = *reinterpret_cast<int32_t*>(buffer_.begin() + fixup);
       *reinterpret_cast<uint32_t*>(buffer_.begin() + fixup) = pc_;
+      jump_edges_.emplace(fixup, pc_);
     }
   }
   l->bind_to(pc_);
@@ -46,16 +49,17 @@ void RegExpBytecodeGenerator::Bind(Label* l) {
 
 void RegExpBytecodeGenerator::EmitOrLink(Label* l) {
   if (l == nullptr) l = &backtrack_;
+  int pos = 0;
   if (l->is_bound()) {
-    Emit32(l->pos());
+    pos = l->pos();
+    jump_edges_.emplace(pc_, pos);
   } else {
-    int pos = 0;
     if (l->is_linked()) {
       pos = l->pos();
     }
     l->link_to(pc_);
-    Emit32(pos);
   }
+  Emit32(pos);
 }
 
 void RegExpBytecodeGenerator::PopRegister(int register_index) {
@@ -128,7 +132,11 @@ void RegExpBytecodeGenerator::PopCurrentPosition() { Emit(BC_POP_CP, 0); }
 
 void RegExpBytecodeGenerator::PushCurrentPosition() { Emit(BC_PUSH_CP, 0); }
 
-void RegExpBytecodeGenerator::Backtrack() { Emit(BC_POP_BT, 0); }
+void RegExpBytecodeGenerator::Backtrack() {
+  int error_code =
+      can_fallback() ? RegExp::RE_FALLBACK_TO_EXPERIMENTAL : RegExp::RE_FAILURE;
+  Emit(BC_POP_BT, error_code);
+}
 
 void RegExpBytecodeGenerator::GoTo(Label* l) {
   if (advance_current_end_ == pc_) {
@@ -157,8 +165,10 @@ bool RegExpBytecodeGenerator::Succeed() {
 void RegExpBytecodeGenerator::Fail() { Emit(BC_FAIL, 0); }
 
 void RegExpBytecodeGenerator::AdvanceCurrentPosition(int by) {
-  DCHECK_LE(kMinCPOffset, by);
-  DCHECK_GE(kMaxCPOffset, by);
+  // TODO(chromium:1166138): Turn back into DCHECKs once the underlying issue
+  // is fixed.
+  CHECK_LE(kMinCPOffset, by);
+  CHECK_GE(kMaxCPOffset, by);
   advance_current_start_ = pc_;
   advance_current_offset_ = by;
   Emit(BC_ADVANCE_CP, by);
@@ -178,7 +188,7 @@ void RegExpBytecodeGenerator::LoadCurrentCharacterImpl(int cp_offset,
                                                        int eats_at_least) {
   DCHECK_GE(eats_at_least, characters);
   if (eats_at_least > characters && check_bounds) {
-    DCHECK(is_uint24(cp_offset + eats_at_least));
+    DCHECK(is_int24(cp_offset + eats_at_least));
     Emit(BC_CHECK_CURRENT_POSITION, cp_offset + eats_at_least);
     EmitOrLink(on_failure);
     check_bounds = false;  // Load below doesn't need to check.
@@ -210,12 +220,14 @@ void RegExpBytecodeGenerator::LoadCurrentCharacterImpl(int cp_offset,
   if (check_bounds) EmitOrLink(on_failure);
 }
 
-void RegExpBytecodeGenerator::CheckCharacterLT(uc16 limit, Label* on_less) {
+void RegExpBytecodeGenerator::CheckCharacterLT(base::uc16 limit,
+                                               Label* on_less) {
   Emit(BC_CHECK_LT, limit);
   EmitOrLink(on_less);
 }
 
-void RegExpBytecodeGenerator::CheckCharacterGT(uc16 limit, Label* on_greater) {
+void RegExpBytecodeGenerator::CheckCharacterGT(base::uc16 limit,
+                                               Label* on_greater) {
   Emit(BC_CHECK_GT, limit);
   EmitOrLink(on_greater);
 }
@@ -278,14 +290,15 @@ void RegExpBytecodeGenerator::CheckNotCharacterAfterAnd(uint32_t c,
 }
 
 void RegExpBytecodeGenerator::CheckNotCharacterAfterMinusAnd(
-    uc16 c, uc16 minus, uc16 mask, Label* on_not_equal) {
+    base::uc16 c, base::uc16 minus, base::uc16 mask, Label* on_not_equal) {
   Emit(BC_MINUS_AND_CHECK_NOT_CHAR, c);
   Emit16(minus);
   Emit16(mask);
   EmitOrLink(on_not_equal);
 }
 
-void RegExpBytecodeGenerator::CheckCharacterInRange(uc16 from, uc16 to,
+void RegExpBytecodeGenerator::CheckCharacterInRange(base::uc16 from,
+                                                    base::uc16 to,
                                                     Label* on_in_range) {
   Emit(BC_CHECK_CHAR_IN_RANGE, 0);
   Emit16(from);
@@ -293,7 +306,8 @@ void RegExpBytecodeGenerator::CheckCharacterInRange(uc16 from, uc16 to,
   EmitOrLink(on_in_range);
 }
 
-void RegExpBytecodeGenerator::CheckCharacterNotInRange(uc16 from, uc16 to,
+void RegExpBytecodeGenerator::CheckCharacterNotInRange(base::uc16 from,
+                                                       base::uc16 to,
                                                        Label* on_not_in_range) {
   Emit(BC_CHECK_CHAR_NOT_IN_RANGE, 0);
   Emit16(from);
@@ -364,9 +378,17 @@ void RegExpBytecodeGenerator::IfRegisterEqPos(int register_index,
 
 Handle<HeapObject> RegExpBytecodeGenerator::GetCode(Handle<String> source) {
   Bind(&backtrack_);
-  Emit(BC_POP_BT, 0);
-  Handle<ByteArray> array = isolate_->factory()->NewByteArray(length());
-  Copy(array->GetDataStartAddress());
+  Backtrack();
+
+  Handle<ByteArray> array;
+  if (FLAG_regexp_peephole_optimization) {
+    array = RegExpBytecodePeepholeOptimization::OptimizeBytecode(
+        isolate_, zone(), source, buffer_.begin(), length(), jump_edges_);
+  } else {
+    array = isolate_->factory()->NewByteArray(length());
+    Copy(array->GetDataStartAddress());
+  }
+
   return array;
 }
 
@@ -377,8 +399,8 @@ void RegExpBytecodeGenerator::Copy(byte* a) {
 }
 
 void RegExpBytecodeGenerator::Expand() {
-  Vector<byte> old_buffer = buffer_;
-  buffer_ = Vector<byte>::New(old_buffer.length() * 2);
+  base::Vector<byte> old_buffer = buffer_;
+  buffer_ = base::Vector<byte>::New(old_buffer.length() * 2);
   MemCopy(buffer_.begin(), old_buffer.begin(), old_buffer.length());
   old_buffer.Dispose();
 }
