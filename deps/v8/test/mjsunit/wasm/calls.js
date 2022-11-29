@@ -4,7 +4,7 @@
 
 // Flags: --expose-wasm
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 function assertModule(module, memsize) {
   // Check the module exists.
@@ -49,8 +49,8 @@ function assertFunction(module, func) {
   builder.addMemory(1, 1, true);
   builder.addFunction("sub", kSig_i_ii)
     .addBody([
-      kExprGetLocal, 0,             // --
-      kExprGetLocal, 1,             // --
+      kExprLocalGet, 0,             // --
+      kExprLocalGet, 1,             // --
       kExprI32Sub,                  // --
     ])
     .exportFunc()
@@ -91,8 +91,8 @@ function assertFunction(module, func) {
   builder.addMemory(kPages, kPages, true);
   builder.addFunction("flt", kSig_i_dd)
     .addBody([
-      kExprGetLocal, 0,     // --
-      kExprGetLocal, 1,     // --
+      kExprLocalGet, 0,     // --
+      kExprLocalGet, 1,     // --
       kExprF64Lt            // --
     ])                      // --
     .exportFunc();

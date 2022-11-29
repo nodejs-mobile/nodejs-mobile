@@ -85,6 +85,7 @@ if (common.hasIntl) {
   assert.strictEqual(dec.encoding, 'utf-8');
   assert.strictEqual(dec.fatal, false);
   assert.strictEqual(dec.ignoreBOM, false);
+  assert.strictEqual(dec[Symbol.toStringTag], 'TextDecoder');
 }
 
 // Test TextDecoder, UTF-16le
@@ -125,10 +126,7 @@ if (common.hasIntl) {
       '  [Symbol(flags)]: 4,\n' +
       '  [Symbol(handle)]: StringDecoder {\n' +
       "    encoding: 'utf8',\n" +
-      '    [Symbol(kNativeDecoder)]: <Buffer 00 00 00 00 00 00 01>,\n' +
-      '    lastChar: [Getter],\n' +
-      '    lastNeed: [Getter],\n' +
-      '    lastTotal: [Getter]\n' +
+      '    [Symbol(kNativeDecoder)]: <Buffer 00 00 00 00 00 00 01>\n' +
       '  }\n' +
       '}'
     );
@@ -192,4 +190,12 @@ if (common.hasIntl) {
       name: 'TypeError'
     }
   );
+}
+
+// Test TextDecoder for incomplete UTF-8 byte sequence.
+{
+  const decoder = new TextDecoder();
+  const chunk = new Uint8Array([0x66, 0x6f, 0x6f, 0xed]);
+  const str = decoder.decode(chunk);
+  assert.strictEqual(str, 'foo\ufffd');
 }

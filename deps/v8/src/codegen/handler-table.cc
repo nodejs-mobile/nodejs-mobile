@@ -4,18 +4,30 @@
 
 #include "src/codegen/handler-table.h"
 
+#include <algorithm>
 #include <iomanip>
 
+#include "src/base/iterator.h"
 #include "src/codegen/assembler-inl.h"
 #include "src/objects/code-inl.h"
 #include "src/objects/objects-inl.h"
+
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/wasm-code-manager.h"
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
 namespace internal {
 
 HandlerTable::HandlerTable(Code code)
-    : HandlerTable(code.InstructionStart() + code.handler_table_offset(),
-                   code.handler_table_size(), kReturnAddressBasedEncoding) {}
+    : HandlerTable(code.HandlerTableAddress(), code.handler_table_size(),
+                   kReturnAddressBasedEncoding) {}
+
+#if V8_ENABLE_WEBASSEMBLY
+HandlerTable::HandlerTable(const wasm::WasmCode* code)
+    : HandlerTable(code->handler_table(), code->handler_table_size(),
+                   kReturnAddressBasedEncoding) {}
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 HandlerTable::HandlerTable(BytecodeArray bytecode_array)
     : HandlerTable(bytecode_array.handler_table()) {}
@@ -135,7 +147,7 @@ int HandlerTable::LengthForRange(int entries) {
 
 // static
 int HandlerTable::EmitReturnTableStart(Assembler* masm) {
-  masm->DataAlign(sizeof(int32_t));  // Make sure entries are aligned.
+  masm->DataAlign(Code::kMetadataAlignment);
   masm->RecordComment(";;; Exception handler table.");
   int table_start = masm->pc_offset();
   return table_start;
@@ -187,15 +199,41 @@ int HandlerTable::LookupRange(int pc_offset, int* data_out,
   return innermost_handler;
 }
 
-// TODO(turbofan): Make sure table is sorted and use binary search.
 int HandlerTable::LookupReturn(int pc_offset) {
-  for (int i = 0; i < NumberOfReturnEntries(); ++i) {
-    int return_offset = GetReturnOffset(i);
-    if (pc_offset == return_offset) {
-      return GetReturnHandler(i);
+  // We only implement the methods needed by the standard libraries we care
+  // about. This is not technically a full random access iterator by the spec.
+  struct Iterator : base::iterator<std::random_access_iterator_tag, int> {
+    Iterator(HandlerTable* tbl, int idx) : table(tbl), index(idx) {}
+    value_type operator*() const { return table->GetReturnOffset(index); }
+    bool operator!=(const Iterator& other) const { return !(*this == other); }
+    bool operator==(const Iterator& other) const {
+      return index == other.index;
     }
-  }
-  return -1;
+    // GLIBCXX_DEBUG checks uses the <= comparator.
+    bool operator<=(const Iterator& other) { return index <= other.index; }
+    Iterator& operator++() {
+      index++;
+      return *this;
+    }
+    Iterator& operator--() {
+      index--;
+      return *this;
+    }
+    Iterator& operator+=(difference_type offset) {
+      index += offset;
+      return *this;
+    }
+    difference_type operator-(const Iterator& other) const {
+      return index - other.index;
+    }
+    HandlerTable* table;
+    int index;
+  };
+  Iterator begin{this, 0}, end{this, NumberOfReturnEntries()};
+  SLOW_DCHECK(std::is_sorted(begin, end));  // Must be sorted.
+  Iterator result = std::lower_bound(begin, end, pc_offset);
+  bool exact_match = result != end && *result == pc_offset;
+  return exact_match ? GetReturnHandler(result.index) : -1;
 }
 
 #ifdef ENABLE_DISASSEMBLER

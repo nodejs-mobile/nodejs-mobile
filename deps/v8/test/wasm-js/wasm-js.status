@@ -3,10 +3,25 @@
 # found in the LICENSE file.
 
 [
+
 [ALWAYS, {
-  # https://bugs.chromium.org/p/v8/issues/detail?id=8633
+  # TODO(v8:10556): Remove sub-typing in the reference-types implementation
+  'constructor/instantiate': [FAIL],
+  'instance/constructor': [FAIL],
+  'proposals/js-types/constructor/instantiate': [FAIL],
+  'proposals/js-types/global/constructor': [FAIL],
+  'proposals/js-types/global/value-get-set': [FAIL],
+  'proposals/js-types/instance/constructor': [FAIL],
+
+  'prototypes': [FAIL],
+
+  # These are slow, and not useful to run for the proposals:
+  'proposals/js-types/limits': [SKIP],
+  'proposals/simd/limits': [SKIP],
+  'proposals/memory64/limits': [SKIP],
+
+  # TODO(v8:11577): investigate this failure.
   'limits': [SKIP],
-  'proposals/reference-types/limits': [SKIP],
 }], # ALWAYS
 
 ['arch == s390 or arch == s390x or system == aix', {
@@ -15,15 +30,21 @@
   'constructor/instantiate': [SKIP],
 }],  # 'arch == s390 or arch == s390x or system == aix'
 
-##############################################################################
-['lite_mode or variant == jitless', {
-  # TODO(v8:7777): Re-enable once wasm is supported in jitless mode.
-  '*': [SKIP],
-}], # lite_mode or variant == jitless
+['mode == debug or simulator_run or variant != default or arch == arm or tsan or msan or asan', {
+  # Slow, and we always have the same limits anyway.
+  # ODroid bots don't have enough memory to run the test.
+  'limits': [SKIP],
+}],  # mode == debug or simulator_run or variant != default or arch == arm or tsan or msan or asan
 
 ##############################################################################
-['variant == jitless and not embedded_builtins', {
+# TODO(v8:7777): Change this once wasm is supported in jitless mode.
+['not has_webassembly or variant == jitless', {
   '*': [SKIP],
-}], # variant == jitless and not embedded_builtins
+}],  # not has_webassembly or variant == jitless
+
+################################################################################
+['variant == stress_snapshot', {
+  '*': [SKIP],  # only relevant for mjsunit tests.
+}],
 
 ]

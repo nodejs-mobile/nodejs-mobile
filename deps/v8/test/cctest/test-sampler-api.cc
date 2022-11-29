@@ -7,7 +7,6 @@
 #include <map>
 #include <string>
 #include "include/v8.h"
-#include "src/execution/simulator.h"
 #include "src/flags/flags.h"
 #include "test/cctest/cctest.h"
 
@@ -24,73 +23,11 @@ class Sample {
   const_iterator end() const { return &data_[data_.length()]; }
 
   int size() const { return data_.length(); }
-  v8::internal::Vector<void*>& data() { return data_; }
+  v8::base::Vector<void*>& data() { return data_; }
 
  private:
-  v8::internal::EmbeddedVector<void*, kFramesLimit> data_;
+  v8::base::EmbeddedVector<void*, kFramesLimit> data_;
 };
-
-
-#if defined(USE_SIMULATOR)
-class SimulatorHelper {
- public:
-  inline bool Init(v8::Isolate* isolate) {
-    simulator_ = reinterpret_cast<v8::internal::Isolate*>(isolate)
-                     ->thread_local_top()
-                     ->simulator_;
-    // Check if there is active simulator.
-    return simulator_ != nullptr;
-  }
-
-  inline void FillRegisters(v8::RegisterState* state) {
-#if V8_TARGET_ARCH_ARM
-    state->pc = reinterpret_cast<void*>(simulator_->get_pc());
-    state->sp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::sp));
-    state->fp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::r11));
-    state->lr = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::lr));
-#elif V8_TARGET_ARCH_ARM64
-    if (simulator_->sp() == 0 || simulator_->fp() == 0) {
-      // It's possible that the simulator is interrupted while it is updating
-      // the sp or fp register. ARM64 simulator does this in two steps:
-      // first setting it to zero and then setting it to a new value.
-      // Bailout if sp/fp doesn't contain the new value.
-      return;
-    }
-    state->pc = reinterpret_cast<void*>(simulator_->pc());
-    state->sp = reinterpret_cast<void*>(simulator_->sp());
-    state->fp = reinterpret_cast<void*>(simulator_->fp());
-    state->lr = reinterpret_cast<void*>(simulator_->lr());
-#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
-    state->pc = reinterpret_cast<void*>(simulator_->get_pc());
-    state->sp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::sp));
-    state->fp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::fp));
-#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
-    state->pc = reinterpret_cast<void*>(simulator_->get_pc());
-    state->sp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::sp));
-    state->fp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::fp));
-    state->lr = reinterpret_cast<void*>(simulator_->get_lr());
-#elif V8_TARGET_ARCH_S390 || V8_TARGET_ARCH_S390X
-    state->pc = reinterpret_cast<void*>(simulator_->get_pc());
-    state->sp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::sp));
-    state->fp = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::fp));
-    state->lr = reinterpret_cast<void*>(
-        simulator_->get_register(v8::internal::Simulator::ra));
-#endif
-  }
-
- private:
-  v8::internal::Simulator* simulator_;
-};
-#endif  // USE_SIMULATOR
 
 
 class SamplingTestHelper {
@@ -108,7 +45,7 @@ class SamplingTestHelper {
     instance_ = this;
     v8::HandleScope scope(isolate_);
     v8::Local<v8::ObjectTemplate> global = v8::ObjectTemplate::New(isolate_);
-    global->Set(v8_str("CollectSample"),
+    global->Set(isolate_, "CollectSample",
                 v8::FunctionTemplate::New(isolate_, CollectSample));
     LocalContext env(isolate_, nullptr, global);
     isolate_->SetJitCodeEventHandler(v8::kJitCodeEventDefault,
@@ -204,7 +141,6 @@ SamplingTestHelper* SamplingTestHelper::instance_;
 
 }  // namespace
 
-
 // A JavaScript function which takes stack depth
 // (minimum value 2) as an argument.
 // When at the bottom of the recursion,
@@ -216,18 +152,15 @@ static const char* test_function =
     "  else return func(depth - 1);"
     "}";
 
-
 TEST(StackDepthIsConsistent) {
   SamplingTestHelper helper(std::string(test_function) + "func(8);");
   CHECK_EQ(8, helper.sample().size());
 }
 
-
 TEST(StackDepthDoesNotExceedMaxValue) {
   SamplingTestHelper helper(std::string(test_function) + "func(300);");
   CHECK_EQ(Sample::kFramesLimit, helper.sample().size());
 }
-
 
 // The captured sample should have three pc values.
 // They should fall in the range where the compiled code resides.

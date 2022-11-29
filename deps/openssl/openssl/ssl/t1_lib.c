@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the OpenSSL license (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -2369,22 +2369,20 @@ int tls1_check_chain(SSL *s, X509 *x, EVP_PKEY *pk, STACK_OF(X509) *chain,
 
         ca_dn = s->s3->tmp.peer_ca_names;
 
-        if (!sk_X509_NAME_num(ca_dn))
+        if (ca_dn == NULL
+            || sk_X509_NAME_num(ca_dn) == 0
+            || ssl_check_ca_name(ca_dn, x))
             rv |= CERT_PKEY_ISSUER_NAME;
-
-        if (!(rv & CERT_PKEY_ISSUER_NAME)) {
-            if (ssl_check_ca_name(ca_dn, x))
-                rv |= CERT_PKEY_ISSUER_NAME;
-        }
-        if (!(rv & CERT_PKEY_ISSUER_NAME)) {
+        else
             for (i = 0; i < sk_X509_num(chain); i++) {
                 X509 *xtmp = sk_X509_value(chain, i);
+
                 if (ssl_check_ca_name(ca_dn, xtmp)) {
                     rv |= CERT_PKEY_ISSUER_NAME;
                     break;
                 }
             }
-        }
+
         if (!check_flags && !(rv & CERT_PKEY_ISSUER_NAME))
             goto end;
     } else
@@ -2439,46 +2437,55 @@ int SSL_check_chain(SSL *s, X509 *x, EVP_PKEY *pk, STACK_OF(X509) *chain)
 #ifndef OPENSSL_NO_DH
 DH *ssl_get_auto_dh(SSL *s)
 {
-    int dh_secbits = 80;
-    if (s->cert->dh_tmp_auto == 2)
-        return DH_get_1024_160();
-    if (s->s3->tmp.new_cipher->algorithm_auth & (SSL_aNULL | SSL_aPSK)) {
-        if (s->s3->tmp.new_cipher->strength_bits == 256)
-            dh_secbits = 128;
-        else
-            dh_secbits = 80;
-    } else {
-        if (s->s3->tmp.cert == NULL)
-            return NULL;
-        dh_secbits = EVP_PKEY_security_bits(s->s3->tmp.cert->privatekey);
+    DH *dhp = NULL;
+    BIGNUM *p = NULL, *g = NULL;
+    int dh_secbits = 80, sec_level_bits;
+
+    if (s->cert->dh_tmp_auto != 2) {
+        if (s->s3->tmp.new_cipher->algorithm_auth & (SSL_aNULL | SSL_aPSK)) {
+            if (s->s3->tmp.new_cipher->strength_bits == 256)
+                dh_secbits = 128;
+            else
+                dh_secbits = 80;
+        } else {
+            if (s->s3->tmp.cert == NULL)
+                return NULL;
+            dh_secbits = EVP_PKEY_security_bits(s->s3->tmp.cert->privatekey);
+        }
     }
 
-    if (dh_secbits >= 128) {
-        DH *dhp = DH_new();
-        BIGNUM *p, *g;
-        if (dhp == NULL)
-            return NULL;
-        g = BN_new();
-        if (g == NULL || !BN_set_word(g, 2)) {
-            DH_free(dhp);
-            BN_free(g);
-            return NULL;
-        }
-        if (dh_secbits >= 192)
-            p = BN_get_rfc3526_prime_8192(NULL);
-        else
-            p = BN_get_rfc3526_prime_3072(NULL);
-        if (p == NULL || !DH_set0_pqg(dhp, p, NULL, g)) {
-            DH_free(dhp);
-            BN_free(p);
-            BN_free(g);
-            return NULL;
-        }
-        return dhp;
+    dhp = DH_new();
+    if (dhp == NULL)
+        return NULL;
+    g = BN_new();
+    if (g == NULL || !BN_set_word(g, 2)) {
+        DH_free(dhp);
+        BN_free(g);
+        return NULL;
     }
-    if (dh_secbits >= 112)
-        return DH_get_2048_224();
-    return DH_get_1024_160();
+
+    /* Do not pick a prime that is too weak for the current security level */
+    sec_level_bits = ssl_get_security_level_bits(s, NULL, NULL);
+    if (dh_secbits < sec_level_bits)
+        dh_secbits = sec_level_bits;
+
+    if (dh_secbits >= 192)
+        p = BN_get_rfc3526_prime_8192(NULL);
+    else if (dh_secbits >= 152)
+        p = BN_get_rfc3526_prime_4096(NULL);
+    else if (dh_secbits >= 128)
+        p = BN_get_rfc3526_prime_3072(NULL);
+    else if (dh_secbits >= 112)
+        p = BN_get_rfc3526_prime_2048(NULL);
+    else
+        p = BN_get_rfc2409_prime_1024(NULL);
+    if (p == NULL || !DH_set0_pqg(dhp, p, NULL, g)) {
+        DH_free(dhp);
+        BN_free(p);
+        BN_free(g);
+        return NULL;
+    }
+    return dhp;
 }
 #endif
 
@@ -2546,6 +2553,8 @@ int ssl_security_cert_chain(SSL *s, STACK_OF(X509) *sk, X509 *x, int vfy)
     int rv, start_idx, i;
     if (x == NULL) {
         x = sk_X509_value(sk, 0);
+        if (x == NULL)
+            return ERR_R_INTERNAL_ERROR;
         start_idx = 1;
     } else
         start_idx = 0;

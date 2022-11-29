@@ -18,6 +18,15 @@ namespace v8 {
 namespace base {
 namespace bits {
 
+TEST(Bits, CountPopulation8) {
+  EXPECT_EQ(0u, CountPopulation(uint8_t{0}));
+  EXPECT_EQ(1u, CountPopulation(uint8_t{1}));
+  EXPECT_EQ(2u, CountPopulation(uint8_t{0x11}));
+  EXPECT_EQ(4u, CountPopulation(uint8_t{0x0F}));
+  EXPECT_EQ(6u, CountPopulation(uint8_t{0x3F}));
+  EXPECT_EQ(8u, CountPopulation(uint8_t{0xFF}));
+}
+
 TEST(Bits, CountPopulation16) {
   EXPECT_EQ(0u, CountPopulation(uint16_t{0}));
   EXPECT_EQ(1u, CountPopulation(uint16_t{1}));
@@ -117,7 +126,6 @@ TEST(Bits, CountTrailingZeros64) {
   EXPECT_EQ(36u, CountTrailingZeros(uint64_t{0xF0F0F0F000000000}));
 }
 
-
 TEST(Bits, IsPowerOfTwo32) {
   EXPECT_FALSE(IsPowerOfTwo(0U));
   TRACED_FORRANGE(uint32_t, shift, 0, 31) {
@@ -130,7 +138,6 @@ TEST(Bits, IsPowerOfTwo32) {
   }
   EXPECT_FALSE(IsPowerOfTwo(0xFFFFFFFF));
 }
-
 
 TEST(Bits, IsPowerOfTwo64) {
   EXPECT_FALSE(IsPowerOfTwo(uint64_t{0}));
@@ -145,6 +152,23 @@ TEST(Bits, IsPowerOfTwo64) {
   EXPECT_FALSE(IsPowerOfTwo(uint64_t{0xFFFFFFFFFFFFFFFF}));
 }
 
+TEST(Bits, WhichPowerOfTwo32) {
+  TRACED_FORRANGE(int, shift, 0, 30) {
+    EXPECT_EQ(shift, WhichPowerOfTwo(int32_t{1} << shift));
+  }
+  TRACED_FORRANGE(int, shift, 0, 31) {
+    EXPECT_EQ(shift, WhichPowerOfTwo(uint32_t{1} << shift));
+  }
+}
+
+TEST(Bits, WhichPowerOfTwo64) {
+  TRACED_FORRANGE(int, shift, 0, 62) {
+    EXPECT_EQ(shift, WhichPowerOfTwo(int64_t{1} << shift));
+  }
+  TRACED_FORRANGE(int, shift, 0, 63) {
+    EXPECT_EQ(shift, WhichPowerOfTwo(uint64_t{1} << shift));
+  }
+}
 
 TEST(Bits, RoundUpToPowerOfTwo32) {
   TRACED_FORRANGE(uint32_t, shift, 0, 31) {

@@ -11,6 +11,10 @@
 #include "node_mutex.h"
 #include "util.h"
 
+#if HAVE_OPENSSL
+#include "openssl/opensslv.h"
+#endif
+
 namespace node {
 
 class HostPort {
@@ -101,27 +105,32 @@ class EnvironmentOptions : public Options {
  public:
   bool abort_on_uncaught_exception = false;
   std::vector<std::string> conditions;
+  std::string dns_result_order;
   bool enable_source_maps = false;
-  bool experimental_json_modules = false;
-  bool experimental_modules = false;
+  bool experimental_https_modules = false;
+  bool experimental_fetch = false;
+  bool experimental_global_customevent = false;
+  bool experimental_global_web_crypto = false;
   std::string experimental_specifier_resolution;
-  std::string es_module_specifier_resolution;
   bool experimental_wasm_modules = false;
   bool experimental_import_meta_resolve = false;
   std::string module_type;
   std::string experimental_policy;
   std::string experimental_policy_integrity;
-  bool has_policy_integrity_string;
-  bool experimental_repl_await = false;
+  bool has_policy_integrity_string = false;
+  bool experimental_repl_await = true;
   bool experimental_vm_modules = false;
   bool expose_internals = false;
+  bool force_node_api_uncaught_exceptions_policy = false;
   bool frozen_intrinsics = false;
+  int64_t heap_snapshot_near_heap_limit = 0;
   std::string heap_snapshot_signal;
-  std::string http_parser = "llhttp";
-  uint64_t http_server_default_timeout = 120000;
-  bool no_deprecation = false;
-  bool no_force_async_hooks_checks = false;
-  bool no_warnings = false;
+  uint64_t max_http_header_size = 16 * 1024;
+  bool deprecation = true;
+  bool force_async_hooks_checks = true;
+  bool allow_native_addons = true;
+  bool global_search_paths = true;
+  bool warnings = true;
   bool force_context_aware = false;
   bool pending_deprecation = false;
   bool preserve_symlinks = false;
@@ -141,8 +150,11 @@ class EnvironmentOptions : public Options {
 #endif  // HAVE_INSPECTOR
   std::string redirect_warnings;
   std::string diagnostic_dir;
+  bool test_runner = false;
+  bool test_only = false;
   bool test_udp_no_try_send = false;
   bool throw_deprecation = false;
+  bool trace_atomics_wait = false;
   bool trace_deprecation = false;
   bool trace_exit = false;
   bool trace_sync_io = false;
@@ -150,7 +162,13 @@ class EnvironmentOptions : public Options {
   bool trace_uncaught = false;
   bool trace_warnings = false;
   std::string unhandled_rejections;
-  std::string userland_loader;
+  std::vector<std::string> userland_loaders;
+  bool verify_base_objects =
+#ifdef DEBUG
+      true;
+#else
+      false;
+#endif  // DEBUG
 
   bool syntax_check_only = false;
   bool has_eval_string = false;
@@ -186,7 +204,7 @@ class PerIsolateOptions : public Options {
  public:
   std::shared_ptr<EnvironmentOptions> per_env { new EnvironmentOptions() };
   bool track_heap_objects = false;
-  bool no_node_snapshot = false;
+  bool node_snapshot = true;
   bool report_uncaught_exception = false;
   bool report_on_signal = false;
   std::string report_signal = "SIGUSR2";
@@ -209,11 +227,11 @@ class PerProcessOptions : public Options {
   std::string title;
   std::string trace_event_categories;
   std::string trace_event_file_pattern = "node_trace.${rotation}.log";
-  uint64_t max_http_header_size = 8 * 1024;
   int64_t v8_thread_pool_size = 4;
   bool zero_fill_all_buffers = false;
   bool debug_arraybuffer_allocations = false;
   std::string disable_proto;
+  bool build_snapshot;
 
   std::vector<std::string> security_reverts;
   bool print_bash_completion = false;
@@ -226,10 +244,13 @@ class PerProcessOptions : public Options {
 #endif
 
   // Per-process because they affect singleton OpenSSL shared library state,
-  // or are used once during process intialization.
+  // or are used once during process initialization.
 #if HAVE_OPENSSL
   std::string openssl_config;
   std::string tls_cipher_list = DEFAULT_CIPHER_LIST_CORE;
+  int64_t secure_heap = 0;
+  int64_t secure_heap_min = 2;
+  bool openssl_shared_config = false;
 #ifdef NODE_OPENSSL_CERT_STORE
   bool ssl_openssl_cert_store = true;
 #else
@@ -237,10 +258,11 @@ class PerProcessOptions : public Options {
 #endif
   bool use_openssl_ca = false;
   bool use_bundled_ca = false;
-#if NODE_FIPS_MODE
   bool enable_fips_crypto = false;
   bool force_fips_crypto = false;
 #endif
+#if OPENSSL_VERSION_MAJOR >= 3
+  bool openssl_legacy_provider = false;
 #endif
 
   // Per-process because reports can be triggered outside a known V8 context.
@@ -294,7 +316,8 @@ class OptionsParser {
   void AddOption(const char* name,
                  const char* help_text,
                  bool Options::* field,
-                 OptionEnvvarSettings env_setting = kDisallowedInEnvironment);
+                 OptionEnvvarSettings env_setting = kDisallowedInEnvironment,
+                 bool default_is_true = false);
   void AddOption(const char* name,
                  const char* help_text,
                  uint64_t Options::* field,
@@ -417,11 +440,14 @@ class OptionsParser {
     std::shared_ptr<BaseOptionField> field;
     OptionEnvvarSettings env_setting;
     std::string help_text;
+    bool default_is_true = false;
   };
 
   // An implied option is composed of the information on where to store a
   // specific boolean value (if another specific option is encountered).
   struct Implication {
+    OptionType type;
+    std::string name;
     std::shared_ptr<BaseOptionField> target_field;
     bool target_value;
   };
@@ -448,7 +474,7 @@ class OptionsParser {
   template <typename OtherOptions>
   friend class OptionsParser;
 
-  friend void GetOptions(const v8::FunctionCallbackInfo<v8::Value>& args);
+  friend void GetCLIOptions(const v8::FunctionCallbackInfo<v8::Value>& args);
   friend std::string GetBashCompletion();
 };
 
@@ -464,7 +490,7 @@ void Parse(
 namespace per_process {
 
 extern Mutex cli_options_mutex;
-extern std::shared_ptr<PerProcessOptions> cli_options;
+extern NODE_EXTERN_PRIVATE std::shared_ptr<PerProcessOptions> cli_options;
 
 }  // namespace per_process
 

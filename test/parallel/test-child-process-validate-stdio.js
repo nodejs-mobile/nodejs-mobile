@@ -5,7 +5,7 @@ const common = require('../common');
 const assert = require('assert');
 const getValidStdio = require('internal/child_process').getValidStdio;
 
-const expectedError = { code: 'ERR_INVALID_OPT_VALUE', name: 'TypeError' };
+const expectedError = { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' };
 
 // Should throw if string and not ignore, pipe, or inherit
 assert.throws(() => getValidStdio('foo'), expectedError);
@@ -18,9 +18,9 @@ assert.throws(() => getValidStdio(600), expectedError);
   const stdio1 = [];
   const result = getValidStdio(stdio1, false);
   assert.strictEqual(stdio1.length, 3);
-  assert.strictEqual(result.hasOwnProperty('stdio'), true);
-  assert.strictEqual(result.hasOwnProperty('ipc'), true);
-  assert.strictEqual(result.hasOwnProperty('ipcFd'), true);
+  assert.strictEqual(Object.hasOwn(result, 'stdio'), true);
+  assert.strictEqual(Object.hasOwn(result, 'ipc'), true);
+  assert.strictEqual(Object.hasOwn(result, 'ipcFd'), true);
 }
 
 // Should throw if stdio has ipc and sync is true
@@ -50,7 +50,7 @@ if (common.isMainThread) {
     stdio: [
       { type: 'fd', fd: 0 },
       { type: 'fd', fd: 1 },
-      { type: 'fd', fd: 2 }
+      { type: 'fd', fd: 2 },
     ],
     ipc: undefined,
     ipcFd: undefined

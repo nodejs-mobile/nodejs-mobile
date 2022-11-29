@@ -11,6 +11,7 @@
 #include "src/compiler/common-operator.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/schedule.h"
+#include "src/objects/tagged-index.h"
 
 namespace v8 {
 namespace internal {
@@ -29,8 +30,8 @@ inline bool operator<(const CaseInfo& l, const CaseInfo& r) {
 // Helper struct containing data about a table or lookup switch.
 class SwitchInfo {
  public:
-  SwitchInfo(ZoneVector<CaseInfo>& cases,  // NOLINT(runtime/references)
-             int32_t min_value, int32_t max_value, BasicBlock* default_branch)
+  SwitchInfo(ZoneVector<CaseInfo> const& cases, int32_t min_value,
+             int32_t max_value, BasicBlock* default_branch)
       : cases_(cases),
         min_value_(min_value),
         max_value_(max_value),
@@ -46,12 +47,6 @@ class SwitchInfo {
     }
   }
 
-  // Ensure that comparison order of if-cascades is preserved.
-  std::vector<CaseInfo> CasesSortedByOriginalOrder() const {
-    std::vector<CaseInfo> result(cases_.begin(), cases_.end());
-    std::stable_sort(result.begin(), result.end());
-    return result;
-  }
   std::vector<CaseInfo> CasesSortedByValue() const {
     std::vector<CaseInfo> result(cases_.begin(), cases_.end());
     std::stable_sort(result.begin(), result.end(),
@@ -90,10 +85,12 @@ class OperandGenerator {
                                      GetVReg(node)));
   }
 
+  InstructionOperand DefineSameAsInput(Node* node, int input_index) {
+    return Define(node, UnallocatedOperand(GetVReg(node), input_index));
+  }
+
   InstructionOperand DefineSameAsFirst(Node* node) {
-    return Define(node,
-                  UnallocatedOperand(UnallocatedOperand::SAME_AS_FIRST_INPUT,
-                                     GetVReg(node)));
+    return DefineSameAsInput(node, 0);
   }
 
   InstructionOperand DefineAsFixed(Node* node, Register reg) {
@@ -182,6 +179,16 @@ class OperandGenerator {
                                         GetVReg(node)));
   }
 
+  enum class RegisterUseKind { kUseRegister, kUseUniqueRegister };
+  InstructionOperand UseRegister(Node* node, RegisterUseKind unique_reg) {
+    if (V8_LIKELY(unique_reg == RegisterUseKind::kUseRegister)) {
+      return UseRegister(node);
+    } else {
+      DCHECK_EQ(unique_reg, RegisterUseKind::kUseUniqueRegister);
+      return UseUniqueRegister(node);
+    }
+  }
+
   InstructionOperand UseFixed(Node* node, Register reg) {
     return Use(node, UnallocatedOperand(UnallocatedOperand::FIXED_REGISTER,
                                         reg.code(), GetVReg(node)));
@@ -191,17 +198,6 @@ class OperandGenerator {
   InstructionOperand UseFixed(Node* node, FPRegType reg) {
     return Use(node, UnallocatedOperand(UnallocatedOperand::FIXED_FP_REGISTER,
                                         reg.code(), GetVReg(node)));
-  }
-
-  InstructionOperand UseExplicit(LinkageLocation location) {
-    MachineRepresentation rep = InstructionSequence::DefaultRepresentation();
-    if (location.IsRegister()) {
-      return ExplicitOperand(LocationOperand::REGISTER, rep,
-                             location.AsRegister());
-    } else {
-      return ExplicitOperand(LocationOperand::STACK_SLOT, rep,
-                             location.GetLocation());
-    }
   }
 
   InstructionOperand UseImmediate(int immediate) {
@@ -240,7 +236,7 @@ class OperandGenerator {
   int AllocateVirtualRegister() { return sequence()->NextVirtualRegister(); }
 
   InstructionOperand DefineSameAsFirstForVreg(int vreg) {
-    return UnallocatedOperand(UnallocatedOperand::SAME_AS_FIRST_INPUT, vreg);
+    return UnallocatedOperand(UnallocatedOperand::SAME_AS_INPUT, vreg);
   }
 
   InstructionOperand DefineAsRegistertForVreg(int vreg) {
@@ -250,6 +246,19 @@ class OperandGenerator {
   InstructionOperand UseRegisterForVreg(int vreg) {
     return UnallocatedOperand(UnallocatedOperand::MUST_HAVE_REGISTER,
                               UnallocatedOperand::USED_AT_START, vreg);
+  }
+
+  // The kind of register generated for memory operands. kRegister is alive
+  // until the start of the operation, kUniqueRegister until the end.
+  enum RegisterMode {
+    kRegister,
+    kUniqueRegister,
+  };
+
+  InstructionOperand UseRegisterWithMode(Node* node,
+                                         RegisterMode register_mode) {
+    return register_mode == kRegister ? UseRegister(node)
+                                      : UseUniqueRegister(node);
   }
 
   InstructionOperand TempDoubleRegister() {
@@ -273,6 +282,16 @@ class OperandGenerator {
   InstructionOperand TempRegister(Register reg) {
     return UnallocatedOperand(UnallocatedOperand::FIXED_REGISTER, reg.code(),
                               InstructionOperand::kInvalidVirtualRegister);
+  }
+
+  template <typename FPRegType>
+  InstructionOperand TempFpRegister(FPRegType reg) {
+    UnallocatedOperand op =
+        UnallocatedOperand(UnallocatedOperand::FIXED_FP_REGISTER, reg.code(),
+                           sequence()->NextVirtualRegister());
+    sequence()->MarkAsRepresentation(MachineRepresentation::kSimd128,
+                                     op.virtual_register());
+    return op;
   }
 
   InstructionOperand TempImmediate(int32_t imm) {
@@ -302,6 +321,19 @@ class OperandGenerator {
         return Constant(OpParameter<int32_t>(node->op()));
       case IrOpcode::kInt64Constant:
         return Constant(OpParameter<int64_t>(node->op()));
+      case IrOpcode::kTaggedIndexConstant: {
+        // Unencoded index value.
+        intptr_t value =
+            static_cast<intptr_t>(OpParameter<int32_t>(node->op()));
+        DCHECK(TaggedIndex::IsValid(value));
+        // Generate it as 32/64-bit constant in a tagged form.
+        Address tagged_index = TaggedIndex::FromIntptr(value).ptr();
+        if (kSystemPointerSize == kInt32Size) {
+          return Constant(static_cast<int32_t>(tagged_index));
+        } else {
+          return Constant(static_cast<int64_t>(tagged_index));
+        }
+      }
       case IrOpcode::kFloat32Constant:
         return Constant(OpParameter<float>(node->op()));
       case IrOpcode::kRelocatableInt32Constant:
@@ -334,9 +366,10 @@ class OperandGenerator {
           case MachineRepresentation::kTaggedSigned:
           case MachineRepresentation::kTaggedPointer:
           case MachineRepresentation::kCompressed:
-          case MachineRepresentation::kCompressedSigned:
           case MachineRepresentation::kCompressedPointer:
             return Constant(static_cast<int32_t>(0));
+          case MachineRepresentation::kWord64:
+            return Constant(static_cast<int64_t>(0));
           case MachineRepresentation::kFloat64:
             return Constant(static_cast<double>(0));
           case MachineRepresentation::kFloat32:

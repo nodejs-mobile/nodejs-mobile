@@ -2,9 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/heap/spaces.h"
+
+#include <memory>
+
+#include "src/common/globals.h"
 #include "src/execution/isolate.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/heap-write-barrier-inl.h"
+#include "src/heap/heap.h"
+#include "src/heap/large-spaces.h"
+#include "src/heap/memory-chunk.h"
 #include "src/heap/spaces-inl.h"
 #include "test/unittests/test-utils.h"
 
@@ -19,7 +27,8 @@ TEST_F(SpacesTest, CompactionSpaceMerge) {
   EXPECT_TRUE(old_space != nullptr);
 
   CompactionSpace* compaction_space =
-      new CompactionSpace(heap, OLD_SPACE, NOT_EXECUTABLE);
+      new CompactionSpace(heap, OLD_SPACE, NOT_EXECUTABLE,
+                          CompactionSpaceKind::kCompactionSpaceForMarkCompact);
   EXPECT_TRUE(compaction_space != nullptr);
 
   for (Page* p : *old_space) {
@@ -55,13 +64,13 @@ TEST_F(SpacesTest, CompactionSpaceMerge) {
 TEST_F(SpacesTest, WriteBarrierFromHeapObject) {
   constexpr Address address1 = Page::kPageSize;
   HeapObject object1 = HeapObject::unchecked_cast(Object(address1));
-  MemoryChunk* chunk1 = MemoryChunk::FromHeapObject(object1);
+  BasicMemoryChunk* chunk1 = BasicMemoryChunk::FromHeapObject(object1);
   heap_internals::MemoryChunk* slim_chunk1 =
       heap_internals::MemoryChunk::FromHeapObject(object1);
   EXPECT_EQ(static_cast<void*>(chunk1), static_cast<void*>(slim_chunk1));
   constexpr Address address2 = 2 * Page::kPageSize - 1;
   HeapObject object2 = HeapObject::unchecked_cast(Object(address2));
-  MemoryChunk* chunk2 = MemoryChunk::FromHeapObject(object2);
+  BasicMemoryChunk* chunk2 = BasicMemoryChunk::FromHeapObject(object2);
   heap_internals::MemoryChunk* slim_chunk2 =
       heap_internals::MemoryChunk::FromHeapObject(object2);
   EXPECT_EQ(static_cast<void*>(chunk2), static_cast<void*>(slim_chunk2));

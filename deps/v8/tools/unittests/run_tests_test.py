@@ -67,7 +67,7 @@ def temp_base(baseroot='testroot1'):
   """
   basedir = os.path.join(TEST_DATA_ROOT, baseroot)
   with temp_dir() as tempbase:
-    builddir = os.path.join(tempbase, 'out', 'Release')
+    builddir = os.path.join(tempbase, 'out', 'build')
     testroot = os.path.join(tempbase, 'test')
     os.makedirs(builddir)
     shutil.copy(os.path.join(basedir, 'v8_build_config.json'), builddir)
@@ -112,7 +112,7 @@ def run_tests(basedir, *args, **kwargs):
 
 def override_build_config(basedir, **kwargs):
   """Override the build config with new values provided as kwargs."""
-  path = os.path.join(basedir, 'out', 'Release', 'v8_build_config.json')
+  path = os.path.join(basedir, 'out', 'build', 'v8_build_config.json')
   with open(path) as f:
     config = json.load(f)
     config.update(kwargs)
@@ -171,17 +171,29 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default,stress',
           '--time',
           'sweet/bananas',
           'sweet/raspberries',
       )
-      self.assertIn('Done running sweet/bananas default: pass', result.stdout, result)
+      self.assertIn('sweet/bananas default: PASS', result.stdout, result)
       # TODO(majeski): Implement for test processors
       # self.assertIn('Total time:', result.stderr, result)
       # self.assertIn('sweet/bananas', result.stderr, result)
+      self.assertEqual(0, result.returncode, result)
+
+  def testPassHeavy(self):
+    """Test running with some tests marked heavy."""
+    with temp_base(baseroot='testroot3') as basedir:
+      result = run_tests(
+          basedir,
+          '--progress=verbose',
+          '--variants=nooptimization',
+          '-j2',
+          'sweet',
+      )
+      self.assertIn('7 tests ran', result.stdout, result)
       self.assertEqual(0, result.returncode, result)
 
   def testShardedProc(self):
@@ -189,7 +201,6 @@ class SystemTest(unittest.TestCase):
       for shard in [1, 2]:
         result = run_tests(
             basedir,
-            '--mode=Release',
             '--progress=verbose',
             '--variants=default,stress',
             '--shard-count=2',
@@ -201,10 +212,8 @@ class SystemTest(unittest.TestCase):
         # One of the shards gets one variant of each test.
         self.assertIn('2 tests ran', result.stdout, result)
         if shard == 1:
-          self.assertIn(
-            'Done running sweet/raspberries default', result.stdout, result)
-          self.assertIn(
-            'Done running sweet/raspberries stress', result.stdout, result)
+          self.assertIn('sweet/raspberries default', result.stdout, result)
+          self.assertIn('sweet/raspberries stress', result.stdout, result)
           self.assertEqual(0, result.returncode, result)
         else:
           self.assertIn(
@@ -220,7 +229,6 @@ class SystemTest(unittest.TestCase):
       for shard in [1, 2]:
         result = run_tests(
             basedir,
-            '--mode=Release',
             '--progress=verbose',
             '--variants=default,stress',
             '--shard-count=2',
@@ -230,8 +238,8 @@ class SystemTest(unittest.TestCase):
         )
         # One of the shards gets one variant of each test.
         self.assertIn('Running 2 tests', result.stdout, result)
-        self.assertIn('Done running sweet/bananas', result.stdout, result)
-        self.assertIn('Done running sweet/raspberries', result.stdout, result)
+        self.assertIn('sweet/bananas', result.stdout, result)
+        self.assertIn('sweet/raspberries', result.stdout, result)
         self.assertEqual(0, result.returncode, result)
 
   def testFail(self):
@@ -239,21 +247,19 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default,stress',
           'sweet/strawberries',
           infra_staging=False,
       )
-      self.assertIn('Done running sweet/strawberries default: FAIL', result.stdout, result)
+      self.assertIn('sweet/strawberries default: FAIL', result.stdout, result)
       self.assertEqual(1, result.returncode, result)
 
   def check_cleaned_json_output(
       self, expected_results_name, actual_json, basedir):
     # Check relevant properties of the json output.
     with open(actual_json) as f:
-      json_output = json.load(f)[0]
-      pretty_json = json.dumps(json_output, indent=2, sort_keys=True)
+      json_output = json.load(f)
 
     # Replace duration in actual output as it's non-deterministic. Also
     # replace the python executable prefix as it has a different absolute
@@ -268,10 +274,15 @@ class SystemTest(unittest.TestCase):
     for data in json_output['results']:
       replace_variable_data(data)
     json_output['duration_mean'] = 1
+    # We need lexicographic sorting here to avoid non-deterministic behaviour
+    # The original sorting key is duration, but in our fake test we have
+    # non-deterministic durations before we reset them to 1
+    json_output['slowest_tests'].sort(key= lambda x: str(x))
 
     with open(os.path.join(TEST_DATA_ROOT, expected_results_name)) as f:
       expected_test_results = json.load(f)
 
+    pretty_json = json.dumps(json_output, indent=2, sort_keys=True)
     msg = None  # Set to pretty_json for bootstrapping.
     self.assertDictEqual(json_output, expected_test_results, msg)
 
@@ -281,7 +292,6 @@ class SystemTest(unittest.TestCase):
       json_path = os.path.join(basedir, 'out.json')
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           '--rerun-failures-count=2',
@@ -290,7 +300,7 @@ class SystemTest(unittest.TestCase):
           'sweet/strawberries',
           infra_staging=False,
       )
-      self.assertIn('Done running sweet/strawberries default: FAIL', result.stdout, result)
+      self.assertIn('sweet/strawberries default: FAIL', result.stdout, result)
       # With test processors we don't count reruns as separated failures.
       # TODO(majeski): fix it?
       self.assertIn('1 tests failed', result.stdout, result)
@@ -310,7 +320,6 @@ class SystemTest(unittest.TestCase):
       json_path = os.path.join(basedir, 'out.json')
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           '--rerun-failures-count=2',
@@ -319,9 +328,10 @@ class SystemTest(unittest.TestCase):
           'sweet',
           infra_staging=False,
       )
-      self.assertIn(
-        'Done running sweet/bananaflakes default: pass', result.stdout, result)
-      self.assertIn('All tests succeeded', result.stdout, result)
+      self.assertIn('sweet/bananaflakes default: FAIL PASS', result.stdout, result)
+      self.assertIn('=== sweet/bananaflakes (flaky) ===', result.stdout, result)
+      self.assertIn('1 tests failed', result.stdout, result)
+      self.assertIn('1 tests were flaky', result.stdout, result)
       self.assertEqual(0, result.returncode, result)
       self.maxDiff = None
       self.check_cleaned_json_output(
@@ -338,12 +348,11 @@ class SystemTest(unittest.TestCase):
           basedir, dcheck_always_on=True, is_asan=True, is_cfi=True,
           is_msan=True, is_tsan=True, is_ubsan_vptr=True, target_cpu='x86',
           v8_enable_i18n_support=False, v8_target_cpu='x86',
-          v8_use_snapshot=False, v8_enable_embedded_builtins=False,
           v8_enable_verify_csa=False, v8_enable_lite_mode=False,
-          v8_enable_pointer_compression=False)
+          v8_enable_pointer_compression=False,
+          v8_enable_pointer_compression_shared_cage=False)
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           'sweet/bananas',
@@ -355,9 +364,9 @@ class SystemTest(unittest.TestCase):
           'dcheck_always_on\n'
           'msan\n'
           'no_i18n\n'
-          'no_snap\n'
           'tsan\n'
           'ubsan_vptr\n'
+          'webassembly\n'
           '>>> Running tests for ia32.release')
       self.assertIn(expect_text, result.stdout, result)
       self.assertEqual(0, result.returncode, result)
@@ -369,7 +378,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=nooptimization',
           'sweet/strawberries',
@@ -383,7 +391,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=nooptimization',
           '--run-skipped',
@@ -400,7 +407,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           infra_staging=False,
       )
       self.assertIn('0 tests ran', result.stdout, result)
@@ -408,24 +414,15 @@ class SystemTest(unittest.TestCase):
 
   def testNoBuildConfig(self):
     """Test failing run when build config is not found."""
-    with temp_base() as basedir:
+    with temp_dir() as basedir:
       result = run_tests(basedir)
       self.assertIn('Failed to load build config', result.stdout, result)
-      self.assertEqual(5, result.returncode, result)
-
-  def testInconsistentMode(self):
-    """Test failing run when attempting to wrongly override the mode."""
-    with temp_base() as basedir:
-      override_build_config(basedir, is_debug=True)
-      result = run_tests(basedir, '--mode=Release')
-      self.assertIn('execution mode (release) for release is inconsistent '
-                    'with build config (debug)', result.stdout, result)
       self.assertEqual(5, result.returncode, result)
 
   def testInconsistentArch(self):
     """Test failing run when attempting to wrongly override the arch."""
     with temp_base() as basedir:
-      result = run_tests(basedir, '--mode=Release', '--arch=ia32')
+      result = run_tests(basedir, '--arch=ia32')
       self.assertIn(
           '--arch value (ia32) inconsistent with build config (x64).',
           result.stdout, result)
@@ -434,13 +431,13 @@ class SystemTest(unittest.TestCase):
   def testWrongVariant(self):
     """Test using a bogus variant."""
     with temp_base() as basedir:
-      result = run_tests(basedir, '--mode=Release', '--variants=meh')
+      result = run_tests(basedir, '--variants=meh')
       self.assertEqual(5, result.returncode, result)
 
   def testModeFromBuildConfig(self):
     """Test auto-detection of mode from build config."""
     with temp_base() as basedir:
-      result = run_tests(basedir, '--outdir=out/Release', 'sweet/bananas')
+      result = run_tests(basedir, '--outdir=out/build', 'sweet/bananas')
       self.assertIn('Running tests for x64.release', result.stdout, result)
       self.assertEqual(0, result.returncode, result)
 
@@ -453,7 +450,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--variants=default',
           'sweet',
           '--report',
@@ -469,7 +465,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--variants=default,nooptimization',
           'sweet',
           '--warn-unused',
@@ -484,7 +479,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--variants=default',
           'sweet/bananas',
           '--cat',
@@ -503,15 +497,13 @@ class SystemTest(unittest.TestCase):
       override_build_config(basedir, v8_enable_verify_predictable=True)
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           'sweet/bananas',
           infra_staging=False,
       )
       self.assertIn('1 tests ran', result.stdout, result)
-      self.assertIn(
-        'Done running sweet/bananas default: FAIL', result.stdout, result)
+      self.assertIn('sweet/bananas default: FAIL', result.stdout, result)
       self.assertIn('Test had no allocation output', result.stdout, result)
       self.assertIn('--predictable --verify-predictable', result.stdout, result)
       self.assertEqual(1, result.returncode, result)
@@ -522,7 +514,6 @@ class SystemTest(unittest.TestCase):
       override_build_config(basedir, v8_target_cpu='arm64')
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           'sweet/bananas',
@@ -536,7 +527,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           '--random-seed-stress-count=2',
@@ -551,7 +541,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default',
           '--random-seed-stress-count=2',
@@ -572,10 +561,9 @@ class SystemTest(unittest.TestCase):
     variants.
     """
     with temp_base() as basedir:
-      override_build_config(basedir, v8_use_snapshot=False)
+      override_build_config(basedir, is_asan=True)
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--variants=default,stress',
           'sweet/bananas',
@@ -597,7 +585,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=dots',
           'sweet/cherries',
           'sweet/bananas',
@@ -618,7 +605,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=%s' % name,
           'sweet/cherries',
           'sweet/bananas',
@@ -639,7 +625,6 @@ class SystemTest(unittest.TestCase):
     with temp_base() as basedir:
       result = run_tests(
           basedir,
-          '--mode=Release',
           '--progress=verbose',
           '--exit-after-n-failures=2',
           '-j1',
@@ -648,23 +633,40 @@ class SystemTest(unittest.TestCase):
           'sweet/blackberries',  # FAIL
           'sweet/raspberries',   # should not run
       )
-      self.assertIn('sweet/mangoes default: pass', result.stdout, result)
+      self.assertIn('sweet/mangoes default: PASS', result.stdout, result)
       self.assertIn('sweet/strawberries default: FAIL', result.stdout, result)
       self.assertIn('Too many failures, exiting...', result.stdout, result)
       self.assertIn('sweet/blackberries default: FAIL', result.stdout, result)
-      self.assertNotIn('Done running sweet/raspberries', result.stdout, result)
+      self.assertNotIn('sweet/raspberries', result.stdout, result)
       self.assertIn('2 tests failed', result.stdout, result)
       self.assertIn('3 tests ran', result.stdout, result)
       self.assertEqual(1, result.returncode, result)
 
   def testNumFuzzer(self):
-    sys_args = ['--command-prefix', sys.executable, '--outdir', 'out/Release']
+    sys_args = ['--command-prefix', sys.executable, '--outdir', 'out/build']
 
     with temp_base() as basedir:
       with capture() as (stdout, stderr):
         code = num_fuzzer.NumFuzzer(basedir=basedir).execute(sys_args)
         result = Result(stdout.getvalue(), stderr.getvalue(), code)
 
+      self.assertEqual(0, result.returncode, result)
+
+  def testRunnerFlags(self):
+    """Test that runner-specific flags are passed to tests."""
+    with temp_base() as basedir:
+      result = run_tests(
+          basedir,
+          '--progress=verbose',
+          '--variants=default',
+          '--random-seed=42',
+          'sweet/bananas',
+          '-v',
+      )
+
+      self.assertIn(
+          '--test bananas --random-seed=42 --nohard-abort --testing-d8-test-runner',
+          result.stdout, result)
       self.assertEqual(0, result.returncode, result)
 
 

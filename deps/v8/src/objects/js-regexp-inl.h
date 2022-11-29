@@ -7,6 +7,7 @@
 
 #include "src/objects/js-regexp.h"
 
+#include "src/objects/js-array-inl.h"
 #include "src/objects/objects-inl.h"  // Needed for write barriers
 #include "src/objects/smi.h"
 #include "src/objects/string.h"
@@ -17,7 +18,20 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/js-regexp-tq-inl.inc"
+
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSRegExp)
+OBJECT_CONSTRUCTORS_IMPL_CHECK_SUPER(JSRegExpResult, JSArray)
+OBJECT_CONSTRUCTORS_IMPL_CHECK_SUPER(JSRegExpResultIndices, JSArray)
+
+inline JSRegExpResultWithIndices::JSRegExpResultWithIndices(Address ptr)
+    : JSRegExpResult(ptr) {
+  SLOW_DCHECK(IsJSArray());
+}
+
+CAST_ACCESSOR(JSRegExpResult)
+CAST_ACCESSOR(JSRegExpResultWithIndices)
+CAST_ACCESSOR(JSRegExpResultIndices)
 
 ACCESSORS(JSRegExp, last_index, Object, kLastIndexOffset)
 
@@ -28,15 +42,21 @@ JSRegExp::Type JSRegExp::TypeTag() const {
   return static_cast<JSRegExp::Type>(smi.value());
 }
 
-int JSRegExp::CaptureCount() {
+int JSRegExp::CaptureCount() const {
   switch (TypeTag()) {
     case ATOM:
       return 0;
+    case EXPERIMENTAL:
     case IRREGEXP:
       return Smi::ToInt(DataAt(kIrregexpCaptureCountIndex));
     default:
       UNREACHABLE();
   }
+}
+
+int JSRegExp::MaxRegisterCount() const {
+  CHECK_EQ(TypeTag(), IRREGEXP);
+  return Smi::ToInt(DataAt(kIrregexpMaxRegisterCountIndex));
 }
 
 JSRegExp::Flags JSRegExp::GetFlags() {
@@ -53,9 +73,15 @@ String JSRegExp::Pattern() {
   return pattern;
 }
 
+String JSRegExp::EscapedPattern() {
+  DCHECK(this->source().IsString());
+  String pattern = String::cast(source());
+  return pattern;
+}
+
 Object JSRegExp::CaptureNameMap() {
   DCHECK(this->data().IsFixedArray());
-  DCHECK_EQ(TypeTag(), IRREGEXP);
+  DCHECK(TypeSupportsCaptures(TypeTag()));
   Object value = DataAt(kIrregexpCaptureNameMapIndex);
   DCHECK_NE(value, Smi::FromInt(JSRegExp::kUninitializedValue));
   return value;
@@ -73,13 +99,21 @@ void JSRegExp::SetDataAt(int index, Object value) {
   FixedArray::cast(data()).set(index, value);
 }
 
+void JSRegExp::SetCaptureNameMap(Handle<FixedArray> capture_name_map) {
+  if (capture_name_map.is_null()) {
+    SetDataAt(JSRegExp::kIrregexpCaptureNameMapIndex, Smi::zero());
+  } else {
+    SetDataAt(JSRegExp::kIrregexpCaptureNameMapIndex, *capture_name_map);
+  }
+}
+
 bool JSRegExp::HasCompiledCode() const {
   if (TypeTag() != IRREGEXP) return false;
   Smi uninitialized = Smi::FromInt(kUninitializedValue);
 #ifdef DEBUG
-  DCHECK(DataAt(kIrregexpLatin1CodeIndex).IsCode() ||
+  DCHECK(DataAt(kIrregexpLatin1CodeIndex).IsCodeT() ||
          DataAt(kIrregexpLatin1CodeIndex) == uninitialized);
-  DCHECK(DataAt(kIrregexpUC16CodeIndex).IsCode() ||
+  DCHECK(DataAt(kIrregexpUC16CodeIndex).IsCodeT() ||
          DataAt(kIrregexpUC16CodeIndex) == uninitialized);
   DCHECK(DataAt(kIrregexpLatin1BytecodeIndex).IsByteArray() ||
          DataAt(kIrregexpLatin1BytecodeIndex) == uninitialized);

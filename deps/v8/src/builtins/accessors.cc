@@ -5,17 +5,19 @@
 #include "src/builtins/accessors.h"
 
 #include "src/api/api-inl.h"
+#include "src/debug/debug.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/execution.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/execution/messages.h"
 #include "src/heap/factory.h"
-#include "src/logging/counters.h"
+#include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/api-callbacks.h"
 #include "src/objects/contexts.h"
 #include "src/objects/field-index-inl.h"
 #include "src/objects/js-array-inl.h"
+#include "src/objects/js-regexp-inl.h"
 #include "src/objects/module-inl.h"
 #include "src/objects/property-details.h"
 #include "src/objects/prototype.h"
@@ -65,6 +67,11 @@ static V8_INLINE bool CheckForName(Isolate* isolate, Handle<Name> name,
 // If true, *object_offset contains offset of object field.
 bool Accessors::IsJSObjectFieldAccessor(Isolate* isolate, Handle<Map> map,
                                         Handle<Name> name, FieldIndex* index) {
+  if (map->is_dictionary_map()) {
+    // There are not descriptors in a dictionary mode map.
+    return false;
+  }
+
   switch (map->instance_type()) {
     case JS_ARRAY_TYPE:
       return CheckForName(isolate, name, isolate->factory()->length_string(),
@@ -80,11 +87,12 @@ bool Accessors::IsJSObjectFieldAccessor(Isolate* isolate, Handle<Map> map,
 }
 
 V8_WARN_UNUSED_RESULT MaybeHandle<Object>
-Accessors::ReplaceAccessorWithDataProperty(Handle<Object> receiver,
+Accessors::ReplaceAccessorWithDataProperty(Isolate* isolate,
+                                           Handle<Object> receiver,
                                            Handle<JSObject> holder,
                                            Handle<Name> name,
                                            Handle<Object> value) {
-  LookupIterator it(receiver, name, holder,
+  LookupIterator it(isolate, receiver, PropertyKey(isolate, name), holder,
                     LookupIterator::OWN_SKIP_INTERCEPTOR);
   // Skip any access checks we might hit. This accessor should never hit in a
   // situation where the caller does not have access.
@@ -105,16 +113,15 @@ void Accessors::ReconfigureToDataProperty(
     v8::Local<v8::Name> key, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope stats_scope(
-      isolate, RuntimeCallCounterId::kReconfigureToDataProperty);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kReconfigureToDataProperty);
   HandleScope scope(isolate);
   Handle<Object> receiver = Utils::OpenHandle(*info.This());
   Handle<JSObject> holder =
       Handle<JSObject>::cast(Utils::OpenHandle(*info.Holder()));
   Handle<Name> name = Utils::OpenHandle(*key);
   Handle<Object> value = Utils::OpenHandle(*val);
-  MaybeHandle<Object> result =
-      Accessors::ReplaceAccessorWithDataProperty(receiver, holder, name, value);
+  MaybeHandle<Object> result = Accessors::ReplaceAccessorWithDataProperty(
+      isolate, receiver, holder, name, value);
   if (result.is_null()) {
     isolate->OptionalRescheduleException(false);
   } else {
@@ -129,7 +136,7 @@ void Accessors::ReconfigureToDataProperty(
 void Accessors::ArgumentsIteratorGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  DisallowHeapAllocation no_allocation;
+  DisallowGarbageCollection no_gc;
   HandleScope scope(isolate);
   Object result = isolate->native_context()->array_values_iterator();
   info.GetReturnValue().Set(Utils::ToLocal(Handle<Object>(result, isolate)));
@@ -147,9 +154,8 @@ Handle<AccessorInfo> Accessors::MakeArgumentsIteratorInfo(Isolate* isolate) {
 void Accessors::ArrayLengthGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kArrayLengthGetter);
-  DisallowHeapAllocation no_allocation;
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kArrayLengthGetter);
+  DisallowGarbageCollection no_gc;
   HandleScope scope(isolate);
   JSArray holder = JSArray::cast(*Utils::OpenHandle(*info.Holder()));
   Object result = holder.length();
@@ -160,8 +166,7 @@ void Accessors::ArrayLengthSetter(
     v8::Local<v8::Name> name, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kArrayLengthSetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kArrayLengthSetter);
   HandleScope scope(isolate);
 
   DCHECK(Utils::OpenHandle(*name)->SameValue(
@@ -179,13 +184,14 @@ void Accessors::ArrayLengthSetter(
     return;
   }
 
-  if (!was_readonly && V8_UNLIKELY(JSArray::HasReadOnlyLength(array)) &&
-      length != array->length().Number()) {
+  if (!was_readonly && V8_UNLIKELY(JSArray::HasReadOnlyLength(array))) {
     // AnythingToArrayLength() may have called setter re-entrantly and modified
     // its property descriptor. Don't perform this check if "length" was
     // previously readonly, as this may have been called during
     // DefineOwnPropertyIgnoreAttributes().
-    if (info.ShouldThrowOnError()) {
+    if (length == array->length().Number()) {
+      info.GetReturnValue().Set(true);
+    } else if (info.ShouldThrowOnError()) {
       Factory* factory = isolate->factory();
       isolate->Throw(*factory->NewTypeError(
           MessageTemplate::kStrictReadOnlyProperty, Utils::OpenHandle(*name),
@@ -197,7 +203,12 @@ void Accessors::ArrayLengthSetter(
     return;
   }
 
-  JSArray::SetLength(array, length);
+  if (JSArray::SetLength(array, length).IsNothing()) {
+    // TODO(victorgomes): AccessorNameBooleanSetterCallback does not handle
+    // exceptions.
+    FATAL("Fatal JavaScript invalid array length %u", length);
+    UNREACHABLE();
+  }
 
   uint32_t actual_new_len = 0;
   CHECK(array->length().ToArrayLength(&actual_new_len));
@@ -273,9 +284,8 @@ Handle<AccessorInfo> Accessors::MakeModuleNamespaceEntryInfo(
 void Accessors::StringLengthGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kStringLengthGetter);
-  DisallowHeapAllocation no_allocation;
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kStringLengthGetter);
+  DisallowGarbageCollection no_gc;
   HandleScope scope(isolate);
 
   // We have a slight impedance mismatch between the external API and the way we
@@ -306,6 +316,12 @@ Handle<AccessorInfo> Accessors::MakeStringLengthInfo(Isolate* isolate) {
 static Handle<Object> GetFunctionPrototype(Isolate* isolate,
                                            Handle<JSFunction> function) {
   if (!function->has_prototype()) {
+    // We lazily allocate .prototype for functions, which confuses debug
+    // evaluate which assumes we can write to temporary objects we allocated
+    // during evaluation. We err on the side of caution here and prevent the
+    // newly allocated prototype from going into the temporary objects set,
+    // which means writes to it will be considered a side effect.
+    DisableTemporaryObjectTracking no_temp_tracking(isolate->debug());
     Handle<JSObject> proto = isolate->factory()->NewFunctionPrototype(function);
     JSFunction::SetPrototype(function, proto);
   }
@@ -315,8 +331,7 @@ static Handle<Object> GetFunctionPrototype(Isolate* isolate,
 void Accessors::FunctionPrototypeGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kFunctionPrototypeGetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kFunctionPrototypeGetter);
   HandleScope scope(isolate);
   Handle<JSFunction> function =
       Handle<JSFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -329,8 +344,7 @@ void Accessors::FunctionPrototypeSetter(
     v8::Local<v8::Name> name, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kFunctionPrototypeSetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kFunctionPrototypeSetter);
   HandleScope scope(isolate);
   Handle<Object> value = Utils::OpenHandle(*val);
   Handle<JSFunction> object =
@@ -352,8 +366,7 @@ Handle<AccessorInfo> Accessors::MakeFunctionPrototypeInfo(Isolate* isolate) {
 void Accessors::FunctionLengthGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kFunctionLengthGetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kFunctionLengthGetter);
   HandleScope scope(isolate);
   Handle<JSFunction> function =
       Handle<JSFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -460,16 +473,9 @@ Handle<JSObject> GetFrameArguments(Isolate* isolate,
     return ArgumentsForInlinedFunction(frame, function_index);
   }
 
-  // Find the frame that holds the actual arguments passed to the function.
-  if (it->frame()->has_adapted_arguments()) {
-    it->AdvanceOneFrame();
-    DCHECK(it->frame()->is_arguments_adaptor());
-  }
-  frame = it->frame();
-
-  // Get the number of arguments and construct an arguments object
-  // mirror for the right frame and the underlying function.
-  const int length = frame->ComputeParametersCount();
+  // Construct an arguments object mirror for the right frame and the underlying
+  // function.
+  const int length = frame->GetActualArgumentCount();
   Handle<JSFunction> function(frame->function(), isolate);
   Handle<JSObject> arguments =
       isolate->factory()->NewArgumentsObject(function, length);
@@ -506,7 +512,6 @@ Handle<JSObject> Accessors::FunctionGetArguments(JavaScriptFrame* frame,
     return GetFrameArguments(isolate, &it, inlined_jsframe_index);
   }
   UNREACHABLE();  // Requested frame not found.
-  return Handle<JSObject>();
 }
 
 void Accessors::FunctionArgumentsGetter(
@@ -693,7 +698,8 @@ void Accessors::FunctionCallerGetter(
   MaybeHandle<JSFunction> maybe_caller;
   maybe_caller = FindCaller(isolate, function);
   Handle<JSFunction> caller;
-  if (maybe_caller.ToHandle(&caller)) {
+  // We don't support caller access with correctness fuzzing.
+  if (!FLAG_correctness_fuzzer_suppressions && maybe_caller.ToHandle(&caller)) {
     result = caller;
   } else {
     result = isolate->factory()->null_value();
@@ -713,8 +719,7 @@ Handle<AccessorInfo> Accessors::MakeFunctionCallerInfo(Isolate* isolate) {
 void Accessors::BoundFunctionLengthGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kBoundFunctionLengthGetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kBoundFunctionLengthGetter);
   HandleScope scope(isolate);
   Handle<JSBoundFunction> function =
       Handle<JSBoundFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -740,8 +745,7 @@ Handle<AccessorInfo> Accessors::MakeBoundFunctionLengthInfo(Isolate* isolate) {
 void Accessors::BoundFunctionNameGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              RuntimeCallCounterId::kBoundFunctionNameGetter);
+  RCS_SCOPE(isolate, RuntimeCallCounterId::kBoundFunctionNameGetter);
   HandleScope scope(isolate);
   Handle<JSBoundFunction> function =
       Handle<JSBoundFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -770,8 +774,8 @@ void Accessors::ErrorStackGetter(
       Handle<JSObject>::cast(Utils::OpenHandle(*info.Holder()));
 
   // Retrieve the stack trace. It can either be structured data in the form of
-  // a FrameArray, an already formatted stack trace (string) or whatever the
-  // "prepareStackTrace" callback produced.
+  // a FixedArray of StackFrameInfo objects, an already formatted stack trace
+  // (string) or whatever the "prepareStackTrace" callback produced.
 
   Handle<Object> stack_trace;
   Handle<Symbol> stack_trace_symbol = isolate->factory()->stack_trace_symbol();

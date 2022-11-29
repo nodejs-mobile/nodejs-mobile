@@ -20,7 +20,7 @@ static void CheckObject(Isolate* isolate, Handle<Object> obj,
   Handle<String> print_string = String::Flatten(
       isolate,
       Handle<String>::cast(Object::NoSideEffectsToString(isolate, obj)));
-  CHECK(print_string->IsOneByteEqualTo(CStrVector(string)));
+  CHECK(print_string->IsOneByteEqualTo(base::CStrVector(string)));
 }
 
 static void CheckSmi(Isolate* isolate, int value, const char* string) {
@@ -77,6 +77,11 @@ TEST(NoSideEffectsToString) {
               "Error: fisk hest");
   CheckObject(isolate, factory->NewJSObject(isolate->object_function()),
               "#<Object>");
+  CheckObject(
+      isolate,
+      factory->NewJSProxy(factory->NewJSObject(isolate->object_function()),
+                          factory->NewJSObject(isolate->object_function())),
+      "#<Object>");
 }
 
 TEST(EnumCache) {
@@ -255,6 +260,29 @@ TEST(EnumCache) {
   }
 }
 
+TEST(ObjectMethodsThatTruncateMinusZero) {
+  LocalContext env;
+  Isolate* isolate = CcTest::i_isolate();
+  Factory* factory = isolate->factory();
+  v8::HandleScope scope(env->GetIsolate());
+
+  Handle<Object> minus_zero = factory->NewNumber(-1.0 * 0.0);
+  CHECK(minus_zero->IsMinusZero());
+
+  Handle<Object> result =
+      Object::ToInteger(isolate, minus_zero).ToHandleChecked();
+  CHECK(result->IsZero());
+
+  result = Object::ToLength(isolate, minus_zero).ToHandleChecked();
+  CHECK(result->IsZero());
+
+  // Choose an error message template, doesn't matter which.
+  result = Object::ToIndex(isolate, minus_zero,
+                           MessageTemplate::kInvalidAtomicAccessIndex)
+               .ToHandleChecked();
+  CHECK(result->IsZero());
+}
+
 #define TEST_FUNCTION_KIND(Name)                                \
   TEST(Name) {                                                  \
     for (int i = 0; i < FunctionKind::kLastFunctionKind; i++) { \
@@ -277,6 +305,7 @@ TEST_FUNCTION_KIND(IsArrowFunction)
 bool FunctionKindIsAsyncGeneratorFunction(FunctionKind kind) {
   switch (kind) {
     case FunctionKind::kAsyncConciseGeneratorMethod:
+    case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kAsyncGeneratorFunction:
       return true;
     default:
@@ -288,7 +317,9 @@ TEST_FUNCTION_KIND(IsAsyncGeneratorFunction)
 bool FunctionKindIsGeneratorFunction(FunctionKind kind) {
   switch (kind) {
     case FunctionKind::kConciseGeneratorMethod:
+    case FunctionKind::kStaticConciseGeneratorMethod:
     case FunctionKind::kAsyncConciseGeneratorMethod:
+    case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kGeneratorFunction:
     case FunctionKind::kAsyncGeneratorFunction:
       return true;
@@ -303,7 +334,9 @@ bool FunctionKindIsAsyncFunction(FunctionKind kind) {
     case FunctionKind::kAsyncFunction:
     case FunctionKind::kAsyncArrowFunction:
     case FunctionKind::kAsyncConciseMethod:
+    case FunctionKind::kStaticAsyncConciseMethod:
     case FunctionKind::kAsyncConciseGeneratorMethod:
+    case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kAsyncGeneratorFunction:
       return true;
     default:
@@ -315,9 +348,13 @@ TEST_FUNCTION_KIND(IsAsyncFunction)
 bool FunctionKindIsConciseMethod(FunctionKind kind) {
   switch (kind) {
     case FunctionKind::kConciseMethod:
+    case FunctionKind::kStaticConciseMethod:
     case FunctionKind::kConciseGeneratorMethod:
+    case FunctionKind::kStaticConciseGeneratorMethod:
     case FunctionKind::kAsyncConciseMethod:
+    case FunctionKind::kStaticAsyncConciseMethod:
     case FunctionKind::kAsyncConciseGeneratorMethod:
+    case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kClassMembersInitializerFunction:
       return true;
     default:
@@ -329,7 +366,9 @@ TEST_FUNCTION_KIND(IsConciseMethod)
 bool FunctionKindIsAccessorFunction(FunctionKind kind) {
   switch (kind) {
     case FunctionKind::kGetterFunction:
+    case FunctionKind::kStaticGetterFunction:
     case FunctionKind::kSetterFunction:
+    case FunctionKind::kStaticSetterFunction:
       return true;
     default:
       return false;
@@ -386,16 +425,22 @@ TEST_FUNCTION_KIND(IsClassConstructor)
 bool FunctionKindIsConstructable(FunctionKind kind) {
   switch (kind) {
     case FunctionKind::kGetterFunction:
+    case FunctionKind::kStaticGetterFunction:
     case FunctionKind::kSetterFunction:
+    case FunctionKind::kStaticSetterFunction:
     case FunctionKind::kArrowFunction:
     case FunctionKind::kAsyncArrowFunction:
     case FunctionKind::kAsyncFunction:
     case FunctionKind::kAsyncConciseMethod:
+    case FunctionKind::kStaticAsyncConciseMethod:
     case FunctionKind::kAsyncConciseGeneratorMethod:
+    case FunctionKind::kStaticAsyncConciseGeneratorMethod:
     case FunctionKind::kAsyncGeneratorFunction:
     case FunctionKind::kGeneratorFunction:
     case FunctionKind::kConciseGeneratorMethod:
+    case FunctionKind::kStaticConciseGeneratorMethod:
     case FunctionKind::kConciseMethod:
+    case FunctionKind::kStaticConciseMethod:
     case FunctionKind::kClassMembersInitializerFunction:
       return false;
     default:

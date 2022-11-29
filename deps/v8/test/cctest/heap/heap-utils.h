@@ -12,6 +12,22 @@ namespace v8 {
 namespace internal {
 namespace heap {
 
+class V8_NODISCARD TemporaryEmbedderHeapTracerScope {
+ public:
+  TemporaryEmbedderHeapTracerScope(v8::Isolate* isolate,
+                                   v8::EmbedderHeapTracer* tracer)
+      : isolate_(isolate) {
+    isolate_->SetEmbedderHeapTracer(tracer);
+  }
+
+  ~TemporaryEmbedderHeapTracerScope() {
+    isolate_->SetEmbedderHeapTracer(nullptr);
+  }
+
+ private:
+  v8::Isolate* const isolate_;
+};
+
 void SealCurrentObjects(Heap* heap);
 
 int FixedArrayLenFromSize(int size);
@@ -26,17 +42,14 @@ std::vector<Handle<FixedArray>> CreatePadding(
     Heap* heap, int padding_size, AllocationType allocation,
     int object_size = kMaxRegularHeapObjectSize);
 
-void AllocateAllButNBytes(
+bool FillCurrentPage(v8::internal::NewSpace* space,
+                     std::vector<Handle<FixedArray>>* out_handles = nullptr);
+
+bool FillCurrentPageButNBytes(
     v8::internal::NewSpace* space, int extra_bytes,
     std::vector<Handle<FixedArray>>* out_handles = nullptr);
 
-void FillCurrentPage(v8::internal::NewSpace* space,
-                     std::vector<Handle<FixedArray>>* out_handles = nullptr);
-
 // Helper function that simulates a full new-space in the heap.
-bool FillUpOnePage(v8::internal::NewSpace* space,
-                   std::vector<Handle<FixedArray>>* out_handles = nullptr);
-
 void SimulateFullSpace(v8::internal::NewSpace* space,
                        std::vector<Handle<FixedArray>>* out_handles = nullptr);
 
@@ -53,15 +66,29 @@ void GcAndSweep(Heap* heap, AllocationSpace space);
 
 void ForceEvacuationCandidate(Page* page);
 
-void InvokeScavenge();
+void InvokeScavenge(Isolate* isolate = nullptr);
 
-void InvokeMarkSweep();
+void InvokeMarkSweep(Isolate* isolate = nullptr);
+
+void GrowNewSpace(Heap* heap);
+
+void GrowNewSpaceToMaximumCapacity(Heap* heap);
 
 template <typename GlobalOrPersistent>
 bool InYoungGeneration(v8::Isolate* isolate, const GlobalOrPersistent& global) {
   v8::HandleScope scope(isolate);
   auto tmp = global.Get(isolate);
   return i::Heap::InYoungGeneration(*v8::Utils::OpenHandle(*tmp));
+}
+
+bool InCorrectGeneration(HeapObject object);
+
+template <typename GlobalOrPersistent>
+bool InCorrectGeneration(v8::Isolate* isolate,
+                         const GlobalOrPersistent& global) {
+  v8::HandleScope scope(isolate);
+  auto tmp = global.Get(isolate);
+  return InCorrectGeneration(*v8::Utils::OpenHandle(*tmp));
 }
 
 }  // namespace heap

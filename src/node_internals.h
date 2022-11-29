@@ -39,11 +39,6 @@
 #include <string>
 #include <vector>
 
-// Custom constants used by both node_constants.cc and node_zlib.cc
-#define Z_MIN_WINDOWBITS 8
-#define Z_MAX_WINDOWBITS 15
-#define Z_DEFAULT_WINDOWBITS 15
-
 struct sockaddr;
 
 namespace node {
@@ -55,7 +50,6 @@ class NativeModuleLoader;
 namespace per_process {
 extern Mutex env_var_mutex;
 extern uint64_t node_start_time;
-extern bool v8_is_profiling;
 }  // namespace per_process
 
 // Forward declaration
@@ -64,7 +58,7 @@ class Environment;
 // Convert a struct sockaddr to a { address: '1.2.3.4', port: 1234 } JS object.
 // Sets address and port properties on the info object and returns it.
 // If |info| is omitted, a new object is returned.
-v8::Local<v8::Object> AddressToJS(
+v8::MaybeLocal<v8::Object> AddressToJS(
     Environment* env,
     const sockaddr* addr,
     v8::Local<v8::Object> info = v8::Local<v8::Object>());
@@ -91,22 +85,15 @@ void PrintCaughtException(v8::Isolate* isolate,
                           const v8::TryCatch& try_catch);
 
 void ResetStdio();  // Safe to call more than once and from signal handlers.
-void SignalExit(int signo);
 #ifdef __POSIX__
-void RegisterSignalHandler(int signal,
-                           void (*handler)(int signal),
-                           bool reset_handler = false);
+void SignalExit(int signal, siginfo_t* info, void* ucontext);
 #endif
 
 std::string GetProcessTitle(const char* default_title);
 std::string GetHumanReadableProcessName();
 
-void InitializeContextRuntime(v8::Local<v8::Context>);
+v8::Maybe<bool> InitializeContextRuntime(v8::Local<v8::Context> context);
 bool InitializePrimordials(v8::Local<v8::Context> context);
-
-namespace task_queue {
-void PromiseRejectCallback(v8::PromiseRejectMessage message);
-}  // namespace task_queue
 
 class NodeArrayBufferAllocator : public ArrayBufferAllocator {
  public:
@@ -115,7 +102,7 @@ class NodeArrayBufferAllocator : public ArrayBufferAllocator {
   void* Allocate(size_t size) override;  // Defined in src/node.cc
   void* AllocateUninitialized(size_t size) override;
   void Free(void* data, size_t size) override;
-  virtual void* Reallocate(void* data, size_t old_size, size_t size);
+  void* Reallocate(void* data, size_t old_size, size_t size) override;
   virtual void RegisterPointer(void* data, size_t size) {
     total_mem_usage_.fetch_add(size, std::memory_order_relaxed);
   }
@@ -131,6 +118,10 @@ class NodeArrayBufferAllocator : public ArrayBufferAllocator {
  private:
   uint32_t zero_fill_field_ = 1;  // Boolean but exposed as uint32 to JS land.
   std::atomic<size_t> total_mem_usage_ {0};
+
+  // Delegate to V8's allocator for compatibility with the V8 memory cage.
+  std::unique_ptr<v8::ArrayBuffer::Allocator> allocator_{
+      v8::ArrayBuffer::Allocator::NewDefaultAllocator()};
 };
 
 class DebuggingArrayBufferAllocator final : public NodeArrayBufferAllocator {
@@ -163,8 +154,7 @@ v8::MaybeLocal<v8::Object> New(Environment* env,
 // ArrayBuffer::Allocator().
 v8::MaybeLocal<v8::Object> New(Environment* env,
                                char* data,
-                               size_t length,
-                               bool uses_malloc);
+                               size_t length);
 // Creates a Buffer instance over an existing ArrayBuffer.
 v8::MaybeLocal<v8::Uint8Array> New(Environment* env,
                                    v8::Local<v8::ArrayBuffer> ab,
@@ -186,7 +176,7 @@ static v8::MaybeLocal<v8::Object> New(Environment* env,
   const size_t len_in_bytes = buf->length() * sizeof(buf->out()[0]);
 
   if (buf->IsAllocated())
-    ret = New(env, src, len_in_bytes, true);
+    ret = New(env, src, len_in_bytes);
   else if (!buf->IsInvalidated())
     ret = Copy(env, src, len_in_bytes);
 
@@ -208,6 +198,12 @@ v8::MaybeLocal<v8::Value> InternalMakeCallback(
     int argc,
     v8::Local<v8::Value> argv[],
     async_context asyncContext);
+
+v8::MaybeLocal<v8::Value> MakeSyncCallback(v8::Isolate* isolate,
+                                           v8::Local<v8::Object> recv,
+                                           v8::Local<v8::Function> callback,
+                                           int argc,
+                                           v8::Local<v8::Value> argv[]);
 
 class InternalCallbackScope {
  public:
@@ -291,10 +287,13 @@ class ThreadPoolWork {
 
 #if defined(__POSIX__) && !(defined(__ANDROID__) && __ANDROID_API__ < 21) && !defined(__CloudABI__)  // NOLINT(whitespace/line_length)
 #define NODE_IMPLEMENTS_POSIX_CREDENTIALS 1
-#endif  // __POSIX__ && !defined(__ANDROID__) && !defined(__CloudABI__)
+#endif  // defined(__POSIX__) && !defined(__ANDROID__) && !defined(__CloudABI__)
 
 namespace credentials {
-bool SafeGetenv(const char* key, std::string* text, Environment* env = nullptr);
+bool SafeGetenv(const char* key,
+                std::string* text,
+                std::shared_ptr<KVStore> env_vars = nullptr,
+                v8::Isolate* isolate = nullptr);
 }  // namespace credentials
 
 void DefineZlibConstants(v8::Local<v8::Object> target);
@@ -319,8 +318,23 @@ struct InitializationResult {
   std::vector<std::string> exec_args;
   bool early_return = false;
 };
-InitializationResult InitializeOncePerProcess(int argc, char** argv);
-void TearDownOncePerProcess();
+
+enum InitializationSettingsFlags : uint64_t {
+  kDefaultInitialization = 1 << 0,
+  kInitializeV8 = 1 << 1,
+  kRunPlatformInit = 1 << 2,
+  kInitOpenSSL = 1 << 3
+};
+
+// TODO(codebytere): eventually document and expose to embedders.
+InitializationResult NODE_EXTERN_PRIVATE InitializeOncePerProcess(int argc,
+                                                                  char** argv);
+InitializationResult NODE_EXTERN_PRIVATE InitializeOncePerProcess(
+    int argc,
+    char** argv,
+    InitializationSettingsFlags flags,
+    ProcessFlags::Flags process_flags = ProcessFlags::kNoFlags);
+void NODE_EXTERN_PRIVATE TearDownOncePerProcess();
 void SetIsolateErrorHandlers(v8::Isolate* isolate, const IsolateSettings& s);
 void SetIsolateMiscHandlers(v8::Isolate* isolate, const IsolateSettings& s);
 void SetIsolateCreateParamsForNode(v8::Isolate::CreateParams* params);
@@ -372,22 +386,9 @@ class DiagnosticFilename {
   std::string filename_;
 };
 
-class TraceEventScope {
- public:
-  TraceEventScope(const char* category,
-                  const char* name,
-                  void* id) : category_(category), name_(name), id_(id) {
-    TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(category_, name_, id_);
-  }
-  ~TraceEventScope() {
-    TRACE_EVENT_NESTABLE_ASYNC_END0(category_, name_, id_);
-  }
-
- private:
-  const char* category_;
-  const char* name_;
-  void* id_;
-};
+namespace heap {
+bool WriteSnapshot(v8::Isolate* isolate, const char* filename);
+}
 
 namespace heap {
 
@@ -402,6 +403,8 @@ BaseObjectPtr<AsyncWrap> CreateHeapSnapshotStream(
 namespace fs {
 std::string Basename(const std::string& str, const std::string& extension);
 }  // namespace fs
+
+node_module napi_module_to_node_module(const napi_module* mod);
 
 }  // namespace node
 

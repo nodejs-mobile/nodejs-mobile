@@ -44,26 +44,27 @@ from testrunner.outproc import test262
 
 # TODO(littledan): move the flag mapping into the status file
 FEATURE_FLAGS = {
-  'Intl.DateTimeFormat-datetimestyle': '--harmony-intl-datetime-style',
-  'Intl.DateTimeFormat-formatRange': '--harmony-intl-date-format-range',
-  'Intl.NumberFormat-unified': '--harmony-intl-numberformat-unified',
-  'Intl.Segmenter': '--harmony-intl-segmenter',
   'Intl.DateTimeFormat-dayPeriod': '--harmony-intl-dateformat-day-period',
-  'Intl.DateTimeFormat-quarter': '--harmony-intl-dateformat-quarter',
-  'Intl.DateTimeFormat-fractionalSecondDigits': '--harmony-intl-dateformat-fractional-second-digits',
+  'Intl.Locale-info': '--harmony_intl_locale_info',
+  'Intl.DateTimeFormat-extend-timezonename': '--harmony_intl_more_timezone',
+  'Intl.DisplayNames-v2': '--harmony_intl_displaynames_v2',
   'Symbol.prototype.description': '--harmony-symbol-description',
-  'export-star-as-namespace-from-module': '--harmony-namespace-exports',
-  'BigInt': '--harmony-intl-bigint',
-  'Promise.allSettled': '--harmony-promise-all-settled',
-  'FinalizationGroup': '--harmony-weak-refs',
-  'WeakRef': '--harmony-weak-refs',
+  'FinalizationRegistry': '--harmony-weak-refs-with-cleanup-some',
+  'WeakRef': '--harmony-weak-refs-with-cleanup-some',
   'host-gc-required': '--expose-gc-as=v8GC',
-  'optional-chaining': '--harmony-optional-chaining',
+  'IsHTMLDDA': '--allow-natives-syntax',
+  'top-level-await': '--harmony-top-level-await',
+  'regexp-match-indices': '--harmony-regexp-match-indices',
+  'regexp-named-groups': '--harmony-regexp-match-indices',
+  'error-cause': '--harmony-error-cause',
+  'import-assertions': '--harmony-import-assertions',
+  'Object.hasOwn': '--harmony-object-has-own',
+  'class-static-block': '--harmony-class-static-blocks',
+  'resizable-arraybuffer': '--harmony-rab-gsab',
+  'array-find-from-last': '--harmony_array_find_last',
 }
 
-SKIPPED_FEATURES = set(['class-methods-private',
-                        'class-static-methods-private',
-                        'top-level-await'])
+SKIPPED_FEATURES = set([])
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -203,6 +204,8 @@ class TestCase(testcase.D8TestCase):
         list(self.suite.harness) +
         ([os.path.join(self.suite.root, "harness-agent.js")]
          if self.__needs_harness_agent() else []) +
+        ([os.path.join(self.suite.root, "harness-ishtmldda.js")]
+         if "IsHTMLDDA" in self.test_record.get("features", []) else []) +
         ([os.path.join(self.suite.root, "harness-adapt-donotevaluate.js")]
          if self.fail_phase_only and not self._fail_phase_reverse else []) +
         self._get_includes() +
@@ -212,6 +215,7 @@ class TestCase(testcase.D8TestCase):
 
   def _get_suite_flags(self):
     return (
+        ["--ignore-unhandled-promises"] +
         (["--throws"] if "negative" in self.test_record else []) +
         (["--allow-natives-syntax"]
          if "detachArrayBuffer.js" in self.test_record.get("includes", [])

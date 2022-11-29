@@ -14,7 +14,6 @@ bool IsSubtype(MachineRepresentation rep1, MachineRepresentation rep2) {
     case MachineRepresentation::kTaggedSigned:  // Fall through.
     case MachineRepresentation::kTaggedPointer:
       return rep2 == MachineRepresentation::kTagged;
-    case MachineRepresentation::kCompressedSigned:  // Fall through.
     case MachineRepresentation::kCompressedPointer:
       return rep2 == MachineRepresentation::kCompressed;
     default:
@@ -52,12 +51,12 @@ const char* MachineReprToString(MachineRepresentation rep) {
       return "kRepTaggedPointer";
     case MachineRepresentation::kTagged:
       return "kRepTagged";
-    case MachineRepresentation::kCompressedSigned:
-      return "kRepCompressedSigned";
     case MachineRepresentation::kCompressedPointer:
       return "kRepCompressedPointer";
     case MachineRepresentation::kCompressed:
       return "kRepCompressed";
+    case MachineRepresentation::kMapWord:
+      return "kRepMapWord";
   }
   UNREACHABLE();
 }
@@ -94,7 +93,6 @@ std::ostream& operator<<(std::ostream& os, MachineType type) {
   } else {
     return os << type.representation() << "|" << type.semantic();
   }
-  return os;
 }
 
 }  // namespace internal

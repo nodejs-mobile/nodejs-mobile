@@ -38,6 +38,7 @@
 #define V8_CODEGEN_IA32_ASSEMBLER_IA32_H_
 
 #include <deque>
+#include <memory>
 
 #include "src/codegen/assembler.h"
 #include "src/codegen/ia32/constants-ia32.h"
@@ -234,6 +235,12 @@ class V8_EXPORT_PRIVATE Operand {
   explicit Operand(Register base, int32_t disp,
                    RelocInfo::Mode rmode = RelocInfo::NONE);
 
+  // [rip + disp/r]
+  explicit Operand(Label* label) {
+    set_modrm(0, ebp);
+    set_dispr(reinterpret_cast<intptr_t>(label), RelocInfo::INTERNAL_REFERENCE);
+  }
+
   // [base + index*scale + disp/r]
   explicit Operand(Register base, Register index, ScaleFactor scale,
                    int32_t disp, RelocInfo::Mode rmode = RelocInfo::NONE);
@@ -292,7 +299,7 @@ class V8_EXPORT_PRIVATE Operand {
   // Only valid if len_ > 4.
   RelocInfo::Mode rmode_ = RelocInfo::NONE;
 
-  // TODO(clemensh): Get rid of this friendship, or make Operand immutable.
+  // TODO(clemensb): Get rid of this friendship, or make Operand immutable.
   friend class Assembler;
 };
 ASSERT_TRIVIALLY_COPYABLE(Operand);
@@ -342,8 +349,8 @@ class Displacement {
  private:
   int data_;
 
-  using TypeField = BitField<Type, 0, 2>;
-  using NextField = BitField<int, 2, 32 - 2>;
+  using TypeField = base::BitField<Type, 0, 2>;
+  using NextField = base::BitField<int, 2, 32 - 2>;
 
   void init(Label* L, Type type);
 };
@@ -360,6 +367,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   // otherwise valid instructions.)
   // This allows for a single, fast space check per instruction.
   static constexpr int kGap = 32;
+  STATIC_ASSERT(AssemblerBase::kMinimalBufferSize >= 2 * kGap);
 
  public:
   // Create an assembler. Instructions and relocation information are emitted
@@ -371,7 +379,6 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   // own buffer. Otherwise it takes ownership of the provided buffer.
   explicit Assembler(const AssemblerOptions&,
                      std::unique_ptr<AssemblerBuffer> = {});
-  virtual ~Assembler() {}
 
   // GetCode emits any pending (non-emitted) code and fills the descriptor desc.
   static constexpr int kNoHandlerTable = 0;
@@ -385,10 +392,26 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     GetCode(isolate, desc, kNoSafepointTable, kNoHandlerTable);
   }
 
+  // This function is called when on-heap-compilation invariants are
+  // invalidated. For instance, when the assembler buffer grows or a GC happens
+  // between Code object allocation and Code object finalization.
+  void FixOnHeapReferences(bool update_embedded_objects = true);
+
+  // This function is called when we fallback from on-heap to off-heap
+  // compilation and patch on-heap references to handles.
+  void FixOnHeapReferencesToHandles();
+
   void FinalizeJumpOptimizationInfo();
 
   // Unused on this architecture.
   void MaybeEmitOutOfLineConstantPool() {}
+
+#ifdef DEBUG
+  bool EmbeddedObjectMatches(int pc_offset, Handle<Object> object) {
+    return *reinterpret_cast<uint32_t*>(buffer_->start() + pc_offset) ==
+           (IsOnHeap() ? object->ptr() : object.address());
+  }
+#endif
 
   // Read/Modify the code target in the branch/call instruction at pc.
   // The isolate argument is unused (and may be nullptr) when skipping flushing.
@@ -457,6 +480,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void Nop(int bytes = 1);
   // Aligns code to something that's optimal for a jump target for the platform.
   void CodeTargetAlign();
+  void LoopHeaderAlign() { CodeTargetAlign(); }
 
   // Stack
   void pushad();
@@ -473,7 +497,6 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void pop(Register dst);
   void pop(Operand dst);
 
-  void enter(const Immediate& size);
   void leave();
 
   // Moves
@@ -512,6 +535,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void movzx_w(Register dst, Operand src);
 
   void movq(XMMRegister dst, Operand src);
+
   // Conditional moves
   void cmov(Condition cc, Register dst, Register src) {
     cmov(cc, dst, Operand(src));
@@ -525,6 +549,10 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void rep_movs();
   void rep_stos();
   void stos();
+
+  void xadd(Operand dst, Register src);
+  void xadd_b(Operand dst, Register src);
+  void xadd_w(Operand dst, Register src);
 
   // Exchange
   void xchg(Register dst, Register src);
@@ -632,6 +660,11 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   void rcl(Register dst, uint8_t imm8);
   void rcr(Register dst, uint8_t imm8);
+
+  void rol(Register dst, uint8_t imm8) { rol(Operand(dst), imm8); }
+  void rol(Operand dst, uint8_t imm8);
+  void rol_cl(Register dst) { rol_cl(Operand(dst)); }
+  void rol_cl(Operand dst);
 
   void ror(Register dst, uint8_t imm8) { ror(Operand(dst), imm8); }
   void ror(Operand dst, uint8_t imm8);
@@ -849,56 +882,61 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void movups(XMMRegister dst, Operand src);
   void movups(Operand dst, XMMRegister src);
   void shufps(XMMRegister dst, XMMRegister src, byte imm8);
+  void shufpd(XMMRegister dst, XMMRegister src, byte imm8);
+
+  void movhlps(XMMRegister dst, XMMRegister src);
+  void movlhps(XMMRegister dst, XMMRegister src);
+  void movlps(XMMRegister dst, Operand src);
+  void movlps(Operand dst, XMMRegister src);
+  void movhps(XMMRegister dst, Operand src);
+  void movhps(Operand dst, XMMRegister src);
 
   void maxss(XMMRegister dst, XMMRegister src) { maxss(dst, Operand(src)); }
   void maxss(XMMRegister dst, Operand src);
   void minss(XMMRegister dst, XMMRegister src) { minss(dst, Operand(src)); }
   void minss(XMMRegister dst, Operand src);
 
-  void andps(XMMRegister dst, Operand src);
-  void andps(XMMRegister dst, XMMRegister src) { andps(dst, Operand(src)); }
-  void andnps(XMMRegister dst, Operand src);
-  void andnps(XMMRegister dst, XMMRegister src) { andnps(dst, Operand(src)); }
-  void xorps(XMMRegister dst, Operand src);
-  void xorps(XMMRegister dst, XMMRegister src) { xorps(dst, Operand(src)); }
-  void orps(XMMRegister dst, Operand src);
-  void orps(XMMRegister dst, XMMRegister src) { orps(dst, Operand(src)); }
-
-  void addps(XMMRegister dst, Operand src);
-  void addps(XMMRegister dst, XMMRegister src) { addps(dst, Operand(src)); }
-  void subps(XMMRegister dst, Operand src);
-  void subps(XMMRegister dst, XMMRegister src) { subps(dst, Operand(src)); }
-  void mulps(XMMRegister dst, Operand src);
-  void mulps(XMMRegister dst, XMMRegister src) { mulps(dst, Operand(src)); }
-  void divps(XMMRegister dst, Operand src);
-  void divps(XMMRegister dst, XMMRegister src) { divps(dst, Operand(src)); }
   void rcpps(XMMRegister dst, Operand src);
   void rcpps(XMMRegister dst, XMMRegister src) { rcpps(dst, Operand(src)); }
+  void sqrtps(XMMRegister dst, Operand src);
+  void sqrtps(XMMRegister dst, XMMRegister src) { sqrtps(dst, Operand(src)); }
   void rsqrtps(XMMRegister dst, Operand src);
   void rsqrtps(XMMRegister dst, XMMRegister src) { rsqrtps(dst, Operand(src)); }
   void haddps(XMMRegister dst, Operand src);
   void haddps(XMMRegister dst, XMMRegister src) { haddps(dst, Operand(src)); }
-
-  void minps(XMMRegister dst, Operand src);
-  void minps(XMMRegister dst, XMMRegister src) { minps(dst, Operand(src)); }
-  void maxps(XMMRegister dst, Operand src);
-  void maxps(XMMRegister dst, XMMRegister src) { maxps(dst, Operand(src)); }
+  void sqrtpd(XMMRegister dst, Operand src) {
+    sse2_instr(dst, src, 0x66, 0x0F, 0x51);
+  }
+  void sqrtpd(XMMRegister dst, XMMRegister src) { sqrtpd(dst, Operand(src)); }
 
   void cmpps(XMMRegister dst, Operand src, uint8_t cmp);
   void cmpps(XMMRegister dst, XMMRegister src, uint8_t cmp) {
     cmpps(dst, Operand(src), cmp);
   }
-#define SSE_CMP_P(instr, imm8)                       \
-  void instr##ps(XMMRegister dst, XMMRegister src) { \
-    cmpps(dst, Operand(src), imm8);                  \
-  }                                                  \
-  void instr##ps(XMMRegister dst, Operand src) { cmpps(dst, src, imm8); }
+  void cmppd(XMMRegister dst, Operand src, uint8_t cmp);
+  void cmppd(XMMRegister dst, XMMRegister src, uint8_t cmp) {
+    cmppd(dst, Operand(src), cmp);
+  }
 
-  SSE_CMP_P(cmpeq, 0x0)
-  SSE_CMP_P(cmplt, 0x1)
-  SSE_CMP_P(cmple, 0x2)
-  SSE_CMP_P(cmpneq, 0x4)
+// Packed floating-point comparison operations.
+#define PACKED_CMP_LIST(V) \
+  V(cmpeq, 0x0)            \
+  V(cmplt, 0x1)            \
+  V(cmple, 0x2)            \
+  V(cmpunord, 0x3)         \
+  V(cmpneq, 0x4)
 
+#define SSE_CMP_P(instr, imm8)                                            \
+  void instr##ps(XMMRegister dst, XMMRegister src) {                      \
+    cmpps(dst, Operand(src), imm8);                                       \
+  }                                                                       \
+  void instr##ps(XMMRegister dst, Operand src) { cmpps(dst, src, imm8); } \
+  void instr##pd(XMMRegister dst, XMMRegister src) {                      \
+    cmppd(dst, Operand(src), imm8);                                       \
+  }                                                                       \
+  void instr##pd(XMMRegister dst, Operand src) { cmppd(dst, src, imm8); }
+
+  PACKED_CMP_LIST(SSE_CMP_P)
 #undef SSE_CMP_P
 
   // SSE2 instructions
@@ -928,10 +966,14 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     cvtdq2ps(dst, Operand(src));
   }
   void cvtdq2ps(XMMRegister dst, Operand src);
+  void cvtdq2pd(XMMRegister dst, XMMRegister src);
+  void cvtps2pd(XMMRegister dst, XMMRegister src);
+  void cvtpd2ps(XMMRegister dst, XMMRegister src);
   void cvttps2dq(XMMRegister dst, XMMRegister src) {
     cvttps2dq(dst, Operand(src));
   }
   void cvttps2dq(XMMRegister dst, Operand src);
+  void cvttpd2dq(XMMRegister dst, XMMRegister src);
 
   void addsd(XMMRegister dst, XMMRegister src) { addsd(dst, Operand(src)); }
   void addsd(XMMRegister dst, Operand src);
@@ -941,15 +983,8 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void mulsd(XMMRegister dst, Operand src);
   void divsd(XMMRegister dst, XMMRegister src) { divsd(dst, Operand(src)); }
   void divsd(XMMRegister dst, Operand src);
-  void xorpd(XMMRegister dst, XMMRegister src) { xorpd(dst, Operand(src)); }
-  void xorpd(XMMRegister dst, Operand src);
   void sqrtsd(XMMRegister dst, XMMRegister src) { sqrtsd(dst, Operand(src)); }
   void sqrtsd(XMMRegister dst, Operand src);
-
-  void andpd(XMMRegister dst, XMMRegister src) { andpd(dst, Operand(src)); }
-  void andpd(XMMRegister dst, Operand src);
-  void orpd(XMMRegister dst, XMMRegister src) { orpd(dst, Operand(src)); }
-  void orpd(XMMRegister dst, Operand src);
 
   void ucomisd(XMMRegister dst, XMMRegister src) { ucomisd(dst, Operand(src)); }
   void ucomisd(XMMRegister dst, Operand src);
@@ -957,8 +992,18 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void roundss(XMMRegister dst, XMMRegister src, RoundingMode mode);
   void roundsd(XMMRegister dst, XMMRegister src, RoundingMode mode);
 
+  void movapd(XMMRegister dst, XMMRegister src) { movapd(dst, Operand(src)); }
+  void movapd(XMMRegister dst, Operand src) {
+    sse2_instr(dst, src, 0x66, 0x0F, 0x28);
+  }
+  void movupd(XMMRegister dst, Operand src) {
+    sse2_instr(dst, src, 0x66, 0x0F, 0x10);
+  }
+
   void movmskpd(Register dst, XMMRegister src);
   void movmskps(Register dst, XMMRegister src);
+
+  void pmovmskb(Register dst, XMMRegister src);
 
   void cmpltsd(XMMRegister dst, XMMRegister src);
 
@@ -969,8 +1014,10 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   void movdqa(XMMRegister dst, Operand src);
   void movdqa(Operand dst, XMMRegister src);
+  void movdqa(XMMRegister dst, XMMRegister src);
   void movdqu(XMMRegister dst, Operand src);
   void movdqu(Operand dst, XMMRegister src);
+  void movdqu(XMMRegister dst, XMMRegister src);
   void movdq(bool aligned, XMMRegister dst, Operand src) {
     if (aligned) {
       movdqa(dst, src);
@@ -990,7 +1037,11 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void movss(XMMRegister dst, Operand src);
   void movss(Operand dst, XMMRegister src);
   void movss(XMMRegister dst, XMMRegister src) { movss(dst, Operand(src)); }
+
+  void extractps(Operand dst, XMMRegister src, byte imm8);
   void extractps(Register dst, XMMRegister src, byte imm8);
+
+  void pcmpgtq(XMMRegister dst, XMMRegister src);
 
   void psllw(XMMRegister reg, uint8_t shift);
   void pslld(XMMRegister reg, uint8_t shift);
@@ -999,9 +1050,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void psraw(XMMRegister reg, uint8_t shift);
   void psrad(XMMRegister reg, uint8_t shift);
   void psllq(XMMRegister reg, uint8_t shift);
-  void psllq(XMMRegister dst, XMMRegister src);
   void psrlq(XMMRegister reg, uint8_t shift);
-  void psrlq(XMMRegister dst, XMMRegister src);
 
   void pshufhw(XMMRegister dst, XMMRegister src, uint8_t shuffle) {
     pshufhw(dst, Operand(src), shuffle);
@@ -1030,6 +1079,11 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     pextrb(Operand(dst), src, offset);
   }
   void pextrb(Operand dst, XMMRegister src, uint8_t offset);
+  // SSE3 instructions
+  void movddup(XMMRegister dst, Operand src);
+  void movddup(XMMRegister dst, XMMRegister src) { movddup(dst, Operand(src)); }
+  void movshdup(XMMRegister dst, XMMRegister src);
+
   // Use SSE4_1 encoding for pextrw reg, xmm, imm8 for consistency
   void pextrw(Register dst, XMMRegister src, uint8_t offset) {
     pextrw(Operand(dst), src, offset);
@@ -1056,6 +1110,9 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     pinsrd(dst, Operand(src), offset);
   }
   void pinsrd(XMMRegister dst, Operand src, uint8_t offset);
+
+  void roundps(XMMRegister dst, XMMRegister src, RoundingMode mode);
+  void roundpd(XMMRegister dst, XMMRegister src, RoundingMode mode);
 
   // AVX instructions
   void vfmadd132sd(XMMRegister dst, XMMRegister src1, XMMRegister src2) {
@@ -1298,6 +1355,10 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void vrcpps(XMMRegister dst, Operand src) {
     vinstr(0x53, dst, xmm0, src, kNone, k0F, kWIG);
   }
+  void vsqrtps(XMMRegister dst, XMMRegister src) { vsqrtps(dst, Operand(src)); }
+  void vsqrtps(XMMRegister dst, Operand src) {
+    vinstr(0x51, dst, xmm0, src, kNone, k0F, kWIG);
+  }
   void vrsqrtps(XMMRegister dst, XMMRegister src) {
     vrsqrtps(dst, Operand(src));
   }
@@ -1310,21 +1371,65 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void vhaddps(XMMRegister dst, XMMRegister src1, Operand src2) {
     vinstr(0x7C, dst, src1, src2, kF2, k0F, kWIG);
   }
+  void vsqrtpd(XMMRegister dst, XMMRegister src) { vsqrtpd(dst, Operand(src)); }
+  void vsqrtpd(XMMRegister dst, Operand src) {
+    vinstr(0x51, dst, xmm0, src, k66, k0F, kWIG);
+  }
+  void vmovss(Operand dst, XMMRegister src) {
+    vinstr(0x11, src, xmm0, dst, kF3, k0F, kWIG);
+  }
+  void vmovss(XMMRegister dst, XMMRegister src1, XMMRegister src2) {
+    vinstr(0x10, dst, src1, src2, kF3, k0F, kWIG);
+  }
+  void vmovss(XMMRegister dst, Operand src) {
+    vinstr(0x10, dst, xmm0, src, kF3, k0F, kWIG);
+  }
+  void vmovsd(Operand dst, XMMRegister src) {
+    vinstr(0x11, src, xmm0, dst, kF2, k0F, kWIG);
+  }
+  void vmovsd(XMMRegister dst, XMMRegister src1, XMMRegister src2) {
+    vinstr(0x10, dst, src1, src2, kF2, k0F, kWIG);
+  }
+  void vmovsd(XMMRegister dst, Operand src) {
+    vinstr(0x10, dst, xmm0, src, kF2, k0F, kWIG);
+  }
+
+  void vextractps(Operand dst, XMMRegister src, byte imm8);
+
+  void vpcmpgtq(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+
   void vmovaps(XMMRegister dst, XMMRegister src) { vmovaps(dst, Operand(src)); }
   void vmovaps(XMMRegister dst, Operand src) { vps(0x28, dst, xmm0, src); }
+  void vmovapd(XMMRegister dst, XMMRegister src) { vmovapd(dst, Operand(src)); }
+  void vmovapd(XMMRegister dst, Operand src) { vpd(0x28, dst, xmm0, src); }
+  void vmovups(Operand dst, XMMRegister src) { vps(0x11, src, xmm0, dst); }
   void vmovups(XMMRegister dst, XMMRegister src) { vmovups(dst, Operand(src)); }
   void vmovups(XMMRegister dst, Operand src) { vps(0x10, dst, xmm0, src); }
+  void vmovupd(XMMRegister dst, Operand src) { vpd(0x10, dst, xmm0, src); }
   void vshufps(XMMRegister dst, XMMRegister src1, XMMRegister src2, byte imm8) {
     vshufps(dst, src1, Operand(src2), imm8);
   }
   void vshufps(XMMRegister dst, XMMRegister src1, Operand src2, byte imm8);
+  void vshufpd(XMMRegister dst, XMMRegister src1, XMMRegister src2, byte imm8) {
+    vshufpd(dst, src1, Operand(src2), imm8);
+  }
+  void vshufpd(XMMRegister dst, XMMRegister src1, Operand src2, byte imm8);
+
+  void vmovhlps(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void vmovlhps(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void vmovlps(XMMRegister dst, XMMRegister src1, Operand src2);
+  void vmovlps(Operand dst, XMMRegister src);
+  void vmovhps(XMMRegister dst, XMMRegister src1, Operand src2);
+  void vmovhps(Operand dst, XMMRegister src);
 
   void vpsllw(XMMRegister dst, XMMRegister src, uint8_t imm8);
   void vpslld(XMMRegister dst, XMMRegister src, uint8_t imm8);
+  void vpsllq(XMMRegister dst, XMMRegister src, uint8_t imm8);
   void vpsrlw(XMMRegister dst, XMMRegister src, uint8_t imm8);
   void vpsrld(XMMRegister dst, XMMRegister src, uint8_t imm8);
   void vpsraw(XMMRegister dst, XMMRegister src, uint8_t imm8);
   void vpsrad(XMMRegister dst, XMMRegister src, uint8_t imm8);
+  void vpsrlq(XMMRegister dst, XMMRegister src, uint8_t imm8);
 
   void vpshufhw(XMMRegister dst, XMMRegister src, uint8_t shuffle) {
     vpshufhw(dst, Operand(src), shuffle);
@@ -1338,6 +1443,13 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     vpshufd(dst, Operand(src), shuffle);
   }
   void vpshufd(XMMRegister dst, Operand src, uint8_t shuffle);
+
+  void vblendvps(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                 XMMRegister mask);
+  void vblendvpd(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                 XMMRegister mask);
+  void vpblendvb(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                 XMMRegister mask);
 
   void vpblendw(XMMRegister dst, XMMRegister src1, XMMRegister src2,
                 uint8_t mask) {
@@ -1386,11 +1498,23 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   }
   void vpinsrd(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t offset);
 
+  void vroundps(XMMRegister dst, XMMRegister src, RoundingMode mode);
+  void vroundpd(XMMRegister dst, XMMRegister src, RoundingMode mode);
+
   void vcvtdq2ps(XMMRegister dst, XMMRegister src) {
     vcvtdq2ps(dst, Operand(src));
   }
   void vcvtdq2ps(XMMRegister dst, Operand src) {
     vinstr(0x5B, dst, xmm0, src, kNone, k0F, kWIG);
+  }
+  void vcvtdq2pd(XMMRegister dst, XMMRegister src) {
+    vinstr(0xE6, dst, xmm0, src, kF3, k0F, kWIG);
+  }
+  void vcvtps2pd(XMMRegister dst, XMMRegister src) {
+    vinstr(0x5A, dst, xmm0, src, kNone, k0F, kWIG);
+  }
+  void vcvtpd2ps(XMMRegister dst, XMMRegister src) {
+    vinstr(0x5A, dst, xmm0, src, k66, k0F, kWIG);
   }
   void vcvttps2dq(XMMRegister dst, XMMRegister src) {
     vcvttps2dq(dst, Operand(src));
@@ -1398,7 +1522,28 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void vcvttps2dq(XMMRegister dst, Operand src) {
     vinstr(0x5B, dst, xmm0, src, kF3, k0F, kWIG);
   }
+  void vcvttpd2dq(XMMRegister dst, XMMRegister src) {
+    vinstr(0xE6, dst, xmm0, src, k66, k0F, kWIG);
+  }
 
+  void vmovddup(XMMRegister dst, Operand src) {
+    vinstr(0x12, dst, xmm0, src, kF2, k0F, kWIG);
+  }
+  void vmovddup(XMMRegister dst, XMMRegister src) {
+    vmovddup(dst, Operand(src));
+  }
+  void vmovshdup(XMMRegister dst, XMMRegister src) {
+    vinstr(0x16, dst, xmm0, src, kF3, k0F, kWIG);
+  }
+  void vbroadcastss(XMMRegister dst, XMMRegister src) {
+    vinstr(0x18, dst, xmm0, src, k66, k0F38, kW0, AVX2);
+  }
+  void vbroadcastss(XMMRegister dst, Operand src) {
+    vinstr(0x18, dst, xmm0, src, k66, k0F38, kW0);
+  }
+  void vmovdqa(XMMRegister dst, Operand src) {
+    vinstr(0x6F, dst, xmm0, src, k66, k0F, kWIG);
+  }
   void vmovdqu(XMMRegister dst, Operand src) {
     vinstr(0x6F, dst, xmm0, src, kF3, k0F, kWIG);
   }
@@ -1413,6 +1558,11 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void vmovd(Operand dst, XMMRegister src) {
     vinstr(0x7E, src, xmm0, dst, k66, k0F, kWIG);
   }
+
+  void vmovmskpd(Register dst, XMMRegister src);
+  void vmovmskps(Register dst, XMMRegister src);
+
+  void vpmovmskb(Register dst, XMMRegister src);
 
   // BMI instruction
   void andn(Register dst, Register src1, Register src2) {
@@ -1489,7 +1639,13 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   }
   void rorx(Register dst, Operand src, byte imm8);
 
+  // Implementation of packed single-precision floating-point SSE instructions.
+  void ps(byte op, XMMRegister dst, Operand src);
+  // Implementation of packed double-precision floating-point SSE instructions.
+  void pd(byte op, XMMRegister dst, Operand src);
+
 #define PACKED_OP_LIST(V) \
+  V(unpckl, 0x14)         \
   V(and, 0x54)            \
   V(andn, 0x55)           \
   V(or, 0x56)             \
@@ -1500,6 +1656,19 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   V(min, 0x5d)            \
   V(div, 0x5e)            \
   V(max, 0x5f)
+
+#define SSE_PACKED_OP_DECLARE(name, opcode)                             \
+  void name##ps(XMMRegister dst, XMMRegister src) {                     \
+    ps(opcode, dst, Operand(src));                                      \
+  }                                                                     \
+  void name##ps(XMMRegister dst, Operand src) { ps(opcode, dst, src); } \
+  void name##pd(XMMRegister dst, XMMRegister src) {                     \
+    pd(opcode, dst, Operand(src));                                      \
+  }                                                                     \
+  void name##pd(XMMRegister dst, Operand src) { pd(opcode, dst, src); }
+
+  PACKED_OP_LIST(SSE_PACKED_OP_DECLARE)
+#undef SSE_PACKED_OP_DECLARE
 
 #define AVX_PACKED_OP_DECLARE(name, opcode)                               \
   void v##name##ps(XMMRegister dst, XMMRegister src1, XMMRegister src2) { \
@@ -1516,24 +1685,32 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   }
 
   PACKED_OP_LIST(AVX_PACKED_OP_DECLARE)
+#undef AVX_PACKED_OP_DECLARE
+#undef PACKED_OP_LIST
+
   void vps(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
   void vpd(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
 
   void vcmpps(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t cmp);
-#define AVX_CMP_P(instr, imm8)                                          \
-  void instr##ps(XMMRegister dst, XMMRegister src1, XMMRegister src2) { \
-    vcmpps(dst, src1, Operand(src2), imm8);                             \
-  }                                                                     \
-  void instr##ps(XMMRegister dst, XMMRegister src1, Operand src2) {     \
-    vcmpps(dst, src1, src2, imm8);                                      \
+  void vcmppd(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t cmp);
+
+#define AVX_CMP_P(instr, imm8)                                             \
+  void v##instr##ps(XMMRegister dst, XMMRegister src1, XMMRegister src2) { \
+    vcmpps(dst, src1, Operand(src2), imm8);                                \
+  }                                                                        \
+  void v##instr##ps(XMMRegister dst, XMMRegister src1, Operand src2) {     \
+    vcmpps(dst, src1, src2, imm8);                                         \
+  }                                                                        \
+  void v##instr##pd(XMMRegister dst, XMMRegister src1, XMMRegister src2) { \
+    vcmppd(dst, src1, Operand(src2), imm8);                                \
+  }                                                                        \
+  void v##instr##pd(XMMRegister dst, XMMRegister src1, Operand src2) {     \
+    vcmppd(dst, src1, src2, imm8);                                         \
   }
 
-  AVX_CMP_P(vcmpeq, 0x0)
-  AVX_CMP_P(vcmplt, 0x1)
-  AVX_CMP_P(vcmple, 0x2)
-  AVX_CMP_P(vcmpneq, 0x4)
-
+  PACKED_CMP_LIST(AVX_CMP_P)
 #undef AVX_CMP_P
+#undef PACKED_CMP_LIST
 
 // Other SSE and AVX instructions
 #define DECLARE_SSE2_INSTRUCTION(instruction, prefix, escape, opcode) \
@@ -1568,6 +1745,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   }
 
   SSSE3_INSTRUCTION_LIST(DECLARE_SSSE3_INSTRUCTION)
+  SSSE3_UNOP_INSTRUCTION_LIST(DECLARE_SSSE3_INSTRUCTION)
 #undef DECLARE_SSSE3_INSTRUCTION
 
 #define DECLARE_SSE4_INSTRUCTION(instruction, prefix, escape1, escape2,     \
@@ -1581,6 +1759,9 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   SSE4_INSTRUCTION_LIST(DECLARE_SSE4_INSTRUCTION)
   SSE4_RM_INSTRUCTION_LIST(DECLARE_SSE4_INSTRUCTION)
+  DECLARE_SSE4_INSTRUCTION(blendvps, 66, 0F, 38, 14)
+  DECLARE_SSE4_INSTRUCTION(blendvpd, 66, 0F, 38, 15)
+  DECLARE_SSE4_INSTRUCTION(pblendvb, 66, 0F, 38, 10)
 #undef DECLARE_SSE4_INSTRUCTION
 
 #define DECLARE_SSE34_AVX_INSTRUCTION(instruction, prefix, escape1, escape2,  \
@@ -1605,6 +1786,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
     vinstr(0x##opcode, dst, xmm0, src, k##prefix, k##escape1##escape2, kW0);   \
   }
 
+  SSSE3_UNOP_INSTRUCTION_LIST(DECLARE_SSE4_AVX_RM_INSTRUCTION)
   SSE4_RM_INSTRUCTION_LIST(DECLARE_SSE4_AVX_RM_INSTRUCTION)
 #undef DECLARE_SSE4_AVX_RM_INSTRUCTION
 
@@ -1621,15 +1803,17 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 
   // Record a deoptimization reason that can be used by a log or cpu profiler.
   // Use --trace-deopt to enable.
-  void RecordDeoptReason(DeoptimizeReason reason, SourcePosition position,
-                         int id);
+  void RecordDeoptReason(DeoptimizeReason reason, uint32_t node_id,
+                         SourcePosition position, int id);
 
   // Writes a single byte or word of data in the code stream.  Used for
   // inline tables, e.g., jump-tables.
   void db(uint8_t data);
-  void dd(uint32_t data);
-  void dq(uint64_t data);
-  void dp(uintptr_t data) { dd(data); }
+  void dd(uint32_t data, RelocInfo::Mode rmode = RelocInfo::NONE);
+  void dq(uint64_t data, RelocInfo::Mode rmode = RelocInfo::NONE);
+  void dp(uintptr_t data, RelocInfo::Mode rmode = RelocInfo::NONE) {
+    dd(data, rmode);
+  }
   void dd(Label* label);
 
   // Check if there is less than kGap bytes available in the buffer.
@@ -1729,8 +1913,10 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
                    byte escape2, byte opcode);
   void sse4_instr(XMMRegister dst, Operand src, byte prefix, byte escape1,
                   byte escape2, byte opcode);
+  void vinstr(byte op, XMMRegister dst, XMMRegister src1, XMMRegister src2,
+              SIMDPrefix pp, LeadingOpcode m, VexW w, CpuFeature = AVX);
   void vinstr(byte op, XMMRegister dst, XMMRegister src1, Operand src2,
-              SIMDPrefix pp, LeadingOpcode m, VexW w);
+              SIMDPrefix pp, LeadingOpcode m, VexW w, CpuFeature = AVX);
   // Most BMI instructions are similar.
   void bmi1(byte op, Register reg, Register vreg, Operand rm);
   void bmi2(SIMDPrefix pp, byte op, Register reg, Register vreg, Operand rm);
@@ -1769,10 +1955,10 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
 // checks that we did not generate too much.
 class EnsureSpace {
  public:
-  explicit EnsureSpace(Assembler* assembler) : assembler_(assembler) {
-    if (assembler_->buffer_overflow()) assembler_->GrowBuffer();
+  explicit V8_INLINE EnsureSpace(Assembler* assembler) : assembler_(assembler) {
+    if (V8_UNLIKELY(assembler_->buffer_overflow())) assembler_->GrowBuffer();
 #ifdef DEBUG
-    space_before_ = assembler_->available_space();
+    space_before_ = assembler->available_space();
 #endif
   }
 
@@ -1784,7 +1970,7 @@ class EnsureSpace {
 #endif
 
  private:
-  Assembler* assembler_;
+  Assembler* const assembler_;
 #ifdef DEBUG
   int space_before_;
 #endif

@@ -5,13 +5,14 @@
 #ifndef V8_COMPILER_OPERATOR_H_
 #define V8_COMPILER_OPERATOR_H_
 
-#include <ostream>  // NOLINT(readability/streams)
+#include <ostream>
 
 #include "src/base/compiler-specific.h"
 #include "src/base/flags.h"
 #include "src/base/functional.h"
 #include "src/common/globals.h"
 #include "src/handles/handles.h"
+#include "src/objects/feedback-cell.h"
 #include "src/zone/zone.h"
 
 namespace v8 {
@@ -47,9 +48,9 @@ class V8_EXPORT_PRIVATE Operator : public NON_EXPORTED_BASE(ZoneObject) {
     kNoThrow = 1 << 5,      // Can never generate an exception.
     kNoDeopt = 1 << 6,      // Can never generate an eager deoptimization exit.
     kFoldable = kNoRead | kNoWrite,
-    kKontrol = kNoDeopt | kFoldable | kNoThrow,
     kEliminatable = kNoDeopt | kNoWrite | kNoThrow,
-    kPure = kNoDeopt | kNoRead | kNoWrite | kNoThrow | kIdempotent
+    kKontrol = kNoDeopt | kFoldable | kNoThrow,
+    kPure = kKontrol | kIdempotent
   };
 
 // List of all bits, for the visualizer.
@@ -64,13 +65,15 @@ class V8_EXPORT_PRIVATE Operator : public NON_EXPORTED_BASE(ZoneObject) {
   Operator(Opcode opcode, Properties properties, const char* mnemonic,
            size_t value_in, size_t effect_in, size_t control_in,
            size_t value_out, size_t effect_out, size_t control_out);
+  Operator(const Operator&) = delete;
+  Operator& operator=(const Operator&) = delete;
 
   virtual ~Operator() = default;
 
   // A small integer unique to all instances of a particular kind of operator,
   // useful for quick matching for specific kinds of operators. For fast access
   // the opcode is stored directly in the operator object.
-  Opcode opcode() const { return opcode_; }
+  constexpr Opcode opcode() const { return opcode_; }
 
   // Returns a constant string representing the mnemonic of the operator,
   // without the static parameters. Useful for debugging.
@@ -142,8 +145,6 @@ class V8_EXPORT_PRIVATE Operator : public NON_EXPORTED_BASE(ZoneObject) {
   uint32_t value_out_;
   uint8_t effect_out_;
   uint32_t control_out_;
-
-  DISALLOW_COPY_AND_ASSIGN(Operator);
 };
 
 DEFINE_OPERATORS_FOR_FLAGS(Operator::Properties)
@@ -230,20 +231,10 @@ struct OpEqualTo<double> : public base::bit_equal_to<double> {};
 template <>
 struct OpHash<double> : public base::bit_hash<double> {};
 
-template <>
-struct OpEqualTo<Handle<HeapObject>> : public Handle<HeapObject>::equal_to {};
-template <>
-struct OpHash<Handle<HeapObject>> : public Handle<HeapObject>::hash {};
-
-template <>
-struct OpEqualTo<Handle<String>> : public Handle<String>::equal_to {};
-template <>
-struct OpHash<Handle<String>> : public Handle<String>::hash {};
-
-template <>
-struct OpEqualTo<Handle<ScopeInfo>> : public Handle<ScopeInfo>::equal_to {};
-template <>
-struct OpHash<Handle<ScopeInfo>> : public Handle<ScopeInfo>::hash {};
+template <class T>
+struct OpEqualTo<Handle<T>> : public Handle<T>::equal_to {};
+template <class T>
+struct OpHash<Handle<T>> : public Handle<T>::hash {};
 
 }  // namespace compiler
 }  // namespace internal

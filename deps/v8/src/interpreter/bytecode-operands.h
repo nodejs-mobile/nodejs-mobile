@@ -5,8 +5,8 @@
 #ifndef V8_INTERPRETER_BYTECODE_OPERANDS_H_
 #define V8_INTERPRETER_BYTECODE_OPERANDS_H_
 
+#include "src/base/bounds.h"
 #include "src/common/globals.h"
-#include "src/utils/utils.h"
 
 namespace v8 {
 namespace internal {
@@ -37,7 +37,7 @@ namespace interpreter {
   V(Flag8, OperandTypeInfo::kFixedUnsignedByte)       \
   V(IntrinsicId, OperandTypeInfo::kFixedUnsignedByte) \
   V(RuntimeId, OperandTypeInfo::kFixedUnsignedShort)  \
-  V(NativeContextIndex, OperandTypeInfo::kScalableUnsignedByte)
+  V(NativeContextIndex, OperandTypeInfo::kFixedUnsignedByte)
 
 // Carefully ordered for operand type range checks below.
 #define NON_REGISTER_OPERAND_TYPE_LIST(V)       \
@@ -109,27 +109,29 @@ enum class OperandType : uint8_t {
 #undef COUNT_OPERAND_TYPES
 };
 
-enum class AccumulatorUse : uint8_t {
+enum class ImplicitRegisterUse : uint8_t {
   kNone = 0,
-  kRead = 1 << 0,
-  kWrite = 1 << 1,
-  kReadWrite = kRead | kWrite
+  kReadAccumulator = 1 << 0,
+  kWriteAccumulator = 1 << 1,
+  kWriteShortStar = 1 << 2,
+  kReadWriteAccumulator = kReadAccumulator | kWriteAccumulator,
+  kReadAccumulatorWriteShortStar = kReadAccumulator | kWriteShortStar
 };
 
-constexpr inline AccumulatorUse operator&(AccumulatorUse lhs,
-                                          AccumulatorUse rhs) {
-  return static_cast<AccumulatorUse>(static_cast<int>(lhs) &
-                                     static_cast<int>(rhs));
+constexpr inline ImplicitRegisterUse operator&(ImplicitRegisterUse lhs,
+                                               ImplicitRegisterUse rhs) {
+  return static_cast<ImplicitRegisterUse>(static_cast<int>(lhs) &
+                                          static_cast<int>(rhs));
 }
 
-constexpr inline AccumulatorUse operator|(AccumulatorUse lhs,
-                                          AccumulatorUse rhs) {
-  return static_cast<AccumulatorUse>(static_cast<int>(lhs) |
-                                     static_cast<int>(rhs));
+constexpr inline ImplicitRegisterUse operator|(ImplicitRegisterUse lhs,
+                                               ImplicitRegisterUse rhs) {
+  return static_cast<ImplicitRegisterUse>(static_cast<int>(lhs) |
+                                          static_cast<int>(rhs));
 }
 
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
-                                           const AccumulatorUse& use);
+                                           const ImplicitRegisterUse& use);
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                            const OperandScale& operand_scale);
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
@@ -149,7 +151,6 @@ class BytecodeOperands : public AllStatic {
 #undef OPERAND_SCALE_COUNT
 
   static constexpr int OperandScaleAsIndex(OperandScale operand_scale) {
-#ifdef V8_CAN_HAVE_DCHECK_IN_CONSTEXPR
 #ifdef DEBUG
     int result = static_cast<int>(operand_scale) >> 1;
     switch (operand_scale) {
@@ -166,29 +167,43 @@ class BytecodeOperands : public AllStatic {
         UNREACHABLE();
     }
 #endif
-#endif
     return static_cast<int>(operand_scale) >> 1;
   }
 
-  // Returns true if |accumulator_use| reads the accumulator.
-  static constexpr bool ReadsAccumulator(AccumulatorUse accumulator_use) {
-    return (accumulator_use & AccumulatorUse::kRead) == AccumulatorUse::kRead;
+  // Returns true if |implicit_register_use| reads the
+  // accumulator.
+  static constexpr bool ReadsAccumulator(
+      ImplicitRegisterUse implicit_register_use) {
+    return (implicit_register_use & ImplicitRegisterUse::kReadAccumulator) ==
+           ImplicitRegisterUse::kReadAccumulator;
   }
 
-  // Returns true if |accumulator_use| writes the accumulator.
-  static constexpr bool WritesAccumulator(AccumulatorUse accumulator_use) {
-    return (accumulator_use & AccumulatorUse::kWrite) == AccumulatorUse::kWrite;
+  // Returns true if |implicit_register_use| writes the
+  // accumulator.
+  static constexpr bool WritesAccumulator(
+      ImplicitRegisterUse implicit_register_use) {
+    return (implicit_register_use & ImplicitRegisterUse::kWriteAccumulator) ==
+           ImplicitRegisterUse::kWriteAccumulator;
+  }
+
+  // Returns true if |implicit_register_use| writes to a
+  // register not specified by an operand.
+  static constexpr bool WritesImplicitRegister(
+      ImplicitRegisterUse implicit_register_use) {
+    return (implicit_register_use & ImplicitRegisterUse::kWriteShortStar) ==
+           ImplicitRegisterUse::kWriteShortStar;
   }
 
   // Returns true if |operand_type| is a scalable signed byte.
   static constexpr bool IsScalableSignedByte(OperandType operand_type) {
-    return IsInRange(operand_type, OperandType::kImm,
-                     OperandType::kRegOutTriple);
+    return base::IsInRange(operand_type, OperandType::kImm,
+                           OperandType::kRegOutTriple);
   }
 
   // Returns true if |operand_type| is a scalable unsigned byte.
   static constexpr bool IsScalableUnsignedByte(OperandType operand_type) {
-    return IsInRange(operand_type, OperandType::kIdx, OperandType::kRegCount);
+    return base::IsInRange(operand_type, OperandType::kIdx,
+                           OperandType::kRegCount);
   }
 };
 

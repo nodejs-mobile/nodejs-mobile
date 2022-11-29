@@ -1,6 +1,7 @@
 # Diagnostic report
 
 <!--introduced_in=v11.8.0-->
+
 <!-- type=misc -->
 
 > Stability: 2 - Stable
@@ -52,7 +53,6 @@ is provided below for reference.
       "nghttp2": "1.34.0",
       "napi": "3",
       "llhttp": "1.0.1",
-      "http_parser": "2.8.0",
       "openssl": "1.1.0j"
     },
     "release": {
@@ -131,11 +131,20 @@ is provided below for reference.
     }
   ],
   "javascriptHeap": {
-    "totalMemory": 6127616,
-    "totalCommittedMemory": 4357352,
-    "usedMemory": 3221136,
-    "availableMemory": 1521370240,
-    "memoryLimit": 1526909922,
+    "totalMemory": 5660672,
+    "executableMemory": 524288,
+    "totalCommittedMemory": 5488640,
+    "availableMemory": 4341379928,
+    "totalGlobalHandlesMemory": 8192,
+    "usedGlobalHandlesMemory": 3136,
+    "usedMemory": 4816432,
+    "memoryLimit": 4345298944,
+    "mallocedMemory": 254128,
+    "externalMemory": 315644,
+    "peakMallocedMemory": 98752,
+    "nativeContextCount": 1,
+    "detachedContextCount": 0,
+    "doesZapGarbage": 0,
     "heapSpaces": {
       "read_only_space": {
         "memorySize": 524288,
@@ -293,7 +302,8 @@ is provided below for reference.
     {
       "type": "loop",
       "is_active": true,
-      "address": "0x000055fc7b2cb180"
+      "address": "0x000055fc7b2cb180",
+      "loopIdleTimeSeconds": 22644.8
     }
   ],
   "workers": [],
@@ -397,15 +407,15 @@ node --report-uncaught-exception --report-on-signal \
 ```
 
 * `--report-uncaught-exception` Enables report to be generated on
-un-caught exceptions. Useful when inspecting JavaScript stack in conjunction
-with native stack and other runtime environment data.
+  un-caught exceptions. Useful when inspecting JavaScript stack in conjunction
+  with native stack and other runtime environment data.
 
 * `--report-on-signal` Enables report to be generated upon receiving
-the specified (or predefined) signal to the running Node.js process. (See below
-on how to modify the signal that triggers the report.) Default signal is `SIGUSR2`.
-Useful when a report needs to be triggered from another program.
-Application monitors may leverage this feature to collect report at regular
-intervals and plot rich set of internal runtime data to their views.
+  the specified (or predefined) signal to the running Node.js process. (See
+  below on how to modify the signal that triggers the report.) Default signal is
+  `SIGUSR2`. Useful when a report needs to be triggered from another program.
+  Application monitors may leverage this feature to collect report at regular
+  intervals and plot rich set of internal runtime data to their views.
 
 Signal based report generation is not supported in Windows.
 
@@ -414,24 +424,24 @@ signal. However, if `SIGUSR2` is already used for other purposes, then this
 flag helps to change the signal for report generation and preserve the original
 meaning of `SIGUSR2` for the said purposes.
 
-* `--report-on-fatalerror` Enables the report to be triggered on
-fatal errors (internal errors within the Node.js runtime, such as out of memory)
-that leads to termination of the application. Useful to inspect various
-diagnostic data elements such as heap, stack, event loop state, resource
-consumption etc. to reason about the fatal error.
+* `--report-on-fatalerror` Enables the report to be triggered on fatal errors
+  (internal errors within the Node.js runtime, such as out of memory)
+  that leads to termination of the application. Useful to inspect various
+  diagnostic data elements such as heap, stack, event loop state, resource
+  consumption etc. to reason about the fatal error.
 
 * `--report-compact` Write reports in a compact format, single-line JSON, more
-easily consumable by log processing systems than the default multi-line format
-designed for human consumption.
+  easily consumable by log processing systems than the default multi-line format
+  designed for human consumption.
 
 * `--report-directory` Location at which the report will be
-generated.
+  generated.
 
 * `--report-filename` Name of the file to which the report will be
-written.
+  written.
 
 * `--report-signal` Sets or resets the signal for report generation
-(not supported on Windows). Default signal is `SIGUSR2`.
+  (not supported on Windows). Default signal is `SIGUSR2`.
 
 A report can also be triggered via an API call from a JavaScript application:
 
@@ -514,7 +524,7 @@ Node.js report completed
 
 When a report is written, start and end messages are issued to stderr
 and the filename of the report is returned to the caller. The default filename
-includes the date, time, PID and a sequence number. The sequence number helps
+includes the date, time, PID, and a sequence number. The sequence number helps
 in associating the report dump with the runtime state if generated multiple
 times for the same Node.js process.
 
@@ -541,7 +551,7 @@ Special meaning is attached to `stdout` and `stderr`. Usage of these
 will result in report being written to the associated standard streams.
 In cases where standard streams are used, the value in `directory` is ignored.
 URLs are not supported. Defaults to a composite filename that contains
-timestamp, PID and sequence number.
+timestamp, PID, and sequence number.
 
 `directory` specifies the filesystem directory where the report will be written.
 URLs are not supported. Defaults to the current working directory of the
@@ -579,9 +589,12 @@ Specific API documentation can be found under
 [`process API documentation`][] section.
 
 ## Interaction with workers
+
 <!-- YAML
 changes:
-  - version: v12.16.2
+  - version:
+      - v13.9.0
+      - v12.16.2
     pr-url: https://github.com/nodejs/node/pull/31386
     description: Workers are now included in the report.
 -->
@@ -597,5 +610,5 @@ The thread which is generating the report will wait for the reports from Worker
 threads to finish. However, the latency for this will usually be low, as both
 running JavaScript and the event loop are interrupted to generate the report.
 
-[`process API documentation`]: process.html
-[`Worker`]: worker_threads.html
+[`Worker`]: worker_threads.md
+[`process API documentation`]: process.md

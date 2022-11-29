@@ -3,10 +3,13 @@
 
 const path = require('path');
 const common = require('../common.js');
-const filename = path.resolve(process.env.NODE_TMPDIR || __dirname,
-                              `.removeme-benchmark-garbage-${process.pid}`);
 const fs = require('fs');
 const assert = require('assert');
+
+const tmpdir = require('../../test/common/tmpdir');
+tmpdir.refresh();
+const filename = path.resolve(tmpdir.path,
+                              `.removeme-benchmark-garbage-${process.pid}`);
 
 const bench = common.createBenchmark(main, {
   encodingType: ['buf', 'asc', 'utf'],
@@ -47,7 +50,11 @@ function main(conf) {
     buf.fill('x');
   }
 
-  try { fs.unlinkSync(filename); } catch {}
+  try {
+    fs.unlinkSync(filename);
+  } catch {
+    // Continue regardless of error.
+  }
   const ws = fs.createWriteStream(filename);
   ws.on('close', runTest.bind(null, filesize, highWaterMark, encoding, n));
   ws.on('drain', write);
@@ -78,7 +85,11 @@ function runTest(filesize, highWaterMark, encoding, n) {
   });
 
   rs.on('end', () => {
-    try { fs.unlinkSync(filename); } catch {}
+    try {
+      fs.unlinkSync(filename);
+    } catch {
+      // Continue regardless of error.
+    }
     // MB/sec
     bench.end(bytes / (1024 * 1024));
   });

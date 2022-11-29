@@ -185,14 +185,14 @@ class MoveInterpreter : public GapResolver::Assembler {
 
   void AssembleMove(InstructionOperand* source,
                     InstructionOperand* destination) override {
-    ParallelMove* moves = new (zone_) ParallelMove(zone_);
+    ParallelMove* moves = zone_->New<ParallelMove>(zone_);
     moves->AddMove(*source, *destination);
     state_.ExecuteInParallel(moves);
   }
 
   void AssembleSwap(InstructionOperand* source,
                     InstructionOperand* destination) override {
-    ParallelMove* moves = new (zone_) ParallelMove(zone_);
+    ParallelMove* moves = zone_->New<ParallelMove>(zone_);
     moves->AddMove(*source, *destination);
     moves->AddMove(*destination, *source);
     state_.ExecuteInParallel(moves);
@@ -209,7 +209,6 @@ class MoveInterpreter : public GapResolver::Assembler {
   InterpreterState state_;
 };
 
-
 class ParallelMoveCreator : public HandleAndZoneScope {
  public:
   ParallelMoveCreator() : rng_(CcTest::random_number_generator()) {}
@@ -217,7 +216,7 @@ class ParallelMoveCreator : public HandleAndZoneScope {
   // Creates a ParallelMove with 'size' random MoveOperands. Note that illegal
   // moves will be rejected, so the actual number of MoveOperands may be less.
   ParallelMove* Create(int size) {
-    ParallelMove* parallel_move = new (main_zone()) ParallelMove(main_zone());
+    ParallelMove* parallel_move = main_zone()->New<ParallelMove>(main_zone());
     // Valid ParallelMoves can't have interfering destination ops.
     std::set<InstructionOperand, CompareOperandModuloType> destinations;
     // Valid ParallelMoves can't have interfering source ops of different reps.
@@ -283,7 +282,7 @@ class ParallelMoveCreator : public HandleAndZoneScope {
   // Creates a ParallelMove from a list of operand pairs. Even operands are
   // destinations, odd ones are sources.
   ParallelMove* Create(const std::vector<InstructionOperand>& operand_pairs) {
-    ParallelMove* parallel_move = new (main_zone()) ParallelMove(main_zone());
+    ParallelMove* parallel_move = main_zone()->New<ParallelMove>(main_zone());
     for (size_t i = 0; i < operand_pairs.size(); i += 2) {
       const InstructionOperand& dst = operand_pairs[i];
       const InstructionOperand& src = operand_pairs[i + 1];
@@ -353,7 +352,7 @@ class ParallelMoveCreator : public HandleAndZoneScope {
     };
     int index = rng_->NextInt(kMaxIndex);
     // destination can't be Constant.
-    switch (rng_->NextInt(is_source ? 5 : 4)) {
+    switch (rng_->NextInt(is_source ? 3 : 2)) {
       case 0:
         return AllocatedOperand(LocationOperand::STACK_SLOT, rep,
                                 GetValidSlotIndex(rep, index));
@@ -361,12 +360,6 @@ class ParallelMoveCreator : public HandleAndZoneScope {
         return AllocatedOperand(LocationOperand::REGISTER, rep,
                                 GetValidRegisterCode(rep, index));
       case 2:
-        return ExplicitOperand(LocationOperand::REGISTER, rep,
-                               GetValidRegisterCode(rep, 1));
-      case 3:
-        return ExplicitOperand(LocationOperand::STACK_SLOT, rep,
-                               GetValidSlotIndex(rep, index));
-      case 4:
         return ConstantOperand(index);
     }
     UNREACHABLE();

@@ -21,7 +21,7 @@
 
 #include "string_bytes.h"
 
-#include "base64.h"
+#include "base64-inl.h"
 #include "env-inl.h"
 #include "node_buffer.h"
 #include "node_errors.h"
@@ -250,8 +250,8 @@ static size_t hex_decode(char* buf,
                          const size_t srcLen) {
   size_t i;
   for (i = 0; i < len && i * 2 + 1 < srcLen; ++i) {
-    unsigned a = unhex(src[i * 2 + 0]);
-    unsigned b = unhex(src[i * 2 + 1]);
+    unsigned a = unhex(static_cast<uint8_t>(src[i * 2 + 0]));
+    unsigned b = unhex(static_cast<uint8_t>(src[i * 2 + 1]));
     if (!~a || !~b)
       return i;
     buf[i] = (a << 4) | b;
@@ -273,16 +273,14 @@ size_t StringBytes::WriteUCS2(Isolate* isolate,
     return 0;
   }
 
+  uint16_t* const aligned_dst = AlignUp(dst, sizeof(*dst));
   size_t nchars;
-  size_t alignment = reinterpret_cast<uintptr_t>(dst) % sizeof(*dst);
-  if (alignment == 0) {
+  if (aligned_dst == dst) {
     nchars = str->Write(isolate, dst, 0, max_chars, flags);
     *chars_written = nchars;
     return nchars * sizeof(*dst);
   }
 
-  uint16_t* aligned_dst =
-      reinterpret_cast<uint16_t*>(buf + sizeof(*dst) - alignment);
   CHECK_EQ(reinterpret_cast<uintptr_t>(aligned_dst) % sizeof(*dst), 0);
 
   // Write all but the last char
@@ -360,6 +358,8 @@ size_t StringBytes::Write(Isolate* isolate,
       break;
     }
 
+    case BASE64URL:
+      // Fall through
     case BASE64:
       if (str->IsExternalOneByte()) {
         auto ext = str->GetExternalOneByteStringResource();
@@ -388,15 +388,6 @@ size_t StringBytes::Write(Isolate* isolate,
   }
 
   return nbytes;
-}
-
-
-bool StringBytes::IsValidString(Local<String> string,
-                                enum encoding enc) {
-  if (enc == HEX && string->Length() % 2 != 0)
-    return false;
-  // TODO(bnoordhuis) Add BASE64 check?
-  return true;
 }
 
 
@@ -436,6 +427,8 @@ Maybe<size_t> StringBytes::StorageSize(Isolate* isolate,
       data_size = str->Length() * sizeof(uint16_t);
       break;
 
+    case BASE64URL:
+      // Fall through
     case BASE64:
       data_size = base64_decoded_size_fast(str->Length());
       break;
@@ -477,6 +470,8 @@ Maybe<size_t> StringBytes::Size(Isolate* isolate,
     case UCS2:
       return Just(str->Length() * sizeof(uint16_t));
 
+    case BASE64URL:
+      // Fall through
     case BASE64: {
       String::Value value(isolate, str);
       return Just(base64_decoded_size(*value, value.length()));
@@ -647,10 +642,6 @@ MaybeLocal<Value> StringBytes::Encode(Isolate* isolate,
   switch (encoding) {
     case BUFFER:
       {
-        if (buflen > node::Buffer::kMaxLength) {
-          *error = node::ERR_BUFFER_TOO_LARGE(isolate);
-          return MaybeLocal<Value>();
-        }
         auto maybe_buf = Buffer::Copy(isolate, buf, buflen);
         Local<v8::Object> buf;
         if (!maybe_buf.ToLocal(&buf)) {
@@ -697,6 +688,20 @@ MaybeLocal<Value> StringBytes::Encode(Isolate* isolate,
       }
 
       size_t written = base64_encode(buf, buflen, dst, dlen);
+      CHECK_EQ(written, dlen);
+
+      return ExternOneByteString::New(isolate, dst, dlen, error);
+    }
+
+    case BASE64URL: {
+      size_t dlen = base64_encoded_size(buflen, Base64Mode::URL);
+      char* dst = node::UncheckedMalloc(dlen);
+      if (dst == nullptr) {
+        *error = node::ERR_MEMORY_ALLOCATION_FAILED(isolate);
+        return MaybeLocal<Value>();
+      }
+
+      size_t written = base64_encode(buf, buflen, dst, dlen, Base64Mode::URL);
       CHECK_EQ(written, dlen);
 
       return ExternOneByteString::New(isolate, dst, dlen, error);

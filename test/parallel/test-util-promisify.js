@@ -83,7 +83,7 @@ const stat = promisify(fs.stat);
     callback(null, 'foo', 'bar');
   }
   promisify(fn)().then(common.mustCall((value) => {
-    assert.deepStrictEqual(value, 'foo');
+    assert.strictEqual(value, 'foo');
   }));
 }
 
@@ -131,7 +131,7 @@ const stat = promisify(fs.stat);
   (async () => {
     const value = await promisify(fn)(null, 42);
     assert.strictEqual(value, 42);
-  })();
+  })().then(common.mustCall());
 }
 
 {
@@ -159,7 +159,7 @@ const stat = promisify(fs.stat);
     await fn();
     await Promise.resolve();
     return assert.strictEqual(stack, err.stack);
-  })();
+  })().then(common.mustCall());
 }
 
 {
@@ -193,7 +193,7 @@ const stat = promisify(fs.stat);
     }),
     b.then(assert.fail, function(e) {
       assert.strictEqual(err, e);
-    })
+    }),
   ]);
 }
 

@@ -47,15 +47,11 @@ static AsyncHooksWrap* UnwrapHook(
   AsyncHooks* hooks = PerIsolateData::Get(isolate)->GetAsyncHooks();
 
   if (!hooks->async_hook_ctor.Get(isolate)->HasInstance(hook)) {
-    isolate->ThrowException(
-        String::NewFromUtf8(
-            isolate, "Invalid 'this' passed instead of AsyncHooks instance",
-            NewStringType::kNormal)
-            .ToLocalChecked());
+    isolate->ThrowError("Invalid 'this' passed instead of AsyncHooks instance");
     return nullptr;
   }
 
-  Local<External> wrap = Local<External>::Cast(hook->GetInternalField(0));
+  Local<External> wrap = hook->GetInternalField(0).As<External>();
   void* ptr = wrap->Value();
   return static_cast<AsyncHooksWrap*>(ptr);
 }
@@ -90,10 +86,7 @@ Local<Object> AsyncHooks::CreateHook(
   Local<Context> currentContext = isolate->GetCurrentContext();
 
   if (args.Length() != 1 || !args[0]->IsObject()) {
-    isolate->ThrowException(
-        String::NewFromUtf8(isolate, "Invalid arguments passed to createHook",
-                            NewStringType::kNormal)
-            .ToLocalChecked());
+    isolate->ThrowError("Invalid arguments passed to createHook");
     return Local<Object>();
   }
 
@@ -101,15 +94,12 @@ Local<Object> AsyncHooks::CreateHook(
 
   Local<Object> fn_obj = args[0].As<Object>();
 
-#define SET_HOOK_FN(name)                                                   \
-  Local<Value> name##_v =                                                   \
-      fn_obj                                                                \
-          ->Get(currentContext,                                             \
-                String::NewFromUtf8(isolate, #name, NewStringType::kNormal) \
-                    .ToLocalChecked())                                      \
-          .ToLocalChecked();                                                \
-  if (name##_v->IsFunction()) {                                             \
-    wrap->set_##name##_function(name##_v.As<Function>());                   \
+#define SET_HOOK_FN(name)                                                     \
+  Local<Value> name##_v =                                                     \
+      fn_obj->Get(currentContext, String::NewFromUtf8Literal(isolate, #name)) \
+          .ToLocalChecked();                                                  \
+  if (name##_v->IsFunction()) {                                               \
+    wrap->set_##name##_function(name##_v.As<Function>());                     \
   }
 
   SET_HOOK_FN(init);
@@ -136,6 +126,7 @@ void AsyncHooks::ShellPromiseHook(PromiseHookType type, Local<Promise> promise,
   HandleScope handle_scope(hooks->isolate_);
 
   Local<Context> currentContext = hooks->isolate_->GetCurrentContext();
+  DCHECK(!currentContext.IsEmpty());
 
   if (type == PromiseHookType::kInit) {
     ++hooks->current_async_id;
@@ -197,20 +188,15 @@ void AsyncHooks::Initialize() {
 
   async_hook_ctor.Reset(isolate_, FunctionTemplate::New(isolate_));
   async_hook_ctor.Get(isolate_)->SetClassName(
-      String::NewFromUtf8(isolate_, "AsyncHook", NewStringType::kNormal)
-          .ToLocalChecked());
+      String::NewFromUtf8Literal(isolate_, "AsyncHook"));
 
   async_hooks_templ.Reset(isolate_,
                           async_hook_ctor.Get(isolate_)->InstanceTemplate());
   async_hooks_templ.Get(isolate_)->SetInternalFieldCount(1);
   async_hooks_templ.Get(isolate_)->Set(
-      String::NewFromUtf8(isolate_, "enable", v8::NewStringType::kNormal)
-          .ToLocalChecked(),
-      FunctionTemplate::New(isolate_, EnableHook));
+      isolate_, "enable", FunctionTemplate::New(isolate_, EnableHook));
   async_hooks_templ.Get(isolate_)->Set(
-      String::NewFromUtf8(isolate_, "disable", v8::NewStringType::kNormal)
-          .ToLocalChecked(),
-      FunctionTemplate::New(isolate_, DisableHook));
+      isolate_, "disable", FunctionTemplate::New(isolate_, DisableHook));
 
   async_id_smb.Reset(isolate_, Private::New(isolate_));
   trigger_id_smb.Reset(isolate_, Private::New(isolate_));
@@ -262,10 +248,7 @@ void AsyncHooks::PromiseHookDispatch(PromiseHookType type,
   if (type == PromiseHookType::kInit) {
     if (!wrap->init_function().IsEmpty()) {
       Local<Value> initArgs[4] = {
-          async_id,
-          String::NewFromUtf8(hooks->isolate_, "PROMISE",
-                              NewStringType::kNormal)
-              .ToLocalChecked(),
+          async_id, String::NewFromUtf8Literal(hooks->isolate_, "PROMISE"),
           promise
               ->GetPrivate(context, hooks->trigger_id_smb.Get(hooks->isolate_))
               .ToLocalChecked(),
@@ -284,10 +267,6 @@ void AsyncHooks::PromiseHookDispatch(PromiseHookType type,
     if (!wrap->promiseResolve_function().IsEmpty()) {
       result = wrap->promiseResolve_function()->Call(context, rcv, 1, args);
     }
-  }
-
-  if (try_catch.HasCaught()) {
-    Shell::ReportException(hooks->isolate_, &try_catch);
   }
 }
 

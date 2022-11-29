@@ -5,17 +5,21 @@
 #ifndef V8_COMPILER_FUNCTIONAL_LIST_H_
 #define V8_COMPILER_FUNCTIONAL_LIST_H_
 
+#include <iterator>
 #include "src/zone/zone.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-// A generic stack implemented as a purely functional singly-linked list, which
-// results in an O(1) copy operation. It is the equivalent of functional lists
-// in ML-like languages, with the only difference that it also caches the length
-// of the list in each node.
-// TODO(tebbi): Use this implementation also for RedundancyElimination.
+// A generic stack implemented with a singly-linked list, which results in an
+// O(1) copy operation. It can be used to model immutable lists like those in
+// functional languages. Compared to typical functional lists, this also caches
+// the length of the list in each node.
+// Note: The underlying implementation is mutable, so if you want to use this as
+// an immutable list, make sure to create a copy by passing it by value and
+// operate on the copy.
+// TODO(turbofan): Use this implementation also for RedundancyElimination.
 template <class A>
 class FunctionalList {
  private:
@@ -45,6 +49,10 @@ class FunctionalList {
     return !(*this == other);
   }
 
+  bool TriviallyEquals(const FunctionalList<A>& other) const {
+    return elements_ == other.elements_;
+  }
+
   const A& Front() const {
     DCHECK_GT(Size(), 0);
     return elements_->top;
@@ -62,7 +70,7 @@ class FunctionalList {
   }
 
   void PushFront(A a, Zone* zone) {
-    elements_ = new (zone) Cons(std::move(a), elements_);
+    elements_ = zone->New<Cons>(std::move(a), elements_);
   }
 
   // If {hint} happens to be exactly what we want to allocate, avoid allocation
@@ -90,7 +98,9 @@ class FunctionalList {
 
   size_t Size() const { return elements_ ? elements_->size : 0; }
 
-  class iterator {
+  void Clear() { elements_ = nullptr; }
+
+  class iterator : public std::iterator<std::forward_iterator_tag, A> {
    public:
     explicit iterator(Cons* cur) : current_(cur) {}
 
@@ -103,6 +113,14 @@ class FunctionalList {
       return this->current_ == other.current_;
     }
     bool operator!=(const iterator& other) const { return !(*this == other); }
+
+    // Implemented so that std::find and friends can use std::iterator_traits
+    // for this iterator type.
+    typedef std::forward_iterator_tag iterator_category;
+    typedef ptrdiff_t difference_type;
+    typedef A value_type;
+    typedef A* pointer;
+    typedef A& reference;
 
    private:
     Cons* current_;

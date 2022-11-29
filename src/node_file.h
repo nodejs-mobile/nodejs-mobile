@@ -3,14 +3,35 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "node.h"
 #include "aliased_buffer.h"
 #include "node_messaging.h"
+#include "node_snapshotable.h"
 #include "stream_base.h"
-#include <iostream>
 
 namespace node {
 namespace fs {
+
+class FileHandleReadWrap;
+
+class BindingData : public SnapshotableObject {
+ public:
+  explicit BindingData(Environment* env, v8::Local<v8::Object> wrap);
+
+  AliasedFloat64Array stats_field_array;
+  AliasedBigUint64Array stats_field_bigint_array;
+
+  std::vector<BaseObjectPtr<FileHandleReadWrap>>
+      file_handle_read_wrap_freelist;
+
+  SERIALIZABLE_OBJECT_METHODS()
+  static constexpr FastStringKey type_name{"node::fs::BindingData"};
+  static constexpr EmbedderObjectType type_int =
+      EmbedderObjectType::k_fs_binding_data;
+
+  void MemoryInfo(MemoryTracker* tracker) const override;
+  SET_SELF_SIZE(BindingData)
+  SET_MEMORY_INFO_NAME(BindingData)
+};
 
 // structure used to store state during a complex operation, e.g., mkdirp.
 class FSContinuationData : public MemoryRetainer {
@@ -44,7 +65,7 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
  public:
   typedef MaybeStackBuffer<char, 64> FSReqBuffer;
 
-  inline FSReqBase(Environment* env,
+  inline FSReqBase(BindingData* binding_data,
                    v8::Local<v8::Object> req,
                    AsyncWrap::ProviderType type,
                    bool use_bigint);
@@ -87,6 +108,8 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
 
   void MemoryInfo(MemoryTracker* tracker) const override;
 
+  BindingData* binding_data();
+
  private:
   std::unique_ptr<FSContinuationData> continuation_data_;
   enum encoding encoding_ = UTF8;
@@ -95,6 +118,8 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
   bool is_plain_open_ = false;
   const char* syscall_ = nullptr;
 
+  BaseObjectPtr<BindingData> binding_data_;
+
   // Typically, the content of buffer_ is something like a file name, so
   // something around 64 bytes should be enough.
   FSReqBuffer buffer_;
@@ -102,7 +127,7 @@ class FSReqBase : public ReqWrap<uv_fs_t> {
 
 class FSReqCallback final : public FSReqBase {
  public:
-  inline FSReqCallback(Environment* env,
+  inline FSReqCallback(BindingData* binding_data,
                        v8::Local<v8::Object> req,
                        bool use_bigint);
 
@@ -123,7 +148,7 @@ void FillStatsArray(AliasedBufferBase<NativeT, V8T>* fields,
                     const uv_stat_t* s,
                     const size_t offset = 0);
 
-inline v8::Local<v8::Value> FillGlobalStatsArray(Environment* env,
+inline v8::Local<v8::Value> FillGlobalStatsArray(BindingData* binding_data,
                                                  const bool use_bigint,
                                                  const uv_stat_t* s,
                                                  const bool second = false);
@@ -131,7 +156,8 @@ inline v8::Local<v8::Value> FillGlobalStatsArray(Environment* env,
 template <typename AliasedBufferT>
 class FSReqPromise final : public FSReqBase {
  public:
-  static inline FSReqPromise* New(Environment* env, bool use_bigint);
+  static inline FSReqPromise* New(BindingData* binding_data,
+                                  bool use_bigint);
   inline ~FSReqPromise() override;
 
   inline void Reject(v8::Local<v8::Value> reject) override;
@@ -150,7 +176,7 @@ class FSReqPromise final : public FSReqBase {
   FSReqPromise& operator=(const FSReqPromise&&) = delete;
 
  private:
-  inline FSReqPromise(Environment* env,
+  inline FSReqPromise(BindingData* binding_data,
                       v8::Local<v8::Object> obj,
                       bool use_bigint);
 
@@ -208,7 +234,13 @@ class FileHandleReadWrap final : public ReqWrap<uv_fs_t> {
 // the object is garbage collected
 class FileHandle final : public AsyncWrap, public StreamBase {
  public:
-  static FileHandle* New(Environment* env,
+  enum InternalFields {
+    kFileHandleBaseField = StreamBase::kInternalFieldCount,
+    kClosingPromiseSlot,
+    kInternalFieldCount
+  };
+
+  static FileHandle* New(BindingData* binding_data,
                          int fd,
                          v8::Local<v8::Object> obj = v8::Local<v8::Object>());
   ~FileHandle() override;
@@ -273,7 +305,7 @@ class FileHandle final : public AsyncWrap, public StreamBase {
     int fd_;
   };
 
-  FileHandle(Environment* env, v8::Local<v8::Object> obj, int fd);
+  FileHandle(BindingData* binding_data, v8::Local<v8::Object> obj, int fd);
 
   // Synchronous close that emits a warning
   void Close();
@@ -318,11 +350,13 @@ class FileHandle final : public AsyncWrap, public StreamBase {
   int fd_;
   bool closing_ = false;
   bool closed_ = false;
+  bool reading_ = false;
   int64_t read_offset_ = -1;
   int64_t read_length_ = -1;
 
-  bool reading_ = false;
-  std::unique_ptr<FileHandleReadWrap> current_read_ = nullptr;
+  BaseObjectPtr<FileHandleReadWrap> current_read_;
+
+  BaseObjectPtr<BindingData> binding_data_;
 };
 
 int MKDirpSync(uv_loop_t* loop,
@@ -354,7 +388,8 @@ class FSReqWrapSync {
 // TODO(addaleax): Currently, callers check the return value and assume
 // that nullptr indicates a synchronous call, rather than a failure.
 // Failure conditions should be disambiguated and handled appropriately.
-inline FSReqBase* GetReqWrap(Environment* env, v8::Local<v8::Value> value,
+inline FSReqBase* GetReqWrap(const v8::FunctionCallbackInfo<v8::Value>& args,
+                             int index,
                              bool use_bigint = false);
 
 // Returns nullptr if the operation fails from the start.

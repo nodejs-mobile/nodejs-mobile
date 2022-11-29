@@ -55,7 +55,8 @@ InspectedContext::InspectedContext(V8InspectorImpl* inspector,
       m_contextGroupId(info.contextGroupId),
       m_origin(toString16(info.origin)),
       m_humanReadableName(toString16(info.humanReadableName)),
-      m_auxData(toString16(info.auxData)) {
+      m_auxData(toString16(info.auxData)),
+      m_uniqueId(V8DebuggerId::generate(inspector)) {
   v8::debug::SetContextId(info.context, contextId);
   m_weakCallbackData =
       new WeakCallbackData(this, m_inspector, m_contextGroupId, m_contextId);
@@ -70,8 +71,8 @@ InspectedContext::InspectedContext(V8InspectorImpl* inspector,
   if (global->Get(info.context, toV8String(m_inspector->isolate(), "console"))
           .ToLocal(&console) &&
       console->IsObject()) {
-    m_inspector->console()->installMemoryGetter(
-        info.context, v8::Local<v8::Object>::Cast(console));
+    m_inspector->console()->installMemoryGetter(info.context,
+                                                console.As<v8::Object>());
   }
 }
 
@@ -112,7 +113,7 @@ InjectedScript* InspectedContext::getInjectedScript(int sessionId) {
 
 InjectedScript* InspectedContext::createInjectedScript(int sessionId) {
   std::unique_ptr<InjectedScript> injectedScript =
-      v8::base::make_unique<InjectedScript>(this, sessionId);
+      std::make_unique<InjectedScript>(this, sessionId);
   CHECK(m_injectedScripts.find(sessionId) == m_injectedScripts.end());
   m_injectedScripts[sessionId] = std::move(injectedScript);
   return getInjectedScript(sessionId);

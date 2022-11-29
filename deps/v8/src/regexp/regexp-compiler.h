@@ -8,6 +8,7 @@
 #include <bitset>
 
 #include "src/base/small-vector.h"
+#include "src/base/strings.h"
 #include "src/regexp/regexp-nodes.h"
 
 namespace v8 {
@@ -21,7 +22,7 @@ namespace regexp_compiler_constants {
 // The '2' variant is has inclusive from and exclusive to.
 // This covers \s as defined in ECMA-262 5.1, 15.10.2.12,
 // which include WhiteSpace (7.2) or LineTerminator (7.3) values.
-constexpr uc32 kRangeEndMarker = 0x110000;
+constexpr base::uc32 kRangeEndMarker = 0x110000;
 constexpr int kSpaceRanges[] = {
     '\t',   '\r' + 1, ' ',    ' ' + 1, 0x00A0, 0x00A1, 0x1680,
     0x1681, 0x2000,   0x200B, 0x2028,  0x202A, 0x202F, 0x2030,
@@ -96,8 +97,8 @@ class QuickCheckDetails {
   void set_cannot_match() { cannot_match_ = true; }
   struct Position {
     Position() : mask(0), value(0), determines_perfectly(false) {}
-    uc16 mask;
-    uc16 value;
+    base::uc32 mask;
+    base::uc32 value;
     bool determines_perfectly;
   };
   int characters() { return characters_; }
@@ -423,10 +424,8 @@ struct PreloadState {
 // Analysis performs assertion propagation and computes eats_at_least_ values.
 // See the comments on AssertionPropagator and EatsAtLeastPropagator for more
 // details.
-//
-// This method returns nullptr on success or a null-terminated failure message
-// on failure.
-const char* AnalyzeRegExp(Isolate* isolate, bool is_one_byte, RegExpNode* node);
+RegExpError AnalyzeRegExp(Isolate* isolate, bool is_one_byte,
+                          JSRegExp::Flags flags, RegExpNode* node);
 
 class FrequencyCollator {
  public:
@@ -476,7 +475,7 @@ class FrequencyCollator {
 class RegExpCompiler {
  public:
   RegExpCompiler(Isolate* isolate, Zone* zone, int capture_count,
-                 bool is_one_byte);
+                 JSRegExp::Flags flags, bool is_one_byte);
 
   int AllocateRegister() {
     if (next_register_ >= RegExpMacroAssembler::kMaxRegister) {
@@ -503,19 +502,18 @@ class RegExpCompiler {
   }
 
   struct CompilationResult final {
-    explicit CompilationResult(const char* error_message)
-        : error_message(error_message) {}
-    CompilationResult(Object code, int registers)
+    explicit CompilationResult(RegExpError err) : error(err) {}
+    CompilationResult(Handle<Object> code, int registers)
         : code(code), num_registers(registers) {}
 
     static CompilationResult RegExpTooBig() {
-      return CompilationResult("RegExp too big");
+      return CompilationResult(RegExpError::kTooLarge);
     }
 
-    bool Succeeded() const { return error_message == nullptr; }
+    bool Succeeded() const { return error == RegExpError::kNone; }
 
-    const char* const error_message = nullptr;
-    Object code;
+    const RegExpError error = RegExpError::kNone;
+    Handle<Object> code;
     int num_registers = 0;
   };
 
@@ -523,11 +521,18 @@ class RegExpCompiler {
                              RegExpNode* start, int capture_count,
                              Handle<String> pattern);
 
+  // Preprocessing is the final step of node creation before analysis
+  // and assembly. It includes:
+  // - Wrapping the body of the regexp in capture 0.
+  // - Inserting the implicit .* before/after the regexp if necessary.
+  // - If the input is a one-byte string, filtering out nodes that can't match.
+  // - Fixing up regexp matches that start within a surrogate pair.
+  RegExpNode* PreprocessRegExp(RegExpCompileData* data, JSRegExp::Flags flags,
+                               bool is_one_byte);
+
   // If the regexp matching starts within a surrogate pair, step back to the
   // lead surrogate and start matching from there.
-  static RegExpNode* OptionallyStepBackToLeadSurrogate(RegExpCompiler* compiler,
-                                                       RegExpNode* on_success,
-                                                       JSRegExp::Flags flags);
+  RegExpNode* OptionallyStepBackToLeadSurrogate(RegExpNode* on_success);
 
   inline void AddWork(RegExpNode* node) {
     if (!node->on_work_list() && !node->label()->is_bound()) {
@@ -547,6 +552,8 @@ class RegExpCompiler {
   inline int recursion_depth() { return recursion_depth_; }
   inline void IncrementRecursionDepth() { recursion_depth_++; }
   inline void DecrementRecursionDepth() { recursion_depth_--; }
+
+  JSRegExp::Flags flags() const { return flags_; }
 
   void SetRegExpTooBig() { reg_exp_too_big_ = true; }
 
@@ -576,8 +583,9 @@ class RegExpCompiler {
   int next_register_;
   int unicode_lookaround_stack_register_;
   int unicode_lookaround_position_register_;
-  std::vector<RegExpNode*>* work_list_;
+  ZoneVector<RegExpNode*>* work_list_;
   int recursion_depth_;
+  const JSRegExp::Flags flags_;
   RegExpMacroAssembler* macro_assembler_;
   bool one_byte_;
   bool reg_exp_too_big_;

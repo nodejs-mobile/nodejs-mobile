@@ -5,7 +5,6 @@
 const common = require('../common');
 
 const assert = require('assert');
-const { URL } = require('url');
 
 const { SourceTextModule } = require('vm');
 
@@ -13,7 +12,8 @@ async function simple() {
   const foo = new SourceTextModule('export default 5;');
   await foo.link(common.mustNotCall());
 
-  const bar = new SourceTextModule('import five from "foo"; five');
+  globalThis.fiveResult = undefined;
+  const bar = new SourceTextModule('import five from "foo"; fiveResult = five');
 
   assert.deepStrictEqual(bar.dependencySpecifiers, ['foo']);
 
@@ -23,7 +23,9 @@ async function simple() {
     return foo;
   }));
 
-  assert.strictEqual((await bar.evaluate()).result, 5);
+  await bar.evaluate();
+  assert.strictEqual(globalThis.fiveResult, 5);
+  delete globalThis.fiveResult;
 }
 
 async function depth() {
@@ -122,6 +124,19 @@ async function circular2() {
   await rootModule.evaluate();
 }
 
+async function asserts() {
+  const m = new SourceTextModule(`
+  import "foo" assert { n1: 'v1', n2: 'v2' };
+  `, { identifier: 'm' });
+  await m.link((s, r, p) => {
+    assert.strictEqual(s, 'foo');
+    assert.strictEqual(r.identifier, 'm');
+    assert.strictEqual(p.assert.n1, 'v1');
+    assert.strictEqual(p.assert.n2, 'v2');
+    return new SourceTextModule('');
+  });
+}
+
 const finished = common.mustCall();
 
 (async function main() {
@@ -129,5 +144,6 @@ const finished = common.mustCall();
   await depth();
   await circular();
   await circular2();
+  await asserts();
   finished();
-})();
+})().then(common.mustCall());

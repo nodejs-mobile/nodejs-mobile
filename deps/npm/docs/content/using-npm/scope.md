@@ -1,11 +1,8 @@
 ---
-section: using-npm
 title: scope
+section: 7
 description: Scoped packages
 ---
-# scope(7)
-
-## Scoped packages
 
 ### Description
 
@@ -55,7 +52,7 @@ Or in `package.json`:
 ```
 
 Note that if the `@` symbol is omitted, in either case, npm will instead attempt to
-install from GitHub; see [`npm install`](/cli-commands/npm-install).
+install from GitHub; see [`npm install`](/commands/npm-install).
 
 ### Requiring scoped packages
 
@@ -82,9 +79,23 @@ If you wish, you may associate a scope with a registry; see below.
 
 #### Publishing public scoped packages to the primary npm registry
 
-To publish a public scoped package, you must specify `--access public` with
-the initial publication. This will publish the package and set access
-to `public` as if you had run `npm access public` after publishing.
+Publishing to a scope, you have two options:
+
+- Publishing to your user scope (example: `@username/module`)
+- Publishing to an organization scope (example: `@org/module`)
+
+If publishing a public module to an organization scope, you must
+first either create an organization with the name of the scope
+that you'd like to publish to or be added to an existing organization
+with the appropriate permisssions. For example, if you'd like to
+publish to `@org`, you would  need to create the `org` organization
+on npmjs.com prior to trying to publish.
+
+Scoped packages are not public by default.  You will need to specify
+`--access public` with the initial `npm publish` command.  This will publish
+the package and set access to `public` as if you had run `npm access public`
+after publishing.  You do not need to do this when publishing new versions of
+an existing scoped package.
 
 #### Publishing private scoped packages to the npm registry
 
@@ -101,7 +112,8 @@ desired, with `npm access` or on the npmjs.com website.
 
 Scopes can be associated with a separate registry. This allows you to
 seamlessly use a mix of packages from the primary npm registry and one or more
-private registries, such as npm Enterprise.
+private registries, such as [GitHub Packages](https://github.com/features/packages) or the open source [Verdaccio](https://verdaccio.org)
+project.
 
 You can associate a scope with a registry at login, e.g.
 
@@ -125,7 +137,7 @@ that registry instead.
 
 ### See also
 
-* [npm install](/cli-commands/npm-install)
-* [npm publish](/cli-commands/npm-publish)
-* [npm access](/cli-commands/npm-access)
+* [npm install](/commands/npm-install)
+* [npm publish](/commands/npm-publish)
+* [npm access](/commands/npm-access)
 * [npm registry](/using-npm/registry)

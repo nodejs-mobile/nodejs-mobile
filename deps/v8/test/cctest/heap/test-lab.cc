@@ -30,7 +30,7 @@ static void VerifyIterable(v8::internal::Address base,
   size_t counter = 0;
   while (base < limit) {
     object = HeapObject::FromAddress(base);
-    CHECK(object.IsFiller());
+    CHECK(object.IsFreeSpaceOrFiller());
     CHECK_LT(counter, expected_size.size());
     CHECK_EQ(expected_size[counter], object.Size());
     base += object.Size();
@@ -95,11 +95,8 @@ TEST(SimpleAllocate) {
     LocalAllocationBuffer lab =
         LocalAllocationBuffer::FromResult(heap, lab_backing_store, kLabSize);
     CHECK(lab.IsValid());
-    intptr_t sum = 0;
     for (auto size : sizes) {
-      if (AllocateFromLab(heap, &lab, size)) {
-        sum += size;
-      }
+      AllocateFromLab(heap, &lab, size);
     }
   }
   VerifyIterable(base, limit, expected_sizes);

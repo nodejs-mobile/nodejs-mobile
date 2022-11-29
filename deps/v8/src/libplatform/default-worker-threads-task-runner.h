@@ -5,6 +5,7 @@
 #ifndef V8_LIBPLATFORM_DEFAULT_WORKER_THREADS_TASK_RUNNER_H_
 #define V8_LIBPLATFORM_DEFAULT_WORKER_THREADS_TASK_RUNNER_H_
 
+#include <memory>
 #include <vector>
 
 #include "include/libplatform/libplatform-export.h"
@@ -30,10 +31,6 @@ class V8_PLATFORM_EXPORT DefaultWorkerThreadsTaskRunner
 
   double MonotonicallyIncreasingTime();
 
-  // It is only valid to call this method on a task runner with a single worker
-  // thread. True if the current thread is the worker thread.
-  bool RunsTasksOnCurrentThread() const;
-
   // v8::TaskRunner implementation.
   void PostTask(std::unique_ptr<Task> task) override;
 
@@ -50,13 +47,14 @@ class V8_PLATFORM_EXPORT DefaultWorkerThreadsTaskRunner
     explicit WorkerThread(DefaultWorkerThreadsTaskRunner* runner);
     ~WorkerThread() override;
 
+    WorkerThread(const WorkerThread&) = delete;
+    WorkerThread& operator=(const WorkerThread&) = delete;
+
     // This thread attempts to get tasks in a loop from |runner_| and run them.
     void Run() override;
 
    private:
     DefaultWorkerThreadsTaskRunner* runner_;
-
-    DISALLOW_COPY_AND_ASSIGN(WorkerThread);
   };
 
   // Called by the WorkerThread. Gets the next take (delayed or immediate) to be
@@ -68,8 +66,6 @@ class V8_PLATFORM_EXPORT DefaultWorkerThreadsTaskRunner
   DelayedTaskQueue queue_;
   std::vector<std::unique_ptr<WorkerThread>> thread_pool_;
   TimeFunction time_function_;
-  std::atomic_int single_worker_thread_id_{0};
-  uint32_t thread_pool_size_;
 };
 
 }  // namespace platform

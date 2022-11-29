@@ -5,7 +5,9 @@
 #ifndef V8_OBJECTS_ELEMENTS_H_
 #define V8_OBJECTS_ELEMENTS_H_
 
+#include "src/builtins/builtins-utils.h"
 #include "src/objects/elements-kind.h"
+#include "src/objects/internal-index.h"
 #include "src/objects/keys.h"
 #include "src/objects/objects.h"
 
@@ -20,6 +22,8 @@ class ElementsAccessor {
  public:
   ElementsAccessor() = default;
   virtual ~ElementsAccessor() = default;
+  ElementsAccessor(const ElementsAccessor&) = delete;
+  ElementsAccessor& operator=(const ElementsAccessor&) = delete;
 
   // Returns a shared ElementsAccessor for the specified ElementsKind.
   static ElementsAccessor* ForKind(ElementsKind elements_kind) {
@@ -32,13 +36,13 @@ class ElementsAccessor {
   virtual void Validate(JSObject obj) = 0;
 
   // Returns true if a holder contains an element with the specified index
-  // without iterating up the prototype chain.  The caller can optionally pass
-  // in the backing store to use for the check, which must be compatible with
-  // the ElementsKind of the ElementsAccessor. If backing_store is nullptr, the
-  // holder->elements() is used as the backing store. If a |filter| is
-  // specified the PropertyAttributes of the element at the given index
-  // are compared to the given |filter|. If they match/overlap the given
-  // index is ignored. Note that only Dictionary elements have custom
+  // without iterating up the prototype chain. The first version takes the
+  // backing store to use for the check, which must be compatible with the
+  // ElementsKind of the ElementsAccessor; the second version uses
+  // holder->elements() as the backing store. If a |filter| is specified,
+  // the PropertyAttributes of the element at the given index are compared
+  // to the given |filter|. If they match/overlap, the given index is ignored.
+  // Note that only Dictionary elements have custom
   // PropertyAttributes associated, hence the |filter| argument is ignored for
   // all but DICTIONARY_ELEMENTS and SLOW_SLOPPY_ARGUMENTS_ELEMENTS.
   virtual bool HasElement(JSObject holder, uint32_t index,
@@ -50,21 +54,20 @@ class ElementsAccessor {
 
   // Note: this is currently not implemented for string wrapper and
   // typed array elements.
-  virtual bool HasEntry(JSObject holder, uint32_t entry) = 0;
+  virtual bool HasEntry(JSObject holder, InternalIndex entry) = 0;
 
-  // TODO(cbruni): HasEntry and Get should not be exposed publicly with the
-  // entry parameter.
-  virtual Handle<Object> Get(Handle<JSObject> holder, uint32_t entry) = 0;
+  virtual Handle<Object> Get(Handle<JSObject> holder, InternalIndex entry) = 0;
 
   virtual bool HasAccessors(JSObject holder) = 0;
-  virtual uint32_t NumberOfElements(JSObject holder) = 0;
+  virtual size_t NumberOfElements(JSObject holder) = 0;
 
   // Modifies the length data property as specified for JSArrays and resizes the
   // underlying backing store accordingly. The method honors the semantics of
   // changing array sizes as defined in EcmaScript 5.1 15.4.5.2, i.e. array that
   // have non-deletable elements can only be shrunk to the size of highest
   // element that is non-deletable.
-  virtual void SetLength(Handle<JSArray> holder, uint32_t new_length) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> SetLength(Handle<JSArray> holder,
+                                                      uint32_t new_length) = 0;
 
   // Copy all indices that have elements from |object| into the given
   // KeyAccumulator. For Dictionary-based element-kinds we filter out elements
@@ -94,60 +97,68 @@ class ElementsAccessor {
       Handle<JSObject> receiver, KeyAccumulator* accumulator,
       AddKeyConversion convert) = 0;
 
-  virtual void TransitionElementsKind(Handle<JSObject> object,
-                                      Handle<Map> map) = 0;
-  virtual void GrowCapacityAndConvert(Handle<JSObject> object,
-                                      uint32_t capacity) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> TransitionElementsKind(
+      Handle<JSObject> object, Handle<Map> map) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> GrowCapacityAndConvert(
+      Handle<JSObject> object, uint32_t capacity) = 0;
   // Unlike GrowCapacityAndConvert do not attempt to convert the backing store
   // and simply return false in this case.
-  virtual bool GrowCapacity(Handle<JSObject> object, uint32_t index) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> GrowCapacity(
+      Handle<JSObject> object, uint32_t index) = 0;
 
   static void InitializeOncePerProcess();
   static void TearDown();
 
-  virtual void Set(Handle<JSObject> holder, uint32_t entry, Object value) = 0;
+  virtual void Set(Handle<JSObject> holder, InternalIndex entry,
+                   Object value) = 0;
 
-  virtual void Add(Handle<JSObject> object, uint32_t index,
-                   Handle<Object> value, PropertyAttributes attributes,
-                   uint32_t new_capacity) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> Add(Handle<JSObject> object,
+                                                uint32_t index,
+                                                Handle<Object> value,
+                                                PropertyAttributes attributes,
+                                                uint32_t new_capacity) = 0;
 
-  static Handle<JSArray> Concat(Isolate* isolate, Arguments* args,
+  static Handle<JSArray> Concat(Isolate* isolate, BuiltinArguments* args,
                                 uint32_t concat_size, uint32_t result_length);
 
-  virtual uint32_t Push(Handle<JSArray> receiver, Arguments* args,
-                        uint32_t push_size) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<uint32_t> Push(Handle<JSArray> receiver,
+                                                     BuiltinArguments* args,
+                                                     uint32_t push_size) = 0;
 
-  virtual uint32_t Unshift(Handle<JSArray> receiver, Arguments* args,
-                           uint32_t unshift_size) = 0;
+  V8_WARN_UNUSED_RESULT virtual Maybe<uint32_t> Unshift(
+      Handle<JSArray> receiver, BuiltinArguments* args,
+      uint32_t unshift_size) = 0;
 
-  virtual Handle<Object> Pop(Handle<JSArray> receiver) = 0;
+  V8_WARN_UNUSED_RESULT virtual MaybeHandle<Object> Pop(
+      Handle<JSArray> receiver) = 0;
 
-  virtual Handle<Object> Shift(Handle<JSArray> receiver) = 0;
+  V8_WARN_UNUSED_RESULT virtual MaybeHandle<Object> Shift(
+      Handle<JSArray> receiver) = 0;
 
   virtual Handle<NumberDictionary> Normalize(Handle<JSObject> object) = 0;
 
-  virtual uint32_t GetCapacity(JSObject holder,
-                               FixedArrayBase backing_store) = 0;
+  virtual size_t GetCapacity(JSObject holder, FixedArrayBase backing_store) = 0;
 
-  virtual Object Fill(Handle<JSObject> receiver, Handle<Object> obj_value,
-                      uint32_t start, uint32_t end) = 0;
+  V8_WARN_UNUSED_RESULT virtual MaybeHandle<Object> Fill(
+      Handle<JSObject> receiver, Handle<Object> obj_value, size_t start,
+      size_t end) = 0;
 
   // Check an Object's own elements for an element (using SameValueZero
   // semantics)
   virtual Maybe<bool> IncludesValue(Isolate* isolate, Handle<JSObject> receiver,
-                                    Handle<Object> value, uint32_t start,
-                                    uint32_t length) = 0;
+                                    Handle<Object> value, size_t start,
+                                    size_t length) = 0;
 
   // Check an Object's own elements for the index of an element (using SameValue
   // semantics)
   virtual Maybe<int64_t> IndexOfValue(Isolate* isolate,
                                       Handle<JSObject> receiver,
-                                      Handle<Object> value, uint32_t start,
-                                      uint32_t length) = 0;
+                                      Handle<Object> value, size_t start,
+                                      size_t length) = 0;
 
   virtual Maybe<int64_t> LastIndexOfValue(Handle<JSObject> receiver,
                                           Handle<Object> value,
-                                          uint32_t start) = 0;
+                                          size_t start) = 0;
 
   virtual void Reverse(JSObject receiver) = 0;
 
@@ -157,7 +168,7 @@ class ElementsAccessor {
 
   virtual Object CopyElements(Handle<Object> source,
                               Handle<JSObject> destination, size_t length,
-                              uint32_t offset = 0) = 0;
+                              size_t offset) = 0;
 
   virtual Handle<FixedArray> CreateListFromArrayLike(Isolate* isolate,
                                                      Handle<JSObject> object,
@@ -178,18 +189,18 @@ class ElementsAccessor {
   // indices are equivalent to entries. In the NumberDictionary
   // ElementsAccessor, entries are mapped to an index using the KeyAt method on
   // the NumberDictionary.
-  virtual uint32_t GetEntryForIndex(Isolate* isolate, JSObject holder,
-                                    FixedArrayBase backing_store,
-                                    uint32_t index) = 0;
+  virtual InternalIndex GetEntryForIndex(Isolate* isolate, JSObject holder,
+                                         FixedArrayBase backing_store,
+                                         size_t index) = 0;
 
-  virtual PropertyDetails GetDetails(JSObject holder, uint32_t entry) = 0;
+  virtual PropertyDetails GetDetails(JSObject holder, InternalIndex entry) = 0;
   virtual void Reconfigure(Handle<JSObject> object,
-                           Handle<FixedArrayBase> backing_store, uint32_t entry,
-                           Handle<Object> value,
+                           Handle<FixedArrayBase> backing_store,
+                           InternalIndex entry, Handle<Object> value,
                            PropertyAttributes attributes) = 0;
 
   // Deletes an element in an object.
-  virtual void Delete(Handle<JSObject> holder, uint32_t entry) = 0;
+  virtual void Delete(Handle<JSObject> holder, InternalIndex entry) = 0;
 
   // NOTE: this method violates the handlified function signature convention:
   // raw pointer parameter |source_holder| in the function that allocates.
@@ -202,12 +213,10 @@ class ElementsAccessor {
 
  private:
   V8_EXPORT_PRIVATE static ElementsAccessor** elements_accessors_;
-
-  DISALLOW_COPY_AND_ASSIGN(ElementsAccessor);
 };
 
 V8_WARN_UNUSED_RESULT MaybeHandle<Object> ArrayConstructInitializeElements(
-    Handle<JSArray> array, Arguments* args);
+    Handle<JSArray> array, JavaScriptArguments* args);
 
 // Called directly from CSA.
 // {raw_context}: Context pointer.

@@ -1,3 +1,5 @@
+// Flags: --expose-internals
+
 'use strict';
 const { expectsError, mustCall } = require('../common');
 const assert = require('assert');
@@ -8,7 +10,7 @@ const CRLF = '\r\n';
 const DUMMY_HEADER_NAME = 'Cookie: ';
 const DUMMY_HEADER_VALUE = 'a'.repeat(
   // Plus one is to make it 1 byte too big
-  maxHeaderSize - DUMMY_HEADER_NAME.length - (2 * CRLF.length) + 1
+  maxHeaderSize - DUMMY_HEADER_NAME.length + 2
 );
 const PAYLOAD_GET = 'GET /blah HTTP/1.1';
 const PAYLOAD = PAYLOAD_GET + CRLF +
@@ -21,7 +23,7 @@ server.on('connection', mustCall((socket) => {
     name: 'Error',
     message: 'Parse Error: Header overflow',
     code: 'HPE_HEADER_OVERFLOW',
-    bytesParsed: maxHeaderSize + PAYLOAD_GET.length,
+    bytesParsed: maxHeaderSize + PAYLOAD_GET.length + (CRLF.length * 2) + 1,
     rawPacket: Buffer.from(PAYLOAD)
   }));
 }));

@@ -16,15 +16,12 @@
 namespace v8 {
 namespace internal {
 
+#include "torque-generated/src/objects/js-generator-tq-inl.inc"
+
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSGeneratorObject)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSAsyncFunctionObject)
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSAsyncGeneratorObject)
 TQ_OBJECT_CONSTRUCTORS_IMPL(AsyncGeneratorRequest)
-
-TQ_SMI_ACCESSORS(JSGeneratorObject, resume_mode)
-TQ_SMI_ACCESSORS(JSGeneratorObject, continuation)
-
-TQ_SMI_ACCESSORS(AsyncGeneratorRequest, resume_mode)
 
 bool JSGeneratorObject::is_suspended() const {
   DCHECK_LT(kGeneratorExecuting, 0);
@@ -39,8 +36,6 @@ bool JSGeneratorObject::is_closed() const {
 bool JSGeneratorObject::is_executing() const {
   return continuation() == kGeneratorExecuting;
 }
-
-TQ_SMI_ACCESSORS(JSAsyncGeneratorObject, is_awaiting)
 
 }  // namespace internal
 }  // namespace v8

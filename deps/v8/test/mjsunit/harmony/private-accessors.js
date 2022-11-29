@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-private-methods
-
 "use strict";
 
 // Complementary private accessors.
@@ -81,6 +79,30 @@
     }
   }
   assertEquals('d', new C().getA().getD());
+}
+
+{
+  assertThrows(() => {
+    class A {
+      [this.#a] = 1;
+      get #a() {}
+    }
+  }, TypeError);
+
+  assertThrows(() => {
+    class A {
+      [this.#a] = 1;
+      set #a(val) {}
+    }
+  }, TypeError);
+
+  assertThrows(() => {
+    class A {
+      [this.#a] = 1;
+      set #a(val) {}
+      get #a() {}
+    }
+  }, TypeError);
 }
 
 // Duplicate private accessors.

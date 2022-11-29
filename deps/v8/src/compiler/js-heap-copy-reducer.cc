@@ -12,6 +12,7 @@
 #include "src/heap/factory-inl.h"
 #include "src/objects/map.h"
 #include "src/objects/scope-info.h"
+#include "src/objects/template-objects.h"
 
 namespace v8 {
 namespace internal {
@@ -27,172 +28,190 @@ JSHeapBroker* JSHeapCopyReducer::broker() { return broker_; }
 Reduction JSHeapCopyReducer::Reduce(Node* node) {
   switch (node->opcode()) {
     case IrOpcode::kHeapConstant: {
-      if (!FLAG_concurrent_inlining) {
-        ObjectRef object(broker(), HeapConstantOf(node->op()));
-        if (object.IsJSFunction()) object.AsJSFunction().Serialize();
-        if (object.IsJSObject()) {
-          object.AsJSObject().SerializeObjectCreateMap();
-        }
-        if (object.IsSourceTextModule()) {
-          object.AsSourceTextModule().Serialize();
-        }
+      ObjectRef object = MakeRef(broker(), HeapConstantOf(node->op()));
+      if (object.IsJSObject()) {
+        object.AsJSObject().SerializeObjectCreateMap(
+            NotConcurrentInliningTag{broker()});
       }
       break;
     }
     case IrOpcode::kJSCreateArray: {
-      if (!FLAG_concurrent_inlining) {
-        CreateArrayParameters const& p = CreateArrayParametersOf(node->op());
-        Handle<AllocationSite> site;
-        if (p.site().ToHandle(&site)) AllocationSiteRef(broker(), site);
-      }
+      CreateArrayParametersOf(node->op()).site(broker());
       break;
     }
     case IrOpcode::kJSCreateArguments: {
-      if (!FLAG_concurrent_inlining) {
-        Node* const frame_state = NodeProperties::GetFrameStateInput(node);
-        FrameStateInfo state_info = FrameStateInfoOf(frame_state->op());
-        SharedFunctionInfoRef shared(
-            broker(), state_info.shared_info().ToHandleChecked());
-      }
+      Node* const frame_state = NodeProperties::GetFrameStateInput(node);
+      FrameStateInfo state_info = FrameStateInfoOf(frame_state->op());
+      MakeRef(broker(), state_info.shared_info().ToHandleChecked());
       break;
     }
     case IrOpcode::kJSCreateBlockContext: {
-      if (!FLAG_concurrent_inlining) {
-        ScopeInfoRef(broker(), ScopeInfoOf(node->op()));
-      }
+      USE(ScopeInfoOf(broker(), node->op()));
       break;
     }
     case IrOpcode::kJSCreateBoundFunction: {
-      if (!FLAG_concurrent_inlining) {
-        CreateBoundFunctionParameters const& p =
-            CreateBoundFunctionParametersOf(node->op());
-        MapRef(broker(), p.map());
-      }
+      CreateBoundFunctionParameters const& p =
+          CreateBoundFunctionParametersOf(node->op());
+      p.map(broker());
       break;
     }
     case IrOpcode::kJSCreateCatchContext: {
-      if (!FLAG_concurrent_inlining) {
-        ScopeInfoRef(broker(), ScopeInfoOf(node->op()));
-      }
+      USE(ScopeInfoOf(broker(), node->op()));
       break;
     }
     case IrOpcode::kJSCreateClosure: {
-      if (!FLAG_concurrent_inlining) {
-        CreateClosureParameters const& p =
-            CreateClosureParametersOf(node->op());
-        SharedFunctionInfoRef(broker(), p.shared_info());
-        FeedbackCellRef(broker(), p.feedback_cell());
-        HeapObjectRef(broker(), p.code());
-      }
+      CreateClosureParameters const& p = CreateClosureParametersOf(node->op());
+      p.shared_info(broker());
+      p.code(broker());
       break;
     }
     case IrOpcode::kJSCreateEmptyLiteralArray: {
-      if (!FLAG_concurrent_inlining) {
-        FeedbackParameter const& p = FeedbackParameterOf(node->op());
-        FeedbackVectorRef(broker(), p.feedback().vector).Serialize();
+      FeedbackParameter const& p = FeedbackParameterOf(node->op());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForArrayOrObjectLiteral(p.feedback());
+      }
+      break;
+    }
+    /* Unary ops. */
+    case IrOpcode::kJSBitwiseNot:
+    case IrOpcode::kJSDecrement:
+    case IrOpcode::kJSIncrement:
+    case IrOpcode::kJSNegate: {
+      FeedbackParameter const& p = FeedbackParameterOf(node->op());
+      if (p.feedback().IsValid()) {
+        // Unary ops are treated as binary ops with respect to feedback.
+        broker()->GetFeedbackForBinaryOperation(p.feedback());
+      }
+      break;
+    }
+    /* Binary ops. */
+    case IrOpcode::kJSAdd:
+    case IrOpcode::kJSSubtract:
+    case IrOpcode::kJSMultiply:
+    case IrOpcode::kJSDivide:
+    case IrOpcode::kJSModulus:
+    case IrOpcode::kJSExponentiate:
+    case IrOpcode::kJSBitwiseOr:
+    case IrOpcode::kJSBitwiseXor:
+    case IrOpcode::kJSBitwiseAnd:
+    case IrOpcode::kJSShiftLeft:
+    case IrOpcode::kJSShiftRight:
+    case IrOpcode::kJSShiftRightLogical: {
+      FeedbackParameter const& p = FeedbackParameterOf(node->op());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForBinaryOperation(p.feedback());
+      }
+      break;
+    }
+    /* Compare ops. */
+    case IrOpcode::kJSEqual:
+    case IrOpcode::kJSGreaterThan:
+    case IrOpcode::kJSGreaterThanOrEqual:
+    case IrOpcode::kJSLessThan:
+    case IrOpcode::kJSLessThanOrEqual:
+    case IrOpcode::kJSStrictEqual: {
+      FeedbackParameter const& p = FeedbackParameterOf(node->op());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForCompareOperation(p.feedback());
       }
       break;
     }
     case IrOpcode::kJSCreateFunctionContext: {
-      if (!FLAG_concurrent_inlining) {
-        CreateFunctionContextParameters const& p =
-            CreateFunctionContextParametersOf(node->op());
-        ScopeInfoRef(broker(), p.scope_info());
-      }
+      CreateFunctionContextParameters const& p =
+          CreateFunctionContextParametersOf(node->op());
+      p.scope_info(broker());
       break;
     }
     case IrOpcode::kJSCreateLiteralArray:
     case IrOpcode::kJSCreateLiteralObject: {
-      if (!FLAG_concurrent_inlining) {
-        CreateLiteralParameters const& p =
-            CreateLiteralParametersOf(node->op());
-        FeedbackVectorRef(broker(), p.feedback().vector).Serialize();
+      CreateLiteralParameters const& p = CreateLiteralParametersOf(node->op());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForArrayOrObjectLiteral(p.feedback());
       }
       break;
     }
     case IrOpcode::kJSCreateLiteralRegExp: {
-      if (!FLAG_concurrent_inlining) {
-        CreateLiteralParameters const& p =
-            CreateLiteralParametersOf(node->op());
-        FeedbackVectorRef(broker(), p.feedback().vector).Serialize();
+      CreateLiteralParameters const& p = CreateLiteralParametersOf(node->op());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForRegExpLiteral(p.feedback());
       }
+      break;
+    }
+    case IrOpcode::kJSGetTemplateObject: {
+      GetTemplateObjectParameters const& p =
+          GetTemplateObjectParametersOf(node->op());
+      p.shared(broker());
+      p.description(broker());
+      broker()->GetFeedbackForTemplateObject(p.feedback());
       break;
     }
     case IrOpcode::kJSCreateWithContext: {
-      if (!FLAG_concurrent_inlining) {
-        ScopeInfoRef(broker(), ScopeInfoOf(node->op()));
-      }
+      USE(ScopeInfoOf(broker(), node->op()));
       break;
     }
     case IrOpcode::kJSLoadNamed: {
-      if (!FLAG_concurrent_inlining) {
-        NamedAccess const& p = NamedAccessOf(node->op());
-        NameRef name(broker(), p.name());
-        if (p.feedback().IsValid()) {
-          broker()->ProcessFeedbackForPropertyAccess(p.feedback(),
-                                                     AccessMode::kLoad, name);
-        }
+      NamedAccess const& p = NamedAccessOf(node->op());
+      NameRef name = p.name(broker());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForPropertyAccess(p.feedback(), AccessMode::kLoad,
+                                               name);
+      }
+      break;
+    }
+    case IrOpcode::kJSLoadNamedFromSuper: {
+      NamedAccess const& p = NamedAccessOf(node->op());
+      NameRef name = p.name(broker());
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForPropertyAccess(p.feedback(), AccessMode::kLoad,
+                                               name);
       }
       break;
     }
     case IrOpcode::kJSStoreNamed: {
-      if (!FLAG_concurrent_inlining) {
-        NamedAccess const& p = NamedAccessOf(node->op());
-        NameRef name(broker(), p.name());
-      }
+      NamedAccess const& p = NamedAccessOf(node->op());
+      p.name(broker());
       break;
     }
     case IrOpcode::kStoreField:
     case IrOpcode::kLoadField: {
-      if (!FLAG_concurrent_inlining) {
-        FieldAccess access = FieldAccessOf(node->op());
-        Handle<Map> map_handle;
-        if (access.map.ToHandle(&map_handle)) {
-          MapRef(broker(), map_handle);
-        }
-        Handle<Name> name_handle;
-        if (access.name.ToHandle(&name_handle)) {
-          NameRef(broker(), name_handle);
-        }
+      FieldAccess access = FieldAccessOf(node->op());
+      Handle<Map> map_handle;
+      if (access.map.ToHandle(&map_handle)) {
+        MakeRef(broker(), map_handle);
+      }
+      Handle<Name> name_handle;
+      if (access.name.ToHandle(&name_handle)) {
+        MakeRef(broker(), name_handle);
       }
       break;
     }
     case IrOpcode::kMapGuard: {
-      if (!FLAG_concurrent_inlining) {
-        ZoneHandleSet<Map> const& maps = MapGuardMapsOf(node->op());
-        for (Handle<Map> map : maps) {
-          MapRef(broker(), map);
-        }
+      ZoneHandleSet<Map> const& maps = MapGuardMapsOf(node->op());
+      for (Handle<Map> map : maps) {
+        MakeRef(broker(), map);
       }
       break;
     }
     case IrOpcode::kCheckMaps: {
-      if (!FLAG_concurrent_inlining) {
-        ZoneHandleSet<Map> const& maps =
-            CheckMapsParametersOf(node->op()).maps();
-        for (Handle<Map> map : maps) {
-          MapRef(broker(), map);
-        }
+      ZoneHandleSet<Map> const& maps = CheckMapsParametersOf(node->op()).maps();
+      for (Handle<Map> map : maps) {
+        MakeRef(broker(), map);
       }
       break;
     }
     case IrOpcode::kCompareMaps: {
-      if (!FLAG_concurrent_inlining) {
-        ZoneHandleSet<Map> const& maps = CompareMapsParametersOf(node->op());
-        for (Handle<Map> map : maps) {
-          MapRef(broker(), map);
-        }
+      ZoneHandleSet<Map> const& maps = CompareMapsParametersOf(node->op());
+      for (Handle<Map> map : maps) {
+        MakeRef(broker(), map);
       }
       break;
     }
     case IrOpcode::kJSLoadProperty: {
-      if (!FLAG_concurrent_inlining) {
-        PropertyAccess const& p = PropertyAccessOf(node->op());
-        AccessMode access_mode = AccessMode::kLoad;
-        if (p.feedback().IsValid()) {
-          broker()->ProcessFeedbackForPropertyAccess(p.feedback(), access_mode,
-                                                     base::nullopt);
-        }
+      PropertyAccess const& p = PropertyAccessOf(node->op());
+      AccessMode access_mode = AccessMode::kLoad;
+      if (p.feedback().IsValid()) {
+        broker()->GetFeedbackForPropertyAccess(p.feedback(), access_mode,
+                                               base::nullopt);
       }
       break;
     }

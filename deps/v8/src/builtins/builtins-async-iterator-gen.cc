@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/base/optional.h"
 #include "src/builtins/builtins-async-gen.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
@@ -12,65 +13,72 @@
 namespace v8 {
 namespace internal {
 
-using compiler::Node;
-
 namespace {
 class AsyncFromSyncBuiltinsAssembler : public AsyncBuiltinsAssembler {
  public:
+  // The 'next' and 'return' take an optional value parameter, and the 'throw'
+  // method take an optional reason parameter.
+  static const int kValueOrReasonArg = 0;
+
   explicit AsyncFromSyncBuiltinsAssembler(compiler::CodeAssemblerState* state)
       : AsyncBuiltinsAssembler(state) {}
 
-  void ThrowIfNotAsyncFromSyncIterator(Node* const context, Node* const object,
+  void ThrowIfNotAsyncFromSyncIterator(const TNode<Context> context,
+                                       const TNode<Object> object,
                                        Label* if_exception,
-                                       Variable* var_exception,
+                                       TVariable<Object>* var_exception,
                                        const char* method_name);
 
-  using UndefinedMethodHandler = std::function<void(
-      Node* const context, Node* const promise, Label* if_exception)>;
-  using SyncIteratorNodeGenerator = std::function<Node*(Node*)>;
+  using UndefinedMethodHandler =
+      std::function<void(const TNode<NativeContext> native_context,
+                         const TNode<JSPromise> promise, Label* if_exception)>;
+  using SyncIteratorNodeGenerator =
+      std::function<TNode<Object>(TNode<JSReceiver>)>;
   void Generate_AsyncFromSyncIteratorMethod(
-      Node* const context, Node* const iterator, Node* const sent_value,
+      CodeStubArguments* args, const TNode<Context> context,
+      const TNode<Object> iterator, const TNode<Object> sent_value,
       const SyncIteratorNodeGenerator& get_method,
       const UndefinedMethodHandler& if_method_undefined,
       const char* operation_name,
       Label::Type reject_label_type = Label::kDeferred,
-      Node* const initial_exception_value = nullptr);
+      base::Optional<TNode<Object>> initial_exception_value = base::nullopt);
 
   void Generate_AsyncFromSyncIteratorMethod(
-      Node* const context, Node* const iterator, Node* const sent_value,
+      CodeStubArguments* args, const TNode<Context> context,
+      const TNode<Object> iterator, const TNode<Object> sent_value,
       Handle<String> name, const UndefinedMethodHandler& if_method_undefined,
       const char* operation_name,
       Label::Type reject_label_type = Label::kDeferred,
-      Node* const initial_exception_value = nullptr) {
-    auto get_method = [=](Node* const sync_iterator) {
+      base::Optional<TNode<Object>> initial_exception_value = base::nullopt) {
+    auto get_method = [=](const TNode<JSReceiver> sync_iterator) {
       return GetProperty(context, sync_iterator, name);
     };
     return Generate_AsyncFromSyncIteratorMethod(
-        context, iterator, sent_value, get_method, if_method_undefined,
+        args, context, iterator, sent_value, get_method, if_method_undefined,
         operation_name, reject_label_type, initial_exception_value);
   }
 
   // Load "value" and "done" from an iterator result object. If an exception
-  // is thrown at any point, jumps to te `if_exception` label with exception
+  // is thrown at any point, jumps to the `if_exception` label with exception
   // stored in `var_exception`.
   //
   // Returns a Pair of Nodes, whose first element is the value of the "value"
   // property, and whose second element is the value of the "done" property,
   // converted to a Boolean if needed.
-  std::pair<Node*, Node*> LoadIteratorResult(Node* const context,
-                                             Node* const native_context,
-                                             Node* const iter_result,
-                                             Label* if_exception,
-                                             Variable* var_exception);
+  std::pair<TNode<Object>, TNode<Oddball>> LoadIteratorResult(
+      const TNode<Context> context, const TNode<NativeContext> native_context,
+      const TNode<Object> iter_result, Label* if_exception,
+      TVariable<Object>* var_exception);
 };
 
 void AsyncFromSyncBuiltinsAssembler::ThrowIfNotAsyncFromSyncIterator(
-    Node* const context, Node* const object, Label* if_exception,
-    Variable* var_exception, const char* method_name) {
+    const TNode<Context> context, const TNode<Object> object,
+    Label* if_exception, TVariable<Object>* var_exception,
+    const char* method_name) {
   Label if_receiverisincompatible(this, Label::kDeferred), done(this);
 
   GotoIf(TaggedIsSmi(object), &if_receiverisincompatible);
-  Branch(HasInstanceType(object, JS_ASYNC_FROM_SYNC_ITERATOR_TYPE), &done,
+  Branch(HasInstanceType(CAST(object), JS_ASYNC_FROM_SYNC_ITERATOR_TYPE), &done,
          &if_receiverisincompatible);
 
   BIND(&if_receiverisincompatible);
@@ -79,13 +87,13 @@ void AsyncFromSyncBuiltinsAssembler::ThrowIfNotAsyncFromSyncIterator(
     // internal slot, then
 
     // Let badIteratorError be a new TypeError exception.
-    Node* const error =
+    TNode<HeapObject> error =
         MakeTypeError(MessageTemplate::kIncompatibleMethodReceiver, context,
                       StringConstant(method_name), object);
 
     // Perform ! Call(promiseCapability.[[Reject]], undefined,
     //                « badIteratorError »).
-    var_exception->Bind(error);
+    *var_exception = error;
     Goto(if_exception);
   }
 
@@ -93,115 +101,143 @@ void AsyncFromSyncBuiltinsAssembler::ThrowIfNotAsyncFromSyncIterator(
 }
 
 void AsyncFromSyncBuiltinsAssembler::Generate_AsyncFromSyncIteratorMethod(
-    Node* const context, Node* const iterator, Node* const sent_value,
+    CodeStubArguments* args, const TNode<Context> context,
+    const TNode<Object> iterator, const TNode<Object> sent_value,
     const SyncIteratorNodeGenerator& get_method,
     const UndefinedMethodHandler& if_method_undefined,
     const char* operation_name, Label::Type reject_label_type,
-    Node* const initial_exception_value) {
-  TNode<NativeContext> const native_context = LoadNativeContext(context);
-  Node* const promise = AllocateAndInitJSPromise(context);
+    base::Optional<TNode<Object>> initial_exception_value) {
+  const TNode<NativeContext> native_context = LoadNativeContext(context);
+  const TNode<JSPromise> promise = NewJSPromise(context);
 
-  VARIABLE(var_exception, MachineRepresentation::kTagged,
-           initial_exception_value == nullptr ? UndefinedConstant()
-                                              : initial_exception_value);
+  TVARIABLE(
+      Object, var_exception,
+      initial_exception_value ? *initial_exception_value : UndefinedConstant());
   Label reject_promise(this, reject_label_type);
 
   ThrowIfNotAsyncFromSyncIterator(context, iterator, &reject_promise,
                                   &var_exception, operation_name);
 
-  TNode<Object> const sync_iterator =
-      LoadObjectField(iterator, JSAsyncFromSyncIterator::kSyncIteratorOffset);
+  TNode<JSAsyncFromSyncIterator> async_iterator = CAST(iterator);
+  const TNode<JSReceiver> sync_iterator = LoadObjectField<JSReceiver>(
+      async_iterator, JSAsyncFromSyncIterator::kSyncIteratorOffset);
 
-  Node* const method = get_method(sync_iterator);
+  TNode<Object> method = get_method(sync_iterator);
 
   if (if_method_undefined) {
     Label if_isnotundefined(this);
 
-    GotoIfNot(IsUndefined(method), &if_isnotundefined);
+    GotoIfNot(IsNullOrUndefined(method), &if_isnotundefined);
     if_method_undefined(native_context, promise, &reject_promise);
 
     BIND(&if_isnotundefined);
   }
 
-  Node* const iter_result = CallJS(CodeFactory::Call(isolate()), context,
-                                   method, sync_iterator, sent_value);
-  GotoIfException(iter_result, &reject_promise, &var_exception);
+  TVARIABLE(Object, iter_result);
+  {
+    Label has_sent_value(this), no_sent_value(this), merge(this);
+    ScopedExceptionHandler handler(this, &reject_promise, &var_exception);
+    Branch(
+        IntPtrGreaterThan(args->GetLength(), IntPtrConstant(kValueOrReasonArg)),
+        &has_sent_value, &no_sent_value);
+    BIND(&has_sent_value);
+    {
+      iter_result = Call(context, method, sync_iterator, sent_value);
+      Goto(&merge);
+    }
+    BIND(&no_sent_value);
+    {
+      iter_result = Call(context, method, sync_iterator);
+      Goto(&merge);
+    }
+    BIND(&merge);
+  }
 
-  Node* value;
-  Node* done;
-  std::tie(value, done) = LoadIteratorResult(
-      context, native_context, iter_result, &reject_promise, &var_exception);
+  TNode<Object> value;
+  TNode<Oddball> done;
+  std::tie(value, done) =
+      LoadIteratorResult(context, native_context, iter_result.value(),
+                         &reject_promise, &var_exception);
 
-  TNode<JSFunction> const promise_fun =
+  const TNode<JSFunction> promise_fun =
       CAST(LoadContextElement(native_context, Context::PROMISE_FUNCTION_INDEX));
   CSA_ASSERT(this, IsConstructor(promise_fun));
 
   // Let valueWrapper be PromiseResolve(%Promise%, « value »).
-  TNode<Object> const value_wrapper = CallBuiltin(
-      Builtins::kPromiseResolve, native_context, promise_fun, value);
   // IfAbruptRejectPromise(valueWrapper, promiseCapability).
-  GotoIfException(value_wrapper, &reject_promise, &var_exception);
+  TNode<Object> value_wrapper;
+  {
+    ScopedExceptionHandler handler(this, &reject_promise, &var_exception);
+    value_wrapper = CallBuiltin(Builtin::kPromiseResolve, native_context,
+                                promise_fun, value);
+  }
 
   // Let onFulfilled be a new built-in function object as defined in
   // Async Iterator Value Unwrap Functions.
   // Set onFulfilled.[[Done]] to throwDone.
-  Node* const on_fulfilled = CreateUnwrapClosure(native_context, done);
+  const TNode<JSFunction> on_fulfilled =
+      CreateUnwrapClosure(native_context, done);
 
   // Perform ! PerformPromiseThen(valueWrapper,
   //     onFulfilled, undefined, promiseCapability).
-  Return(CallBuiltin(Builtins::kPerformPromiseThen, context, value_wrapper,
-                     on_fulfilled, UndefinedConstant(), promise));
+  args->PopAndReturn(CallBuiltin(Builtin::kPerformPromiseThen, context,
+                                 value_wrapper, on_fulfilled,
+                                 UndefinedConstant(), promise));
 
   BIND(&reject_promise);
   {
-    Node* const exception = var_exception.value();
-    CallBuiltin(Builtins::kRejectPromise, context, promise, exception,
+    const TNode<Object> exception = var_exception.value();
+    CallBuiltin(Builtin::kRejectPromise, context, promise, exception,
                 TrueConstant());
-    Return(promise);
+    args->PopAndReturn(promise);
   }
 }
-std::pair<Node*, Node*> AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
-    Node* const context, Node* const native_context, Node* const iter_result,
-    Label* if_exception, Variable* var_exception) {
+
+std::pair<TNode<Object>, TNode<Oddball>>
+AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
+    const TNode<Context> context, const TNode<NativeContext> native_context,
+    const TNode<Object> iter_result, Label* if_exception,
+    TVariable<Object>* var_exception) {
   Label if_fastpath(this), if_slowpath(this), merge(this), to_boolean(this),
       done(this), if_notanobject(this, Label::kDeferred);
   GotoIf(TaggedIsSmi(iter_result), &if_notanobject);
 
-  TNode<Map> const iter_result_map = LoadMap(iter_result);
+  const TNode<Map> iter_result_map = LoadMap(CAST(iter_result));
   GotoIfNot(IsJSReceiverMap(iter_result_map), &if_notanobject);
 
-  TNode<Object> const fast_iter_result_map =
+  const TNode<Object> fast_iter_result_map =
       LoadContextElement(native_context, Context::ITERATOR_RESULT_MAP_INDEX);
 
-  VARIABLE(var_value, MachineRepresentation::kTagged);
-  VARIABLE(var_done, MachineRepresentation::kTagged);
+  TVARIABLE(Object, var_value);
+  TVARIABLE(Object, var_done);
   Branch(TaggedEqual(iter_result_map, fast_iter_result_map), &if_fastpath,
          &if_slowpath);
 
   BIND(&if_fastpath);
   {
-    var_done.Bind(LoadObjectField(iter_result, JSIteratorResult::kDoneOffset));
-    var_value.Bind(
-        LoadObjectField(iter_result, JSIteratorResult::kValueOffset));
+    TNode<JSObject> fast_iter_result = CAST(iter_result);
+    var_done = LoadObjectField(fast_iter_result, JSIteratorResult::kDoneOffset);
+    var_value =
+        LoadObjectField(fast_iter_result, JSIteratorResult::kValueOffset);
     Goto(&merge);
   }
 
   BIND(&if_slowpath);
   {
+    ScopedExceptionHandler handler(this, if_exception, var_exception);
+
     // Let nextDone be IteratorComplete(nextResult).
     // IfAbruptRejectPromise(nextDone, promiseCapability).
-    TNode<Object> const done =
+    const TNode<Object> done =
         GetProperty(context, iter_result, factory()->done_string());
-    GotoIfException(done, if_exception, var_exception);
 
     // Let nextValue be IteratorValue(nextResult).
     // IfAbruptRejectPromise(nextValue, promiseCapability).
-    TNode<Object> const value =
+    const TNode<Object> value =
         GetProperty(context, iter_result, factory()->value_string());
-    GotoIfException(value, if_exception, var_exception);
 
-    var_value.Bind(value);
-    var_done.Bind(done);
+    var_value = value;
+    var_done = done;
     Goto(&merge);
   }
 
@@ -209,27 +245,27 @@ std::pair<Node*, Node*> AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
   {
     // Sync iterator result is not an object --- Produce a TypeError and jump
     // to the `if_exception` path.
-    Node* const error = MakeTypeError(
+    const TNode<Object> error = MakeTypeError(
         MessageTemplate::kIteratorResultNotAnObject, context, iter_result);
-    var_exception->Bind(error);
+    *var_exception = error;
     Goto(if_exception);
   }
 
   BIND(&merge);
   // Ensure `iterResult.done` is a Boolean.
   GotoIf(TaggedIsSmi(var_done.value()), &to_boolean);
-  Branch(IsBoolean(var_done.value()), &done, &to_boolean);
+  Branch(IsBoolean(CAST(var_done.value())), &done, &to_boolean);
 
   BIND(&to_boolean);
   {
-    TNode<Object> const result =
-        CallBuiltin(Builtins::kToBoolean, context, var_done.value());
-    var_done.Bind(result);
+    const TNode<Object> result =
+        CallBuiltin(Builtin::kToBoolean, context, var_done.value());
+    var_done = result;
     Goto(&done);
   }
 
   BIND(&done);
-  return std::make_pair(var_value.value(), var_done.value());
+  return std::make_pair(var_value.value(), CAST(var_done.value()));
 }
 
 }  // namespace
@@ -237,15 +273,20 @@ std::pair<Node*, Node*> AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
 // https://tc39.github.io/proposal-async-iteration/
 // Section #sec-%asyncfromsynciteratorprototype%.next
 TF_BUILTIN(AsyncFromSyncIteratorPrototypeNext, AsyncFromSyncBuiltinsAssembler) {
-  Node* const iterator = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  Node* const context = Parameter(Descriptor::kContext);
+  TNode<IntPtrT> argc = ChangeInt32ToIntPtr(
+      UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount));
+  CodeStubArguments args(this, argc);
 
-  auto get_method = [=](Node* const unused) {
-    return LoadObjectField(iterator, JSAsyncFromSyncIterator::kNextOffset);
+  const TNode<Object> iterator = args.GetReceiver();
+  const TNode<Object> value = args.GetOptionalArgumentValue(kValueOrReasonArg);
+  const auto context = Parameter<Context>(Descriptor::kContext);
+
+  auto get_method = [=](const TNode<JSReceiver> unused) {
+    return LoadObjectField(CAST(iterator),
+                           JSAsyncFromSyncIterator::kNextOffset);
   };
   Generate_AsyncFromSyncIteratorMethod(
-      context, iterator, value, get_method, UndefinedMethodHandler(),
+      &args, context, iterator, value, get_method, UndefinedMethodHandler(),
       "[Async-from-Sync Iterator].prototype.next");
 }
 
@@ -253,44 +294,55 @@ TF_BUILTIN(AsyncFromSyncIteratorPrototypeNext, AsyncFromSyncBuiltinsAssembler) {
 // Section #sec-%asyncfromsynciteratorprototype%.return
 TF_BUILTIN(AsyncFromSyncIteratorPrototypeReturn,
            AsyncFromSyncBuiltinsAssembler) {
-  Node* const iterator = Parameter(Descriptor::kReceiver);
-  Node* const value = Parameter(Descriptor::kValue);
-  Node* const context = Parameter(Descriptor::kContext);
+  TNode<IntPtrT> argc = ChangeInt32ToIntPtr(
+      UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount));
+  CodeStubArguments args(this, argc);
 
-  auto if_return_undefined = [=](Node* const native_context,
-                                 Node* const promise, Label* if_exception) {
+  const TNode<Object> iterator = args.GetReceiver();
+  const TNode<Object> value = args.GetOptionalArgumentValue(kValueOrReasonArg);
+  const auto context = Parameter<Context>(Descriptor::kContext);
+
+  auto if_return_undefined = [=, &args](
+                                 const TNode<NativeContext> native_context,
+                                 const TNode<JSPromise> promise,
+                                 Label* if_exception) {
     // If return is undefined, then
     // Let iterResult be ! CreateIterResultObject(value, true)
-    TNode<Object> const iter_result = CallBuiltin(
-        Builtins::kCreateIterResultObject, context, value, TrueConstant());
+    const TNode<Object> iter_result = CallBuiltin(
+        Builtin::kCreateIterResultObject, context, value, TrueConstant());
 
     // Perform ! Call(promiseCapability.[[Resolve]], undefined, « iterResult »).
     // IfAbruptRejectPromise(nextDone, promiseCapability).
     // Return promiseCapability.[[Promise]].
-    CallBuiltin(Builtins::kResolvePromise, context, promise, iter_result);
-    Return(promise);
+    CallBuiltin(Builtin::kResolvePromise, context, promise, iter_result);
+    args.PopAndReturn(promise);
   };
 
   Generate_AsyncFromSyncIteratorMethod(
-      context, iterator, value, factory()->return_string(), if_return_undefined,
-      "[Async-from-Sync Iterator].prototype.return");
+      &args, context, iterator, value, factory()->return_string(),
+      if_return_undefined, "[Async-from-Sync Iterator].prototype.return");
 }
 
 // https://tc39.github.io/proposal-async-iteration/
 // Section #sec-%asyncfromsynciteratorprototype%.throw
 TF_BUILTIN(AsyncFromSyncIteratorPrototypeThrow,
            AsyncFromSyncBuiltinsAssembler) {
-  Node* const iterator = Parameter(Descriptor::kReceiver);
-  Node* const reason = Parameter(Descriptor::kReason);
-  Node* const context = Parameter(Descriptor::kContext);
+  TNode<IntPtrT> argc = ChangeInt32ToIntPtr(
+      UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount));
+  CodeStubArguments args(this, argc);
 
-  auto if_throw_undefined = [=](Node* const native_context, Node* const promise,
+  const TNode<Object> iterator = args.GetReceiver();
+  const TNode<Object> reason = args.GetOptionalArgumentValue(kValueOrReasonArg);
+  const auto context = Parameter<Context>(Descriptor::kContext);
+
+  auto if_throw_undefined = [=](const TNode<NativeContext> native_context,
+                                const TNode<JSPromise> promise,
                                 Label* if_exception) { Goto(if_exception); };
 
   Generate_AsyncFromSyncIteratorMethod(
-      context, iterator, reason, factory()->throw_string(), if_throw_undefined,
-      "[Async-from-Sync Iterator].prototype.throw", Label::kNonDeferred,
-      reason);
+      &args, context, iterator, reason, factory()->throw_string(),
+      if_throw_undefined, "[Async-from-Sync Iterator].prototype.throw",
+      Label::kNonDeferred, reason);
 }
 
 }  // namespace internal

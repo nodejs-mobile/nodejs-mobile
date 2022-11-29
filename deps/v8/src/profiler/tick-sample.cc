@@ -7,13 +7,14 @@
 #include <cinttypes>
 
 #include "include/v8-profiler.h"
+#include "src/base/sanitizer/asan.h"
+#include "src/base/sanitizer/msan.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/simulator.h"
 #include "src/execution/vm-state-inl.h"
-#include "src/heap/heap-inl.h"  // For MemoryAllocator::code_range.
+#include "src/heap/heap-inl.h"  // For Heap::code_range.
 #include "src/logging/counters.h"
-#include "src/sanitizer/asan.h"
-#include "src/sanitizer/msan.h"
+#include "src/profiler/profiler-stats.h"
 
 namespace v8 {
 namespace internal {
@@ -110,7 +111,7 @@ bool SimulatorHelper::FillRegisters(Isolate* isolate,
   }
   state->sp = reinterpret_cast<void*>(simulator->get_register(Simulator::sp));
   state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
-#elif V8_TARGET_ARCH_PPC
+#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
@@ -118,6 +119,13 @@ bool SimulatorHelper::FillRegisters(Isolate* isolate,
   state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
   state->lr = reinterpret_cast<void*>(simulator->get_lr());
 #elif V8_TARGET_ARCH_S390
+  if (!simulator->has_bad_pc()) {
+    state->pc = reinterpret_cast<void*>(simulator->get_pc());
+  }
+  state->sp = reinterpret_cast<void*>(simulator->get_register(Simulator::sp));
+  state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
+  state->lr = reinterpret_cast<void*>(simulator->get_register(Simulator::ra));
+#elif V8_TARGET_ARCH_RISCV64
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
@@ -143,42 +151,6 @@ bool SimulatorHelper::FillRegisters(Isolate* isolate,
 }
 #endif  // USE_SIMULATOR
 
-// Attempts to safely dereference the address of a native context at a given
-// context's address. Returns kNullAddress on failure, in the event that the
-// context is in an inconsistent state.
-Address ScrapeNativeContextAddress(Heap* heap, Address context_address) {
-  DCHECK_EQ(heap->gc_state(), Heap::NOT_IN_GC);
-
-  if (!HAS_STRONG_HEAP_OBJECT_TAG(context_address)) return kNullAddress;
-
-  if (heap->memory_allocator()->IsOutsideAllocatedSpace(context_address))
-    return kNullAddress;
-
-  // Note that once a native context has been assigned to a context, the slot
-  // is no longer mutated except during pointer updates / evictions. Since
-  // pointer updates exclusively occur on the main thread, and we don't record
-  // TickSamples when the main thread's VM state is GC, the only other
-  // situation where the address here would be invalid is if it's being
-  // reassigned -- which isn't possible.
-  int native_context_offset =
-      i::Context::SlotOffset(i::Context::NATIVE_CONTEXT_INDEX);
-  i::Address native_context_slot_address =
-      context_address + native_context_offset;
-
-  // By the prior hypothesis, the indirect native context address should always
-  // be valid.
-  if (heap->memory_allocator()->IsOutsideAllocatedSpace(
-          native_context_slot_address)) {
-    DCHECK(false);
-    return kNullAddress;
-  }
-
-  i::ObjectSlot native_context_slot(native_context_slot_address);
-  i::Object native_context = native_context_slot.Relaxed_Load();
-
-  return native_context.ptr();
-}
-
 }  // namespace
 
 DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
@@ -188,22 +160,23 @@ DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
                                    bool use_simulator_reg_state,
                                    base::TimeDelta sampling_interval) {
   this->update_stats = update_stats;
-  SampleInfoWithContext info;
+  SampleInfo info;
   RegisterState regs = reg_state;
   if (!GetStackSample(v8_isolate, &regs, record_c_entry_frame, stack,
-                      kMaxFramesCount, &info, use_simulator_reg_state,
-                      contexts)) {
+                      kMaxFramesCount, &info, &state,
+                      use_simulator_reg_state)) {
     // It is executing JS but failed to collect a stack trace.
     // Mark the sample as spoiled.
     pc = nullptr;
     return;
   }
 
-  state = info.vm_state;
+  if (state != StateTag::EXTERNAL) {
+    state = info.vm_state;
+  }
   pc = regs.pc;
   frames_count = static_cast<unsigned>(info.frames_count);
   has_external_callback = info.external_callback_entry != nullptr;
-  top_context = info.top_context;
   if (has_external_callback) {
     external_callback_entry = info.external_callback_entry;
   } else if (frames_count) {
@@ -229,32 +202,13 @@ DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
 bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
                                 RecordCEntryFrame record_c_entry_frame,
                                 void** frames, size_t frames_limit,
-                                v8::SampleInfo* sample_info_out,
-                                bool use_simulator_reg_state, void** contexts) {
-  SampleInfoWithContext sample_info_local;
-
-  bool ret = GetStackSample(
-      v8_isolate, regs, record_c_entry_frame, frames, frames_limit,
-      &sample_info_local, use_simulator_reg_state, contexts);
-
-  sample_info_out->frames_count = sample_info_local.frames_count;
-  sample_info_out->vm_state = sample_info_local.vm_state;
-  sample_info_out->external_callback_entry =
-    sample_info_local.external_callback_entry;
-
-  return ret;
-}
-
-bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
-                                RecordCEntryFrame record_c_entry_frame,
-                                void** frames, size_t frames_limit,
-                                SampleInfoWithContext* sample_info,
-                                bool use_simulator_reg_state, void** contexts) {
+                                v8::SampleInfo* sample_info,
+                                StateTag* out_state,
+                                bool use_simulator_reg_state) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
   sample_info->frames_count = 0;
   sample_info->vm_state = isolate->current_vm_state();
   sample_info->external_callback_entry = nullptr;
-  sample_info->top_context = nullptr;
   if (sample_info->vm_state == GC) return true;
 
   i::Address js_entry_sp = isolate->js_entry_sp();
@@ -262,7 +216,11 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
 
 #if defined(USE_SIMULATOR)
   if (use_simulator_reg_state) {
-    if (!i::SimulatorHelper::FillRegisters(isolate, regs)) return false;
+    if (!i::SimulatorHelper::FillRegisters(isolate, regs)) {
+      i::ProfilerStats::Instance()->AddReason(
+          i::ProfilerStats::Reason::kSimulatorFillRegistersFailed);
+      return false;
+    }
   }
 #else
   USE(use_simulator_reg_state);
@@ -271,11 +229,15 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
 
   // Check whether we interrupted setup/teardown of a stack frame in JS code.
   // Avoid this check for C++ code, as that would trigger false positives.
+  // TODO(petermarshall): Code range is always null on ia32 so this check for
+  // IsNoFrameRegion will never actually run there.
   if (regs->pc &&
-      isolate->heap()->memory_allocator()->code_range().contains(
+      isolate->heap()->code_region().contains(
           reinterpret_cast<i::Address>(regs->pc)) &&
       IsNoFrameRegion(reinterpret_cast<i::Address>(regs->pc))) {
     // The frame is not setup, so it'd be hard to iterate the stack. Bailout.
+    i::ProfilerStats::Instance()->AddReason(
+        i::ProfilerStats::Reason::kNoFrameRegion);
     return false;
   }
 
@@ -292,20 +254,29 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
             ? nullptr
             : reinterpret_cast<void*>(*external_callback_entry_ptr);
   }
+  // 'Fast API calls' are similar to fast C calls (see frames.cc) in that
+  // they don't build an exit frame when entering C from JS. They have the
+  // added speciality of having separate "fast" and "default" callbacks, the
+  // latter being the regular API callback called before the JS function is
+  // optimized. When TurboFan optimizes the JS caller, the fast callback
+  // gets executed instead of the default one, therefore we need to store
+  // its address in the sample.
+  IsolateData* isolate_data = isolate->isolate_data();
+  Address fast_c_fp = isolate_data->fast_c_call_caller_fp();
+  if (fast_c_fp != kNullAddress &&
+      isolate_data->fast_api_call_target() != kNullAddress) {
+    sample_info->external_callback_entry =
+        reinterpret_cast<void*>(isolate_data->fast_api_call_target());
+    if (out_state) {
+      *out_state = StateTag::EXTERNAL;
+    }
+  }
 
   i::SafeStackFrameIterator it(isolate, reinterpret_cast<i::Address>(regs->pc),
                                reinterpret_cast<i::Address>(regs->fp),
                                reinterpret_cast<i::Address>(regs->sp),
                                reinterpret_cast<i::Address>(regs->lr),
                                js_entry_sp);
-
-  i::Address top_context_address = it.top_context_address();
-  if (top_context_address != i::kNullAddress) {
-    sample_info->top_context = reinterpret_cast<void*>(
-        i::ScrapeNativeContextAddress(isolate->heap(), top_context_address));
-  } else {
-    sample_info->top_context = nullptr;
-  }
 
   if (it.done()) return true;
 
@@ -314,45 +285,21 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
       (it.top_frame_type() == internal::StackFrame::EXIT ||
        it.top_frame_type() == internal::StackFrame::BUILTIN_EXIT)) {
     frames[i] = reinterpret_cast<void*>(isolate->c_function());
-    if (contexts) contexts[i] = sample_info->top_context;
     i++;
   }
-
-  // If we couldn't get a context address from the top frame due to execution
-  // being in a callback, borrow it from the next context on the stack.
-  bool borrows_top_context = it.top_frame_type() == i::StackFrame::EXIT ||
-                             it.top_frame_type() == i::StackFrame::BUILTIN_EXIT;
-
+#ifdef V8_RUNTIME_CALL_STATS
   i::RuntimeCallTimer* timer =
       isolate->counters()->runtime_call_stats()->current_timer();
+#endif  // V8_RUNTIME_CALL_STATS
   for (; !it.done() && i < frames_limit; it.Advance()) {
+#ifdef V8_RUNTIME_CALL_STATS
     while (timer && reinterpret_cast<i::Address>(timer) < it.frame()->fp() &&
            i < frames_limit) {
-      if (contexts) contexts[i] = nullptr;
       frames[i++] = reinterpret_cast<void*>(timer->counter());
       timer = timer->parent();
     }
+#endif  // V8_RUNTIME_CALL_STATS
     if (i == frames_limit) break;
-
-    // Attempt to read the native context associated with the frame from the
-    // heap for standard frames.
-    if (it.frame()->is_standard() && (contexts || borrows_top_context)) {
-      i::Address context_address = base::Memory<i::Address>(
-          it.frame()->fp() + i::StandardFrameConstants::kContextOffset);
-      i::Address native_context_address =
-          i::ScrapeNativeContextAddress(isolate->heap(), context_address);
-      if (contexts)
-        contexts[i] = reinterpret_cast<void*>(native_context_address);
-
-      if (borrows_top_context) {
-        DCHECK(!sample_info->top_context);
-        sample_info->top_context =
-            reinterpret_cast<void*>(native_context_address);
-      }
-    } else if (contexts) {
-      contexts[i] = nullptr;
-    }
-    borrows_top_context = false;
 
     if (it.frame()->is_interpreted()) {
       // For interpreted frames use the bytecode array pointer as the pc.
@@ -376,7 +323,10 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
         continue;
       }
     }
-    frames[i++] = reinterpret_cast<void*>(it.frame()->pc());
+    // For arm64, the PC for the frame sometimes doesn't come from the stack,
+    // but from the link register instead. For this reason, we skip
+    // authenticating it.
+    frames[i++] = reinterpret_cast<void*>(it.frame()->unauthenticated_pc());
   }
   sample_info->frames_count = i;
   return true;

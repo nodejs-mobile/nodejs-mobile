@@ -4,13 +4,13 @@
 
 // Flags: --allow-natives-syntax
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 const builder = new WasmModuleBuilder();
 builder.addMemory(1, undefined, false);
 builder.addFunction('load', kSig_i_i)
     .addBody([
-        kExprGetLocal, 0,
+        kExprLocalGet, 0,
     kExprI32LoadMem, 0, 100])
     .exportFunc();
 

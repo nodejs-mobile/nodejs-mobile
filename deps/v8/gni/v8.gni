@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/jumbo.gni")
+import("//build/config/gclient_args.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/v8_target_cpu.gni")
-import("//build/split_static_library.gni")
+import("split_static_library.gni")
 
 declare_args() {
   # Set flags for tracking code coverage. Uses gcov with gcc and sanitizer
@@ -31,20 +31,12 @@ declare_args() {
   # Support for backtrace_symbols on linux.
   v8_enable_backtrace = ""
 
-  # Enables raw heap snapshots containing internals. Used for debugging memory
-  # on platform and embedder level.
+  # This flag is deprecated and is now available through the inspector interface
+  # as an argument to profiler's method `takeHeapSnapshot`.
   v8_enable_raw_heap_snapshots = false
 
-  # Enable the snapshot feature, for fast context creation.
-  # https://v8.dev/blog/custom-startup-snapshots
-  # TODO(thakis): Make snapshots work in 64-bit win/cross builds,
-  # https://803591
-  # On Mac hosts, 32-bit builds targeting Windows can't use snapshots, see
-  # https://crbug.com/794838
-  v8_use_snapshot = !(is_win && host_os != "win" && target_cpu == "x64") &&
-                    !(is_win && host_os == "mac" && target_cpu == "x86")
-
-  # Enable several snapshots side-by-side (e.g. default and for trusted code).
+  # Deprecated flag that no longer does anything.
+  # TODO(rmcilroy): Remove this gn arg once it's no longer used by the bots.
   v8_use_multi_snapshots = false
 
   # Use external files for startup data blobs:
@@ -64,28 +56,66 @@ declare_args() {
   # Expose symbols for dynamic linking.
   v8_expose_symbols = false
 
-  # Use Perfetto (https://perfetto.dev) as the default TracingController. Not
-  # currently implemented.
+  # Implement tracing using Perfetto (https://perfetto.dev).
   v8_use_perfetto = false
+
+  # Override global symbol level setting for v8.
+  v8_symbol_level = symbol_level
+
+  # Enable WebAssembly debugging via GDB-remote protocol.
+  v8_enable_wasm_gdb_remote_debugging = false
+
+  # Lite mode disables a number of performance optimizations to reduce memory
+  # at the cost of performance.
+  # Sets -DV8_LITE_MODE.
+  v8_enable_lite_mode = false
+
+  # Include support for WebAssembly. If disabled, the 'WebAssembly' global
+  # will not be available, and embedder APIs to generate WebAssembly modules
+  # will fail. Also, asm.js will not be translated to WebAssembly and will be
+  # executed as standard JavaScript instead.
+  v8_enable_webassembly = ""
+
+  # Enable runtime call stats.
+  v8_enable_runtime_call_stats = true
+
+  # Add fuzzilli fuzzer support.
+  v8_fuzzilli = false
+
+  # Scan the call stack conservatively during garbage collection.
+  v8_enable_conservative_stack_scanning = false
+
+  v8_enable_google_benchmark = false
+
+  cppgc_is_standalone = false
+
+  # Enable advanced BigInt algorithms, costing about 10-30 KB binary size
+  # depending on platform. Disabled on Android to save binary size.
+  v8_advanced_bigint_algorithms = !is_android
 }
 
 if (v8_use_external_startup_data == "") {
   # If not specified as a gn arg, use external startup data by default if
-  # a snapshot is used and if we're not on ios.
-  v8_use_external_startup_data = v8_use_snapshot && !is_ios
-}
-
-if (v8_use_multi_snapshots) {
-  # Silently disable multi snapshots if they're incompatible with the current
-  # build configuration. This allows us to set v8_use_multi_snapshots=true on
-  # all bots, and e.g. no-snapshot bots will automatically do the right thing.
-  v8_use_multi_snapshots =
-      v8_use_external_startup_data && !build_with_chromium && !use_jumbo_build
+  # we're not on ios.
+  v8_use_external_startup_data = !is_ios
 }
 
 if (v8_enable_backtrace == "") {
   v8_enable_backtrace = is_debug && !v8_optimized_debug
 }
+
+# If chromium is configured to use the perfetto client library, v8 should also
+# use perfetto for tracing.
+if (build_with_chromium && use_perfetto_client_library) {
+  v8_use_perfetto = true
+}
+
+# WebAssembly is enabled by default, except in lite mode.
+if (v8_enable_webassembly == "") {
+  v8_enable_webassembly = !v8_enable_lite_mode
+}
+assert(!(v8_enable_webassembly && v8_enable_lite_mode),
+       "Webassembly is not available in lite mode.")
 
 # Points to // in v8 stand-alone or to //v8/ in chromium. We need absolute
 # paths for all configs in templates as they are shared in different
@@ -120,11 +150,31 @@ if (is_debug && !v8_optimized_debug) {
   }
 }
 
+if (!is_debug) {
+  v8_remove_configs += [
+    # Too much performance impact, unclear security benefit.
+    "//build/config/compiler:default_init_stack_vars",
+  ]
+}
+
 if (v8_code_coverage && !is_clang) {
   v8_add_configs += [
     v8_path_prefix + ":v8_gcov_coverage_cflags",
     v8_path_prefix + ":v8_gcov_coverage_ldflags",
   ]
+}
+
+if (v8_symbol_level != symbol_level) {
+  v8_remove_configs += [ "//build/config/compiler:default_symbols" ]
+  if (v8_symbol_level == 0) {
+    v8_add_configs += [ "//build/config/compiler:no_symbols" ]
+  } else if (v8_symbol_level == 1) {
+    v8_add_configs += [ "//build/config/compiler:minimal_symbols" ]
+  } else if (v8_symbol_level == 2) {
+    v8_add_configs += [ "//build/config/compiler:symbols" ]
+  } else {
+    assert(false)
+  }
 }
 
 if ((is_posix || is_fuchsia) &&
@@ -147,11 +197,11 @@ if (!build_with_chromium && is_clang) {
 template("v8_source_set") {
   if (defined(invoker.split_count) && invoker.split_count > 1 &&
       defined(v8_static_library) && v8_static_library && is_win) {
-    link_target_type = "jumbo_split_static_library"
+    link_target_type = "split_static_library"
   } else if (defined(v8_static_library) && v8_static_library) {
-    link_target_type = "jumbo_static_library"
+    link_target_type = "static_library"
   } else {
-    link_target_type = "jumbo_source_set"
+    link_target_type = "source_set"
   }
   target(link_target_type, target_name) {
     forward_variables_from(invoker,
@@ -170,7 +220,7 @@ template("v8_source_set") {
 }
 
 template("v8_header_set") {
-  jumbo_source_set(target_name) {
+  source_set(target_name) {
     forward_variables_from(invoker, "*", [ "configs" ])
     configs -= v8_remove_configs
     configs += v8_add_configs
@@ -192,7 +242,7 @@ template("v8_executable") {
       configs -= invoker.remove_configs
     }
     configs += invoker.configs
-    if (is_linux) {
+    if (is_linux || is_chromeos) {
       # For enabling ASLR.
       ldflags = [ "-pie" ]
     }
@@ -213,10 +263,37 @@ template("v8_executable") {
 
 template("v8_component") {
   component(target_name) {
-    forward_variables_from(invoker, "*", [ "configs" ])
+    forward_variables_from(invoker,
+                           "*",
+                           [
+                             "configs",
+                             "remove_configs",
+                           ])
     configs -= v8_remove_configs
     configs += v8_add_configs
+    if (defined(invoker.remove_configs)) {
+      configs -= invoker.remove_configs
+    }
     configs += invoker.configs
+  }
+}
+
+template("v8_shared_library") {
+  shared_library(target_name) {
+    forward_variables_from(invoker,
+                           "*",
+                           [
+                             "configs",
+                             "remove_configs",
+                           ])
+    configs -= v8_remove_configs
+    configs += v8_add_configs
+    if (defined(invoker.remove_configs)) {
+      configs -= invoker.remove_configs
+    }
+    if (defined(invoker.configs)) {
+      configs += invoker.configs
+    }
   }
 }
 

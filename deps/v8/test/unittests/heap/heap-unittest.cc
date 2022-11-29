@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/heap/heap.h"
+
 #include <cmath>
 #include <iostream>
 #include <limits>
 
 #include "src/handles/handles-inl.h"
-#include "src/heap/heap.h"
+#include "src/heap/memory-chunk.h"
+#include "src/heap/safepoint.h"
 #include "src/heap/spaces-inl.h"
 #include "src/objects/objects-inl.h"
 #include "test/unittests/test-utils.h"
@@ -16,27 +19,29 @@
 namespace v8 {
 namespace internal {
 
-using HeapTest = TestWithIsolate;
-using HeapWithPointerCompressionTest = TestWithIsolateAndPointerCompression;
+using HeapTest = TestWithContext;
 
 TEST(Heap, YoungGenerationSizeFromOldGenerationSize) {
   const size_t MB = static_cast<size_t>(i::MB);
   const size_t KB = static_cast<size_t>(i::KB);
   const size_t pm = i::Heap::kPointerMultiplier;
+  const size_t hlm = i::Heap::kHeapLimitMultiplier;
   ASSERT_EQ(3 * 512u * pm * KB,
-            i::Heap::YoungGenerationSizeFromOldGenerationSize(128u * pm * MB));
+            i::Heap::YoungGenerationSizeFromOldGenerationSize(128u * hlm * MB));
   ASSERT_EQ(3 * 2048u * pm * KB,
-            i::Heap::YoungGenerationSizeFromOldGenerationSize(256u * pm * MB));
+            i::Heap::YoungGenerationSizeFromOldGenerationSize(256u * hlm * MB));
   ASSERT_EQ(3 * 4096u * pm * KB,
-            i::Heap::YoungGenerationSizeFromOldGenerationSize(512u * pm * MB));
-  ASSERT_EQ(3 * 8192u * pm * KB,
-            i::Heap::YoungGenerationSizeFromOldGenerationSize(1024u * pm * MB));
+            i::Heap::YoungGenerationSizeFromOldGenerationSize(512u * hlm * MB));
+  ASSERT_EQ(
+      3 * 8192u * pm * KB,
+      i::Heap::YoungGenerationSizeFromOldGenerationSize(1024u * hlm * MB));
 }
 
 TEST(Heap, GenerationSizesFromHeapSize) {
   const size_t MB = static_cast<size_t>(i::MB);
   const size_t KB = static_cast<size_t>(i::KB);
   const size_t pm = i::Heap::kPointerMultiplier;
+  const size_t hlm = i::Heap::kHeapLimitMultiplier;
   size_t old, young;
 
   i::Heap::GenerationSizesFromHeapSize(1 * KB, &young, &old);
@@ -48,45 +53,46 @@ TEST(Heap, GenerationSizesFromHeapSize) {
   ASSERT_EQ(1 * KB, old);
   ASSERT_EQ(3 * 512u * pm * KB, young);
 
-  i::Heap::GenerationSizesFromHeapSize(128 * pm * MB + 3 * 512 * pm * KB,
+  i::Heap::GenerationSizesFromHeapSize(128 * hlm * MB + 3 * 512 * pm * KB,
                                        &young, &old);
-  ASSERT_EQ(128u * pm * MB, old);
+  ASSERT_EQ(128u * hlm * MB, old);
   ASSERT_EQ(3 * 512u * pm * KB, young);
 
-  i::Heap::GenerationSizesFromHeapSize(256u * pm * MB + 3 * 2048 * pm * KB,
+  i::Heap::GenerationSizesFromHeapSize(256u * hlm * MB + 3 * 2048 * pm * KB,
                                        &young, &old);
-  ASSERT_EQ(256u * pm * MB, old);
+  ASSERT_EQ(256u * hlm * MB, old);
   ASSERT_EQ(3 * 2048u * pm * KB, young);
 
-  i::Heap::GenerationSizesFromHeapSize(512u * pm * MB + 3 * 4096 * pm * KB,
+  i::Heap::GenerationSizesFromHeapSize(512u * hlm * MB + 3 * 4096 * pm * KB,
                                        &young, &old);
-  ASSERT_EQ(512u * pm * MB, old);
+  ASSERT_EQ(512u * hlm * MB, old);
   ASSERT_EQ(3 * 4096u * pm * KB, young);
 
-  i::Heap::GenerationSizesFromHeapSize(1024u * pm * MB + 3 * 8192 * pm * KB,
+  i::Heap::GenerationSizesFromHeapSize(1024u * hlm * MB + 3 * 8192 * pm * KB,
                                        &young, &old);
-  ASSERT_EQ(1024u * pm * MB, old);
+  ASSERT_EQ(1024u * hlm * MB, old);
   ASSERT_EQ(3 * 8192u * pm * KB, young);
 }
 
 TEST(Heap, HeapSizeFromPhysicalMemory) {
   const size_t MB = static_cast<size_t>(i::MB);
   const size_t pm = i::Heap::kPointerMultiplier;
+  const size_t hlm = i::Heap::kHeapLimitMultiplier;
 
   // The expected value is old_generation_size + 3 * semi_space_size.
-  ASSERT_EQ(128 * pm * MB + 3 * 512 * pm * KB,
+  ASSERT_EQ(128 * hlm * MB + 3 * 512 * pm * KB,
             i::Heap::HeapSizeFromPhysicalMemory(0u));
-  ASSERT_EQ(128 * pm * MB + 3 * 512 * pm * KB,
+  ASSERT_EQ(128 * hlm * MB + 3 * 512 * pm * KB,
             i::Heap::HeapSizeFromPhysicalMemory(512u * MB));
-  ASSERT_EQ(256 * pm * MB + 3 * 2048 * pm * KB,
+  ASSERT_EQ(256 * hlm * MB + 3 * 2048 * pm * KB,
             i::Heap::HeapSizeFromPhysicalMemory(1024u * MB));
-  ASSERT_EQ(512 * pm * MB + 3 * 4096 * pm * KB,
+  ASSERT_EQ(512 * hlm * MB + 3 * 4096 * pm * KB,
             i::Heap::HeapSizeFromPhysicalMemory(2048u * MB));
   ASSERT_EQ(
-      1024 * pm * MB + 3 * 8192 * pm * KB,
+      1024 * hlm * MB + 3 * 8192 * pm * KB,
       i::Heap::HeapSizeFromPhysicalMemory(static_cast<uint64_t>(4096u) * MB));
   ASSERT_EQ(
-      1024 * pm * MB + 3 * 8192 * pm * KB,
+      1024 * hlm * MB + 3 * 8192 * pm * KB,
       i::Heap::HeapSizeFromPhysicalMemory(static_cast<uint64_t>(8192u) * MB));
 }
 
@@ -119,20 +125,18 @@ TEST_F(HeapTest, ASLR) {
 
 TEST_F(HeapTest, ExternalLimitDefault) {
   Heap* heap = i_isolate()->heap();
-  EXPECT_EQ(kExternalAllocationSoftLimit,
-            heap->isolate()->isolate_data()->external_memory_limit_);
+  EXPECT_EQ(kExternalAllocationSoftLimit, heap->external_memory_limit());
 }
 
 TEST_F(HeapTest, ExternalLimitStaysAboveDefaultForExplicitHandling) {
   v8_isolate()->AdjustAmountOfExternalAllocatedMemory(+10 * MB);
   v8_isolate()->AdjustAmountOfExternalAllocatedMemory(-10 * MB);
   Heap* heap = i_isolate()->heap();
-  EXPECT_GE(heap->isolate()->isolate_data()->external_memory_limit_,
-            kExternalAllocationSoftLimit);
+  EXPECT_GE(heap->external_memory_limit(), kExternalAllocationSoftLimit);
 }
 
-#if V8_TARGET_ARCH_64_BIT
-TEST_F(HeapWithPointerCompressionTest, HeapLayout) {
+#ifdef V8_COMPRESS_POINTERS
+TEST_F(HeapTest, HeapLayout) {
   // Produce some garbage.
   RunJS(
       "let ar = [];"
@@ -141,13 +145,18 @@ TEST_F(HeapWithPointerCompressionTest, HeapLayout) {
       "}"
       "ar.push(Array(32 * 1024 * 1024));");
 
+  Address cage_base = i_isolate()->cage_base();
+  EXPECT_TRUE(IsAligned(cage_base, size_t{4} * GB));
+
+#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
   Address isolate_root = i_isolate()->isolate_root();
-  EXPECT_TRUE(IsAligned(isolate_root, size_t{4} * GB));
+  EXPECT_EQ(cage_base, isolate_root);
+#endif
 
   // Check that all memory chunks belong this region.
-  base::AddressRegion heap_reservation(isolate_root - size_t{2} * GB,
-                                       size_t{4} * GB);
+  base::AddressRegion heap_reservation(cage_base, size_t{4} * GB);
 
+  SafepointScope scope(i_isolate()->heap());
   OldGenerationMemoryChunkIterator iter(i_isolate()->heap());
   for (;;) {
     MemoryChunk* chunk = iter.next();
@@ -158,7 +167,7 @@ TEST_F(HeapWithPointerCompressionTest, HeapLayout) {
     EXPECT_TRUE(heap_reservation.contains(address, size));
   }
 }
-#endif  // V8_TARGET_ARCH_64_BIT
+#endif  // V8_COMPRESS_POINTERS
 
 }  // namespace internal
 }  // namespace v8

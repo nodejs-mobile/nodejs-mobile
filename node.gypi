@@ -29,7 +29,7 @@
     [ 'clang==1', {
       'cflags': [ '-Werror=undefined-inline', ]
     }],
-    [ 'node_shared=="false" and "<(_type)"=="executable"', {
+    [ '"<(_type)"=="executable"', {
       'msvs_settings': {
         'VCManifestTool': {
           'EmbedManifest': 'true',
@@ -40,6 +40,19 @@
     [ 'node_shared=="true"', {
       'defines': [
         'NODE_SHARED_MODE',
+      ],
+      'conditions': [
+        ['"<(_type)"=="executable"', {
+          'defines': [
+            'USING_UV_SHARED',
+            'USING_V8_SHARED',
+            'BUILDING_NODE_EXTENSION'
+          ],
+          'defines!': [
+            'BUILDING_V8_SHARED=1',
+            'BUILDING_UV_SHARED=1'
+          ]
+        }],
       ],
     }],
     [ 'OS=="win"', {
@@ -70,7 +83,7 @@
     }],
     [ 'node_use_bundled_v8=="true"', {
       'dependencies': [
-        'tools/v8_gypfiles/v8.gyp:v8_maybe_snapshot',
+        'tools/v8_gypfiles/v8.gyp:v8_snapshot',
         'tools/v8_gypfiles/v8.gyp:v8_libplatform',
       ],
     }],
@@ -146,7 +159,6 @@
 
     [ 'node_shared_http_parser=="false"', {
       'dependencies': [
-        'deps/http_parser/http_parser.gyp:http_parser',
         'deps/llhttp/llhttp.gyp:llhttp'
       ],
     } ],
@@ -320,9 +332,6 @@
     [ 'node_use_openssl=="true"', {
       'defines': [ 'HAVE_OPENSSL=1' ],
       'conditions': [
-        ['openssl_fips != "" or openssl_is_fips=="true"', {
-          'defines': [ 'NODE_FIPS_MODE' ],
-        }],
         [ 'node_shared_openssl=="false"', {
           'dependencies': [
             './deps/openssl/openssl.gyp:openssl',
@@ -368,9 +377,19 @@
                 }],
               ],
             }],
-          ],
-        }]]
-
+          ]
+        }, {
+          # Set 1.0.0 as the API compatibility level to avoid the
+          # deprecation warnings when using OpenSSL 3.0.
+          'defines': [ 'OPENSSL_API_COMPAT=0x10000000L', ]
+        }],
+        [ 'openssl_quic=="true" and node_shared_ngtcp2=="false"', {
+          'dependencies': [ './deps/ngtcp2/ngtcp2.gyp:ngtcp2' ]
+        }],
+        [ 'openssl_quic=="true" and node_shared_nghttp3=="false"', {
+          'dependencies': [ './deps/ngtcp2/ngtcp2.gyp:nghttp3' ]
+        }]
+      ]
     }, {
       'defines': [ 'HAVE_OPENSSL=0' ]
     }],
@@ -379,6 +398,5 @@
         'NODE_MOBILE',
       ],
     }],
-
   ],
 }

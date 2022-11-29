@@ -16,7 +16,7 @@ namespace compiler {
 // Foward declarations.
 class TypeCache;
 
-enum IdentifyZeros { kIdentifyZeros, kDistinguishZeros };
+enum IdentifyZeros : uint8_t { kIdentifyZeros, kDistinguishZeros };
 
 class Truncation final {
  public:
@@ -119,9 +119,11 @@ enum class TypeCheckKind : uint8_t {
   kSigned32,
   kSigned64,
   kNumber,
+  kNumberOrBoolean,
   kNumberOrOddball,
   kHeapObject,
   kBigInt,
+  kArrayIndex
 };
 
 inline std::ostream& operator<<(std::ostream& os, TypeCheckKind type_check) {
@@ -136,12 +138,16 @@ inline std::ostream& operator<<(std::ostream& os, TypeCheckKind type_check) {
       return os << "Signed64";
     case TypeCheckKind::kNumber:
       return os << "Number";
+    case TypeCheckKind::kNumberOrBoolean:
+      return os << "NumberOrBoolean";
     case TypeCheckKind::kNumberOrOddball:
       return os << "NumberOrOddball";
     case TypeCheckKind::kHeapObject:
       return os << "HeapObject";
     case TypeCheckKind::kBigInt:
       return os << "BigInt";
+    case TypeCheckKind::kArrayIndex:
+      return os << "ArrayIndex";
   }
   UNREACHABLE();
 }
@@ -174,10 +180,10 @@ class UseInfo {
   static UseInfo TruncatingWord32() {
     return UseInfo(MachineRepresentation::kWord32, Truncation::Word32());
   }
-  static UseInfo TruncatingWord64() {
-    return UseInfo(MachineRepresentation::kWord64, Truncation::Word64());
-  }
   static UseInfo CheckedBigIntTruncatingWord64(const FeedbackSource& feedback) {
+    // Note that Trunction::Word64() can safely use kIdentifyZero, because
+    // TypeCheckKind::kBigInt will make sure we deopt for anything other than
+    // type BigInt anyway.
     return UseInfo(MachineRepresentation::kWord64, Truncation::Word64(),
                    TypeCheckKind::kBigInt, feedback);
   }
@@ -193,6 +199,9 @@ class UseInfo {
   static UseInfo Float32() {
     return UseInfo(MachineRepresentation::kFloat32, Truncation::Any());
   }
+  static UseInfo Float64() {
+    return UseInfo(MachineRepresentation::kFloat64, Truncation::Any());
+  }
   static UseInfo TruncatingFloat64(
       IdentifyZeros identify_zeros = kDistinguishZeros) {
     return UseInfo(MachineRepresentation::kFloat64,
@@ -207,18 +216,13 @@ class UseInfo {
   static UseInfo TaggedPointer() {
     return UseInfo(MachineRepresentation::kTaggedPointer, Truncation::Any());
   }
-  static UseInfo AnyCompressed() {
-    return UseInfo(MachineRepresentation::kCompressed, Truncation::Any());
-  }
-  static UseInfo CompressedSigned() {
-    return UseInfo(MachineRepresentation::kCompressedSigned, Truncation::Any());
-  }
-  static UseInfo CompressedPointer() {
-    return UseInfo(MachineRepresentation::kCompressedPointer,
-                   Truncation::Any());
-  }
 
   // Possibly deoptimizing conversions.
+  static UseInfo CheckedTaggedAsArrayIndex(const FeedbackSource& feedback) {
+    return UseInfo(MachineType::PointerRepresentation(),
+                   Truncation::Any(kIdentifyZeros), TypeCheckKind::kArrayIndex,
+                   feedback);
+  }
   static UseInfo CheckedHeapObjectAsTaggedPointer(
       const FeedbackSource& feedback) {
     return UseInfo(MachineRepresentation::kTaggedPointer, Truncation::Any(),
@@ -264,6 +268,12 @@ class UseInfo {
   static UseInfo CheckedNumberAsWord32(const FeedbackSource& feedback) {
     return UseInfo(MachineRepresentation::kWord32, Truncation::Word32(),
                    TypeCheckKind::kNumber, feedback);
+  }
+  static UseInfo CheckedNumberOrBooleanAsFloat64(
+      IdentifyZeros identify_zeros, const FeedbackSource& feedback) {
+    return UseInfo(MachineRepresentation::kFloat64,
+                   Truncation::Any(identify_zeros),
+                   TypeCheckKind::kNumberOrBoolean, feedback);
   }
   static UseInfo CheckedNumberOrOddballAsFloat64(
       IdentifyZeros identify_zeros, const FeedbackSource& feedback) {
@@ -315,7 +325,7 @@ class V8_EXPORT_PRIVATE RepresentationChanger final {
   RepresentationChanger(JSGraph* jsgraph, JSHeapBroker* broker);
 
   // Changes representation from {output_type} to {use_rep}. The {truncation}
-  // parameter is only used for sanity checking - if the changer cannot figure
+  // parameter is only used for checking - if the changer cannot figure
   // out signedness for the word32->float64 conversion, then we check that the
   // uses truncate to word32 (so they do not care about signedness).
   Node* GetRepresentationFor(Node* node, MachineRepresentation output_rep,
@@ -359,17 +369,6 @@ class V8_EXPORT_PRIVATE RepresentationChanger final {
                                           UseInfo use_info);
   Node* GetTaggedRepresentationFor(Node* node, MachineRepresentation output_rep,
                                    Type output_type, Truncation truncation);
-  Node* GetCompressedSignedRepresentationFor(Node* node,
-                                             MachineRepresentation output_rep,
-                                             Type output_type, Node* use_node,
-                                             UseInfo use_info);
-  Node* GetCompressedPointerRepresentationFor(Node* node,
-                                              MachineRepresentation output_rep,
-                                              Type output_type, Node* use_node,
-                                              UseInfo use_info);
-  Node* GetCompressedRepresentationFor(Node* node,
-                                       MachineRepresentation output_rep,
-                                       Type output_type, Truncation truncation);
   Node* GetFloat32RepresentationFor(Node* node,
                                     MachineRepresentation output_rep,
                                     Type output_type, Truncation truncation);
@@ -396,15 +395,13 @@ class V8_EXPORT_PRIVATE RepresentationChanger final {
   Node* InsertChangeTaggedSignedToInt32(Node* node);
   Node* InsertChangeTaggedToFloat64(Node* node);
   Node* InsertChangeUint32ToFloat64(Node* node);
-  Node* InsertChangeCompressedPointerToTaggedPointer(Node* node);
-  Node* InsertChangeCompressedSignedToTaggedSigned(Node* node);
-  Node* InsertChangeCompressedToTagged(Node* node);
   Node* InsertCheckedFloat64ToInt32(Node* node, CheckForMinusZeroMode check,
                                     const FeedbackSource& feedback,
                                     Node* use_node);
   Node* InsertConversion(Node* node, const Operator* op, Node* use_node);
   Node* InsertTruncateInt64ToInt32(Node* node);
-  Node* InsertUnconditionalDeopt(Node* node, DeoptimizeReason reason);
+  Node* InsertUnconditionalDeopt(Node* node, DeoptimizeReason reason,
+                                 const FeedbackSource& feedback = {});
 
   JSGraph* jsgraph() const { return jsgraph_; }
   Isolate* isolate() const;

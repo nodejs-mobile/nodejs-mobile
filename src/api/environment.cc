@@ -16,29 +16,32 @@ using errors::TryCatchScope;
 using v8::Array;
 using v8::Context;
 using v8::EscapableHandleScope;
-using v8::FinalizationGroup;
 using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::HandleScope;
 using v8::Isolate;
+using v8::Just;
 using v8::Local;
+using v8::Maybe;
 using v8::MaybeLocal;
+using v8::Nothing;
 using v8::Null;
 using v8::Object;
 using v8::ObjectTemplate;
 using v8::Private;
 using v8::PropertyDescriptor;
+using v8::SealHandleScope;
 using v8::String;
 using v8::Value;
 
-static bool AllowWasmCodeGenerationCallback(Local<Context> context,
-                                            Local<String>) {
+bool AllowWasmCodeGenerationCallback(Local<Context> context,
+                                     Local<String>) {
   Local<Value> wasm_code_gen =
       context->GetEmbedderData(ContextEmbedderIndex::kAllowWasmCodeGeneration);
   return wasm_code_gen->IsUndefined() || wasm_code_gen->IsTrue();
 }
 
-static bool ShouldAbortOnUncaughtException(Isolate* isolate) {
+bool ShouldAbortOnUncaughtException(Isolate* isolate) {
   DebugSealHandleScope scope(isolate);
   Environment* env = Environment::GetCurrent(isolate);
   return env != nullptr &&
@@ -48,9 +51,9 @@ static bool ShouldAbortOnUncaughtException(Isolate* isolate) {
          !env->inside_should_not_abort_on_uncaught_scope();
 }
 
-static MaybeLocal<Value> PrepareStackTraceCallback(Local<Context> context,
-                                      Local<Value> exception,
-                                      Local<Array> trace) {
+MaybeLocal<Value> PrepareStackTraceCallback(Local<Context> context,
+                                            Local<Value> exception,
+                                            Local<Array> trace) {
   Environment* env = Environment::GetCurrent(context);
   if (env == nullptr) {
     return exception->ToString(context).FromMaybe(Local<Value>());
@@ -77,28 +80,19 @@ static MaybeLocal<Value> PrepareStackTraceCallback(Local<Context> context,
   return result;
 }
 
-static void HostCleanupFinalizationGroupCallback(
-    Local<Context> context, Local<FinalizationGroup> group) {
-  Environment* env = Environment::GetCurrent(context);
-  if (env == nullptr) {
-    return;
-  }
-  env->RegisterFinalizationGroupForCleanup(group);
-}
-
 void* NodeArrayBufferAllocator::Allocate(size_t size) {
   void* ret;
   if (zero_fill_field_ || per_process::cli_options->zero_fill_all_buffers)
-    ret = UncheckedCalloc(size);
+    ret = allocator_->Allocate(size);
   else
-    ret = UncheckedMalloc(size);
+    ret = allocator_->AllocateUninitialized(size);
   if (LIKELY(ret != nullptr))
     total_mem_usage_.fetch_add(size, std::memory_order_relaxed);
   return ret;
 }
 
 void* NodeArrayBufferAllocator::AllocateUninitialized(size_t size) {
-  void* ret = node::UncheckedMalloc(size);
+  void* ret = allocator_->AllocateUninitialized(size);
   if (LIKELY(ret != nullptr))
     total_mem_usage_.fetch_add(size, std::memory_order_relaxed);
   return ret;
@@ -106,7 +100,7 @@ void* NodeArrayBufferAllocator::AllocateUninitialized(size_t size) {
 
 void* NodeArrayBufferAllocator::Reallocate(
     void* data, size_t old_size, size_t size) {
-  void* ret = UncheckedRealloc<char>(static_cast<char*>(data), size);
+  void* ret = allocator_->Reallocate(data, old_size, size);
   if (LIKELY(ret != nullptr) || UNLIKELY(size == 0))
     total_mem_usage_.fetch_add(size - old_size, std::memory_order_relaxed);
   return ret;
@@ -114,7 +108,7 @@ void* NodeArrayBufferAllocator::Reallocate(
 
 void NodeArrayBufferAllocator::Free(void* data, size_t size) {
   total_mem_usage_.fetch_sub(size, std::memory_order_relaxed);
-  free(data);
+  allocator_->Free(data, size);
 }
 
 DebuggingArrayBufferAllocator::~DebuggingArrayBufferAllocator() {
@@ -147,8 +141,12 @@ void* DebuggingArrayBufferAllocator::Reallocate(void* data,
   Mutex::ScopedLock lock(mutex_);
   void* ret = NodeArrayBufferAllocator::Reallocate(data, old_size, size);
   if (ret == nullptr) {
-    if (size == 0)  // i.e. equivalent to free().
+    if (size == 0) {  // i.e. equivalent to free().
+      // suppress coverity warning as data is used as key versus as pointer
+      // in UnregisterPointerInternal
+      // coverity[pass_freed_arg]
       UnregisterPointerInternal(data, old_size);
+    }
     return nullptr;
   }
 
@@ -220,6 +218,8 @@ void SetIsolateCreateParamsForNode(Isolate::CreateParams* params) {
     // heap based on the actual physical memory.
     params->constraints.ConfigureDefaults(total_memory, 0);
   }
+  params->embedder_wrapper_object_index = BaseObject::InternalFields::kSlot;
+  params->embedder_wrapper_type_index = std::numeric_limits<int>::max();
 }
 
 void SetIsolateErrorHandlers(v8::Isolate* isolate, const IsolateSettings& s) {
@@ -238,9 +238,11 @@ void SetIsolateErrorHandlers(v8::Isolate* isolate, const IsolateSettings& s) {
       s.fatal_error_callback : OnFatalError;
   isolate->SetFatalErrorHandler(fatal_error_cb);
 
-  auto* prepare_stack_trace_cb = s.prepare_stack_trace_callback ?
-      s.prepare_stack_trace_callback : PrepareStackTraceCallback;
-  isolate->SetPrepareStackTraceCallback(prepare_stack_trace_cb);
+  if ((s.flags & SHOULD_NOT_SET_PREPARE_STACK_TRACE_CALLBACK) == 0) {
+    auto* prepare_stack_trace_cb = s.prepare_stack_trace_callback ?
+        s.prepare_stack_trace_callback : PrepareStackTraceCallback;
+    isolate->SetPrepareStackTraceCallback(prepare_stack_trace_cb);
+  }
 }
 
 void SetIsolateMiscHandlers(v8::Isolate* isolate, const IsolateSettings& s) {
@@ -249,17 +251,14 @@ void SetIsolateMiscHandlers(v8::Isolate* isolate, const IsolateSettings& s) {
   auto* allow_wasm_codegen_cb = s.allow_wasm_code_generation_callback ?
     s.allow_wasm_code_generation_callback : AllowWasmCodeGenerationCallback;
   isolate->SetAllowWasmCodeGenerationCallback(allow_wasm_codegen_cb);
+  isolate->SetModifyCodeGenerationFromStringsCallback(
+      ModifyCodeGenerationFromStrings);
 
   if ((s.flags & SHOULD_NOT_SET_PROMISE_REJECTION_CALLBACK) == 0) {
     auto* promise_reject_cb = s.promise_reject_callback ?
-      s.promise_reject_callback : task_queue::PromiseRejectCallback;
+      s.promise_reject_callback : PromiseRejectCallback;
     isolate->SetPromiseRejectCallback(promise_reject_cb);
   }
-
-  auto* host_cleanup_cb = s.host_cleanup_finalization_group_callback ?
-    s.host_cleanup_finalization_group_callback :
-    HostCleanupFinalizationGroupCallback;
-  isolate->SetHostCleanupFinalizationGroupCallback(host_cleanup_cb);
 
   if (s.flags & DETAILED_SOURCE_POSITIONS_FOR_PROFILING)
     v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(isolate);
@@ -274,10 +273,6 @@ void SetIsolateUpForNode(v8::Isolate* isolate,
 void SetIsolateUpForNode(v8::Isolate* isolate) {
   IsolateSettings settings;
   SetIsolateUpForNode(isolate, settings);
-}
-
-Isolate* NewIsolate(ArrayBufferAllocator* allocator, uv_loop_t* event_loop) {
-  return NewIsolate(allocator, event_loop, GetMainThreadMultiIsolatePlatform());
 }
 
 // TODO(joyeecheung): we may want to expose this, but then we need to be
@@ -307,6 +302,14 @@ Isolate* NewIsolate(ArrayBufferAllocator* allocator,
   return NewIsolate(&params, event_loop, platform);
 }
 
+Isolate* NewIsolate(std::shared_ptr<ArrayBufferAllocator> allocator,
+                    uv_loop_t* event_loop,
+                    MultiIsolatePlatform* platform) {
+  Isolate::CreateParams params;
+  if (allocator) params.array_buffer_allocator_shared = allocator;
+  return NewIsolate(&params, event_loop, platform);
+}
+
 IsolateData* CreateIsolateData(Isolate* isolate,
                                uv_loop_t* loop,
                                MultiIsolatePlatform* platform,
@@ -331,18 +334,6 @@ struct InspectorParentHandleImpl : public InspectorParentHandle {
 };
 #endif
 
-Environment* CreateEnvironment(IsolateData* isolate_data,
-                               Local<Context> context,
-                               int argc,
-                               const char* const* argv,
-                               int exec_argc,
-                               const char* const* exec_argv) {
-  return CreateEnvironment(
-      isolate_data, context,
-      std::vector<std::string>(argv, argv + argc),
-      std::vector<std::string>(exec_argv, exec_argv + exec_argc));
-}
-
 Environment* CreateEnvironment(
     IsolateData* isolate_data,
     Local<Context> context,
@@ -357,20 +348,16 @@ Environment* CreateEnvironment(
   // TODO(addaleax): This is a much better place for parsing per-Environment
   // options than the global parse call.
   Environment* env = new Environment(
-      isolate_data,
-      context,
-      args,
-      exec_args,
-      flags,
-      thread_id);
-
+      isolate_data, context, args, exec_args, nullptr, flags, thread_id);
 #if HAVE_INSPECTOR
-  if (inspector_parent_handle) {
-    env->InitializeInspector(
-        std::move(static_cast<InspectorParentHandleImpl*>(
-            inspector_parent_handle.get())->impl));
-  } else {
-    env->InitializeInspector({});
+  if (env->should_create_inspector()) {
+    if (inspector_parent_handle) {
+      env->InitializeInspector(
+          std::move(static_cast<InspectorParentHandleImpl*>(
+              inspector_parent_handle.get())->impl));
+    } else {
+      env->InitializeInspector({});
+    }
   }
 #endif
 
@@ -383,10 +370,14 @@ Environment* CreateEnvironment(
 }
 
 void FreeEnvironment(Environment* env) {
+  Isolate* isolate = env->isolate();
+  Isolate::DisallowJavascriptExecutionScope disallow_js(isolate,
+      Isolate::DisallowJavascriptExecutionScope::THROW_ON_FAILURE);
   {
-    // TODO(addaleax): This should maybe rather be in a SealHandleScope.
-    HandleScope handle_scope(env->isolate());
+    HandleScope handle_scope(isolate);  // For env->context().
     Context::Scope context_scope(env->context());
+    SealHandleScope seal_handle_scope(isolate);
+
     env->set_stopping(true);
     env->stop_sub_worker_contexts();
     env->RunCleanup();
@@ -398,7 +389,7 @@ void FreeEnvironment(Environment* env) {
   // NodePlatform implementation.
   MultiIsolatePlatform* platform = env->isolate_data()->platform();
   if (platform != nullptr)
-    platform->DrainTasks(env->isolate());
+    platform->DrainTasks(isolate);
 
   delete env;
 }
@@ -417,17 +408,10 @@ NODE_EXTERN std::unique_ptr<InspectorParentHandle> GetInspectorParentHandle(
 #endif
 }
 
-void LoadEnvironment(Environment* env) {
-  USE(LoadEnvironment(env,
-                      StartExecutionCallback{},
-                      {}));
-}
-
 MaybeLocal<Value> LoadEnvironment(
     Environment* env,
-    StartExecutionCallback cb,
-    std::unique_ptr<InspectorParentHandle> removeme) {
-  env->InitializeLibuv(per_process::v8_is_profiling);
+    StartExecutionCallback cb) {
+  env->InitializeLibuv();
   env->InitializeDiagnostics();
 
   return StartExecution(env, cb);
@@ -435,18 +419,17 @@ MaybeLocal<Value> LoadEnvironment(
 
 MaybeLocal<Value> LoadEnvironment(
     Environment* env,
-    const char* main_script_source_utf8,
-    std::unique_ptr<InspectorParentHandle> removeme) {
+    const char* main_script_source_utf8) {
   CHECK_NOT_NULL(main_script_source_utf8);
+  Isolate* isolate = env->isolate();
   return LoadEnvironment(
       env,
       [&](const StartExecutionCallbackInfo& info) -> MaybeLocal<Value> {
         // This is a slightly hacky way to convert UTF-8 to UTF-16.
         Local<String> str =
-            String::NewFromUtf8(env->isolate(),
-                                main_script_source_utf8,
-                                v8::NewStringType::kNormal).ToLocalChecked();
-        auto main_utf16 = std::make_unique<String::Value>(env->isolate(), str);
+            String::NewFromUtf8(isolate,
+                                main_script_source_utf8).ToLocalChecked();
+        auto main_utf16 = std::make_unique<String::Value>(isolate, str);
 
         // TODO(addaleax): Avoid having a global table for all scripts.
         std::string name = "embedder_main_" + std::to_string(env->thread_id());
@@ -468,8 +451,12 @@ Environment* GetCurrentEnvironment(Local<Context> context) {
   return Environment::GetCurrent(context);
 }
 
-MultiIsolatePlatform* GetMainThreadMultiIsolatePlatform() {
-  return per_process::v8_platform.Platform();
+IsolateData* GetEnvironmentIsolateData(Environment* env) {
+  return env->isolate_data();
+}
+
+ArrayBufferAllocator* GetArrayBufferAllocator(IsolateData* isolate_data) {
+  return isolate_data->node_allocator();
 }
 
 MultiIsolatePlatform* GetMultiIsolatePlatform(Environment* env) {
@@ -547,64 +534,122 @@ void ProtoThrower(const FunctionCallbackInfo<Value>& info) {
 
 // This runs at runtime, regardless of whether the context
 // is created from a snapshot.
-void InitializeContextRuntime(Local<Context> context) {
+Maybe<bool> InitializeContextRuntime(Local<Context> context) {
   Isolate* isolate = context->GetIsolate();
   HandleScope handle_scope(isolate);
 
   // Delete `Intl.v8BreakIterator`
   // https://github.com/nodejs/node/issues/14909
-  Local<String> intl_string = FIXED_ONE_BYTE_STRING(isolate, "Intl");
-  Local<String> break_iter_string =
-    FIXED_ONE_BYTE_STRING(isolate, "v8BreakIterator");
-  Local<Value> intl_v;
-  if (context->Global()->Get(context, intl_string).ToLocal(&intl_v) &&
-      intl_v->IsObject()) {
-    Local<Object> intl = intl_v.As<Object>();
-    intl->Delete(context, break_iter_string).Check();
+  {
+    Local<String> intl_string =
+      FIXED_ONE_BYTE_STRING(isolate, "Intl");
+    Local<String> break_iter_string =
+      FIXED_ONE_BYTE_STRING(isolate, "v8BreakIterator");
+
+    Local<Value> intl_v;
+    if (!context->Global()
+        ->Get(context, intl_string)
+        .ToLocal(&intl_v)) {
+      return Nothing<bool>();
+    }
+
+    if (intl_v->IsObject() &&
+        intl_v.As<Object>()
+          ->Delete(context, break_iter_string)
+          .IsNothing()) {
+      return Nothing<bool>();
+    }
   }
 
   // Delete `Atomics.wake`
   // https://github.com/nodejs/node/issues/21219
-  Local<String> atomics_string = FIXED_ONE_BYTE_STRING(isolate, "Atomics");
-  Local<String> wake_string = FIXED_ONE_BYTE_STRING(isolate, "wake");
-  Local<Value> atomics_v;
-  if (context->Global()->Get(context, atomics_string).ToLocal(&atomics_v) &&
-      atomics_v->IsObject()) {
-    Local<Object> atomics = atomics_v.As<Object>();
-    atomics->Delete(context, wake_string).Check();
+  {
+    Local<String> atomics_string =
+      FIXED_ONE_BYTE_STRING(isolate, "Atomics");
+    Local<String> wake_string =
+      FIXED_ONE_BYTE_STRING(isolate, "wake");
+
+    Local<Value> atomics_v;
+    if (!context->Global()
+        ->Get(context, atomics_string)
+        .ToLocal(&atomics_v)) {
+      return Nothing<bool>();
+    }
+
+    if (atomics_v->IsObject() &&
+        atomics_v.As<Object>()
+          ->Delete(context, wake_string)
+          .IsNothing()) {
+      return Nothing<bool>();
+    }
   }
 
   // Remove __proto__
   // https://github.com/nodejs/node/issues/31951
-  Local<String> object_string = FIXED_ONE_BYTE_STRING(isolate, "Object");
-  Local<String> prototype_string = FIXED_ONE_BYTE_STRING(isolate, "prototype");
-  Local<Object> prototype = context->Global()
-                                ->Get(context, object_string)
-                                .ToLocalChecked()
-                                .As<Object>()
-                                ->Get(context, prototype_string)
-                                .ToLocalChecked()
-                                .As<Object>();
-  Local<String> proto_string = FIXED_ONE_BYTE_STRING(isolate, "__proto__");
+  Local<Object> prototype;
+  {
+    Local<String> object_string =
+      FIXED_ONE_BYTE_STRING(isolate, "Object");
+    Local<String> prototype_string =
+      FIXED_ONE_BYTE_STRING(isolate, "prototype");
+
+    Local<Value> object_v;
+    if (!context->Global()
+        ->Get(context, object_string)
+        .ToLocal(&object_v)) {
+      return Nothing<bool>();
+    }
+
+    Local<Value> prototype_v;
+    if (!object_v.As<Object>()
+        ->Get(context, prototype_string)
+        .ToLocal(&prototype_v)) {
+      return Nothing<bool>();
+    }
+
+    prototype = prototype_v.As<Object>();
+  }
+
+  Local<String> proto_string =
+    FIXED_ONE_BYTE_STRING(isolate, "__proto__");
+
   if (per_process::cli_options->disable_proto == "delete") {
-    prototype->Delete(context, proto_string).ToChecked();
+    if (prototype
+        ->Delete(context, proto_string)
+        .IsNothing()) {
+      return Nothing<bool>();
+    }
   } else if (per_process::cli_options->disable_proto == "throw") {
-    Local<Value> thrower =
-        Function::New(context, ProtoThrower).ToLocalChecked();
+    Local<Value> thrower;
+    if (!Function::New(context, ProtoThrower)
+        .ToLocal(&thrower)) {
+      return Nothing<bool>();
+    }
+
     PropertyDescriptor descriptor(thrower, thrower);
     descriptor.set_enumerable(false);
     descriptor.set_configurable(true);
-    prototype->DefineProperty(context, proto_string, descriptor).ToChecked();
+    if (prototype
+        ->DefineProperty(context, proto_string, descriptor)
+        .IsNothing()) {
+      return Nothing<bool>();
+    }
   } else if (per_process::cli_options->disable_proto != "") {
     // Validated in ProcessGlobalArgs
-    FatalError("InitializeContextRuntime()", "invalid --disable-proto mode");
+    FatalError("InitializeContextRuntime()",
+               "invalid --disable-proto mode");
   }
+
+  return Just(true);
 }
 
 bool InitializeContextForSnapshot(Local<Context> context) {
   Isolate* isolate = context->GetIsolate();
   HandleScope handle_scope(isolate);
 
+  context->AllowCodeGenerationFromStrings(false);
+  context->SetEmbedderData(
+      ContextEmbedderIndex::kAllowCodeGenerationFromStrings, True(isolate));
   context->SetEmbedderData(ContextEmbedderIndex::kAllowWasmCodeGeneration,
                            True(isolate));
   return InitializePrimordials(context);
@@ -662,8 +707,7 @@ bool InitializeContext(Local<Context> context) {
     return false;
   }
 
-  InitializeContextRuntime(context);
-  return true;
+  return InitializeContextRuntime(context).IsJust();
 }
 
 uv_loop_t* GetCurrentEventLoop(Isolate* isolate) {
@@ -679,10 +723,14 @@ void AddLinkedBinding(Environment* env, const node_module& mod) {
   CHECK_NOT_NULL(env);
   Mutex::ScopedLock lock(env->extra_linked_bindings_mutex());
 
-  node_module* prev_head = env->extra_linked_bindings_head();
+  node_module* prev_tail = env->extra_linked_bindings_tail();
   env->extra_linked_bindings()->push_back(mod);
-  if (prev_head != nullptr)
-    prev_head->nm_link = &env->extra_linked_bindings()->back();
+  if (prev_tail != nullptr)
+    prev_tail->nm_link = &env->extra_linked_bindings()->back();
+}
+
+void AddLinkedBinding(Environment* env, const napi_module& mod) {
+  AddLinkedBinding(env, napi_module_to_node_module(&mod));
 }
 
 void AddLinkedBinding(Environment* env,
@@ -706,13 +754,12 @@ void AddLinkedBinding(Environment* env,
 static std::atomic<uint64_t> next_thread_id{0};
 
 ThreadId AllocateEnvironmentThreadId() {
-  ThreadId ret;
-  ret.id = next_thread_id++;
-  return ret;
+  return ThreadId { next_thread_id++ };
 }
 
 void DefaultProcessExitHandler(Environment* env, int exit_code) {
-  Stop(env);
+  env->set_can_call_into_js(false);
+  env->stop_sub_worker_contexts();
   DisposePlatform();
   uv_library_shutdown();
   exit(exit_code);

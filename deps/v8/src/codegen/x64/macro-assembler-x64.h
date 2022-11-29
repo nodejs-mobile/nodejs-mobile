@@ -11,9 +11,12 @@
 
 #include "src/base/flags.h"
 #include "src/codegen/bailout-reason.h"
+#include "src/codegen/shared-ia32-x64/macro-assembler-shared-ia32-x64.h"
 #include "src/codegen/x64/assembler-x64.h"
 #include "src/common/globals.h"
+#include "src/execution/isolate-data.h"
 #include "src/objects/contexts.h"
+#include "src/objects/tagged-index.h"
 
 namespace v8 {
 namespace internal {
@@ -23,9 +26,6 @@ using MemOperand = Operand;
 
 class StringConstantBase;
 
-enum RememberedSetAction { EMIT_REMEMBERED_SET, OMIT_REMEMBERED_SET };
-enum SmiCheck { INLINE_SMI_CHECK, OMIT_SMI_CHECK };
-
 struct SmiIndex {
   SmiIndex(Register index_register, ScaleFactor scale)
       : reg(index_register), scale(scale) {}
@@ -33,129 +33,85 @@ struct SmiIndex {
   ScaleFactor scale;
 };
 
-enum StackArgumentsAccessorReceiverMode {
-  ARGUMENTS_CONTAIN_RECEIVER,
-  ARGUMENTS_DONT_CONTAIN_RECEIVER
-};
+// TODO(victorgomes): Move definition to macro-assembler.h, once all other
+// platforms are updated.
+enum class StackLimitKind { kInterruptStackLimit, kRealStackLimit };
 
+// Convenient class to access arguments below the stack pointer.
 class StackArgumentsAccessor {
  public:
-  StackArgumentsAccessor(Register base_reg, Register argument_count_reg,
-                         StackArgumentsAccessorReceiverMode receiver_mode =
-                             ARGUMENTS_CONTAIN_RECEIVER,
-                         int extra_displacement_to_last_argument = 0)
-      : base_reg_(base_reg),
-        argument_count_reg_(argument_count_reg),
-        argument_count_immediate_(0),
-        receiver_mode_(receiver_mode),
-        extra_displacement_to_last_argument_(
-            extra_displacement_to_last_argument) {}
-
-  StackArgumentsAccessor(Register base_reg,
-                         const ParameterCount& parameter_count,
-                         StackArgumentsAccessorReceiverMode receiver_mode =
-                             ARGUMENTS_CONTAIN_RECEIVER,
-                         int extra_displacement_to_last_argument = 0);
-
-  Operand GetArgumentOperand(int index);
-  Operand GetReceiverOperand() {
-    DCHECK(receiver_mode_ == ARGUMENTS_CONTAIN_RECEIVER);
-    return GetArgumentOperand(0);
+  // argc = the number of arguments not including the receiver.
+  explicit StackArgumentsAccessor(Register argc) : argc_(argc) {
+    DCHECK_NE(argc_, no_reg);
   }
 
+  // Argument 0 is the receiver (despite argc not including the receiver).
+  Operand operator[](int index) const { return GetArgumentOperand(index); }
+
+  Operand GetArgumentOperand(int index) const;
+  Operand GetReceiverOperand() const { return GetArgumentOperand(0); }
+
  private:
-  const Register base_reg_;
-  const Register argument_count_reg_;
-  const int argument_count_immediate_;
-  const StackArgumentsAccessorReceiverMode receiver_mode_;
-  const int extra_displacement_to_last_argument_;
+  const Register argc_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(StackArgumentsAccessor);
 };
 
-class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
+class V8_EXPORT_PRIVATE TurboAssembler : public SharedTurboAssembler {
  public:
-  using TurboAssemblerBase::TurboAssemblerBase;
-
-  template <typename Dst, typename... Args>
-  struct AvxHelper {
-    Assembler* assm;
-    // Call a method where the AVX version expects the dst argument to be
-    // duplicated.
-    template <void (Assembler::*avx)(Dst, Dst, Args...),
-              void (Assembler::*no_avx)(Dst, Args...)>
-    void emit(Dst dst, Args... args) {
-      if (CpuFeatures::IsSupported(AVX)) {
-        CpuFeatureScope scope(assm, AVX);
-        (assm->*avx)(dst, dst, args...);
-      } else {
-        (assm->*no_avx)(dst, args...);
-      }
-    }
-
-    // Call a method where the AVX version expects no duplicated dst argument.
-    template <void (Assembler::*avx)(Dst, Args...),
-              void (Assembler::*no_avx)(Dst, Args...)>
-    void emit(Dst dst, Args... args) {
-      if (CpuFeatures::IsSupported(AVX)) {
-        CpuFeatureScope scope(assm, AVX);
-        (assm->*avx)(dst, args...);
-      } else {
-        (assm->*no_avx)(dst, args...);
-      }
-    }
-  };
-
-#define AVX_OP(macro_name, name)                                             \
-  template <typename Dst, typename... Args>                                  \
-  void macro_name(Dst dst, Args... args) {                                   \
-    AvxHelper<Dst, Args...>{this}                                            \
-        .template emit<&Assembler::v##name, &Assembler::name>(dst, args...); \
-  }
-
+  using SharedTurboAssembler::SharedTurboAssembler;
   AVX_OP(Subsd, subsd)
   AVX_OP(Divss, divss)
   AVX_OP(Divsd, divsd)
-  AVX_OP(Xorps, xorps)
-  AVX_OP(Xorpd, xorpd)
-  AVX_OP(Movd, movd)
-  AVX_OP(Movq, movq)
-  AVX_OP(Movaps, movaps)
-  AVX_OP(Movapd, movapd)
-  AVX_OP(Movups, movups)
-  AVX_OP(Movmskps, movmskps)
-  AVX_OP(Movmskpd, movmskpd)
-  AVX_OP(Movss, movss)
-  AVX_OP(Movsd, movsd)
-  AVX_OP(Movdqu, movdqu)
-  AVX_OP(Pcmpeqd, pcmpeqd)
+  AVX_OP(Pcmpgtw, pcmpgtw)
+  AVX_OP(Pmaxsw, pmaxsw)
+  AVX_OP(Pminsw, pminsw)
   AVX_OP(Addss, addss)
   AVX_OP(Addsd, addsd)
   AVX_OP(Mulsd, mulsd)
-  AVX_OP(Andps, andps)
-  AVX_OP(Andnps, andnps)
-  AVX_OP(Andpd, andpd)
-  AVX_OP(Orpd, orpd)
   AVX_OP(Cmpeqps, cmpeqps)
   AVX_OP(Cmpltps, cmpltps)
-  AVX_OP(Cmpleps, cmpleps)
   AVX_OP(Cmpneqps, cmpneqps)
   AVX_OP(Cmpnltps, cmpnltps)
   AVX_OP(Cmpnleps, cmpnleps)
-  AVX_OP(Cmpeqpd, cmpeqpd)
-  AVX_OP(Cmpltpd, cmpltpd)
-  AVX_OP(Cmplepd, cmplepd)
-  AVX_OP(Cmpneqpd, cmpneqpd)
   AVX_OP(Cmpnltpd, cmpnltpd)
   AVX_OP(Cmpnlepd, cmpnlepd)
-  AVX_OP(Roundss, roundss)
-  AVX_OP(Roundsd, roundsd)
-  AVX_OP(Sqrtss, sqrtss)
-  AVX_OP(Sqrtsd, sqrtsd)
+  AVX_OP(Cvttpd2dq, cvttpd2dq)
   AVX_OP(Ucomiss, ucomiss)
   AVX_OP(Ucomisd, ucomisd)
+  AVX_OP(Psubsw, psubsw)
+  AVX_OP(Psubusw, psubusw)
+  AVX_OP(Paddsw, paddsw)
+  AVX_OP(Pcmpgtd, pcmpgtd)
+  AVX_OP(Pcmpeqb, pcmpeqb)
+  AVX_OP(Pcmpeqw, pcmpeqw)
+  AVX_OP(Pcmpeqd, pcmpeqd)
+  AVX_OP(Movlhps, movlhps)
+  AVX_OP_SSSE3(Phaddd, phaddd)
+  AVX_OP_SSSE3(Phaddw, phaddw)
+  AVX_OP_SSSE3(Pshufb, pshufb)
+  AVX_OP_SSE4_1(Pcmpeqq, pcmpeqq)
+  AVX_OP_SSE4_1(Packusdw, packusdw)
+  AVX_OP_SSE4_1(Pminsd, pminsd)
+  AVX_OP_SSE4_1(Pminuw, pminuw)
+  AVX_OP_SSE4_1(Pminud, pminud)
+  AVX_OP_SSE4_1(Pmaxuw, pmaxuw)
+  AVX_OP_SSE4_1(Pmaxud, pmaxud)
+  AVX_OP_SSE4_1(Pmulld, pmulld)
+  AVX_OP_SSE4_1(Insertps, insertps)
+  AVX_OP_SSE4_1(Pinsrq, pinsrq)
+  AVX_OP_SSE4_1(Pextrq, pextrq)
+  AVX_OP_SSE4_1(Roundss, roundss)
+  AVX_OP_SSE4_1(Roundsd, roundsd)
+  AVX_OP_SSE4_2(Pcmpgtq, pcmpgtq)
 
 #undef AVX_OP
+
+  // Define movq here instead of using AVX_OP. movq is defined using templates
+  // and there is a function template `void movq(P1)`, while technically
+  // impossible, will be selected when deducing the arguments for AvxHelper.
+  void Movq(XMMRegister dst, Register src);
+  void Movq(Register dst, XMMRegister src);
 
   void PushReturnAddressFrom(Register src) { pushq(src); }
   void PopReturnAddressTo(Register dst) { popq(dst); }
@@ -166,12 +122,9 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // may be bigger than 2^16 - 1.  Requires a scratch register.
   void Ret(int bytes_dropped, Register scratch);
 
-  // Load a register with a long value as efficiently as possible.
-  void Set(Register dst, int64_t x);
-  void Set(Operand dst, intptr_t x);
-
   // Operations on roots in the root-array.
-  void LoadRoot(Register destination, RootIndex index) override;
+  Operand RootAsOperand(RootIndex index);
+  void LoadRoot(Register destination, RootIndex index) final;
   void LoadRoot(Operand destination, RootIndex index) {
     LoadRoot(kScratchRegister, index);
     movq(destination, kScratchRegister);
@@ -181,7 +134,16 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Push(Operand src);
   void Push(Immediate value);
   void Push(Smi smi);
+  void Push(TaggedIndex index) {
+    Push(Immediate(static_cast<uint32_t>(index.ptr())));
+  }
   void Push(Handle<HeapObject> source);
+
+  enum class PushArrayOrder { kNormal, kReverse };
+  // `array` points to the first element (the lowest address).
+  // `array` and `size` are not modified.
+  void PushArray(Register array, Register size, Register scratch,
+                 PushArrayOrder order = PushArrayOrder::kNormal);
 
   // Before calling a C-function from generated code, align arguments on stack.
   // After aligning the frame, arguments must be stored in rsp[0], rsp[8],
@@ -208,6 +170,9 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
                      Label* condition_met,
                      Label::Distance condition_met_distance = Label::kFar);
 
+  void Movdqa(XMMRegister dst, Operand src);
+  void Movdqa(XMMRegister dst, XMMRegister src);
+
   void Cvtss2sd(XMMRegister dst, XMMRegister src);
   void Cvtss2sd(XMMRegister dst, Operand src);
   void Cvtsd2ss(XMMRegister dst, XMMRegister src);
@@ -220,12 +185,6 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Cvttss2si(Register dst, Operand src);
   void Cvttss2siq(Register dst, XMMRegister src);
   void Cvttss2siq(Register dst, Operand src);
-  void Cvtqsi2ss(XMMRegister dst, Register src);
-  void Cvtqsi2ss(XMMRegister dst, Operand src);
-  void Cvtqsi2sd(XMMRegister dst, Register src);
-  void Cvtqsi2sd(XMMRegister dst, Operand src);
-  void Cvtlsi2ss(XMMRegister dst, Register src);
-  void Cvtlsi2ss(XMMRegister dst, Operand src);
   void Cvtlui2ss(XMMRegister dst, Register src);
   void Cvtlui2ss(XMMRegister dst, Operand src);
   void Cvtlui2sd(XMMRegister dst, Register src);
@@ -239,9 +198,17 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Cvttss2uiq(Register dst, Operand src, Label* fail = nullptr);
   void Cvttss2uiq(Register dst, XMMRegister src, Label* fail = nullptr);
 
-  // cvtsi2sd instruction only writes to the low 64-bit of dst register, which
-  // hinders register renaming and makes dependence chains longer. So we use
-  // xorpd to clear the dst register before cvtsi2sd to solve this issue.
+  // cvtsi2sd and cvtsi2ss instructions only write to the low 64/32-bit of dst
+  // register, which hinders register renaming and makes dependence chains
+  // longer. So we use xorpd to clear the dst register before cvtsi2sd for
+  // non-AVX and a scratch XMM register as first src for AVX to solve this
+  // issue.
+  void Cvtqsi2ss(XMMRegister dst, Register src);
+  void Cvtqsi2ss(XMMRegister dst, Operand src);
+  void Cvtqsi2sd(XMMRegister dst, Register src);
+  void Cvtqsi2sd(XMMRegister dst, Operand src);
+  void Cvtlsi2ss(XMMRegister dst, Register src);
+  void Cvtlsi2ss(XMMRegister dst, Operand src);
   void Cvtlsi2sd(XMMRegister dst, Register src);
   void Cvtlsi2sd(XMMRegister dst, Operand src);
 
@@ -258,13 +225,73 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Popcntq(Register dst, Register src);
   void Popcntq(Register dst, Operand src);
 
-  // Is the value a tagged smi.
+  void Cmp(Register dst, Smi src);
+  void Cmp(Operand dst, Smi src);
+  void Cmp(Register dst, int32_t src);
+
+  // ---------------------------------------------------------------------------
+  // Conversions between tagged smi values and non-tagged integer values.
+
+  // Tag an word-size value. The result must be known to be a valid smi value.
+  void SmiTag(Register reg);
+  // Requires dst != src
+  void SmiTag(Register dst, Register src);
+
+  // Simple comparison of smis.  Both sides must be known smis to use these,
+  // otherwise use Cmp.
+  void SmiCompare(Register smi1, Register smi2);
+  void SmiCompare(Register dst, Smi src);
+  void SmiCompare(Register dst, Operand src);
+  void SmiCompare(Operand dst, Register src);
+  void SmiCompare(Operand dst, Smi src);
+
+  // Functions performing a check on a known or potential smi. Returns
+  // a condition that is satisfied if the check is successful.
   Condition CheckSmi(Register src);
   Condition CheckSmi(Operand src);
+
+  // Abort execution if argument is a smi, enabled via --debug-code.
+  void AssertNotSmi(Register object);
+
+  // Abort execution if argument is not a smi, enabled via --debug-code.
+  void AssertSmi(Register object);
+  void AssertSmi(Operand object);
+
+  // Test-and-jump functions. Typically combines a check function
+  // above with a conditional jump.
 
   // Jump to label if the value is a tagged smi.
   void JumpIfSmi(Register src, Label* on_smi,
                  Label::Distance near_jump = Label::kFar);
+
+  // Jump to label if the value is not a tagged smi.
+  void JumpIfNotSmi(Register src, Label* on_not_smi,
+                    Label::Distance near_jump = Label::kFar);
+
+  // Jump to label if the value is not a tagged smi.
+  void JumpIfNotSmi(Operand src, Label* on_not_smi,
+                    Label::Distance near_jump = Label::kFar);
+
+  // Operations on tagged smi values.
+
+  // Smis represent a subset of integers. The subset is always equivalent to
+  // a two's complement interpretation of a fixed number of bits.
+
+  // Add an integer constant to a tagged smi, giving a tagged smi as result.
+  // No overflow testing on the result is done.
+  void SmiAddConstant(Operand dst, Smi constant);
+
+  // Specialized operations
+
+  // Converts, if necessary, a smi to a combination of number and
+  // multiplier to be used as a scaled index.
+  // The src register contains a *positive* smi value. The shift is the
+  // power of two to multiply the index value by (e.g. to index by
+  // smi-value * kSystemPointerSize, pass the smi and kSystemPointerSizeLog2).
+  // The returned index register may be either src or dst, depending
+  // on what is most efficient. If src and dst are different registers,
+  // src is always unchanged.
+  SmiIndex SmiToIndex(Register dst, Register src, int shift);
 
   void JumpIfEqual(Register a, int32_t b, Label* dest) {
     cmpl(a, Immediate(b));
@@ -276,6 +303,29 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
     j(less, dest);
   }
 
+#ifdef V8_MAP_PACKING
+  void UnpackMapWord(Register r);
+#endif
+
+  void LoadMap(Register destination, Register object);
+
+  void Move(Register dst, intptr_t x) {
+    if (x == 0) {
+      xorl(dst, dst);
+      // The following shorter sequence for uint8 causes performance
+      // regressions:
+      // xorl(dst, dst); movb(dst,
+      // Immediate(static_cast<uint32_t>(x)));
+    } else if (is_uint32(x)) {
+      movl(dst, Immediate(static_cast<uint32_t>(x)));
+    } else if (is_int32(x)) {
+      // "movq reg64, imm32" is sign extending.
+      movq(dst, Immediate(static_cast<int32_t>(x)));
+    } else {
+      movq(dst, Immediate64(x));
+    }
+  }
+  void Move(Operand dst, intptr_t x);
   void Move(Register dst, Smi source);
 
   void Move(Operand dst, Smi source) {
@@ -283,15 +333,24 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
     movq(dst, constant);
   }
 
+  void Move(Register dst, TaggedIndex source) { Move(dst, source.ptr()); }
+
+  void Move(Operand dst, TaggedIndex source) { Move(dst, source.ptr()); }
+
   void Move(Register dst, ExternalReference ext);
 
   void Move(XMMRegister dst, uint32_t src);
   void Move(XMMRegister dst, uint64_t src);
   void Move(XMMRegister dst, float src) { Move(dst, bit_cast<uint32_t>(src)); }
   void Move(XMMRegister dst, double src) { Move(dst, bit_cast<uint64_t>(src)); }
+  void Move(XMMRegister dst, uint64_t high, uint64_t low);
 
   // Move if the registers are not identical.
   void Move(Register target, Register source);
+  void Move(XMMRegister target, XMMRegister source);
+
+  void Move(Register target, Operand source);
+  void Move(Register target, Immediate source);
 
   void Move(Register dst, Handle<HeapObject> source,
             RelocInfo::Mode rmode = RelocInfo::FULL_EMBEDDED_OBJECT);
@@ -302,7 +361,7 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Move(Register dst, Address ptr, RelocInfo::Mode rmode) {
     // This method must not be used with heap object references. The stored
     // address is not GC safe. Use the handle version instead.
-    DCHECK(rmode > RelocInfo::LAST_GCED_ENUM);
+    DCHECK(rmode == RelocInfo::NONE || rmode > RelocInfo::LAST_GCED_ENUM);
     movq(dst, Immediate64(ptr, rmode));
   }
 
@@ -314,6 +373,8 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
       RelocInfo::Mode rmode = RelocInfo::FULL_EMBEDDED_OBJECT);
 
   // Convert smi to word-size sign-extended value.
+  void SmiUntag(Register reg);
+  // Requires dst != src
   void SmiUntag(Register dst, Register src);
   void SmiUntag(Register dst, Operand src);
 
@@ -321,10 +382,9 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // register.
   void LoadAddress(Register destination, ExternalReference source);
 
-  void LoadFromConstantsTable(Register destination,
-                              int constant_index) override;
-  void LoadRootRegisterOffset(Register destination, intptr_t offset) override;
-  void LoadRootRelative(Register destination, int32_t offset) override;
+  void LoadFromConstantsTable(Register destination, int constant_index) final;
+  void LoadRootRegisterOffset(Register destination, intptr_t offset) final;
+  void LoadRootRelative(Register destination, int32_t offset) final;
 
   // Operand pointing to an external reference.
   // May emit code to set up the scratch register. The operand is
@@ -342,36 +402,101 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   void Call(ExternalReference ext);
   void Call(Label* target) { call(target); }
 
+  Operand EntryFromBuiltinAsOperand(Builtin builtin_index);
   Operand EntryFromBuiltinIndexAsOperand(Register builtin_index);
-  void CallBuiltinByIndex(Register builtin_index) override;
-  void CallBuiltin(int builtin_index);
+  void CallBuiltinByIndex(Register builtin_index);
+  void CallBuiltin(Builtin builtin);
+  void TailCallBuiltin(Builtin builtin);
 
-  void LoadCodeObjectEntry(Register destination, Register code_object) override;
-  void CallCodeObject(Register code_object) override;
-  void JumpCodeObject(Register code_object) override;
+  void LoadCodeObjectEntry(Register destination, Register code_object);
+  void CallCodeObject(Register code_object);
+  void JumpCodeObject(Register code_object,
+                      JumpMode jump_mode = JumpMode::kJump);
 
-  void RetpolineCall(Register reg);
-  void RetpolineCall(Address destination, RelocInfo::Mode rmode);
+  // Load code entry point from the CodeDataContainer object.
+  void LoadCodeDataContainerEntry(Register destination,
+                                  Register code_data_container_object);
+  // Load code entry point from the CodeDataContainer object and compute
+  // Code object pointer out of it. Must not be used for CodeDataContainers
+  // corresponding to builtins, because their entry points values point to
+  // the embedded instruction stream in .text section.
+  void LoadCodeDataContainerCodeNonBuiltin(Register destination,
+                                           Register code_data_container_object);
+  void CallCodeDataContainerObject(Register code_data_container_object);
+  void JumpCodeDataContainerObject(Register code_data_container_object,
+                                   JumpMode jump_mode = JumpMode::kJump);
+
+  // Helper functions that dispatch either to Call/JumpCodeObject or to
+  // Call/JumpCodeDataContainerObject.
+  void LoadCodeTEntry(Register destination, Register code);
+  void CallCodeTObject(Register code);
+  void JumpCodeTObject(Register code, JumpMode jump_mode = JumpMode::kJump);
 
   void Jump(Address destination, RelocInfo::Mode rmode);
-  void Jump(const ExternalReference& reference) override;
+  void Jump(const ExternalReference& reference);
   void Jump(Operand op);
   void Jump(Handle<Code> code_object, RelocInfo::Mode rmode,
             Condition cc = always);
 
-  void RetpolineJump(Register reg);
+  void CallForDeoptimization(Builtin target, int deopt_id, Label* exit,
+                             DeoptimizeKind kind, Label* ret,
+                             Label* jump_deoptimization_entry_label);
 
-  void CallForDeoptimization(Address target, int deopt_id);
+  void Trap();
+  void DebugBreak();
+
+  // Will move src1 to dst if dst != src1.
+  void Pmaddwd(XMMRegister dst, XMMRegister src1, Operand src2);
+  void Pmaddwd(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void Pmaddubsw(XMMRegister dst, XMMRegister src1, Operand src2);
+  void Pmaddubsw(XMMRegister dst, XMMRegister src1, XMMRegister src2);
 
   // Non-SSE2 instructions.
-  void Pextrd(Register dst, XMMRegister src, int8_t imm8);
-  void Pinsrd(XMMRegister dst, Register src, int8_t imm8);
-  void Pinsrd(XMMRegister dst, Operand src, int8_t imm8);
+  void Pextrd(Register dst, XMMRegister src, uint8_t imm8);
 
-  void Psllq(XMMRegister dst, byte imm8);
-  void Psrlq(XMMRegister dst, byte imm8);
-  void Pslld(XMMRegister dst, byte imm8);
-  void Psrld(XMMRegister dst, byte imm8);
+  void Pinsrb(XMMRegister dst, XMMRegister src1, Register src2, uint8_t imm8);
+  void Pinsrb(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t imm8);
+  void Pinsrw(XMMRegister dst, XMMRegister src1, Register src2, uint8_t imm8);
+  void Pinsrw(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t imm8);
+  void Pinsrd(XMMRegister dst, XMMRegister src1, Register src2, uint8_t imm8);
+  void Pinsrd(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t imm8);
+  void Pinsrd(XMMRegister dst, Register src2, uint8_t imm8);
+  void Pinsrd(XMMRegister dst, Operand src2, uint8_t imm8);
+  void Pinsrq(XMMRegister dst, XMMRegister src1, Register src2, uint8_t imm8);
+  void Pinsrq(XMMRegister dst, XMMRegister src1, Operand src2, uint8_t imm8);
+
+  void Pblendvb(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                XMMRegister mask);
+  void Blendvps(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                XMMRegister mask);
+  void Blendvpd(XMMRegister dst, XMMRegister src1, XMMRegister src2,
+                XMMRegister mask);
+
+  // Supports both SSE and AVX. Move src1 to dst if they are not equal on SSE.
+  void Pshufb(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void Pmulhrsw(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+
+  // These Wasm SIMD ops do not have direct lowerings on x64. These
+  // helpers are optimized to produce the fastest and smallest codegen.
+  // Defined here to allow usage on both TurboFan and Liftoff.
+  void I16x8Q15MulRSatS(XMMRegister dst, XMMRegister src1, XMMRegister src2);
+
+  void S128Store64Lane(Operand dst, XMMRegister src, uint8_t laneidx);
+
+  void I8x16Popcnt(XMMRegister dst, XMMRegister src, XMMRegister tmp);
+
+  void F64x2ConvertLowI32x4U(XMMRegister dst, XMMRegister src);
+  void I32x4TruncSatF64x2SZero(XMMRegister dst, XMMRegister src);
+  void I32x4TruncSatF64x2UZero(XMMRegister dst, XMMRegister src);
+
+  void I16x8ExtAddPairwiseI8x16S(XMMRegister dst, XMMRegister src);
+  void I32x4ExtAddPairwiseI16x8U(XMMRegister dst, XMMRegister src);
+
+  void I8x16Swizzle(XMMRegister dst, XMMRegister src, XMMRegister mask,
+                    bool omit_add = false);
+
+  void Abspd(XMMRegister dst);
+  void Negpd(XMMRegister dst);
 
   void CompareRoot(Register with, RootIndex index);
   void CompareRoot(Operand with, RootIndex index);
@@ -379,6 +504,20 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // Generates function and stub prologue code.
   void StubPrologue(StackFrame::Type type);
   void Prologue();
+
+  // Helpers for argument handling
+  enum ArgumentsCountMode { kCountIncludesReceiver, kCountExcludesReceiver };
+  enum ArgumentsCountType { kCountIsInteger, kCountIsSmi, kCountIsBytes };
+  void DropArguments(Register count, Register scratch, ArgumentsCountType type,
+                     ArgumentsCountMode mode);
+  void DropArgumentsAndPushNewReceiver(Register argc, Register receiver,
+                                       Register scratch,
+                                       ArgumentsCountType type,
+                                       ArgumentsCountMode mode);
+  void DropArgumentsAndPushNewReceiver(Register argc, Operand receiver,
+                                       Register scratch,
+                                       ArgumentsCountType type,
+                                       ArgumentsCountMode mode);
 
   // Calls Abort(msg) if the condition cc is not satisfied.
   // Use --debug_code to enable.
@@ -414,42 +553,49 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 // stack check, do it before calling this function because this function may
 // write into the newly allocated space. It may also overwrite the given
 // register's value, in the version that takes a register.
-#ifdef V8_OS_WIN
+#if defined(V8_TARGET_OS_WIN) || defined(V8_TARGET_OS_MACOSX)
   void AllocateStackSpace(Register bytes_scratch);
   void AllocateStackSpace(int bytes);
 #else
   void AllocateStackSpace(Register bytes) { subq(rsp, bytes); }
-  void AllocateStackSpace(int bytes) { subq(rsp, Immediate(bytes)); }
+  void AllocateStackSpace(int bytes) {
+    DCHECK_GE(bytes, 0);
+    if (bytes == 0) return;
+    subq(rsp, Immediate(bytes));
+  }
 #endif
-
-  // Removes current frame and its arguments from the stack preserving the
-  // arguments and a return address pushed to the stack for the next call.  Both
-  // |callee_args_count| and |caller_args_count_reg| do not include receiver.
-  // |callee_args_count| is not modified, |caller_args_count_reg| is trashed.
-  void PrepareForTailCall(const ParameterCount& callee_args_count,
-                          Register caller_args_count_reg, Register scratch0,
-                          Register scratch1);
-
-  // Call a runtime routine. This expects {centry} to contain a fitting CEntry
-  // builtin for the target runtime function and uses an indirect call.
-  void CallRuntimeWithCEntry(Runtime::FunctionId fid, Register centry);
 
   void InitializeRootRegister() {
     ExternalReference isolate_root = ExternalReference::isolate_root(isolate());
     Move(kRootRegister, isolate_root);
+#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+    LoadRootRelative(kPtrComprCageBaseRegister,
+                     IsolateData::cage_base_offset());
+#endif
   }
 
-  void SaveRegisters(RegList registers);
-  void RestoreRegisters(RegList registers);
+  void MaybeSaveRegisters(RegList registers);
+  void MaybeRestoreRegisters(RegList registers);
 
-  void CallRecordWriteStub(Register object, Register address,
-                           RememberedSetAction remembered_set_action,
-                           SaveFPRegsMode fp_mode);
-  void CallRecordWriteStub(Register object, Register address,
-                           RememberedSetAction remembered_set_action,
-                           SaveFPRegsMode fp_mode, Address wasm_target);
-  void CallEphemeronKeyBarrier(Register object, Register address,
+  void CallEphemeronKeyBarrier(Register object, Register slot_address,
                                SaveFPRegsMode fp_mode);
+
+  void CallRecordWriteStubSaveRegisters(
+      Register object, Register slot_address,
+      RememberedSetAction remembered_set_action, SaveFPRegsMode fp_mode,
+      StubCallMode mode = StubCallMode::kCallBuiltinPointer);
+  void CallRecordWriteStub(
+      Register object, Register slot_address,
+      RememberedSetAction remembered_set_action, SaveFPRegsMode fp_mode,
+      StubCallMode mode = StubCallMode::kCallBuiltinPointer);
+
+#ifdef V8_IS_TSAN
+  void CallTSANRelaxedStoreStub(Register address, Register value,
+                                SaveFPRegsMode fp_mode, int size,
+                                StubCallMode mode);
+  void CallTSANRelaxedLoadStub(Register address, SaveFPRegsMode fp_mode,
+                               int size, StubCallMode mode);
+#endif  // V8_IS_TSAN
 
   void MoveNumber(Register dst, double value);
   void MoveNonSmi(Register dst, double value);
@@ -481,7 +627,15 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // This is an alternative to embedding the {CodeObject} handle as a reference.
   void ComputeCodeStartAddress(Register dst);
 
-  void ResetSpeculationPoisonRegister();
+  // Control-flow integrity:
+
+  // Define a function entrypoint. This doesn't emit any code for this
+  // architecture, as control-flow integrity is not supported for it.
+  void CodeEntry() {}
+  // Define an exception handler.
+  void ExceptionHandler() {}
+  // Define an exception handler and bind a label.
+  void BindExceptionHandler(Label* label) { bind(label); }
 
   // ---------------------------------------------------------------------------
   // Pointer compression support
@@ -490,11 +644,12 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // compression is enabled.
   void LoadTaggedPointerField(Register destination, Operand field_operand);
 
+  // Loads a field containing a Smi and decompresses it if pointer compression
+  // is enabled.
+  void LoadTaggedSignedField(Register destination, Operand field_operand);
+
   // Loads a field containing any tagged value and decompresses it if necessary.
-  // When pointer compression is enabled, uses |scratch| to decompress the
-  // value.
-  void LoadAnyTaggedField(Register destination, Operand field_operand,
-                          Register scratch = kScratchRegister);
+  void LoadAnyTaggedField(Register destination, Operand field_operand);
 
   // Loads a field containing a HeapObject, decompresses it if necessary and
   // pushes full pointer to the stack. When pointer compression is enabled,
@@ -503,9 +658,8 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
 
   // Loads a field containing any tagged value, decompresses it if necessary and
   // pushes the full pointer to the stack. When pointer compression is enabled,
-  // uses |scratch1| and |scratch2| to decompress the value.
-  void PushTaggedAnyField(Operand field_operand, Register scratch1,
-                          Register scratch2);
+  // uses |scratch| to decompress the value.
+  void PushTaggedAnyField(Operand field_operand, Register scratch);
 
   // Loads a field containing smi value and untags it.
   void SmiUntagField(Register dst, Operand src);
@@ -514,19 +668,24 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // location.
   void StoreTaggedField(Operand dst_field_operand, Immediate immediate);
   void StoreTaggedField(Operand dst_field_operand, Register value);
+  void StoreTaggedSignedField(Operand dst_field_operand, Smi value);
 
   // The following macros work even when pointer compression is not enabled.
   void DecompressTaggedSigned(Register destination, Operand field_operand);
-  void DecompressTaggedSigned(Register destination, Register source);
   void DecompressTaggedPointer(Register destination, Operand field_operand);
   void DecompressTaggedPointer(Register destination, Register source);
-  // Auxiliary function used by DecompressAnyTagged to perform the actual
-  // decompression. Assumes destination is already signed extended.
-  void DecompressRegisterAnyTagged(Register destination, Register scratch);
-  void DecompressAnyTagged(Register destination, Operand field_operand,
-                           Register scratch = kScratchRegister);
-  void DecompressAnyTagged(Register destination, Register source,
-                           Register scratch = kScratchRegister);
+  void DecompressAnyTagged(Register destination, Operand field_operand);
+
+  // ---------------------------------------------------------------------------
+  // V8 Heap sandbox support
+
+  enum class IsolateRootLocation { kInScratchRegister, kInRootRegister };
+  // Loads a field containing off-heap pointer and does necessary decoding
+  // if V8 heap sandbox is enabled.
+  void LoadExternalPointerField(Register destination, Operand field_operand,
+                                ExternalPointerTag tag, Register scratch,
+                                IsolateRootLocation isolateRootLocation =
+                                    IsolateRootLocation::kInRootRegister);
 
  protected:
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
@@ -535,10 +694,9 @@ class V8_EXPORT_PRIVATE TurboAssembler : public TurboAssemblerBase {
   // modified. It may be the "smi 1 constant" register.
   Register GetSmiConstant(Smi value);
 
-  void CallRecordWriteStub(Register object, Register address,
-                           RememberedSetAction remembered_set_action,
-                           SaveFPRegsMode fp_mode, Handle<Code> code_target,
-                           Address wasm_target);
+  // Drops arguments assuming that the return address was already popped.
+  void DropArguments(Register count, ArgumentsCountType type = kCountIsInteger,
+                     ArgumentsCountMode mode = kCountExcludesReceiver);
 };
 
 // MacroAssembler implements a collection of frequently used macros.
@@ -597,10 +755,10 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // The offset is the offset from the start of the object, not the offset from
   // the tagged HeapObject pointer.  For use with FieldOperand(reg, off).
   void RecordWriteField(
-      Register object, int offset, Register value, Register scratch,
+      Register object, int offset, Register value, Register slot_address,
       SaveFPRegsMode save_fp,
-      RememberedSetAction remembered_set_action = EMIT_REMEMBERED_SET,
-      SmiCheck smi_check = INLINE_SMI_CHECK);
+      RememberedSetAction remembered_set_action = RememberedSetAction::kEmit,
+      SmiCheck smi_check = SmiCheck::kInline);
 
   // For page containing |object| mark region covering |address|
   // dirty. |object| is the object being stored into, |value| is the
@@ -608,12 +766,10 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // operation.  RecordWrite filters out smis so it does not update
   // the write barrier if the value is a smi.
   void RecordWrite(
-      Register object, Register address, Register value, SaveFPRegsMode save_fp,
-      RememberedSetAction remembered_set_action = EMIT_REMEMBERED_SET,
-      SmiCheck smi_check = INLINE_SMI_CHECK);
-
-  // Frame restart support.
-  void MaybeDropFrames();
+      Register object, Register slot_address, Register value,
+      SaveFPRegsMode save_fp,
+      RememberedSetAction remembered_set_action = RememberedSetAction::kEmit,
+      SmiCheck smi_check = SmiCheck::kInline);
 
   // Enter specific kind of exit frame; either in normal or
   // debug mode. Expects the number of arguments in register rax and
@@ -644,79 +800,29 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   // Invoke the JavaScript function code by either calling or jumping.
   void InvokeFunctionCode(Register function, Register new_target,
-                          const ParameterCount& expected,
-                          const ParameterCount& actual, InvokeFlag flag);
+                          Register expected_parameter_count,
+                          Register actual_parameter_count, InvokeType type);
 
-  // On function call, call into the debugger if necessary.
-  void CheckDebugHook(Register fun, Register new_target,
-                      const ParameterCount& expected,
-                      const ParameterCount& actual);
+  // On function call, call into the debugger.
+  void CallDebugOnFunctionCall(Register fun, Register new_target,
+                               Register expected_parameter_count,
+                               Register actual_parameter_count);
 
   // Invoke the JavaScript function in the given register. Changes the
   // current context to the context in the function before invoking.
   void InvokeFunction(Register function, Register new_target,
-                      const ParameterCount& actual, InvokeFlag flag);
+                      Register actual_parameter_count, InvokeType type);
 
   void InvokeFunction(Register function, Register new_target,
-                      const ParameterCount& expected,
-                      const ParameterCount& actual, InvokeFlag flag);
-
-  // ---------------------------------------------------------------------------
-  // Conversions between tagged smi values and non-tagged integer values.
-
-  // Tag an word-size value. The result must be known to be a valid smi value.
-  void SmiTag(Register dst, Register src);
-
-  // Simple comparison of smis.  Both sides must be known smis to use these,
-  // otherwise use Cmp.
-  void SmiCompare(Register smi1, Register smi2);
-  void SmiCompare(Register dst, Smi src);
-  void SmiCompare(Register dst, Operand src);
-  void SmiCompare(Operand dst, Register src);
-  void SmiCompare(Operand dst, Smi src);
-
-  // Functions performing a check on a known or potential smi. Returns
-  // a condition that is satisfied if the check is successful.
-
-  // Test-and-jump functions. Typically combines a check function
-  // above with a conditional jump.
-
-  // Jump to label if the value is not a tagged smi.
-  void JumpIfNotSmi(Register src, Label* on_not_smi,
-                    Label::Distance near_jump = Label::kFar);
-
-  // Jump to label if the value is not a tagged smi.
-  void JumpIfNotSmi(Operand src, Label* on_not_smi,
-                    Label::Distance near_jump = Label::kFar);
-
-  // Operations on tagged smi values.
-
-  // Smis represent a subset of integers. The subset is always equivalent to
-  // a two's complement interpretation of a fixed number of bits.
-
-  // Add an integer constant to a tagged smi, giving a tagged smi as result.
-  // No overflow testing on the result is done.
-  void SmiAddConstant(Operand dst, Smi constant);
-
-  // Specialized operations
-
-  // Converts, if necessary, a smi to a combination of number and
-  // multiplier to be used as a scaled index.
-  // The src register contains a *positive* smi value. The shift is the
-  // power of two to multiply the index value by (e.g. to index by
-  // smi-value * kSystemPointerSize, pass the smi and kSystemPointerSizeLog2).
-  // The returned index register may be either src or dst, depending
-  // on what is most efficient. If src and dst are different registers,
-  // src is always unchanged.
-  SmiIndex SmiToIndex(Register dst, Register src, int shift);
+                      Register expected_parameter_count,
+                      Register actual_parameter_count, InvokeType type);
 
   // ---------------------------------------------------------------------------
   // Macro instructions.
 
+  using TurboAssembler::Cmp;
   void Cmp(Register dst, Handle<Object> source);
   void Cmp(Operand dst, Handle<Object> source);
-  void Cmp(Register dst, Smi src);
-  void Cmp(Operand dst, Smi src);
 
   // Checks if value is in range [lower_limit, higher_limit] using a single
   // comparison.
@@ -732,7 +838,6 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // clobbering the rsp register.
   void DropUnderReturnAddress(int stack_elements,
                               Register scratch = kScratchRegister);
-
   void PushQuad(Operand src);
   void PushImm32(int32_t imm32);
   void Pop(Register dst);
@@ -743,8 +848,6 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // SIMD macros.
   void Absps(XMMRegister dst);
   void Negps(XMMRegister dst);
-  void Abspd(XMMRegister dst);
-  void Negpd(XMMRegister dst);
   // Generates a trampoline to jump to the off-heap instruction stream.
   void JumpToInstructionStream(Address entry);
 
@@ -758,6 +861,10 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
   // Always use unsigned comparisons: above and below, not less and greater.
   void CmpInstanceType(Register map, InstanceType type);
 
+  // Compare instance type ranges for a map (low and high inclusive)
+  // Always use unsigned comparisons: below_equal for a positive result.
+  void CmpInstanceTypeRange(Register map, InstanceType low, InstanceType high);
+
   template <typename Field>
   void DecodeField(Register reg) {
     static const int shift = Field::kShift;
@@ -768,12 +875,8 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
     andq(reg, Immediate(mask));
   }
 
-  // Abort execution if argument is a smi, enabled via --debug-code.
-  void AssertNotSmi(Register object);
-
-  // Abort execution if argument is not a smi, enabled via --debug-code.
-  void AssertSmi(Register object);
-  void AssertSmi(Operand object);
+  // Abort execution if argument is not a CodeT, enabled via --debug-code.
+  void AssertCodeT(Register object);
 
   // Abort execution if argument is not a Constructor, enabled via --debug-code.
   void AssertConstructor(Register object);
@@ -807,29 +910,29 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   // Load the global proxy from the current context.
   void LoadGlobalProxy(Register dst) {
-    LoadNativeContextSlot(Context::GLOBAL_PROXY_INDEX, dst);
+    LoadNativeContextSlot(dst, Context::GLOBAL_PROXY_INDEX);
   }
 
   // Load the native context slot with the current index.
-  void LoadNativeContextSlot(int index, Register dst);
+  void LoadNativeContextSlot(Register dst, int index);
 
   // ---------------------------------------------------------------------------
   // Runtime calls
 
   // Call a runtime routine.
   void CallRuntime(const Runtime::Function* f, int num_arguments,
-                   SaveFPRegsMode save_doubles = kDontSaveFPRegs);
+                   SaveFPRegsMode save_doubles = SaveFPRegsMode::kIgnore);
 
   // Convenience function: Same as above, but takes the fid instead.
   void CallRuntime(Runtime::FunctionId fid,
-                   SaveFPRegsMode save_doubles = kDontSaveFPRegs) {
+                   SaveFPRegsMode save_doubles = SaveFPRegsMode::kIgnore) {
     const Runtime::Function* function = Runtime::FunctionForId(fid);
     CallRuntime(function, function->nargs, save_doubles);
   }
 
   // Convenience function: Same as above, but takes the fid instead.
   void CallRuntime(Runtime::FunctionId fid, int num_arguments,
-                   SaveFPRegsMode save_doubles = kDontSaveFPRegs) {
+                   SaveFPRegsMode save_doubles = SaveFPRegsMode::kIgnore) {
     CallRuntime(Runtime::FunctionForId(fid), num_arguments, save_doubles);
   }
 
@@ -842,48 +945,42 @@ class V8_EXPORT_PRIVATE MacroAssembler : public TurboAssembler {
 
   // ---------------------------------------------------------------------------
   // StatsCounter support
-  void IncrementCounter(StatsCounter* counter, int value);
-  void DecrementCounter(StatsCounter* counter, int value);
+  void IncrementCounter(StatsCounter* counter, int value) {
+    if (!FLAG_native_code_counters) return;
+    EmitIncrementCounter(counter, value);
+  }
+  void EmitIncrementCounter(StatsCounter* counter, int value);
+  void DecrementCounter(StatsCounter* counter, int value) {
+    if (!FLAG_native_code_counters) return;
+    EmitDecrementCounter(counter, value);
+  }
+  void EmitDecrementCounter(StatsCounter* counter, int value);
+
+  // ---------------------------------------------------------------------------
+  // Stack limit utilities
+  Operand StackLimitAsOperand(StackLimitKind kind);
+  void StackOverflowCheck(
+      Register num_args, Label* stack_overflow,
+      Label::Distance stack_overflow_distance = Label::kFar);
 
   // ---------------------------------------------------------------------------
   // In-place weak references.
   void LoadWeakValue(Register in_out, Label* target_if_cleared);
 
-  // ---------------------------------------------------------------------------
-  // Debugging
-
-  static int SafepointRegisterStackIndex(Register reg) {
-    return SafepointRegisterStackIndex(reg.code());
-  }
-
  private:
-  // Order general registers are pushed by Pushad.
-  // rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r11, r12, r14, r15.
-  static const int kSafepointPushRegisterIndices[Register::kNumRegisters];
-  static const int kNumSafepointSavedRegisters = 12;
-
   // Helper functions for generating invokes.
-  void InvokePrologue(const ParameterCount& expected,
-                      const ParameterCount& actual, Label* done,
-                      bool* definitely_mismatches, InvokeFlag flag,
-                      Label::Distance near_jump);
+  void InvokePrologue(Register expected_parameter_count,
+                      Register actual_parameter_count, Label* done,
+                      InvokeType type);
 
-  void EnterExitFramePrologue(bool save_rax, StackFrame::Type frame_type);
+  void EnterExitFramePrologue(Register saved_rax_reg,
+                              StackFrame::Type frame_type);
 
   // Allocates arg_stack_space * kSystemPointerSize memory (not GCed) on the
   // stack accessible via StackSpaceOperand.
   void EnterExitFrameEpilogue(int arg_stack_space, bool save_doubles);
 
   void LeaveExitFrameEpilogue();
-
-  // Compute memory operands for safepoint stack slots.
-  static int SafepointRegisterStackIndex(int reg_code) {
-    return kNumSafepointRegisters - kSafepointPushRegisterIndices[reg_code] - 1;
-  }
-
-  // Needs access to SafepointRegisterStackIndex for compiled frame
-  // traversal.
-  friend class StandardFrame;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MacroAssembler);
 };
@@ -902,22 +999,9 @@ inline Operand FieldOperand(Register object, Register index, ScaleFactor scale,
   return Operand(object, index, scale, offset - kHeapObjectTag);
 }
 
-inline Operand ContextOperand(Register context, int index) {
-  return Operand(context, Context::SlotOffset(index));
-}
-
-inline Operand ContextOperand(Register context, Register index) {
-  return Operand(context, index, times_system_pointer_size,
-                 Context::SlotOffset(0));
-}
-
-inline Operand NativeContextOperand() {
-  return ContextOperand(rsi, Context::NATIVE_CONTEXT_INDEX);
-}
-
 // Provides access to exit frame stack space (not GCed).
 inline Operand StackSpaceOperand(int index) {
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
   const int kShaddowSpace = 4;
   return Operand(rsp, (index + kShaddowSpace) * kSystemPointerSize);
 #else

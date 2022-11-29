@@ -7,10 +7,9 @@ var throwTypeErrorFunction =
 
 var nameDesc =
     Object.getOwnPropertyDescriptor(throwTypeErrorFunction, 'name');
-assertEquals('', nameDesc.value);
-assertFalse(nameDesc.configurable);
-assertFalse(nameDesc.enumerable);
-assertFalse(nameDesc.writable);
+assertFalse(nameDesc.configurable, 'configurable');
+assertFalse(nameDesc.enumerable, 'enumerable');
+assertFalse(nameDesc.writable, 'writable');
 assertThrows(function() {
   'use strict';
   throwTypeErrorFunction.name = 'foo';

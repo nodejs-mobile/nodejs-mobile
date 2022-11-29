@@ -6,7 +6,6 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const URL = require('url').URL;
 
 function pathToFileURL(p) {
   if (!path.isAbsolute(p))
@@ -22,8 +21,7 @@ const url = pathToFileURL(p);
 assert(url instanceof URL);
 
 // Check that we can pass in a URL object successfully
-fs.readFile(url, common.mustCall((err, data) => {
-  assert.ifError(err);
+fs.readFile(url, common.mustSucceed((data) => {
   assert(Buffer.isBuffer(data));
 }));
 
@@ -63,7 +61,7 @@ if (common.isWindows) {
       code: 'ERR_INVALID_ARG_VALUE',
       name: 'TypeError',
       message: 'The argument \'path\' must be a string or Uint8Array without ' +
-               'null bytes. Received \'c:\\\\tmp\\\\\\u0000test\''
+               "null bytes. Received 'c:\\\\tmp\\\\\\x00test'"
     }
   );
 } else {
@@ -97,7 +95,7 @@ if (common.isWindows) {
       code: 'ERR_INVALID_ARG_VALUE',
       name: 'TypeError',
       message: "The argument 'path' must be a string or Uint8Array without " +
-               "null bytes. Received '/tmp/\\u0000test'"
+               "null bytes. Received '/tmp/\\x00test'"
     }
   );
 }

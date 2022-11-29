@@ -62,8 +62,7 @@ REGEXP_BUILTINS(CASE)
 #undef CASE
 
 v8::Local<v8::String> v8_str(v8::Isolate* isolate, const char* s) {
-  return v8::String::NewFromUtf8(isolate, s, v8::NewStringType::kNormal)
-      .ToLocalChecked();
+  return v8::String::NewFromUtf8(isolate, s).ToLocalChecked();
 }
 
 v8::MaybeLocal<v8::Value> CompileRun(v8::Local<v8::Context> context,
@@ -241,9 +240,13 @@ std::string PickLimitForSplit(FuzzerArgs* args) {
 }
 
 std::string GenerateRandomFlags(FuzzerArgs* args) {
+  // TODO(mbid,v8:10765): Find a way to generate the kLinear flag sometimes,
+  // but only for patterns that are supported by the experimental engine.
   constexpr size_t kFlagCount = JSRegExp::kFlagCount;
-  CHECK_EQ(JSRegExp::kDotAll, 1 << (kFlagCount - 1));
-  STATIC_ASSERT((1 << kFlagCount) - 1 < 0xFF);
+  CHECK_EQ(JSRegExp::kHasIndices, 1 << (kFlagCount - 1));
+  CHECK_EQ(JSRegExp::kLinear, 1 << (kFlagCount - 2));
+  CHECK_EQ(JSRegExp::kDotAll, 1 << (kFlagCount - 3));
+  STATIC_ASSERT((1 << kFlagCount) - 1 <= 0xFF);
 
   const size_t flags = RandomByte(args) & ((1 << kFlagCount) - 1);
 
@@ -256,6 +259,7 @@ std::string GenerateRandomFlags(FuzzerArgs* args) {
   if (flags & JSRegExp::kSticky) buffer[cursor++] = 'y';
   if (flags & JSRegExp::kUnicode) buffer[cursor++] = 'u';
   if (flags & JSRegExp::kDotAll) buffer[cursor++] = 's';
+  if (flags & JSRegExp::kHasIndices) buffer[cursor++] = 'd';
 
   return std::string(buffer, cursor);
 }
@@ -376,10 +380,11 @@ void CompileRunAndVerify(FuzzerArgs* args, const std::string& source) {
   }
 
   if (!ResultsAreIdentical(args)) {
-    uint32_t hash = StringHasher::HashSequentialString(
+    uint32_t raw_hash_field = StringHasher::HashSequentialString(
         args->input_data, static_cast<int>(args->input_length),
         kRegExpBuiltinsFuzzerHashSeed);
-    FATAL("!ResultAreIdentical(args); RegExpBuiltinsFuzzerHash=%x", hash);
+    FATAL("!ResultAreIdentical(args); RegExpBuiltinsFuzzerHash=%x",
+          raw_hash_field);
   }
 }
 

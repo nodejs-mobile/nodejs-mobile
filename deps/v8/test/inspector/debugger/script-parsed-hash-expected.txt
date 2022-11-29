@@ -1,5 +1,6 @@
 Tests scripts hasing
 {
+    embedderName : foo1.js
     endColumn : 1
     endLine : 0
     executionContextId : <executionContextId>
@@ -9,12 +10,14 @@ Tests scripts hasing
     isModule : false
     length : 1
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
     url : foo1.js
 }
 {
+    embedderName : foo2.js
     endColumn : 3
     endLine : 0
     executionContextId : <executionContextId>
@@ -24,12 +27,14 @@ Tests scripts hasing
     isModule : false
     length : 3
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
     url : foo2.js
 }
 {
+    embedderName : foo3.js
     endColumn : 8106
     endLine : 0
     executionContextId : <executionContextId>
@@ -39,6 +44,7 @@ Tests scripts hasing
     isModule : false
     length : 8106
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0

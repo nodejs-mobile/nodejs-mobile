@@ -21,13 +21,20 @@ class JSGraph;
 class NodeOriginTable;
 class Schedule;
 class SourcePositionTable;
-
-enum class MaskArrayIndexEnable { kDoNotMaskArrayIndex, kMaskArrayIndex };
+class JSHeapBroker;
 
 V8_EXPORT_PRIVATE void LinearizeEffectControl(
     JSGraph* graph, Schedule* schedule, Zone* temp_zone,
     SourcePositionTable* source_positions, NodeOriginTable* node_origins,
-    MaskArrayIndexEnable mask_array_index);
+    JSHeapBroker* broker);
+
+// Performs effect control linearization lowering in addition to machine
+// lowering, producing a scheduled graph that is ready for instruction
+// selection.
+V8_EXPORT_PRIVATE void LowerToMachineSchedule(
+    JSGraph* graph, Schedule* schedule, Zone* temp_zone,
+    SourcePositionTable* source_positions, NodeOriginTable* node_origins,
+    JSHeapBroker* broker);
 
 }  // namespace compiler
 }  // namespace internal

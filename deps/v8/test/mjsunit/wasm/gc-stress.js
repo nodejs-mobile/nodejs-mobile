@@ -4,14 +4,14 @@
 
 // Flags: --expose-wasm --gc-interval=500 --stress-compaction
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 function run(f) {
   var builder = new WasmModuleBuilder();
   builder.addImport("m", "f", kSig_i_i);
   builder.addFunction("main", kSig_i_i)
     .addBody([
-      kExprGetLocal, 0,
+      kExprLocalGet, 0,
       kExprCallFunction, 0])
     .exportAs("main");
 

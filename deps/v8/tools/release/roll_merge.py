@@ -129,7 +129,7 @@ class CreateCommitMessage(Step):
         bugs.extend(s.strip() for s in bug.split(","))
     bug_aggregate = ",".join(sorted(filter(lambda s: s and s != "none", bugs)))
     if bug_aggregate:
-      msg_pieces.append("BUG=%s\nLOG=N\n" % bug_aggregate)
+      msg_pieces.append("BUG=%s\n" % bug_aggregate)
 
     self["new_commit_msg"] = "".join(msg_pieces)
 
@@ -250,8 +250,6 @@ class RollMerge(ScriptsBase):
         print("You must specify a merge comment if no patches are specified")
         return False
     options.bypass_upload_hooks = True
-    # CC ulan to make sure that fixes are merged to Google3.
-    options.cc = "ulan@chromium.org"
 
     # Make sure to use git hashes in the new workflows.
     for revision in options.revisions:

@@ -20,6 +20,7 @@
 #include "src/objects/js-break-iterator-inl.h"
 #include "src/objects/js-collator-inl.h"
 #include "src/objects/js-date-time-format-inl.h"
+#include "src/objects/js-display-names-inl.h"
 #include "src/objects/js-list-format-inl.h"
 #include "src/objects/js-locale-inl.h"
 #include "src/objects/js-number-format-inl.h"
@@ -27,10 +28,10 @@
 #include "src/objects/js-relative-time-format-inl.h"
 #include "src/objects/js-segment-iterator-inl.h"
 #include "src/objects/js-segmenter-inl.h"
+#include "src/objects/js-segments-inl.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/property-descriptor.h"
 #include "src/objects/smi.h"
-
 #include "unicode/brkiter.h"
 
 namespace v8 {
@@ -83,13 +84,8 @@ BUILTIN(NumberFormatPrototypeFormatToParts) {
 
   Handle<Object> x;
   if (args.length() >= 2) {
-    if (FLAG_harmony_intl_bigint) {
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-          isolate, x, Object::ToNumeric(isolate, args.at(1)));
-    } else {
-      ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, x,
-                                         Object::ToNumber(isolate, args.at(1)));
-    }
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, x,
+                                       Object::ToNumeric(isolate, args.at(1)));
   } else {
     x = isolate->factory()->nan_value();
   }
@@ -153,8 +149,8 @@ BUILTIN(DateTimeFormatPrototypeFormatToParts) {
         isolate, NewRangeError(MessageTemplate::kInvalidTimeValue));
   }
 
-  RETURN_RESULT_OR_FAILURE(
-      isolate, JSDateTimeFormat::FormatToParts(isolate, dtf, date_value));
+  RETURN_RESULT_OR_FAILURE(isolate, JSDateTimeFormat::FormatToParts(
+                                        isolate, dtf, date_value, false));
 }
 
 // Common code for DateTimeFormatPrototypeFormtRange(|ToParts)
@@ -180,13 +176,13 @@ V8_WARN_UNUSED_RESULT Object DateTimeFormatRange(
   Handle<JSDateTimeFormat> dtf =
       Handle<JSDateTimeFormat>::cast(date_format_holder);
 
-  // 4. If startDate is undefined or endDate is undefined, throw a RangeError
+  // 4. If startDate is undefined or endDate is undefined, throw a TypeError
   // exception.
   Handle<Object> start_date = args.atOrUndefined(isolate, 1);
   Handle<Object> end_date = args.atOrUndefined(isolate, 2);
   if (start_date->IsUndefined(isolate) || end_date->IsUndefined(isolate)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
-        isolate, NewRangeError(MessageTemplate::kInvalidTimeValue));
+        isolate, NewTypeError(MessageTemplate::kInvalidTimeValue));
   }
   // 5. Let x be ? ToNumber(startDate).
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, start_date,
@@ -224,9 +220,10 @@ BUILTIN(DateTimeFormatPrototypeFormatRangeToParts) {
 }
 
 namespace {
+
 Handle<JSFunction> CreateBoundFunction(Isolate* isolate,
-                                       Handle<JSObject> object,
-                                       Builtins::Name builtin_id, int len) {
+                                       Handle<JSObject> object, Builtin builtin,
+                                       int len) {
   Handle<NativeContext> native_context(isolate->context().native_context(),
                                        isolate);
   Handle<Context> context = isolate->factory()->NewBuiltinContext(
@@ -238,15 +235,13 @@ Handle<JSFunction> CreateBoundFunction(Isolate* isolate,
 
   Handle<SharedFunctionInfo> info =
       isolate->factory()->NewSharedFunctionInfoForBuiltin(
-          isolate->factory()->empty_string(), builtin_id, kNormalFunction);
+          isolate->factory()->empty_string(), builtin, kNormalFunction);
   info->set_internal_formal_parameter_count(len);
   info->set_length(len);
 
-  Handle<Map> map = isolate->strict_function_without_prototype_map();
-
-  Handle<JSFunction> new_bound_function =
-      isolate->factory()->NewFunctionFromSharedFunctionInfo(map, info, context);
-  return new_bound_function;
+  return Factory::JSFunctionBuilder{isolate, info, context}
+      .set_map(isolate->strict_function_without_prototype_map())
+      .Build();
 }
 
 /**
@@ -269,61 +264,54 @@ Object LegacyFormatConstructor(BuiltinArguments args, Isolate* isolate,
 
   // [[Construct]]
   Handle<JSFunction> target = args.target();
-
   Handle<Object> locales = args.atOrUndefined(isolate, 1);
   Handle<Object> options = args.atOrUndefined(isolate, 2);
 
   // 2. Let format be ? OrdinaryCreateFromConstructor(newTarget,
   // "%<T>Prototype%", ...).
-
   Handle<Map> map;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, map, JSFunction::GetDerivedMap(isolate, target, new_target));
 
   // 3. Perform ? Initialize<T>(Format, locales, options).
   Handle<T> format;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, format,
-                                     T::New(isolate, map, locales, options));
-  // 4. Let this be the this value.
-  Handle<Object> receiver = args.receiver();
-
-  // 5. If NewTarget is undefined and ? InstanceofOperator(this, %<T>%)
-  // is true, then
-  //
-  // Look up the intrinsic value that has been stored on the context.
-  // Call the instanceof function
-  Handle<Object> is_instance_of_obj;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-      isolate, is_instance_of_obj,
-      Object::InstanceOf(isolate, receiver, constructor));
-
-  // Get the boolean value of the result
-  bool is_instance_of = is_instance_of_obj->BooleanValue(isolate);
-
-  if (args.new_target()->IsUndefined(isolate) && is_instance_of) {
-    if (!receiver->IsJSReceiver()) {
-      THROW_NEW_ERROR_RETURN_FAILURE(
-          isolate,
-          NewTypeError(MessageTemplate::kIncompatibleMethodReceiver,
-                       isolate->factory()->NewStringFromAsciiChecked(method),
-                       receiver));
+      isolate, format, T::New(isolate, map, locales, options, method));
+  // 4. Let this be the this value.
+  if (args.new_target()->IsUndefined(isolate)) {
+    Handle<Object> receiver = args.receiver();
+    // 5. If NewTarget is undefined and ? OrdinaryHasInstance(%<T>%, this)
+    // is true, then Look up the intrinsic value that has been stored on
+    // the context.
+    Handle<Object> ordinary_has_instance_obj;
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+        isolate, ordinary_has_instance_obj,
+        Object::OrdinaryHasInstance(isolate, constructor, receiver));
+    if (ordinary_has_instance_obj->BooleanValue(isolate)) {
+      if (!receiver->IsJSReceiver()) {
+        THROW_NEW_ERROR_RETURN_FAILURE(
+            isolate,
+            NewTypeError(MessageTemplate::kIncompatibleMethodReceiver,
+                         isolate->factory()->NewStringFromAsciiChecked(method),
+                         receiver));
+      }
+      Handle<JSReceiver> rec = Handle<JSReceiver>::cast(receiver);
+      // a. Perform ? DefinePropertyOrThrow(this,
+      // %Intl%.[[FallbackSymbol]], PropertyDescriptor{ [[Value]]: format,
+      // [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }).
+      PropertyDescriptor desc;
+      desc.set_value(format);
+      desc.set_writable(false);
+      desc.set_enumerable(false);
+      desc.set_configurable(false);
+      Maybe<bool> success = JSReceiver::DefineOwnProperty(
+          isolate, rec, isolate->factory()->intl_fallback_symbol(), &desc,
+          Just(kThrowOnError));
+      MAYBE_RETURN(success, ReadOnlyRoots(isolate).exception());
+      CHECK(success.FromJust());
+      // b. b. Return this.
+      return *receiver;
     }
-    Handle<JSReceiver> rec = Handle<JSReceiver>::cast(receiver);
-    // a. Perform ? DefinePropertyOrThrow(this,
-    // %Intl%.[[FallbackSymbol]], PropertyDescriptor{ [[Value]]: format,
-    // [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }).
-    PropertyDescriptor desc;
-    desc.set_value(format);
-    desc.set_writable(false);
-    desc.set_enumerable(false);
-    desc.set_configurable(false);
-    Maybe<bool> success = JSReceiver::DefineOwnProperty(
-        isolate, rec, isolate->factory()->intl_fallback_symbol(), &desc,
-        Just(kThrowOnError));
-    MAYBE_RETURN(success, ReadOnlyRoots(isolate).exception());
-    CHECK(success.FromJust());
-    // b. b. Return this.
-    return *receiver;
   }
   // 6. Return format.
   return *format;
@@ -367,7 +355,8 @@ Object DisallowCallConstructor(BuiltinArguments args, Isolate* isolate,
  * Common code shared by Collator and V8BreakIterator
  */
 template <class T>
-Object CallOrConstructConstructor(BuiltinArguments args, Isolate* isolate) {
+Object CallOrConstructConstructor(BuiltinArguments args, Isolate* isolate,
+                                  const char* method) {
   Handle<JSReceiver> new_target;
 
   if (args.new_target()->IsUndefined(isolate)) {
@@ -386,9 +375,50 @@ Object CallOrConstructConstructor(BuiltinArguments args, Isolate* isolate) {
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, map, JSFunction::GetDerivedMap(isolate, target, new_target));
 
-  RETURN_RESULT_OR_FAILURE(isolate, T::New(isolate, map, locales, options));
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           T::New(isolate, map, locales, options, method));
 }
+
 }  // namespace
+
+// Intl.DisplayNames
+
+BUILTIN(DisplayNamesConstructor) {
+  HandleScope scope(isolate);
+
+  return DisallowCallConstructor<JSDisplayNames>(
+      args, isolate, v8::Isolate::UseCounterFeature::kDisplayNames,
+      "Intl.DisplayNames");
+}
+
+BUILTIN(DisplayNamesPrototypeResolvedOptions) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSDisplayNames, holder,
+                 "Intl.DisplayNames.prototype.resolvedOptions");
+  return *JSDisplayNames::ResolvedOptions(isolate, holder);
+}
+
+BUILTIN(DisplayNamesSupportedLocalesOf) {
+  HandleScope scope(isolate);
+  Handle<Object> locales = args.atOrUndefined(isolate, 1);
+  Handle<Object> options = args.atOrUndefined(isolate, 2);
+
+  RETURN_RESULT_OR_FAILURE(
+      isolate, Intl::SupportedLocalesOf(
+                   isolate, "Intl.DisplayNames.supportedLocalesOf",
+                   JSDisplayNames::GetAvailableLocales(), locales, options));
+}
+
+BUILTIN(DisplayNamesPrototypeOf) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSDisplayNames, holder, "Intl.DisplayNames.prototype.of");
+  Handle<Object> code_obj = args.atOrUndefined(isolate, 1);
+
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           JSDisplayNames::Of(isolate, holder, code_obj));
+}
+
+// Intl.NumberFormat
 
 BUILTIN(NumberFormatConstructor) {
   HandleScope scope(isolate);
@@ -439,7 +469,7 @@ BUILTIN(NumberFormatPrototypeFormatNumber) {
   }
 
   Handle<JSFunction> new_bound_format_function = CreateBoundFunction(
-      isolate, number_format, Builtins::kNumberFormatInternalFormatNumber, 1);
+      isolate, number_format, Builtin::kNumberFormatInternalFormatNumber, 1);
 
   // 4. c. Set nf.[[BoundFormat]] to F.
   number_format->set_bound_format(*new_bound_format_function);
@@ -466,13 +496,8 @@ BUILTIN(NumberFormatInternalFormatNumber) {
 
   // 4. Let x be ? ToNumeric(value).
   Handle<Object> numeric_obj;
-  if (FLAG_harmony_intl_bigint) {
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, numeric_obj,
-                                       Object::ToNumeric(isolate, value));
-  } else {
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, numeric_obj,
-                                       Object::ToNumber(isolate, value));
-  }
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, numeric_obj,
+                                     Object::ToNumeric(isolate, value));
 
   icu::number::LocalizedNumberFormatter* icu_localized_number_formatter =
       number_format->icu_number_formatter().raw();
@@ -516,7 +541,7 @@ BUILTIN(DateTimeFormatPrototypeFormat) {
   }
 
   Handle<JSFunction> new_bound_format_function = CreateBoundFunction(
-      isolate, format, Builtins::kDateTimeFormatInternalFormat, 1);
+      isolate, format, Builtin::kDateTimeFormatInternalFormat, 1);
 
   // 4.c. Set dtf.[[BoundFormat]] to F.
   format->set_bound_format(*new_bound_format_function);
@@ -577,23 +602,36 @@ BUILTIN(ListFormatSupportedLocalesOf) {
                    JSListFormat::GetAvailableLocales(), locales, options));
 }
 
-namespace {
+// Intl.Locale implementation
+BUILTIN(LocaleConstructor) {
+  HandleScope scope(isolate);
 
-MaybeHandle<JSLocale> CreateLocale(Isolate* isolate,
-                                   Handle<JSFunction> constructor,
-                                   Handle<JSReceiver> new_target,
-                                   Handle<Object> tag, Handle<Object> options) {
+  isolate->CountUsage(v8::Isolate::UseCounterFeature::kLocale);
+
+  const char* method = "Intl.Locale";
+  if (args.new_target()->IsUndefined(isolate)) {  // [[Call]]
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate,
+        NewTypeError(MessageTemplate::kConstructorNotFunction,
+                     isolate->factory()->NewStringFromAsciiChecked(method)));
+  }
+  // [[Construct]]
+  Handle<JSFunction> target = args.target();
+  Handle<JSReceiver> new_target = Handle<JSReceiver>::cast(args.new_target());
+
+  Handle<Object> tag = args.atOrUndefined(isolate, 1);
+  Handle<Object> options = args.atOrUndefined(isolate, 2);
+
   Handle<Map> map;
   // 6. Let locale be ? OrdinaryCreateFromConstructor(NewTarget,
   // %LocalePrototype%, internalSlotsList).
-  ASSIGN_RETURN_ON_EXCEPTION(
-      isolate, map, JSFunction::GetDerivedMap(isolate, constructor, new_target),
-      JSLocale);
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, map, JSFunction::GetDerivedMap(isolate, target, new_target));
 
   // 7. If Type(tag) is not String or Object, throw a TypeError exception.
   if (!tag->IsString() && !tag->IsJSReceiver()) {
-    THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kLocaleNotEmpty),
-                    JSLocale);
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate, NewTypeError(MessageTemplate::kLocaleNotEmpty));
   }
 
   Handle<String> locale_string;
@@ -604,71 +642,73 @@ MaybeHandle<JSLocale> CreateLocale(Isolate* isolate,
     locale_string = JSLocale::ToString(isolate, Handle<JSLocale>::cast(tag));
   } else {  // 9. Else,
     // a. Let tag be ? ToString(tag).
-    ASSIGN_RETURN_ON_EXCEPTION(isolate, locale_string,
-                               Object::ToString(isolate, tag), JSLocale);
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, locale_string,
+                                       Object::ToString(isolate, tag));
   }
 
+  // 10. Set options to ? CoerceOptionsToObject(options).
   Handle<JSReceiver> options_object;
-  // 10. If options is undefined, then
-  if (options->IsUndefined(isolate)) {
-    // a. Let options be ! ObjectCreate(null).
-    options_object = isolate->factory()->NewJSObjectWithNullProto();
-  } else {  // 11. Else
-    // a. Let options be ? ToObject(options).
-    ASSIGN_RETURN_ON_EXCEPTION(isolate, options_object,
-                               Object::ToObject(isolate, options), JSLocale);
-  }
-
-  return JSLocale::New(isolate, map, locale_string, options_object);
-}
-
-}  // namespace
-
-// Intl.Locale implementation
-BUILTIN(LocaleConstructor) {
-  HandleScope scope(isolate);
-
-  isolate->CountUsage(v8::Isolate::UseCounterFeature::kLocale);
-
-  if (args.new_target()->IsUndefined(isolate)) {  // [[Call]]
-    THROW_NEW_ERROR_RETURN_FAILURE(
-        isolate, NewTypeError(MessageTemplate::kConstructorNotFunction,
-                              isolate->factory()->NewStringFromAsciiChecked(
-                                  "Intl.Locale")));
-  }
-  // [[Construct]]
-  Handle<JSFunction> target = args.target();
-  Handle<JSReceiver> new_target = Handle<JSReceiver>::cast(args.new_target());
-
-  Handle<Object> tag = args.atOrUndefined(isolate, 1);
-  Handle<Object> options = args.atOrUndefined(isolate, 2);
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, options_object,
+      Intl::CoerceOptionsToObject(isolate, options, method));
 
   RETURN_RESULT_OR_FAILURE(
-      isolate, CreateLocale(isolate, target, new_target, tag, options));
+      isolate, JSLocale::New(isolate, map, locale_string, options_object));
 }
 
 BUILTIN(LocalePrototypeMaximize) {
   HandleScope scope(isolate);
   CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.maximize");
-  Handle<JSFunction> constructor(
-      isolate->native_context()->intl_locale_function(), isolate);
-  Handle<String> locale_str = JSLocale::ToString(isolate, locale);
-  RETURN_RESULT_OR_FAILURE(
-      isolate, CreateLocale(isolate, constructor, constructor,
-                            JSLocale::Maximize(isolate, *locale_str),
-                            isolate->factory()->NewJSObjectWithNullProto()));
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::Maximize(isolate, locale));
 }
 
 BUILTIN(LocalePrototypeMinimize) {
   HandleScope scope(isolate);
   CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.minimize");
-  Handle<JSFunction> constructor(
-      isolate->native_context()->intl_locale_function(), isolate);
-  Handle<String> locale_str = JSLocale::ToString(isolate, locale);
-  RETURN_RESULT_OR_FAILURE(
-      isolate, CreateLocale(isolate, constructor, constructor,
-                            JSLocale::Minimize(isolate, *locale_str),
-                            isolate->factory()->NewJSObjectWithNullProto()));
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::Minimize(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeCalendars) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.calendars");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::Calendars(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeCollations) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.collations");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::Collations(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeHourCycles) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.hourCycles");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::HourCycles(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeNumberingSystems) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.numberingSystems");
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           JSLocale::NumberingSystems(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeTextInfo) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.textInfo");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::TextInfo(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeTimeZones) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.timeZones");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::TimeZones(isolate, locale));
+}
+
+BUILTIN(LocalePrototypeWeekInfo) {
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSLocale, locale, "Intl.Locale.prototype.weekInfo");
+  RETURN_RESULT_OR_FAILURE(isolate, JSLocale::WeekInfo(isolate, locale));
 }
 
 BUILTIN(RelativeTimeFormatSupportedLocalesOf) {
@@ -884,7 +924,7 @@ BUILTIN(CollatorConstructor) {
 
   isolate->CountUsage(v8::Isolate::UseCounterFeature::kCollator);
 
-  return CallOrConstructConstructor<JSCollator>(args, isolate);
+  return CallOrConstructConstructor<JSCollator>(args, isolate, "Intl.Collator");
 }
 
 BUILTIN(CollatorPrototypeResolvedOptions) {
@@ -924,7 +964,7 @@ BUILTIN(CollatorPrototypeCompare) {
   }
 
   Handle<JSFunction> new_bound_compare_function = CreateBoundFunction(
-      isolate, collator, Builtins::kCollatorInternalCompare, 2);
+      isolate, collator, Builtin::kCollatorInternalCompare, 2);
 
   // 4.c. Set collator.[[BoundCompare]] to F.
   collator->set_bound_compare(*new_bound_compare_function);
@@ -965,32 +1005,9 @@ BUILTIN(CollatorInternalCompare) {
   return *Intl::CompareStrings(isolate, *icu_collator, string_x, string_y);
 }
 
-// ecma402 #sec-segment-iterator-prototype-breakType
-BUILTIN(SegmentIteratorPrototypeBreakType) {
-  const char* const method = "get %SegmentIteratorPrototype%.breakType";
-  HandleScope scope(isolate);
-
-  CHECK_RECEIVER(JSSegmentIterator, segment_iterator, method);
-  return *segment_iterator->BreakType();
-}
-
-// ecma402 #sec-segment-iterator-prototype-following
-BUILTIN(SegmentIteratorPrototypeFollowing) {
-  const char* const method = "%SegmentIteratorPrototype%.following";
-  HandleScope scope(isolate);
-  CHECK_RECEIVER(JSSegmentIterator, segment_iterator, method);
-
-  Handle<Object> from = args.atOrUndefined(isolate, 1);
-
-  Maybe<bool> success =
-      JSSegmentIterator::Following(isolate, segment_iterator, from);
-  MAYBE_RETURN(success, ReadOnlyRoots(isolate).exception());
-  return *isolate->factory()->ToBoolean(success.FromJust());
-}
-
-// ecma402 #sec-segment-iterator-prototype-next
+// ecma402 #sec-%segmentiteratorprototype%.next
 BUILTIN(SegmentIteratorPrototypeNext) {
-  const char* const method = "%SegmentIteratorPrototype%.next";
+  const char* const method = "%SegmentIterator.prototype%.next";
   HandleScope scope(isolate);
   CHECK_RECEIVER(JSSegmentIterator, segment_iterator, method);
 
@@ -998,29 +1015,7 @@ BUILTIN(SegmentIteratorPrototypeNext) {
                            JSSegmentIterator::Next(isolate, segment_iterator));
 }
 
-// ecma402 #sec-segment-iterator-prototype-preceding
-BUILTIN(SegmentIteratorPrototypePreceding) {
-  const char* const method = "%SegmentIteratorPrototype%.preceding";
-  HandleScope scope(isolate);
-  CHECK_RECEIVER(JSSegmentIterator, segment_iterator, method);
-
-  Handle<Object> from = args.atOrUndefined(isolate, 1);
-
-  Maybe<bool> success =
-      JSSegmentIterator::Preceding(isolate, segment_iterator, from);
-  MAYBE_RETURN(success, ReadOnlyRoots(isolate).exception());
-  return *isolate->factory()->ToBoolean(success.FromJust());
-}
-
-// ecma402 #sec-segment-iterator-prototype-index
-BUILTIN(SegmentIteratorPrototypeIndex) {
-  const char* const method = "get %SegmentIteratorPrototype%.index";
-  HandleScope scope(isolate);
-
-  CHECK_RECEIVER(JSSegmentIterator, segment_iterator, method);
-  return *JSSegmentIterator::Index(isolate, segment_iterator);
-}
-
+// ecma402 #sec-intl.segmenter
 BUILTIN(SegmenterConstructor) {
   HandleScope scope(isolate);
 
@@ -1029,6 +1024,7 @@ BUILTIN(SegmenterConstructor) {
       "Intl.Segmenter");
 }
 
+// ecma402 #sec-intl.segmenter.supportedlocalesof
 BUILTIN(SegmenterSupportedLocalesOf) {
   HandleScope scope(isolate);
   Handle<Object> locales = args.atOrUndefined(isolate, 1);
@@ -1040,36 +1036,61 @@ BUILTIN(SegmenterSupportedLocalesOf) {
                    JSSegmenter::GetAvailableLocales(), locales, options));
 }
 
+// ecma402 #sec-intl.segmenter.prototype.resolvedoptions
 BUILTIN(SegmenterPrototypeResolvedOptions) {
   HandleScope scope(isolate);
-  CHECK_RECEIVER(JSSegmenter, segmenter_holder,
+  CHECK_RECEIVER(JSSegmenter, segmenter,
                  "Intl.Segmenter.prototype.resolvedOptions");
-  return *JSSegmenter::ResolvedOptions(isolate, segmenter_holder);
+  return *JSSegmenter::ResolvedOptions(isolate, segmenter);
 }
 
-// ecma402 #sec-Intl.Segmenter.prototype.segment
+// ecma402 #sec-intl.segmenter.prototype.segment
 BUILTIN(SegmenterPrototypeSegment) {
   HandleScope scope(isolate);
-  CHECK_RECEIVER(JSSegmenter, segmenter_holder,
-                 "Intl.Segmenter.prototype.segment");
+  CHECK_RECEIVER(JSSegmenter, segmenter, "Intl.Segmenter.prototype.segment");
   Handle<Object> input_text = args.atOrUndefined(isolate, 1);
   // 3. Let string be ? ToString(string).
-  Handle<String> text;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, text,
+  Handle<String> string;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, string,
                                      Object::ToString(isolate, input_text));
 
-  // 4. Return ? CreateSegmentIterator(segment, string).
+  // 4. Return ? CreateSegmentsObject(segmenter, string).
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           JSSegments::Create(isolate, segmenter, string));
+}
+
+// ecma402 #sec-%segmentsprototype%.containing
+BUILTIN(SegmentsPrototypeContaining) {
+  const char* const method = "%Segments.prototype%.containing";
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSSegments, segments, method);
+  Handle<Object> index = args.atOrUndefined(isolate, 1);
+
+  // 6. Let n be ? ToInteger(index).
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, index,
+                                     Object::ToInteger(isolate, index));
+  double const n = index->Number();
+
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           JSSegments::Containing(isolate, segments, n));
+}
+
+// ecma402 #sec-%segmentsprototype%-@@iterator
+BUILTIN(SegmentsPrototypeIterator) {
+  const char* const method = "%SegmentIsPrototype%[@@iterator]";
+  HandleScope scope(isolate);
+  CHECK_RECEIVER(JSSegments, segments, method);
   RETURN_RESULT_OR_FAILURE(
       isolate,
-      JSSegmentIterator::Create(
-          isolate, segmenter_holder->icu_break_iterator().raw()->clone(),
-          segmenter_holder->granularity(), text));
+      JSSegmentIterator::Create(isolate, segments->icu_break_iterator().raw(),
+                                segments->granularity()));
 }
 
 BUILTIN(V8BreakIteratorConstructor) {
   HandleScope scope(isolate);
 
-  return CallOrConstructConstructor<JSV8BreakIterator>(args, isolate);
+  return CallOrConstructConstructor<JSV8BreakIterator>(args, isolate,
+                                                       "Intl.v8BreakIterator");
 }
 
 BUILTIN(V8BreakIteratorPrototypeResolvedOptions) {
@@ -1092,7 +1113,7 @@ BUILTIN(V8BreakIteratorPrototypeAdoptText) {
   }
 
   Handle<JSFunction> new_bound_adopt_text_function = CreateBoundFunction(
-      isolate, break_iterator, Builtins::kV8BreakIteratorInternalAdoptText, 1);
+      isolate, break_iterator, Builtin::kV8BreakIteratorInternalAdoptText, 1);
   break_iterator->set_bound_adopt_text(*new_bound_adopt_text_function);
   return *new_bound_adopt_text_function;
 }
@@ -1128,7 +1149,7 @@ BUILTIN(V8BreakIteratorPrototypeFirst) {
   }
 
   Handle<JSFunction> new_bound_first_function = CreateBoundFunction(
-      isolate, break_iterator, Builtins::kV8BreakIteratorInternalFirst, 0);
+      isolate, break_iterator, Builtin::kV8BreakIteratorInternalFirst, 0);
   break_iterator->set_bound_first(*new_bound_first_function);
   return *new_bound_first_function;
 }
@@ -1158,7 +1179,7 @@ BUILTIN(V8BreakIteratorPrototypeNext) {
   }
 
   Handle<JSFunction> new_bound_next_function = CreateBoundFunction(
-      isolate, break_iterator, Builtins::kV8BreakIteratorInternalNext, 0);
+      isolate, break_iterator, Builtin::kV8BreakIteratorInternalNext, 0);
   break_iterator->set_bound_next(*new_bound_next_function);
   return *new_bound_next_function;
 }
@@ -1187,7 +1208,7 @@ BUILTIN(V8BreakIteratorPrototypeCurrent) {
   }
 
   Handle<JSFunction> new_bound_current_function = CreateBoundFunction(
-      isolate, break_iterator, Builtins::kV8BreakIteratorInternalCurrent, 0);
+      isolate, break_iterator, Builtin::kV8BreakIteratorInternalCurrent, 0);
   break_iterator->set_bound_current(*new_bound_current_function);
   return *new_bound_current_function;
 }
@@ -1216,7 +1237,7 @@ BUILTIN(V8BreakIteratorPrototypeBreakType) {
   }
 
   Handle<JSFunction> new_bound_break_type_function = CreateBoundFunction(
-      isolate, break_iterator, Builtins::kV8BreakIteratorInternalBreakType, 0);
+      isolate, break_iterator, Builtin::kV8BreakIteratorInternalBreakType, 0);
   break_iterator->set_bound_break_type(*new_bound_break_type_function);
   return *new_bound_break_type_function;
 }

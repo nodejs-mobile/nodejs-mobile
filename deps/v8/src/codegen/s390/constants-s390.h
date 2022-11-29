@@ -101,16 +101,7 @@ enum Condition {
   mask0xC = 12,
   mask0xD = 13,
   mask0xE = 14,
-  mask0xF = 15,
-
-  // Rounding modes for floating poing facility
-  CURRENT_ROUNDING_MODE = 0,
-  ROUND_TO_NEAREST_WITH_TIES_AWAY_FROM_0 = 1,
-  ROUND_TO_PREPARE_FOR_SHORTER_PRECISION = 3,
-  ROUND_TO_NEAREST_WITH_TIES_TO_EVEN = 4,
-  ROUND_TOWARD_0 = 5,
-  ROUND_TOWARD_PLUS_INFINITE = 6,
-  ROUND_TOWARD_MINUS_INFINITE = 7
+  mask0xF = 15
 };
 
 inline Condition NegateCondition(Condition cond) {
@@ -567,11 +558,12 @@ using SixByteInstr = uint64_t;
   V(va, VA, 0xE7F3)       /* type = VRR_C VECTOR ADD  */                       \
   V(vscbi, VSCBI,                                                              \
     0xE7F5) /* type = VRR_C VECTOR SUBTRACT COMPUTE BORROW INDICATION  */      \
-  V(vs, VS, 0xE7F7)     /* type = VRR_C VECTOR SUBTRACT  */                    \
-  V(vmnl, VMNL, 0xE7FC) /* type = VRR_C VECTOR MINIMUM LOGICAL  */             \
-  V(vmxl, VMXL, 0xE7FD) /* type = VRR_C VECTOR MAXIMUM LOGICAL  */             \
-  V(vmn, VMN, 0xE7FE)   /* type = VRR_C VECTOR MINIMUM  */                     \
-  V(vmx, VMX, 0xE7FF)   /* type = VRR_C VECTOR MAXIMUM  */
+  V(vs, VS, 0xE7F7)         /* type = VRR_C VECTOR SUBTRACT  */                \
+  V(vmnl, VMNL, 0xE7FC)     /* type = VRR_C VECTOR MINIMUM LOGICAL  */         \
+  V(vmxl, VMXL, 0xE7FD)     /* type = VRR_C VECTOR MAXIMUM LOGICAL  */         \
+  V(vmn, VMN, 0xE7FE)       /* type = VRR_C VECTOR MINIMUM  */                 \
+  V(vmx, VMX, 0xE7FF)       /* type = VRR_C VECTOR MAXIMUM  */                 \
+  V(vbperm, VBPERM, 0xE785) /* type = VRR_C VECTOR BIT PERMUTE  */
 
 #define S390_VRI_A_OPCODE_LIST(V)                                              \
   V(vleib, VLEIB, 0xE740) /* type = VRI_A VECTOR LOAD ELEMENT IMMEDIATE (8) */ \
@@ -613,7 +605,9 @@ using SixByteInstr = uint64_t;
   V(vperm, VPERM, 0xE78C) /* type = VRR_E VECTOR PERMUTE  */                  \
   V(vsel, VSEL, 0xE78D)   /* type = VRR_E VECTOR SELECT  */                   \
   V(vfms, VFMS, 0xE78E)   /* type = VRR_E VECTOR FP MULTIPLY AND SUBTRACT  */ \
-  V(vfma, VFMA, 0xE78F)   /* type = VRR_E VECTOR FP MULTIPLY AND ADD  */
+  V(vfnms, VFNMS,                                                             \
+    0xE79E) /* type = VRR_E VECTOR FP NEGATIVE MULTIPLY AND SUBTRACT  */      \
+  V(vfma, VFMA, 0xE78F) /* type = VRR_E VECTOR FP MULTIPLY AND ADD  */
 
 #define S390_VRI_C_OPCODE_LIST(V) \
   V(vrep, VREP, 0xE74D) /* type = VRI_C VECTOR REPLICATE  */
@@ -1549,21 +1543,24 @@ using SixByteInstr = uint64_t;
   V(risbhg, RISBHG,                                                            \
     0xEC5D) /* type = RIE_F ROTATE THEN INSERT SELECTED BITS HIGH (64)  */
 
-#define S390_VRX_OPCODE_LIST(V)                                             \
-  V(vleb, VLEB, 0xE700) /* type = VRX   VECTOR LOAD ELEMENT (8)  */         \
-  V(vleh, VLEH, 0xE701) /* type = VRX   VECTOR LOAD ELEMENT (16)  */        \
-  V(vleg, VLEG, 0xE702) /* type = VRX   VECTOR LOAD ELEMENT (64)  */        \
-  V(vlef, VLEF, 0xE703) /* type = VRX   VECTOR LOAD ELEMENT (32)  */        \
-  V(vllez, VLLEZ,                                                           \
-    0xE704) /* type = VRX   VECTOR LOAD LOGICAL ELEMENT AND ZERO  */        \
-  V(vlrep, VLREP, 0xE705) /* type = VRX   VECTOR LOAD AND REPLICATE  */     \
-  V(vl, VL, 0xE706)       /* type = VRX   VECTOR LOAD  */                   \
-  V(vlbb, VLBB, 0xE707)   /* type = VRX   VECTOR LOAD TO BLOCK BOUNDARY  */ \
-  V(vsteb, VSTEB, 0xE708) /* type = VRX   VECTOR STORE ELEMENT (8)  */      \
-  V(vsteh, VSTEH, 0xE709) /* type = VRX   VECTOR STORE ELEMENT (16)  */     \
-  V(vsteg, VSTEG, 0xE70A) /* type = VRX   VECTOR STORE ELEMENT (64)  */     \
-  V(vstef, VSTEF, 0xE70B) /* type = VRX   VECTOR STORE ELEMENT (32)  */     \
-  V(vst, VST, 0xE70E)     /* type = VRX   VECTOR STORE  */
+#define S390_VRX_OPCODE_LIST(V)                                               \
+  V(vleb, VLEB, 0xE700) /* type = VRX   VECTOR LOAD ELEMENT (8)  */           \
+  V(vleh, VLEH, 0xE701) /* type = VRX   VECTOR LOAD ELEMENT (16)  */          \
+  V(vleg, VLEG, 0xE702) /* type = VRX   VECTOR LOAD ELEMENT (64)  */          \
+  V(vlef, VLEF, 0xE703) /* type = VRX   VECTOR LOAD ELEMENT (32)  */          \
+  V(vllez, VLLEZ,                                                             \
+    0xE704) /* type = VRX   VECTOR LOAD LOGICAL ELEMENT AND ZERO  */          \
+  V(vlrep, VLREP, 0xE705) /* type = VRX   VECTOR LOAD AND REPLICATE  */       \
+  V(vl, VL, 0xE706)       /* type = VRX   VECTOR LOAD  */                     \
+  V(vlbb, VLBB, 0xE707)   /* type = VRX   VECTOR LOAD TO BLOCK BOUNDARY  */   \
+  V(vsteb, VSTEB, 0xE708) /* type = VRX   VECTOR STORE ELEMENT (8)  */        \
+  V(vsteh, VSTEH, 0xE709) /* type = VRX   VECTOR STORE ELEMENT (16)  */       \
+  V(vsteg, VSTEG, 0xE70A) /* type = VRX   VECTOR STORE ELEMENT (64)  */       \
+  V(vstef, VSTEF, 0xE70B) /* type = VRX   VECTOR STORE ELEMENT (32)  */       \
+  V(vst, VST, 0xE70E)     /* type = VRX   VECTOR STORE  */                    \
+  V(vlbr, VLBR, 0xE606) /* type = VRX   VECTOR LOAD BYTE REVERSED ELEMENTS */ \
+  V(vstbr, VSTBR, 0xE60E) /* type = VRX   VECTOR STORE BYTE REVERSED ELEMENTS \
+                           */
 
 #define S390_RIE_G_OPCODE_LIST(V)                                             \
   V(lochi, LOCHI,                                                             \
@@ -1781,16 +1778,18 @@ const int32_t kDefaultStopCode = -1;
 
 // FP rounding modes.
 enum FPRoundingMode {
-  RN = 0,  // Round to Nearest.
-  RZ = 1,  // Round towards zero.
-  RP = 2,  // Round towards Plus Infinity.
-  RM = 3,  // Round towards Minus Infinity.
+  CURRENT_ROUNDING_MODE = 0,
+  ROUND_TO_NEAREST_AWAY_FROM_0 = 1,
+  ROUND_TO_NEAREST_TO_EVEN = 4,
+  ROUND_TOWARD_0 = 5,
+  ROUND_TOWARD_POS_INF = 6,
+  ROUND_TOWARD_NEG_INF = 7,
 
   // Aliases.
-  kRoundToNearest = RN,
-  kRoundToZero = RZ,
-  kRoundToPlusInf = RP,
-  kRoundToMinusInf = RM
+  kRoundToNearest = ROUND_TO_NEAREST_TO_EVEN,
+  kRoundToZero = ROUND_TOWARD_0,
+  kRoundToPlusInf = ROUND_TOWARD_POS_INF,
+  kRoundToMinusInf = ROUND_TOWARD_NEG_INF
 };
 
 const uint32_t kFPRoundingModeMask = 3;
@@ -2326,6 +2325,13 @@ class VRR_E_Instruction : SixByteInstruction {
   DECLARE_FIELD_FOR_SIX_BYTE_INSTR(R4Value, int, 32, 36)
   DECLARE_FIELD_FOR_SIX_BYTE_INSTR(M6Value, uint32_t, 20, 24)
   DECLARE_FIELD_FOR_SIX_BYTE_INSTR(M5Value, uint32_t, 28, 32)
+};
+
+class VRR_F_Instruction : SixByteInstruction {
+ public:
+  DECLARE_FIELD_FOR_SIX_BYTE_INSTR(R1Value, int, 8, 12)
+  DECLARE_FIELD_FOR_SIX_BYTE_INSTR(R2Value, int, 12, 16)
+  DECLARE_FIELD_FOR_SIX_BYTE_INSTR(R3Value, int, 16, 20)
 };
 
 class VRX_Instruction : SixByteInstruction {

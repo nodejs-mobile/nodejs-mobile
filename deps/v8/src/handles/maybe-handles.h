@@ -12,6 +12,10 @@
 namespace v8 {
 namespace internal {
 
+struct NullMaybeHandleType {};
+
+constexpr NullMaybeHandleType kNullMaybeHandle;
+
 // ----------------------------------------------------------------------------
 // A Handle can be converted into a MaybeHandle. Converting a MaybeHandle
 // into a Handle requires checking that it does not point to nullptr.  This
@@ -24,6 +28,8 @@ template <typename T>
 class MaybeHandle final {
  public:
   V8_INLINE MaybeHandle() = default;
+
+  V8_INLINE MaybeHandle(NullMaybeHandleType) {}
 
   // Constructor for handling automatic up casting from Handle.
   // Ex. Handle<JSArray> can be passed when MaybeHandle<Object> is expected.
@@ -39,6 +45,7 @@ class MaybeHandle final {
       : location_(maybe_handle.location_) {}
 
   V8_INLINE MaybeHandle(T object, Isolate* isolate);
+  V8_INLINE MaybeHandle(T object, LocalHeap* local_heap);
 
   V8_INLINE void Assert() const { DCHECK_NOT_NULL(location_); }
   V8_INLINE void Check() const { CHECK_NOT_NULL(location_); }
@@ -50,7 +57,7 @@ class MaybeHandle final {
 
   // Convert to a Handle with a type that can be upcasted to.
   template <typename S>
-  V8_INLINE bool ToHandle(Handle<S>* out) const {
+  V8_WARN_UNUSED_RESULT V8_INLINE bool ToHandle(Handle<S>* out) const {
     if (location_ == nullptr) {
       *out = Handle<T>::null();
       return false;
@@ -85,6 +92,8 @@ class MaybeObjectHandle {
       : reference_type_(HeapObjectReferenceType::STRONG) {}
   inline MaybeObjectHandle(MaybeObject object, Isolate* isolate);
   inline MaybeObjectHandle(Object object, Isolate* isolate);
+  inline MaybeObjectHandle(MaybeObject object, LocalHeap* local_heap);
+  inline MaybeObjectHandle(Object object, LocalHeap* local_heap);
   inline explicit MaybeObjectHandle(Handle<Object> object);
 
   static inline MaybeObjectHandle Weak(Object object, Isolate* isolate);
@@ -94,15 +103,7 @@ class MaybeObjectHandle {
   inline MaybeObject operator->() const;
   inline Handle<Object> object() const;
 
-  bool is_identical_to(const MaybeObjectHandle& other) const {
-    Handle<Object> this_handle;
-    Handle<Object> other_handle;
-    return reference_type_ == other.reference_type_ &&
-           handle_.ToHandle(&this_handle) ==
-               other.handle_.ToHandle(&other_handle) &&
-           this_handle.is_identical_to(other_handle);
-  }
-
+  inline bool is_identical_to(const MaybeObjectHandle& other) const;
   bool is_null() const { return handle_.is_null(); }
 
  private:

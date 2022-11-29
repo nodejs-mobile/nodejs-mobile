@@ -86,9 +86,6 @@
     # For a shared library build, results in "libv8-<(soname_version).so".
     'soname_version%': '',
 
-    # Allow to suppress the array bounds warning (default is no suppression).
-    'wno_array_bounds%': '',
-
     # Override where to find binutils
     'binutils_dir%': '',
 
@@ -270,11 +267,24 @@
         'defines': [
           'V8_TARGET_ARCH_ARM64',
         ],
+        'conditions': [
+          ['v8_control_flow_integrity==1', {
+            'cflags': [ '-mbranch-protection=standard' ],
+          }],
+        ],
+      }],
+      ['v8_target_arch=="riscv64"', {
+        'defines': [
+          'V8_TARGET_ARCH_RISCV64',
+          '__riscv_xlen=64',
+          'CAN_USE_FPU_INSTRUCTIONS'
+        ],
       }],
       ['v8_target_arch=="s390x"', {
         'defines': [
           'V8_TARGET_ARCH_S390',
         ],
+        'cflags': [ '-ffp-contract=off' ],
         'conditions': [
           ['v8_target_arch=="s390x"', {
             'defines': [
@@ -291,13 +301,18 @@
           ],
       }],  # s390x
       ['v8_target_arch=="ppc" or v8_target_arch=="ppc64"', {
-        'defines': [
-          'V8_TARGET_ARCH_PPC',
-        ],
         'conditions': [
+          ['v8_target_arch=="ppc"', {
+            'defines': [
+              'V8_TARGET_ARCH_PPC',
+            ],
+          }],
           ['v8_target_arch=="ppc64"', {
             'defines': [
               'V8_TARGET_ARCH_PPC64',
+            ],
+            'cflags': [
+              '-ffp-contract=off',
             ],
           }],
           ['v8_host_byteorder=="little"', {
@@ -939,21 +954,6 @@
         },
         'msvs_configuration_platform': 'x64',
       }],  # v8_target_arch=="x64"
-      ['v8_target_arch=="x32"', {
-        'defines': [
-          # x32 port shares the source code with x64 port.
-          'V8_TARGET_ARCH_X64',
-          'V8_TARGET_ARCH_32_BIT',
-        ],
-        'cflags': [
-          '-mx32',
-          # Inhibit warning if long long type is used.
-          '-Wno-long-long',
-        ],
-        'ldflags': [
-          '-mx32',
-        ],
-      }],  # v8_target_arch=="x32"
       ['OS=="win"', {
         'defines': [
           'WIN32',
@@ -980,6 +980,36 @@
             'GenerateMapFile': 'true',
           },
         },
+      }],
+      ['OS=="android"', {
+        'defines': [
+          'V8_HAVE_TARGET_OS',
+          'V8_TARGET_OS_ANDROID',
+        ]
+      }],
+      ['OS=="ios"', {
+        'defines': [
+          'V8_HAVE_TARGET_OS',
+          'V8_TARGET_OS_IOS',
+        ]
+      }],
+      ['OS=="linux"', {
+        'defines': [
+          'V8_HAVE_TARGET_OS',
+          'V8_TARGET_OS_LINUX',
+        ]
+      }],
+      ['OS=="mac"', {
+        'defines': [
+          'V8_HAVE_TARGET_OS',
+          'V8_TARGET_OS_MACOSX',
+        ]
+      }],
+      ['OS=="win"', {
+        'defines': [
+          'V8_HAVE_TARGET_OS',
+          'V8_TARGET_OS_WIN',
+        ]
       }],
       ['(OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" \
          or OS=="netbsd" or OS=="mac" or OS=="android" or OS=="qnx") and \
@@ -1120,17 +1150,12 @@
           'ENABLE_DISASSEMBLER',
           'V8_ENABLE_CHECKS',
           'OBJECT_PRINT',
-          'VERIFY_HEAP',
           'DEBUG',
           'V8_TRACE_MAPS',
           'V8_ENABLE_ALLOCATION_TIMEOUT',
           'V8_ENABLE_FORCE_SLOW_PATH',
         ],
         'conditions': [
-          ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="netbsd" or \
-            OS=="qnx" or OS=="aix"', {
-            'cflags': [ '-Woverloaded-virtual', '<(wno_array_bounds)', ],
-          }],
           ['OS=="linux" and v8_enable_backtrace==1', {
             # Support for backtrace_symbols.
             'ldflags': [ '-rdynamic' ],
@@ -1287,7 +1312,6 @@
             'cflags': [
               '-fdata-sections',
               '-ffunction-sections',
-              '<(wno_array_bounds)',
             ],
             'conditions': [
               # Don't use -O3 with sanitizers.
@@ -1361,17 +1385,26 @@
       4324,  # Padding structure due to alignment.
       # 4351, # [refack] Old issue with array init.
       4355,  # 'this' used in base member initializer list
+      4506,  # Benign "no definition for inline function"
       4661,  # no suitable definition provided for explicit template instantiation request
       4701,  # Potentially uninitialized local variable.
       4702,  # Unreachable code.
       4703,  # Potentially uninitialized local pointer variable.
       4709,  # Comma operator within array index expr (bugged).
-      # 4714,  # Function marked forceinline not inlined.
+      4714,  # Function marked forceinline not inlined.
       4715,  # Not all control paths return a value. (see https://crbug.com/v8/7658)
       4718,  # Recursive call has no side-effect.
       4723,  # https://crbug.com/v8/7771
       4724,  # https://crbug.com/v8/7771
       4800,  # Forcing value to bool.
     ],
+    # Relevant only for x86.
+    # Refs: https://github.com/nodejs/node/pull/25852
+    # Refs: https://docs.microsoft.com/en-us/cpp/build/reference/safeseh-image-has-safe-exception-handlers
+    'msvs_settings': {
+      'VCLinkerTool': {
+        'ImageHasSafeExceptionHandlers': 'false',
+      },
+    },
   },  # target_defaults
 }

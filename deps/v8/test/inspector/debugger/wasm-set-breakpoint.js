@@ -1,96 +1,105 @@
-// Copyright 2018 the V8 project authors. All rights reserved.
+// Copyright 2020 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+utils.load('test/inspector/wasm-inspector-test.js');
+
 const {session, contextGroup, Protocol} =
     InspectorTest.start('Tests stepping through wasm scripts.');
-
-utils.load('test/mjsunit/wasm/wasm-module-builder.js');
+session.setupScriptMap();
 
 const builder = new WasmModuleBuilder();
 
-const func_a_idx =
-    builder.addFunction('wasm_A', kSig_v_v).addBody([kExprNop, kExprNop]).index;
+const func_a =
+    builder.addFunction('wasm_A', kSig_v_v).addBody([kExprNop, kExprNop]);
 
 // wasm_B calls wasm_A <param0> times.
-builder.addFunction('wasm_B', kSig_v_i)
+const func_b = builder.addFunction('wasm_B', kSig_v_i)
     .addBody([
       // clang-format off
-      kExprLoop, kWasmStmt,               // while
-        kExprGetLocal, 0,                 // -
-        kExprIf, kWasmStmt,               // if <param0> != 0
-          kExprGetLocal, 0,               // -
-          kExprI32Const, 1,               // -
-          kExprI32Sub,                    // -
-          kExprSetLocal, 0,               // decrease <param0>
-          kExprCallFunction, func_a_idx,  // -
-          kExprBr, 1,                     // continue
-          kExprEnd,                       // -
-        kExprEnd,                         // break
+      kExprLoop, kWasmVoid,                // while
+        kExprLocalGet, 0,                  // -
+        kExprIf, kWasmVoid,                // if <param0> != 0
+          kExprLocalGet, 0,                // -
+          kExprI32Const, 1,                // -
+          kExprI32Sub,                     // -
+          kExprLocalSet, 0,                // decrease <param0>
+          kExprCallFunction, func_a.index, // -
+          kExprBr, 1,                      // continue
+          kExprEnd,                        // -
+        kExprEnd,                          // break
       // clang-format on
     ])
     .exportAs('main');
 
 const module_bytes = builder.toArray();
 
-function instantiate(bytes) {
-  let buffer = new ArrayBuffer(bytes.length);
-  let view = new Uint8Array(buffer);
-  for (let i = 0; i < bytes.length; ++i) {
-    view[i] = bytes[i] | 0;
-  }
-
-  let module = new WebAssembly.Module(buffer);
-  return new WebAssembly.Instance(module);
-}
-
 const getResult = msg => msg.result || InspectorTest.logMessage(msg);
 
-const evalWithUrl = (code, url) =>
-    Protocol.Runtime
-        .evaluate({'expression': code + '\n//# sourceURL=v8://test/' + url})
-        .then(getResult);
-
-function setBreakpoint(line, script) {
+function setBreakpoint(offset, scriptId, scriptUrl) {
   InspectorTest.log(
-      'Setting breakpoint on line ' + line + ' on script ' + script.url);
+      'Setting breakpoint at offset ' + offset + ' on script ' + scriptUrl);
   return Protocol.Debugger
       .setBreakpoint(
-          {'location': {'scriptId': script.scriptId, 'lineNumber': line}})
+          {'location': {'scriptId': scriptId, 'lineNumber': 0, 'columnNumber': offset}})
       .then(getResult);
 }
 
-Protocol.Debugger.onPaused(pause_msg => {
-  let loc = pause_msg.params.callFrames[0].location;
-  InspectorTest.log('Breaking on line ' + loc.lineNumber);
+// Only set breakpoints during the first loop iteration.
+var first_iteration = true;
+
+Protocol.Debugger.onPaused(async msg => {
+  let loc = msg.params.callFrames[0].location;
+  InspectorTest.log('Paused:');
+  await session.logSourceLocation(loc);
+  InspectorTest.log('Scope:');
+  for (var frame of msg.params.callFrames) {
+    var functionName = frame.functionName || '(anonymous)';
+    var lineNumber = frame.location.lineNumber;
+    var columnNumber = frame.location.columnNumber;
+    InspectorTest.log(`at ${functionName} (${lineNumber}:${columnNumber}):`);
+    if (!/^wasm/.test(frame.url)) {
+      InspectorTest.log('   -- skipped');
+      continue;
+    }
+    for (var scope of frame.scopeChain) {
+      InspectorTest.logObject(' - scope (' + scope.type + '):');
+      var properties = await Protocol.Runtime.getProperties(
+          {'objectId': scope.object.objectId});
+      await WasmInspectorTest.dumpScopeProperties(properties);
+    }
+  }
+
+  if (first_iteration && loc.columnNumber == func_a.body_offset) {
+    // Check that setting breakpoints on active instances of A and B takes
+    // effect immediately.
+    setBreakpoint(func_a.body_offset + 1, loc.scriptId, frame.url);
+    // All of the following breakpoints are in reachable code, except offset 17.
+    for (offset of [18, 17, 11, 10, 8, 6, 2, 4]) {
+      setBreakpoint(func_b.body_offset + offset, loc.scriptId, frame.url);
+    }
+    first_iteration = false;
+  }
+
   Protocol.Debugger.resume();
 });
 
-(async function test() {
-  await Protocol.Debugger.enable();
-  InspectorTest.log('Instantiating.');
-  // Spawn asynchronously:
-  let instantiate_code = 'const instance = (' + instantiate + ')(' +
-      JSON.stringify(module_bytes) + ');';
-  evalWithUrl(instantiate_code, 'instantiate');
-  InspectorTest.log(
-      'Waiting for two wasm scripts (ignoring first non-wasm script).');
-  const [, {params: wasm_script_a}, {params: wasm_script_b}] =
-      await Protocol.Debugger.onceScriptParsed(3);
-  for (script of [wasm_script_a, wasm_script_b]) {
-    InspectorTest.log('Source of script ' + script.url + ':');
-    let src_msg =
-        await Protocol.Debugger.getScriptSource({scriptId: script.scriptId});
-    let lines = getResult(src_msg).scriptSource.replace(/\s+$/, '').split('\n');
+InspectorTest.runAsyncTestSuite([
+  async function test() {
+    await Protocol.Runtime.enable();
+    await Protocol.Debugger.enable();
+    InspectorTest.log('Instantiating.');
+    // Spawn asynchronously:
+    WasmInspectorTest.instantiate(module_bytes);
     InspectorTest.log(
-        lines.map((line, nr) => (nr + 1) + ': ' + line).join('\n') + '\n');
+        'Waiting for wasm script (ignoring first non-wasm script).');
+    // Ignore javascript and full module wasm script, get scripts for functions.
+    const [, {params: wasm_script}] = await Protocol.Debugger.onceScriptParsed(2);
+    // Set a breakpoint in function A at offset 0. When the debugger hits this
+    // breakpoint, new ones will be added.
+    await setBreakpoint(func_a.body_offset, wasm_script.scriptId, wasm_script.url);
+    InspectorTest.log('Calling main(4)');
+    await WasmInspectorTest.evalWithUrl('instance.exports.main(4)', 'runWasm');
+    InspectorTest.log('exports.main returned!');
   }
-  for (line of [8, 7, 6, 5, 3, 4]) {
-    await setBreakpoint(line, wasm_script_b);
-  }
-  InspectorTest.log('Calling main(4)');
-  await evalWithUrl('instance.exports.main(4)', 'runWasm');
-  InspectorTest.log('exports.main returned!');
-  InspectorTest.log('Finished!');
-  InspectorTest.completeTest();
-})();
+]);

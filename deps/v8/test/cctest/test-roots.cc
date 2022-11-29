@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/common/globals.h"
+#include "src/heap/basic-memory-chunk.h"
 #include "src/heap/heap-inl.h"
 #include "src/objects/cell.h"
 #include "src/objects/feedback-cell.h"
@@ -15,8 +17,10 @@ namespace internal {
 namespace {
 AllocationSpace GetSpaceFromObject(Object object) {
   DCHECK(object.IsHeapObject());
-  return MemoryChunk::FromHeapObject(HeapObject::cast(object))
-      ->owner_identity();
+  BasicMemoryChunk* chunk =
+      BasicMemoryChunk::FromHeapObject(HeapObject::cast(object));
+  if (chunk->InReadOnlySpace()) return RO_SPACE;
+  return chunk->owner()->identity();
 }
 }  // namespace
 
@@ -41,14 +45,14 @@ bool IsInitiallyMutable(Factory* factory, Address object_address) {
 #define INITIALLY_READ_ONLY_ROOT_LIST(V)  \
   V(api_private_symbol_table)             \
   V(api_symbol_table)                     \
+  V(basic_block_profiling_data)           \
   V(builtins_constants_table)             \
   V(current_microtask)                    \
   V(detached_contexts)                    \
-  V(dirty_js_finalization_groups)         \
   V(feedback_vectors_for_profiling_tools) \
+  V(shared_wasm_memories)                 \
   V(materialized_objects)                 \
   V(public_symbol_table)                  \
-  V(retained_maps)                        \
   V(retaining_path_targets)               \
   V(serialized_global_proxy_sizes)        \
   V(serialized_objects)                   \

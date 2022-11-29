@@ -11,7 +11,7 @@
 // Only trace the wasm functions:
 // Flags: --trace-turbo-filter=wasm*
 
-load('test/mjsunit/wasm/wasm-module-builder.js');
+d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 // The idea behind this test is to make sure we do not crash when using the
 // --trace-turbo flag given different sort of inputs.
@@ -20,8 +20,8 @@ load('test/mjsunit/wasm/wasm-module-builder.js');
   let builder = new WasmModuleBuilder();
 
   builder.addFunction("add", kSig_i_ii)
-    .addBody([kExprGetLocal, 0,
-              kExprGetLocal, 1,
+    .addBody([kExprLocalGet, 0,
+              kExprLocalGet, 1,
               kExprI32Add])
     .exportFunc();
 

@@ -7,10 +7,10 @@
 
 #include <map>
 
+#include "src/base/numbers/double.h"
 #include "src/codegen/label.h"
 #include "src/codegen/reloc-info.h"
 #include "src/common/globals.h"
-#include "src/numbers/double.h"
 
 namespace v8 {
 namespace internal {
@@ -29,7 +29,7 @@ class ConstantPoolEntry {
         merged_index_(sharing_ok ? SHARING_ALLOWED : SHARING_PROHIBITED),
         value_(value),
         rmode_(rmode) {}
-  ConstantPoolEntry(int position, Double value,
+  ConstantPoolEntry(int position, base::Double value,
                     RelocInfo::Mode rmode = RelocInfo::NONE)
       : position_(position),
         merged_index_(SHARING_ALLOWED),
@@ -81,7 +81,7 @@ class ConstantPoolEntry {
   enum { SHARING_PROHIBITED = -2, SHARING_ALLOWED = -1 };
 };
 
-#if defined(V8_TARGET_ARCH_PPC)
+#if defined(V8_TARGET_ARCH_PPC) || defined(V8_TARGET_ARCH_PPC64)
 
 // -----------------------------------------------------------------------------
 // Embedded constant pool support
@@ -102,18 +102,18 @@ class ConstantPoolBuilder {
   ConstantPoolEntry::Access AddEntry(int position, intptr_t value,
                                      bool sharing_ok) {
     ConstantPoolEntry entry(position, value, sharing_ok);
-    return AddEntry(entry, ConstantPoolEntry::INTPTR);
+    return AddEntry(&entry, ConstantPoolEntry::INTPTR);
   }
 
   // Add double constant to the embedded constant pool
-  ConstantPoolEntry::Access AddEntry(int position, Double value) {
+  ConstantPoolEntry::Access AddEntry(int position, base::Double value) {
     ConstantPoolEntry entry(position, value);
-    return AddEntry(entry, ConstantPoolEntry::DOUBLE);
+    return AddEntry(&entry, ConstantPoolEntry::DOUBLE);
   }
 
   // Add double constant to the embedded constant pool
   ConstantPoolEntry::Access AddEntry(int position, double value) {
-    return AddEntry(position, Double(value));
+    return AddEntry(position, base::Double(value));
   }
 
   // Previews the access type required for the next new entry to be added.
@@ -138,9 +138,8 @@ class ConstantPoolBuilder {
   inline Label* EmittedPosition() { return &emitted_label_; }
 
  private:
-  ConstantPoolEntry::Access AddEntry(
-      ConstantPoolEntry& entry,  // NOLINT(runtime/references)
-      ConstantPoolEntry::Type type);
+  ConstantPoolEntry::Access AddEntry(ConstantPoolEntry* entry,
+                                     ConstantPoolEntry::Type type);
   void EmitSharedEntries(Assembler* assm, ConstantPoolEntry::Type type);
   void EmitGroup(Assembler* assm, ConstantPoolEntry::Access access,
                  ConstantPoolEntry::Type type);
@@ -162,9 +161,9 @@ class ConstantPoolBuilder {
   PerTypeEntryInfo info_[ConstantPoolEntry::NUMBER_OF_TYPES];
 };
 
-#endif  // defined(V8_TARGET_ARCH_PPC)
+#endif  // defined(V8_TARGET_ARCH_PPC) || defined(V8_TARGET_ARCH_PPC64)
 
-#if defined(V8_TARGET_ARCH_ARM64)
+#if defined(V8_TARGET_ARCH_ARM64) || defined(V8_TARGET_ARCH_RISCV64)
 
 class ConstantPoolKey {
  public:
@@ -193,7 +192,8 @@ class ConstantPoolKey {
            rmode_ != RelocInfo::VENEER_POOL &&
            rmode_ != RelocInfo::DEOPT_SCRIPT_OFFSET &&
            rmode_ != RelocInfo::DEOPT_INLINING_ID &&
-           rmode_ != RelocInfo::DEOPT_REASON && rmode_ != RelocInfo::DEOPT_ID);
+           rmode_ != RelocInfo::DEOPT_REASON && rmode_ != RelocInfo::DEOPT_ID &&
+           rmode_ != RelocInfo::DEOPT_NODE_ID);
     // CODE_TARGETs can be shared because they aren't patched anymore,
     // and we make sure we emit only one reloc info for them (thus delta
     // patching) will apply the delta only once. At the moment, we do not dedup
@@ -283,7 +283,7 @@ class ConstantPool {
   void SetNextCheckIn(size_t instructions);
 
   // Class for scoping postponing the constant pool generation.
-  class V8_EXPORT_PRIVATE BlockScope {
+  class V8_EXPORT_PRIVATE V8_NODISCARD BlockScope {
    public:
     // BlockScope immediatelly emits the pool if necessary to ensure that
     // during the block scope at least {margin} bytes can be emitted without

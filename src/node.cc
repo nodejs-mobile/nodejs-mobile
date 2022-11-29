@@ -25,6 +25,7 @@
 
 #include "debug_utils-inl.h"
 #include "env-inl.h"
+#include "histogram-inl.h"
 #include "memory_tracker-inl.h"
 #include "node_binding.h"
 #include "node_errors.h"
@@ -34,14 +35,16 @@
 #include "node_native_module_env.h"
 #include "node_options-inl.h"
 #include "node_perf.h"
-#include "node_process.h"
+#include "node_process-inl.h"
 #include "node_report.h"
 #include "node_revert.h"
+#include "node_snapshot_builder.h"
 #include "node_v8_platform-inl.h"
 #include "node_version.h"
 
 #if HAVE_OPENSSL
 #include "node_crypto.h"
+#include <openssl/conf.h>
 #endif
 
 #if defined(NODE_HAVE_I18N_SUPPORT)
@@ -67,6 +70,21 @@
 #endif
 
 #include "large_pages/node_large_page.h"
+
+#if defined(__APPLE__) || defined(__linux__) || defined(_WIN32)
+#define NODE_USE_V8_WASM_TRAP_HANDLER 1
+#else
+#define NODE_USE_V8_WASM_TRAP_HANDLER 0
+#endif
+
+#if NODE_USE_V8_WASM_TRAP_HANDLER
+#if defined(_WIN32)
+#include "v8-wasm-trap-handler-win.h"
+#else
+#include <atomic>
+#include "v8-wasm-trap-handler-posix.h"
+#endif
+#endif  // NODE_USE_V8_WASM_TRAP_HANDLER
 
 // ========== global C headers ==========
 
@@ -130,30 +148,32 @@ unsigned int reverted_cve = 0;
 
 // util.h
 // Tells whether the per-process V8::Initialize() is called and
-// if it is safe to call v8::Isolate::GetCurrent().
+// if it is safe to call v8::Isolate::TryGetCurrent().
 bool v8_initialized = false;
 
 // node_internals.h
 // process-relative uptime base in nanoseconds, initialized in node::Start()
 uint64_t node_start_time;
-// Tells whether --prof is passed.
-bool v8_is_profiling = false;
+
+#if NODE_USE_V8_WASM_TRAP_HANDLER && defined(_WIN32)
+PVOID old_vectored_exception_handler;
+#endif
 
 // node_v8_platform-inl.h
 struct V8Platform v8_platform;
 }  // namespace per_process
 
-void SignalExit(int signo) {
+// The section in the OpenSSL configuration file to be loaded.
+const char* conf_section_name = STRINGIFY(NODE_OPENSSL_CONF_NAME);
+
+const char* fips_error_msg = "OpenSSL error when trying to enable FIPS:\n";
+
+#ifdef __POSIX__
+void SignalExit(int signo, siginfo_t* info, void* ucontext) {
   ResetStdio();
-#ifdef __FreeBSD__
-  // FreeBSD has a nasty bug, see RegisterSignalHandler for details
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = SIG_DFL;
-  CHECK_EQ(sigaction(signo, &sa, nullptr), 0);
-#endif
   raise(signo);
 }
+#endif  // __POSIX__
 
 MaybeLocal<Value> ExecuteBootstrapper(Environment* env,
                                       const char* id,
@@ -219,13 +239,62 @@ int Environment::InitializeInspector(
 
   return 0;
 }
-#endif  // HAVE_INSPECTOR && NODE_USE_V8_PLATFORM
+#endif  // HAVE_INSPECTOR
+
+#define ATOMIC_WAIT_EVENTS(V)                                               \
+  V(kStartWait,           "started")                                        \
+  V(kWokenUp,             "was woken up by another thread")                 \
+  V(kTimedOut,            "timed out")                                      \
+  V(kTerminatedExecution, "was stopped by terminated execution")            \
+  V(kAPIStopped,          "was stopped through the embedder API")           \
+  V(kNotEqual,            "did not wait because the values mismatched")     \
+
+static void AtomicsWaitCallback(Isolate::AtomicsWaitEvent event,
+                                Local<v8::SharedArrayBuffer> array_buffer,
+                                size_t offset_in_bytes, int64_t value,
+                                double timeout_in_ms,
+                                Isolate::AtomicsWaitWakeHandle* stop_handle,
+                                void* data) {
+  Environment* env = static_cast<Environment*>(data);
+
+  const char* message = "(unknown event)";
+  switch (event) {
+#define V(key, msg)                         \
+    case Isolate::AtomicsWaitEvent::key:    \
+      message = msg;                        \
+      break;
+    ATOMIC_WAIT_EVENTS(V)
+#undef V
+  }
+
+  fprintf(stderr,
+          "(node:%d) [Thread %" PRIu64 "] Atomics.wait(%p + %zx, %" PRId64
+              ", %.f) %s\n",
+          static_cast<int>(uv_os_getpid()),
+          env->thread_id(),
+          array_buffer->GetBackingStore()->Data(),
+          offset_in_bytes,
+          value,
+          timeout_in_ms,
+          message);
+}
 
 void Environment::InitializeDiagnostics() {
   isolate_->GetHeapProfiler()->AddBuildEmbedderGraphCallback(
       Environment::BuildEmbedderGraph, this);
+  if (options_->heap_snapshot_near_heap_limit > 0) {
+    isolate_->AddNearHeapLimitCallback(Environment::NearHeapLimitCallback,
+                                       this);
+  }
   if (options_->trace_uncaught)
     isolate_->SetCaptureStackTraceForUncaughtExceptions(true);
+  if (options_->trace_atomics_wait) {
+    isolate_->SetAtomicsWaitCallback(AtomicsWaitCallback, this);
+    AddCleanupHook([](void* data) {
+      Environment* env = static_cast<Environment*>(data);
+      env->isolate()->SetAtomicsWaitCallback(nullptr, nullptr);
+    }, this);
+  }
 
 #if defined HAVE_DTRACE || defined HAVE_ETW
   InitDTrace(this);
@@ -276,11 +345,6 @@ MaybeLocal<Value> Environment::BootstrapInternalLoaders() {
 MaybeLocal<Value> Environment::BootstrapNode() {
   EscapableHandleScope scope(isolate_);
 
-  Local<Object> global = context()->Global();
-  // TODO(joyeecheung): this can be done in JS land now.
-  global->Set(context(), FIXED_ONE_BYTE_STRING(isolate_, "global"), global)
-      .Check();
-
   // process, require, internalBinding, primordials
   std::vector<Local<String>> node_params = {
       process_string(),
@@ -300,6 +364,7 @@ MaybeLocal<Value> Environment::BootstrapNode() {
     return scope.EscapeMaybe(result);
   }
 
+  // TODO(joyeecheung): skip these in the snapshot building for workers.
   auto thread_switch_id =
       is_main_thread() ? "internal/bootstrap/switches/is_main_thread"
                        : "internal/bootstrap/switches/is_not_main_thread";
@@ -323,8 +388,7 @@ MaybeLocal<Value> Environment::BootstrapNode() {
 
   Local<String> env_string = FIXED_ONE_BYTE_STRING(isolate_, "env");
   Local<Object> env_var_proxy;
-  if (!CreateEnvVarProxy(context(), isolate_, as_callback_data())
-           .ToLocal(&env_var_proxy) ||
+  if (!CreateEnvVarProxy(context(), isolate_).ToLocal(&env_var_proxy) ||
       process_object()->Set(context(), env_string, env_var_proxy).IsNothing()) {
     return MaybeLocal<Value>();
   }
@@ -353,7 +417,7 @@ MaybeLocal<Value> Environment::RunBootstrapping() {
   CHECK(req_wrap_queue()->IsEmpty());
   CHECK(handle_wrap_queue()->IsEmpty());
 
-  set_has_run_bootstrapping_code(true);
+  DoneBootstrapping();
 
   return scope.Escape(result);
 }
@@ -410,11 +474,12 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
     return scope.EscapeMaybe(cb(info));
   }
 
-  // To allow people to extend Node in different ways, this hook allows
-  // one to drop a file lib/_third_party_main.js into the build
-  // directory which will be executed instead of Node's normal loading.
-  if (NativeModuleEnv::Exists("_third_party_main")) {
-    return StartExecution(env, "internal/main/run_third_party_main");
+  // TODO(joyeecheung): move these conditions into JS land and let the
+  // deserialize main function take precedence. For workers, we need to
+  // move the pre-execution part into a different file that can be
+  // reused when dealing with user-defined main functions.
+  if (!env->snapshot_deserialize_main().IsEmpty()) {
+    return env->RunSnapshotDeserializeMain();
   }
 
   if (env->worker_context() != nullptr) {
@@ -426,8 +491,12 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
     first_argv = env->argv()[1];
   }
 
-  if (first_argv == "inspect" || first_argv == "debug") {
+  if (first_argv == "inspect") {
     return StartExecution(env, "internal/main/inspect");
+  }
+
+  if (per_process::cli_options->build_snapshot) {
+    return StartExecution(env, "internal/main/mksnapshot");
   }
 
   if (per_process::cli_options->print_help) {
@@ -448,6 +517,10 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
     return StartExecution(env, "internal/main/check_syntax");
   }
 
+  if (env->options()->test_runner) {
+    return StartExecution(env, "internal/main/test_runner");
+  }
+
   if (!first_argv.empty() && first_argv != "-") {
     return StartExecution(env, "internal/main/run_main_module");
   }
@@ -463,6 +536,14 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
 typedef void (*sigaction_cb)(int signo, siginfo_t* info, void* ucontext);
 #endif
 #if NODE_USE_V8_WASM_TRAP_HANDLER
+#if defined(_WIN32)
+static LONG TrapWebAssemblyOrContinue(EXCEPTION_POINTERS* exception) {
+  if (v8::TryHandleWebAssemblyTrapWindows(exception)) {
+    return EXCEPTION_CONTINUE_EXECUTION;
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+#else
 static std::atomic<sigaction_cb> previous_sigsegv_action;
 
 void TrapWebAssemblyOrContinue(int signo, siginfo_t* info, void* ucontext) {
@@ -482,25 +563,29 @@ void TrapWebAssemblyOrContinue(int signo, siginfo_t* info, void* ucontext) {
     }
   }
 }
+#endif  // defined(_WIN32)
 #endif  // NODE_USE_V8_WASM_TRAP_HANDLER
 
 #ifdef __POSIX__
 void RegisterSignalHandler(int signal,
-                           void (*handler)(int signal),
+                           sigaction_cb handler,
                            bool reset_handler) {
+  CHECK_NOT_NULL(handler);
+#if NODE_USE_V8_WASM_TRAP_HANDLER
+  if (signal == SIGSEGV) {
+    CHECK(previous_sigsegv_action.is_lock_free());
+    CHECK(!reset_handler);
+    previous_sigsegv_action.store(handler);
+    return;
+  }
+#endif  // NODE_USE_V8_WASM_TRAP_HANDLER
   struct sigaction sa;
   memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = handler;
-#ifndef __FreeBSD__
-  // FreeBSD has a nasty bug with SA_RESETHAND reseting the SA_SIGINFO, that is
-  // in turn set for a libthr wrapper. This leads to a crash.
-  // Work around the issue by manually setting SIG_DFL in the signal handler
+  sa.sa_sigaction = handler;
   sa.sa_flags = reset_handler ? SA_RESETHAND : 0;
-#endif
   sigfillset(&sa.sa_mask);
   CHECK_EQ(sigaction(signal, &sa, nullptr), 0);
 }
-
 #endif  // __POSIX__
 
 #ifdef __POSIX__
@@ -581,6 +666,29 @@ inline void PlatformInit() {
 
   RegisterSignalHandler(SIGINT, SignalExit, true);
   RegisterSignalHandler(SIGTERM, SignalExit, true);
+
+#if NODE_USE_V8_WASM_TRAP_HANDLER
+#if defined(_WIN32)
+  {
+    constexpr ULONG first = TRUE;
+    per_process::old_vectored_exception_handler =
+        AddVectoredExceptionHandler(first, TrapWebAssemblyOrContinue);
+  }
+#else
+  // Tell V8 to disable emitting WebAssembly
+  // memory bounds checks. This means that we have
+  // to catch the SIGSEGV in TrapWebAssemblyOrContinue
+  // and pass the signal context to V8.
+  {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = TrapWebAssemblyOrContinue;
+    sa.sa_flags = SA_SIGINFO;
+    CHECK_EQ(sigaction(SIGSEGV, &sa, nullptr), 0);
+  }
+#endif  // defined(_WIN32)
+  V8::EnableWebAssemblyTrapHandler(false);
+#endif  // NODE_USE_V8_WASM_TRAP_HANDLER
 
   // Raise the open file descriptor limit.
   struct rlimit lim;
@@ -715,6 +823,13 @@ int ProcessGlobalArgs(std::vector<std::string>* args,
     return 12;
   }
 
+  // TODO(aduh95): remove this when the harmony-import-assertions flag
+  // is removed in V8.
+  if (std::find(v8_args.begin(), v8_args.end(),
+                "--no-harmony-import-assertions") == v8_args.end()) {
+    v8_args.emplace_back("--harmony-import-assertions");
+  }
+
   auto env_opts = per_process::cli_options->per_isolate->per_env;
   if (std::find(v8_args.begin(), v8_args.end(),
                 "--abort-on-uncaught-exception") != v8_args.end() ||
@@ -723,19 +838,11 @@ int ProcessGlobalArgs(std::vector<std::string>* args,
     env_opts->abort_on_uncaught_exception = true;
   }
 
-  // TODO(bnoordhuis) Intercept --prof arguments and start the CPU profiler
-  // manually?  That would give us a little more control over its runtime
-  // behavior but it could also interfere with the user's intentions in ways
-  // we fail to anticipate.  Dillema.
-  if (std::find(v8_args.begin(), v8_args.end(), "--prof") != v8_args.end()) {
-    per_process::v8_is_profiling = true;
-  }
-
 #ifdef __POSIX__
   // Block SIGPROF signals when sleeping in epoll_wait/kevent/etc.  Avoids the
   // performance penalty of frequent EINTR wakeups when the profiler is running.
   // Only do this for v8.log profiling, as it breaks v8::CpuProfiler users.
-  if (per_process::v8_is_profiling) {
+  if (std::find(v8_args.begin(), v8_args.end(), "--prof") != v8_args.end()) {
     uv_loop_configure(uv_default_loop(), UV_LOOP_BLOCK_SIGNAL, SIGPROF);
   }
 #endif
@@ -763,6 +870,14 @@ static std::atomic_bool init_called{false};
 int InitializeNodeWithArgs(std::vector<std::string>* argv,
                            std::vector<std::string>* exec_argv,
                            std::vector<std::string>* errors) {
+  return InitializeNodeWithArgs(argv, exec_argv, errors,
+                                ProcessFlags::kNoFlags);
+}
+
+int InitializeNodeWithArgs(std::vector<std::string>* argv,
+                           std::vector<std::string>* exec_argv,
+                           std::vector<std::string>* errors,
+                           ProcessFlags::Flags flags) {
   // Make sure InitializeNodeWithArgs() is called only once.
   CHECK(!init_called.exchange(true));
 
@@ -773,7 +888,8 @@ int InitializeNodeWithArgs(std::vector<std::string>* argv,
   binding::RegisterBuiltinModules();
 
   // Make inherited handles noninheritable.
-  uv_disable_stdio_inheritance();
+  if (!(flags & ProcessFlags::kEnableStdioInheritance))
+    uv_disable_stdio_inheritance();
 
   // Cache the original command line to be
   // used in diagnostic reports.
@@ -789,68 +905,82 @@ int InitializeNodeWithArgs(std::vector<std::string>* argv,
   HandleEnvOptions(per_process::cli_options->per_isolate->per_env);
 
 #if !defined(NODE_WITHOUT_NODE_OPTIONS)
-  std::string node_options;
+  if (!(flags & ProcessFlags::kDisableNodeOptionsEnv)) {
+    std::string node_options;
 
-  if (credentials::SafeGetenv("NODE_OPTIONS", &node_options)) {
-    std::vector<std::string> env_argv =
-        ParseNodeOptionsEnvVar(node_options, errors);
+    if (credentials::SafeGetenv("NODE_OPTIONS", &node_options)) {
+      std::vector<std::string> env_argv =
+          ParseNodeOptionsEnvVar(node_options, errors);
 
-    if (!errors->empty()) return 9;
+      if (!errors->empty()) return 9;
 
-    // [0] is expected to be the program name, fill it in from the real argv.
-    env_argv.insert(env_argv.begin(), argv->at(0));
+      // [0] is expected to be the program name, fill it in from the real argv.
+      env_argv.insert(env_argv.begin(), argv->at(0));
 
-    const int exit_code = ProcessGlobalArgs(&env_argv,
-                                            nullptr,
-                                            errors,
-                                            kAllowedInEnvironment);
-    if (exit_code != 0) return exit_code;
+      const int exit_code = ProcessGlobalArgs(&env_argv,
+                                              nullptr,
+                                              errors,
+                                              kAllowedInEnvironment);
+      if (exit_code != 0) return exit_code;
+    }
   }
 #endif
 
-  const int exit_code = ProcessGlobalArgs(argv,
-                                          exec_argv,
-                                          errors,
-                                          kDisallowedInEnvironment);
-  if (exit_code != 0) return exit_code;
+  if (!(flags & ProcessFlags::kDisableCLIOptions)) {
+    const int exit_code = ProcessGlobalArgs(argv,
+                                            exec_argv,
+                                            errors,
+                                            kDisallowedInEnvironment);
+    if (exit_code != 0) return exit_code;
+  }
 
   // Set the process.title immediately after processing argv if --title is set.
   if (!per_process::cli_options->title.empty())
     uv_set_process_title(per_process::cli_options->title.c_str());
 
 #if defined(NODE_HAVE_I18N_SUPPORT)
-  // If the parameter isn't given, use the env variable.
-  if (per_process::cli_options->icu_data_dir.empty())
-    credentials::SafeGetenv("NODE_ICU_DATA",
-                            &per_process::cli_options->icu_data_dir);
+  if (!(flags & ProcessFlags::kNoICU)) {
+    // If the parameter isn't given, use the env variable.
+    if (per_process::cli_options->icu_data_dir.empty())
+      credentials::SafeGetenv("NODE_ICU_DATA",
+                              &per_process::cli_options->icu_data_dir);
 
 #ifdef NODE_ICU_DEFAULT_DATA_DIR
-  // If neither the CLI option nor the environment variable was specified,
-  // fall back to the configured default
-  if (per_process::cli_options->icu_data_dir.empty()) {
-    // Check whether the NODE_ICU_DEFAULT_DATA_DIR contains the right data
-    // file and can be read.
-    static const char full_path[] =
-        NODE_ICU_DEFAULT_DATA_DIR "/" U_ICUDATA_NAME ".dat";
+    // If neither the CLI option nor the environment variable was specified,
+    // fall back to the configured default
+    if (per_process::cli_options->icu_data_dir.empty()) {
+      // Check whether the NODE_ICU_DEFAULT_DATA_DIR contains the right data
+      // file and can be read.
+      static const char full_path[] =
+          NODE_ICU_DEFAULT_DATA_DIR "/" U_ICUDATA_NAME ".dat";
 
-    FILE* f = fopen(full_path, "rb");
+      FILE* f = fopen(full_path, "rb");
 
-    if (f != nullptr) {
-      fclose(f);
-      per_process::cli_options->icu_data_dir = NODE_ICU_DEFAULT_DATA_DIR;
+      if (f != nullptr) {
+        fclose(f);
+        per_process::cli_options->icu_data_dir = NODE_ICU_DEFAULT_DATA_DIR;
+      }
     }
-  }
 #endif  // NODE_ICU_DEFAULT_DATA_DIR
 
-  // Initialize ICU.
-  // If icu_data_dir is empty here, it will load the 'minimal' data.
-  if (!i18n::InitializeICUDirectory(per_process::cli_options->icu_data_dir)) {
-    errors->push_back("could not initialize ICU "
-                      "(check NODE_ICU_DATA or --icu-data-dir parameters)\n");
-    return 9;
+    // Initialize ICU.
+    // If icu_data_dir is empty here, it will load the 'minimal' data.
+    if (!i18n::InitializeICUDirectory(per_process::cli_options->icu_data_dir)) {
+      errors->push_back("could not initialize ICU "
+                        "(check NODE_ICU_DATA or --icu-data-dir parameters)\n");
+      return 9;
+    }
+    per_process::metadata.versions.InitializeIntlVersions();
   }
-  per_process::metadata.versions.InitializeIntlVersions();
-#endif
+
+# ifndef __POSIX__
+  std::string tz;
+  if (credentials::SafeGetenv("TZ", &tz) && !tz.empty()) {
+    i18n::SetDefaultTimeZone(tz.c_str());
+  }
+# endif
+
+#endif  // defined(NODE_HAVE_I18N_SUPPORT)
 
   NativeModuleEnv::InitializeCodeCache();
 
@@ -861,58 +991,40 @@ int InitializeNodeWithArgs(std::vector<std::string>* argv,
   return 0;
 }
 
-// TODO(addaleax): Deprecate and eventually remove this.
-void Init(int* argc,
-          const char** argv,
-          int* exec_argc,
-          const char*** exec_argv) {
-  std::vector<std::string> argv_(argv, argv + *argc);  // NOLINT
-  std::vector<std::string> exec_argv_;
-  std::vector<std::string> errors;
-
-  // This (approximately) duplicates some logic that has been moved to
-  // node::Start(), with the difference that here we explicitly call `exit()`.
-  int exit_code = InitializeNodeWithArgs(&argv_, &exec_argv_, &errors);
-
-  for (const std::string& error : errors)
-    fprintf(stderr, "%s: %s\n", argv_.at(0).c_str(), error.c_str());
-  if (exit_code != 0) exit(exit_code);
-
-  if (per_process::cli_options->print_version) {
-    printf("%s\n", NODE_VERSION);
-    exit(0);
-  }
-
-  if (per_process::cli_options->print_bash_completion) {
-    std::string completion = options_parser::GetBashCompletion();
-    printf("%s\n", completion.c_str());
-    exit(0);
-  }
-
-  if (per_process::cli_options->print_v8_help) {
-    V8::SetFlagsFromString("--help", 6);  // Doesn't return.
-    UNREACHABLE();
-  }
-
-  *argc = argv_.size();
-  *exec_argc = exec_argv_.size();
-  // These leak memory, because, in the original code of this function, no
-  // extra allocations were visible. This should be okay because this function
-  // is only supposed to be called once per process, though.
-  *exec_argv = Malloc<const char*>(*exec_argc);
-  for (int i = 0; i < *exec_argc; ++i)
-    (*exec_argv)[i] = strdup(exec_argv_[i].c_str());
-  for (int i = 0; i < *argc; ++i)
-    argv[i] = strdup(argv_[i].c_str());
+InitializationResult InitializeOncePerProcess(int argc, char** argv) {
+  return InitializeOncePerProcess(argc, argv, kDefaultInitialization);
 }
 
-InitializationResult InitializeOncePerProcess(int argc, char** argv) {
+#if HAVE_OPENSSL
+InitializationResult handle_openssl_error(int exit_code,
+                                          const char* msg,
+                                          InitializationResult* result) {
+  result->exit_code = exit_code;
+  result->early_return = true;
+  fprintf(stderr, "%s", msg);
+  ERR_print_errors_fp(stderr);
+  return *result;
+}
+#endif
+
+InitializationResult InitializeOncePerProcess(
+  int argc,
+  char** argv,
+  InitializationSettingsFlags flags,
+  ProcessFlags::Flags process_flags) {
+  uint64_t init_flags = flags;
+  if (init_flags & kDefaultInitialization) {
+    init_flags = init_flags | kInitializeV8 | kInitOpenSSL | kRunPlatformInit;
+  }
+
   // Initialized the enabled list for Debug() calls with system
   // environment variables.
-  per_process::enabled_debug_list.Parse(nullptr);
+  per_process::enabled_debug_list.Parse();
 
   atexit(ResetStdio);
-  PlatformInit();
+
+  if (init_flags & kRunPlatformInit)
+    PlatformInit();
 
   CHECK_GT(argc, 0);
 
@@ -925,8 +1037,8 @@ InitializationResult InitializeOncePerProcess(int argc, char** argv) {
 
   // This needs to run *before* V8::Initialize().
   {
-    result.exit_code =
-        InitializeNodeWithArgs(&(result.args), &(result.exec_args), &errors);
+    result.exit_code = InitializeNodeWithArgs(
+        &(result.args), &(result.exec_args), &errors, process_flags);
     for (const std::string& error : errors)
       fprintf(stderr, "%s: %s\n", result.args.at(0).c_str(), error.c_str());
     if (result.exit_code != 0) {
@@ -953,41 +1065,137 @@ InitializationResult InitializeOncePerProcess(int argc, char** argv) {
   if (per_process::cli_options->print_bash_completion) {
     std::string completion = options_parser::GetBashCompletion();
     printf("%s\n", completion.c_str());
-    exit(0);
+    result.exit_code = 0;
+    result.early_return = true;
+    return result;
   }
 
   if (per_process::cli_options->print_v8_help) {
-    V8::SetFlagsFromString("--help", 6);  // Doesn't return.
-    UNREACHABLE();
+    V8::SetFlagsFromString("--help", static_cast<size_t>(6));
+    result.exit_code = 0;
+    result.early_return = true;
+    return result;
   }
 
-#if HAVE_OPENSSL
-  {
-    std::string extra_ca_certs;
-    if (credentials::SafeGetenv("NODE_EXTRA_CA_CERTS", &extra_ca_certs))
-      crypto::UseExtraCaCerts(extra_ca_certs);
-  }
-#ifdef NODE_FIPS_MODE
-  // In the case of FIPS builds we should make sure
-  // the random source is properly initialized first.
-  OPENSSL_init();
-#endif  // NODE_FIPS_MODE
-  // V8 on Windows doesn't have a good source of entropy. Seed it from
-  // OpenSSL's pool.
-  V8::SetEntropySource(crypto::EntropySource);
-#endif  // HAVE_OPENSSL
+  if (init_flags & kInitOpenSSL) {
+#if HAVE_OPENSSL && !defined(OPENSSL_IS_BORINGSSL)
+    {
+      std::string extra_ca_certs;
+      if (credentials::SafeGetenv("NODE_EXTRA_CA_CERTS", &extra_ca_certs))
+        crypto::UseExtraCaCerts(extra_ca_certs);
+    }
+    // In the case of FIPS builds we should make sure
+    // the random source is properly initialized first.
+    // Call OPENSSL_init_crypto to initialize OPENSSL_INIT_LOAD_CONFIG to
+    // avoid the default behavior where errors raised during the parsing of the
+    // OpenSSL configuration file are not propagated and cannot be detected.
+    //
+    // If FIPS is configured the OpenSSL configuration file will have an
+    // .include pointing to the fipsmodule.cnf file generated by the openssl
+    // fipsinstall command. If the path to this file is incorrect no error
+    // will be reported.
+    //
+    // For Node.js this will mean that CSPRNG() will be called by V8 as
+    // part of its initialization process, and CSPRNG() will in turn call
+    // call RAND_status which will now always return 0, leading to an endless
+    // loop and the node process will appear to hang/freeze.
 
+    // Passing NULL as the config file will allow the default openssl.cnf file
+    // to be loaded, but the default section in that file will not be used,
+    // instead only the section that matches the value of conf_section_name
+    // will be read from the default configuration file.
+    const char* conf_file = nullptr;
+    // To allow for using the previous default where the 'openssl_conf' appname
+    // was used, the command line option 'openssl-shared-config' can be used to
+    // force the old behavior.
+    if (per_process::cli_options->openssl_shared_config) {
+      conf_section_name = "openssl_conf";
+    }
+    // Use OPENSSL_CONF environment variable is set.
+    std::string env_openssl_conf;
+    credentials::SafeGetenv("OPENSSL_CONF", &env_openssl_conf);
+    if (!env_openssl_conf.empty()) {
+      conf_file = env_openssl_conf.c_str();
+    }
+    // Use --openssl-conf command line option if specified.
+    if (!per_process::cli_options->openssl_config.empty()) {
+      conf_file = per_process::cli_options->openssl_config.c_str();
+    }
+
+    OPENSSL_INIT_SETTINGS* settings = OPENSSL_INIT_new();
+    OPENSSL_INIT_set_config_filename(settings, conf_file);
+    OPENSSL_INIT_set_config_appname(settings, conf_section_name);
+    OPENSSL_INIT_set_config_file_flags(settings,
+                                       CONF_MFLAGS_IGNORE_MISSING_FILE);
+
+    OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, settings);
+    OPENSSL_INIT_free(settings);
+
+#if OPENSSL_VERSION_MAJOR < 3
+    if (ERR_peek_error() != 0) {
+      int ossl_error_code = ERR_GET_REASON(ERR_peek_error());
+      if (ossl_error_code == EVP_R_FIPS_MODE_NOT_SUPPORTED) {
+        if (!crypto::ProcessFipsOptions()) {
+          return handle_openssl_error(ossl_error_code, fips_error_msg, &result);
+        }
+      } else {
+        return handle_openssl_error(ossl_error_code,
+                                    "OpenSSL configuration error:\n",
+                                    &result);
+      }
+    }
+#else
+    if (ERR_peek_error() != 0) {
+      return handle_openssl_error(ERR_GET_REASON(ERR_peek_error()),
+                                  "OpenSSL configuration error:\n",
+                                  &result);
+      }
+#endif
+
+#if OPENSSL_VERSION_MAJOR < 3
+    if (FIPS_mode()) {
+      OPENSSL_init();
+    }
+#endif
+
+    if (!crypto::ProcessFipsOptions()) {
+      return handle_openssl_error(ERR_GET_REASON(ERR_peek_error()),
+                                  fips_error_msg,
+                                  &result);
+    }
+
+    // Ensure CSPRNG is properly seeded.
+    CHECK(crypto::CSPRNG(nullptr, 0).is_ok());
+
+    V8::SetEntropySource([](unsigned char* buffer, size_t length) {
+      // V8 falls back to very weak entropy when this function fails
+      // and /dev/urandom isn't available. That wouldn't be so bad if
+      // the entropy was only used for Math.random() but it's also used for
+      // hash table and address space layout randomization. Better to abort.
+      CHECK(crypto::CSPRNG(buffer, length).is_ok());
+      return true;
+    });
+#endif  // HAVE_OPENSSL && !defined(OPENSSL_IS_BORINGSSL)
+  }
   per_process::v8_platform.Initialize(
-      per_process::cli_options->v8_thread_pool_size);
-  V8::Initialize();
+      static_cast<int>(per_process::cli_options->v8_thread_pool_size));
+  if (init_flags & kInitializeV8) {
+    V8::Initialize();
+  }
+
   performance::performance_v8_start = PERFORMANCE_NOW();
   per_process::v8_initialized = true;
+
   return result;
 }
 
 void TearDownOncePerProcess() {
   per_process::v8_initialized = false;
   V8::Dispose();
+
+#if NODE_USE_V8_WASM_TRAP_HANDLER && defined(_WIN32)
+  RemoveVectoredExceptionHandler(per_process::old_vectored_exception_handler);
+#endif
 
   // uv_run cannot be called from the time before the beforeExit callback
   // runs until the program exits unless the event loop has any referenced
@@ -1004,32 +1212,25 @@ int Start(int argc, char** argv) {
     return result.exit_code;
   }
 
-  {
-    Isolate::CreateParams params;
-    const std::vector<size_t>* indexes = nullptr;
-    std::vector<intptr_t> external_references;
+  if (per_process::cli_options->build_snapshot) {
+    fprintf(stderr,
+            "--build-snapshot is not yet supported in the node binary\n");
+    return 1;
+  }
 
-    bool force_no_snapshot =
-        per_process::cli_options->per_isolate->no_node_snapshot;
-    if (!force_no_snapshot) {
-      v8::StartupData* blob = NodeMainInstance::GetEmbeddedSnapshotBlob();
-      if (blob != nullptr) {
-        // TODO(joyeecheung): collect external references and set it in
-        // params.external_references.
-        external_references.push_back(reinterpret_cast<intptr_t>(nullptr));
-        params.external_references = external_references.data();
-        params.snapshot_blob = blob;
-        indexes = NodeMainInstance::GetIsolateDataIndexes();
-      }
-    }
+  {
+    bool use_node_snapshot =
+        per_process::cli_options->per_isolate->node_snapshot;
+    const SnapshotData* snapshot_data =
+        use_node_snapshot ? SnapshotBuilder::GetEmbeddedSnapshotData()
+                          : nullptr;
     uv_loop_configure(uv_default_loop(), UV_METRICS_IDLE_TIME);
 
-    NodeMainInstance main_instance(&params,
+    NodeMainInstance main_instance(snapshot_data,
                                    uv_default_loop(),
                                    per_process::v8_platform.Platform(),
                                    result.args,
-                                   result.exec_args,
-                                   indexes);
+                                   result.exec_args);
     result.exit_code = main_instance.Run();
   }
 
@@ -1038,7 +1239,7 @@ int Start(int argc, char** argv) {
 }
 
 int Stop(Environment* env) {
-  env->Stop();
+  env->ExitEnv();
   return 0;
 }
 

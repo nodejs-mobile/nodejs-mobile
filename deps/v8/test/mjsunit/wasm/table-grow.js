@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 let kMaxTableSize = 10000000;
 
@@ -10,20 +10,20 @@ function addFunctions(builder) {
   let sig_index = builder.addType(kSig_i_ii);
   let mul = builder.addFunction("mul", sig_index)
     .addBody([
-      kExprGetLocal, 0,  // --
-      kExprGetLocal, 1,  // --
+      kExprLocalGet, 0,  // --
+      kExprLocalGet, 1,  // --
       kExprI32Mul        // --
     ]);
   let add = builder.addFunction("add", sig_index)
     .addBody([
-      kExprGetLocal, 0,  // --
-      kExprGetLocal, 1,  // --
+      kExprLocalGet, 0,  // --
+      kExprLocalGet, 1,  // --
       kExprI32Add        // --
     ]);
   let sub = builder.addFunction("sub", sig_index)
     .addBody([
-      kExprGetLocal, 0,  // --
-      kExprGetLocal, 1,  // --
+      kExprLocalGet, 0,  // --
+      kExprLocalGet, 1,  // --
       kExprI32Sub        // --
     ]);
   return {mul: mul, add: add, sub: sub};
@@ -45,7 +45,7 @@ function addMain(builder) {
   builder.addFunction("main", kSig_i_i)
     .addBody([
       kExprI32Const, 0,
-      kExprGetLocal, 0,
+      kExprLocalGet, 0,
       kExprCallIndirect, 0, kTableZero])
     .exportAs("main");
 }
@@ -53,7 +53,7 @@ function addMain(builder) {
 let id = (() => {  // identity exported function
   let builder = new WasmModuleBuilder();
   builder.addFunction("id", kSig_i_i)
-    .addBody([kExprGetLocal, 0])
+    .addBody([kExprLocalGet, 0])
     .exportAs("id");
   let module = new WebAssembly.Module(builder.toBuffer());
   return (new WebAssembly.Instance(builder.toModule())).exports.id;
@@ -125,14 +125,14 @@ let id = (() => {  // identity exported function
   builder.addFunction("main", kSig_i_ii)
     .addBody([
       kExprI32Const, 15,  // --
-      kExprGetLocal, 0,   // --
-      kExprGetLocal, 1,   // --
+      kExprLocalGet, 0,   // --
+      kExprLocalGet, 1,   // --
       kExprCallIndirect, 0, kTableZero])  // --
     .exportAs("main");
 
   builder.addImportedTable("q", "table", 5, 32);
   let g = builder.addImportedGlobal("q", "base", kWasmI32);
-  builder.addElementSegment(0, g, true,
+  builder.addActiveElementSegment(0, WasmInitExpr.GlobalGet(g),
       [funcs.mul.index, funcs.add.index, funcs.sub.index]);
   builder.addExportOfKind("table", kExternalTable, 0);
   let module = new WebAssembly.Module(builder.toBuffer());
@@ -179,7 +179,7 @@ let id = (() => {  // identity exported function
   let t = builder.addImport("q", "exp_ten", sig_i_v);
 
   builder.setTableBounds(7, 35);
-  builder.addElementSegment(0, g1, true, [a, i, t]);
+  builder.addActiveElementSegment(0, WasmInitExpr.GlobalGet(g1), [a, i, t]);
 
   builder.addExportOfKind("table", kExternalTable, 0);
   let module = new WebAssembly.Module(builder.toBuffer());
@@ -212,7 +212,8 @@ let id = (() => {  // identity exported function
   let funcs = addFunctions(builder1);
 
   builder1.addImportedTable("q", "table", 6, 36);
-  builder1.addElementSegment(0, g, true,
+  builder1.addActiveElementSegment(
+      0, WasmInitExpr.GlobalGet(g),
       [funcs.mul.index, funcs.add.index, funcs.sub.index]);
   let module1 = new WebAssembly.Module(builder1.toBuffer());
 
@@ -228,7 +229,7 @@ let id = (() => {  // identity exported function
   }
 
   for (let i = 3; i < 10; i++) {
-    let instance1 = new WebAssembly.Instance(module1, {q: {base: i, table: table}});
+    new WebAssembly.Instance(module1, {q: {base: i, table: table}});
     verifyTableFuncs(i);
     var prev = table.length;
     assertEquals(prev,     table.grow(3));
@@ -254,17 +255,17 @@ let id = (() => {  // identity exported function
     builder.addImportedTable("x", "table", 1, kMaxTableSize);
     builder.addFunction("add", index_i_ii)
       .addBody([
-        kExprGetLocal, 0,
-        kExprGetLocal, 1,
+        kExprLocalGet, 0,
+        kExprLocalGet, 1,
         kExprI32Add]);
     builder.addFunction("main", index_i_i)
       .addBody([
         kExprI32Const, 5,
         kExprI32Const, 5,
-        kExprGetLocal, 0,
+        kExprLocalGet, 0,
         kExprCallIndirect, index_i_ii, kTableZero])
       .exportAs("main");
-    builder.addElementSegment(0, 0, false, [0]);
+    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(0), [0]);
     return new WebAssembly.Module(builder.toBuffer());
   }
 
@@ -283,13 +284,13 @@ let id = (() => {  // identity exported function
     print("Verifying bounds for size = " + size);
     assertEquals(size, table.length);
     for (let i = 0; i < 5; i++) {
-      // Sanity check for indirect call
+      // Validity check for indirect call
       assertEquals(10, instances[i].exports.main(0));
       // Bounds check at different out of bounds indices
       assertInvalidFunction = function(s) {
         assertThrows(
             () => instances[i].exports.main(s), WebAssembly.RuntimeError,
-            kTrapMsgs[kTrapFuncInvalid]);
+            kTrapMsgs[kTrapTableOutOfBounds]);
       }
       assertInvalidFunction(size);
       assertInvalidFunction(size + 1);

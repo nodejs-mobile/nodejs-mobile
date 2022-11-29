@@ -1,17 +1,17 @@
-// Copyright 2018 the V8 project authors. All rights reserved.
+// Copyright 2020 the V8 project authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+#ifndef V8_OBJECTS_JS_SEGMENTER_H_
+#define V8_OBJECTS_JS_SEGMENTER_H_
 
 #ifndef V8_INTL_SUPPORT
 #error Internationalization is expected to be enabled.
 #endif  // V8_INTL_SUPPORT
 
-#ifndef V8_OBJECTS_JS_SEGMENTER_H_
-#define V8_OBJECTS_JS_SEGMENTER_H_
-
 #include <set>
 #include <string>
 
+#include "src/base/bit-field.h"
 #include "src/execution/isolate.h"
 #include "src/heap/factory.h"
 #include "src/objects/managed.h"
@@ -23,12 +23,14 @@
 
 namespace U_ICU_NAMESPACE {
 class BreakIterator;
-}
+}  // namespace U_ICU_NAMESPACE
 
 namespace v8 {
 namespace internal {
 
-class JSSegmenter : public JSObject {
+#include "torque-generated/src/objects/js-segmenter-tq.inc"
+
+class JSSegmenter : public TorqueGeneratedJSSegmenter<JSSegmenter, JSObject> {
  public:
   // Creates segmenter object with properties derived from input locales and
   // options.
@@ -41,13 +43,9 @@ class JSSegmenter : public JSObject {
 
   V8_EXPORT_PRIVATE static const std::set<std::string>& GetAvailableLocales();
 
-  Handle<String> GranularityAsString() const;
-
-  DECL_CAST(JSSegmenter)
+  Handle<String> GranularityAsString(Isolate* isolate) const;
 
   // Segmenter accessors.
-  DECL_ACCESSORS(locale, String)
-
   DECL_ACCESSORS(icu_break_iterator, Managed<icu::BreakIterator>)
 
   // Granularity: identifying the segmenter used.
@@ -61,29 +59,19 @@ class JSSegmenter : public JSObject {
   inline void set_granularity(Granularity granularity);
   inline Granularity granularity() const;
 
-// Bit positions in |flags|.
-#define FLAGS_BIT_FIELDS(V, _) V(GranularityBits, Granularity, 2, _)
-  DEFINE_BIT_FIELDS(FLAGS_BIT_FIELDS)
-#undef FLAGS_BIT_FIELDS
+  Handle<String> static GetGranularityString(Isolate* isolate,
+                                             Granularity granularity);
+
+  // Bit positions in |flags|.
+  DEFINE_TORQUE_GENERATED_JS_SEGMENTER_FLAGS()
 
   STATIC_ASSERT(Granularity::GRAPHEME <= GranularityBits::kMax);
   STATIC_ASSERT(Granularity::WORD <= GranularityBits::kMax);
   STATIC_ASSERT(Granularity::SENTENCE <= GranularityBits::kMax);
 
-  // [flags] Bit field containing various flags about the function.
-  DECL_INT_ACCESSORS(flags)
-
   DECL_PRINTER(JSSegmenter)
-  DECL_VERIFIER(JSSegmenter)
 
-  // Layout description.
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                TORQUE_GENERATED_JSSEGMENTER_FIELDS)
-
- private:
-  static Granularity GetGranularity(const char* str);
-
-  OBJECT_CONSTRUCTORS(JSSegmenter, JSObject);
+  TQ_OBJECT_CONSTRUCTORS(JSSegmenter)
 };
 
 }  // namespace internal

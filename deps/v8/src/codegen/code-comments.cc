@@ -33,9 +33,9 @@ CodeCommentsIterator::CodeCommentsIterator(Address code_comments_start,
       code_comments_size_(code_comments_size),
       current_entry_(code_comments_start + kOffsetToFirstCommentEntry) {
   DCHECK_NE(kNullAddress, code_comments_start);
-  DCHECK_IMPLIES(
-      code_comments_size,
-      code_comments_size == *reinterpret_cast<uint32_t*>(code_comments_start_));
+  DCHECK_IMPLIES(code_comments_size,
+                 code_comments_size ==
+                     base::ReadUnalignedValue<uint32_t>(code_comments_start_));
 }
 
 uint32_t CodeCommentsIterator::size() const { return code_comments_size_; }
@@ -85,21 +85,6 @@ void CodeCommentsWriter::Add(uint32_t pc_offset, std::string comment) {
 size_t CodeCommentsWriter::entry_count() const { return comments_.size(); }
 uint32_t CodeCommentsWriter::section_size() const {
   return kOffsetToFirstCommentEntry + static_cast<uint32_t>(byte_count_);
-}
-
-void PrintCodeCommentsSection(std::ostream& out, Address code_comments_start,
-                              uint32_t code_comments_size) {
-  CodeCommentsIterator it(code_comments_start, code_comments_size);
-  out << "CodeComments (size = " << it.size() << ")\n";
-  if (it.HasCurrent()) {
-    out << std::setw(6) << "pc" << std::setw(6) << "len"
-        << " comment\n";
-  }
-  for (; it.HasCurrent(); it.Next()) {
-    out << std::hex << std::setw(6) << it.GetPCOffset() << std::dec
-        << std::setw(6) << it.GetCommentSize() << " (" << it.GetComment()
-        << ")\n";
-  }
 }
 
 }  // namespace internal

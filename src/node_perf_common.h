@@ -3,11 +3,13 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "aliased_buffer.h"
 #include "node.h"
 #include "uv.h"
 #include "v8.h"
 
 #include <algorithm>
+#include <iostream>
 #include <map>
 #include <string>
 
@@ -30,13 +32,11 @@ extern uint64_t performance_v8_start;
 
 
 #define NODE_PERFORMANCE_ENTRY_TYPES(V)                                       \
-  V(NODE, "node")                                                             \
-  V(MARK, "mark")                                                             \
-  V(MEASURE, "measure")                                                       \
   V(GC, "gc")                                                                 \
-  V(FUNCTION, "function")                                                     \
+  V(HTTP, "http")                                                             \
   V(HTTP2, "http2")                                                           \
-  V(HTTP, "http")
+  V(NET, "net")                                                               \
+  V(DNS, "dns")
 
 enum PerformanceMilestone {
 #define V(name, _) NODE_PERFORMANCE_MILESTONE_##name,
@@ -54,23 +54,17 @@ enum PerformanceEntryType {
 
 class PerformanceState {
  public:
-  explicit PerformanceState(v8::Isolate* isolate) :
-    root(
-      isolate,
-      sizeof(performance_state_internal)),
-    milestones(
-      isolate,
-      offsetof(performance_state_internal, milestones),
-      NODE_PERFORMANCE_MILESTONE_INVALID,
-      root),
-    observers(
-      isolate,
-      offsetof(performance_state_internal, observers),
-      NODE_PERFORMANCE_ENTRY_TYPE_INVALID,
-      root) {
-    for (size_t i = 0; i < milestones.Length(); i++)
-      milestones[i] = -1.;
-  }
+  struct SerializeInfo {
+    AliasedBufferIndex root;
+    AliasedBufferIndex milestones;
+    AliasedBufferIndex observers;
+  };
+
+  explicit PerformanceState(v8::Isolate* isolate, const SerializeInfo* info);
+  SerializeInfo Serialize(v8::Local<v8::Context> context,
+                          v8::SnapshotCreator* creator);
+  void Deserialize(v8::Local<v8::Context> context);
+  friend std::ostream& operator<<(std::ostream& o, const SerializeInfo& i);
 
   AliasedUint8Array root;
   AliasedFloat64Array milestones;

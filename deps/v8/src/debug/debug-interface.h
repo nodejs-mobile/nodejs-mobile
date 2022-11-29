@@ -5,12 +5,18 @@
 #ifndef V8_DEBUG_DEBUG_INTERFACE_H_
 #define V8_DEBUG_DEBUG_INTERFACE_H_
 
-#include "include/v8-inspector.h"
+#include <memory>
+
 #include "include/v8-util.h"
 #include "include/v8.h"
-
+#include "src/base/platform/time.h"
+#include "src/base/vector.h"
 #include "src/common/globals.h"
 #include "src/debug/interface-types.h"
+
+namespace v8_inspector {
+class V8Inspector;
+}  // namespace v8_inspector
 
 namespace v8 {
 
@@ -21,6 +27,7 @@ struct CoverageScript;
 struct TypeProfileEntry;
 struct TypeProfileScript;
 class Coverage;
+class DisableBreak;
 class PostponeInterruptsScope;
 class Script;
 class TypeProfile;
@@ -33,6 +40,16 @@ int GetContextId(Local<Context> context);
 
 void SetInspector(Isolate* isolate, v8_inspector::V8Inspector*);
 v8_inspector::V8Inspector* GetInspector(Isolate* isolate);
+
+// Returns the debug name for the function, which is supposed to be used
+// by the debugger and the developer tools. This can thus be different from
+// the name returned by the StackFrame::GetFunctionName() method. For example,
+// in case of WebAssembly, the debug name is WAT-compatible and thus always
+// preceeded by a dollar ('$').
+Local<String> GetFunctionDebugName(Local<StackFrame> frame);
+
+// Returns a debug string representation of the function.
+Local<String> GetFunctionDescription(Local<Function> function);
 
 // Schedule a debugger break to happen when function is called inside given
 // isolate.
@@ -50,18 +67,26 @@ V8_EXPORT_PRIVATE void ClearBreakOnNextFunctionCall(Isolate* isolate);
 MaybeLocal<Array> GetInternalProperties(Isolate* isolate, Local<Value> value);
 
 /**
- * Returns array of private fields specific to the value type. Result has
- * the following format: [<name>, <value>,...,<name>, <value>]. Result array
- * will be allocated in the current context.
+ * Returns through the out parameters names_out a vector of names
+ * in v8::String for private members, including fields, methods,
+ * accessors specific to the value type.
+ * The values are returned through the out parameter values_out in the
+ * corresponding indices. Private fields and methods are returned directly
+ * while accessors are returned as v8::debug::AccessorPair. Missing components
+ * in the accessor pairs are null.
+ * If an exception occurs, false is returned. Otherwise true is returned.
+ * Results will be allocated in the current context and handle scope.
  */
-V8_EXPORT_PRIVATE MaybeLocal<Array> GetPrivateFields(Local<Context> context,
-                                                     Local<Object> value);
+V8_EXPORT_PRIVATE bool GetPrivateMembers(Local<Context> context,
+                                         Local<Object> value,
+                                         std::vector<Local<Value>>* names_out,
+                                         std::vector<Local<Value>>* values_out);
 
 /**
  * Forwards to v8::Object::CreationContext, but with special handling for
  * JSGlobalProxy objects.
  */
-Local<Context> GetCreationContext(Local<Object> value);
+MaybeLocal<Context> GetCreationContext(Local<Object> value);
 
 enum ExceptionBreakState {
   NoBreakOnException = 0,
@@ -82,8 +107,8 @@ void SetBreakPointsActive(Isolate* isolate, bool is_active);
 
 enum StepAction {
   StepOut = 0,   // Step out of the current function.
-  StepNext = 1,  // Step to the next statement in the current function.
-  StepIn = 2     // Step into new functions invoked or the next statement
+  StepOver = 1,  // Step to the next statement in the current function.
+  StepInto = 2   // Step into new functions invoked or the next statement
                  // in the current function.
 };
 
@@ -91,7 +116,14 @@ void PrepareStep(Isolate* isolate, StepAction action);
 void ClearStepping(Isolate* isolate);
 V8_EXPORT_PRIVATE void BreakRightNow(Isolate* isolate);
 
-bool AllFramesOnStackAreBlackboxed(Isolate* isolate);
+// Use `SetTerminateOnResume` to indicate that an TerminateExecution interrupt
+// should be set shortly before resuming, i.e. shortly before returning into
+// the JavaScript stack frames on the stack. In contrast to setting the
+// interrupt with `RequestTerminateExecution` directly, this flag allows
+// the isolate to be entered for further JavaScript execution.
+V8_EXPORT_PRIVATE void SetTerminateOnResume(Isolate* isolate);
+
+bool CanBreakProgram(Isolate* isolate);
 
 class Script;
 
@@ -100,11 +132,7 @@ struct LiveEditResult {
     OK,
     COMPILE_ERROR,
     BLOCKED_BY_RUNNING_GENERATOR,
-    BLOCKED_BY_FUNCTION_ABOVE_BREAK_FRAME,
-    BLOCKED_BY_FUNCTION_BELOW_NON_DROPPABLE_FRAME,
-    BLOCKED_BY_ACTIVE_FUNCTION,
-    BLOCKED_BY_NEW_TARGET_IN_RESTART_FRAME,
-    FRAME_RESTART_IS_NOT_SUPPORTED
+    BLOCKED_BY_ACTIVE_FUNCTION
   };
   Status status = OK;
   bool stack_changed = false;
@@ -135,7 +163,6 @@ class V8_EXPORT_PRIVATE Script {
   MaybeLocal<String> SourceMappingURL() const;
   Maybe<int> ContextId() const;
   MaybeLocal<String> Source() const;
-  bool IsWasm() const;
   bool IsModule() const;
   bool GetPossibleBreakpoints(
       const debug::Location& start, const debug::Location& end,
@@ -147,26 +174,38 @@ class V8_EXPORT_PRIVATE Script {
                        LiveEditResult* result) const;
   bool SetBreakpoint(v8::Local<v8::String> condition, debug::Location* location,
                      BreakpointId* id) const;
+#if V8_ENABLE_WEBASSEMBLY
+  bool IsWasm() const;
+  void RemoveWasmBreakpoint(BreakpointId id);
+#endif  // V8_ENABLE_WEBASSEMBLY
   bool SetBreakpointOnScriptEntry(BreakpointId* id) const;
 };
 
+#if V8_ENABLE_WEBASSEMBLY
 // Specialization for wasm Scripts.
 class WasmScript : public Script {
  public:
   static WasmScript* Cast(Script* script);
 
+  enum class DebugSymbolsType { None, SourceMap, EmbeddedDWARF, ExternalDWARF };
+  DebugSymbolsType GetDebugSymbolType() const;
+  MemorySpan<const char> ExternalSymbolsURL() const;
   int NumFunctions() const;
   int NumImportedFunctions() const;
+  MemorySpan<const uint8_t> Bytecode() const;
 
   std::pair<int, int> GetFunctionRange(int function_index) const;
+  int GetContainingFunction(int byte_offset) const;
 
-  debug::WasmDisassembly DisassembleFunction(int function_index) const;
   uint32_t GetFunctionHash(int function_index);
-};
 
-V8_EXPORT_PRIVATE void GetLoadedScripts(
-    Isolate* isolate,
-    PersistentValueVector<Script>& scripts);  // NOLINT(runtime/references)
+  int CodeOffset() const;
+  int CodeLength() const;
+};
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+V8_EXPORT_PRIVATE void GetLoadedScripts(Isolate* isolate,
+                                        PersistentValueVector<Script>& scripts);
 
 MaybeLocal<UnboundScript> CompileInspectorScript(Isolate* isolate,
                                                  Local<String> source);
@@ -192,10 +231,19 @@ class DebugDelegate {
                                     const debug::Location& end) {
     return false;
   }
+  virtual bool ShouldBeSkipped(v8::Local<v8::debug::Script> script, int line,
+                               int column) {
+    return false;
+  }
 };
 
 V8_EXPORT_PRIVATE void SetDebugDelegate(Isolate* isolate,
                                         DebugDelegate* listener);
+
+#if V8_ENABLE_WEBASSEMBLY
+V8_EXPORT_PRIVATE void TierDownAllModulesPerIsolate(Isolate* isolate);
+V8_EXPORT_PRIVATE void TierUpAllModulesPerIsolate(Isolate* isolate);
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 class AsyncEventDelegate {
  public:
@@ -218,6 +266,7 @@ Local<Function> GetBuiltin(Isolate* isolate, Builtin builtin);
 V8_EXPORT_PRIVATE void SetConsoleDelegate(Isolate* isolate,
                                           ConsoleDelegate* delegate);
 
+V8_DEPRECATED("See http://crbug.com/v8/10566.")
 int GetStackFrameId(v8::Local<v8::StackFrame> frame);
 
 v8::Local<v8::StackTrace> GetDetailedStackTrace(Isolate* isolate,
@@ -388,6 +437,8 @@ class V8_EXPORT_PRIVATE ScopeIterator {
 
   ScopeIterator() = default;
   virtual ~ScopeIterator() = default;
+  ScopeIterator(const ScopeIterator&) = delete;
+  ScopeIterator& operator=(const ScopeIterator&) = delete;
 
   enum ScopeType {
     ScopeTypeGlobal = 0,
@@ -398,7 +449,8 @@ class V8_EXPORT_PRIVATE ScopeIterator {
     ScopeTypeBlock,
     ScopeTypeScript,
     ScopeTypeEval,
-    ScopeTypeModule
+    ScopeTypeModule,
+    ScopeTypeWasmExpressionStack
   };
 
   virtual bool Done() = 0;
@@ -413,9 +465,6 @@ class V8_EXPORT_PRIVATE ScopeIterator {
 
   virtual bool SetVariableValue(v8::Local<v8::String> name,
                                 v8::Local<v8::Value> value) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScopeIterator);
 };
 
 class V8_EXPORT_PRIVATE StackTraceIterator {
@@ -424,6 +473,8 @@ class V8_EXPORT_PRIVATE StackTraceIterator {
                                                     int index = 0);
   StackTraceIterator() = default;
   virtual ~StackTraceIterator() = default;
+  StackTraceIterator(const StackTraceIterator&) = delete;
+  StackTraceIterator& operator=(const StackTraceIterator&) = delete;
 
   virtual bool Done() const = 0;
   virtual void Advance() = 0;
@@ -437,12 +488,8 @@ class V8_EXPORT_PRIVATE StackTraceIterator {
   virtual v8::Local<v8::Function> GetFunction() const = 0;
   virtual std::unique_ptr<ScopeIterator> GetScopeIterator() const = 0;
 
-  virtual bool Restart() = 0;
   virtual v8::MaybeLocal<v8::Value> Evaluate(v8::Local<v8::String> source,
                                              bool throw_on_side_effect) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StackTraceIterator);
 };
 
 class QueryObjectPredicate {
@@ -468,9 +515,29 @@ enum class NativeAccessorType {
 
 int64_t GetNextRandomInt64(v8::Isolate* isolate);
 
+using RuntimeCallCounterCallback =
+    std::function<void(const char* name, int64_t count, base::TimeDelta time)>;
+void EnumerateRuntimeCallCounters(v8::Isolate* isolate,
+                                  RuntimeCallCounterCallback callback);
+
+MaybeLocal<Value> CallFunctionOn(Local<Context> context,
+                                 Local<Function> function, Local<Value> recv,
+                                 int argc, Local<Value> argv[],
+                                 bool throw_on_side_effect);
+
+enum class EvaluateGlobalMode {
+  kDefault,
+  kDisableBreaks,
+  kDisableBreaksAndThrowOnSideEffect
+};
+
 V8_EXPORT_PRIVATE v8::MaybeLocal<v8::Value> EvaluateGlobal(
-    v8::Isolate* isolate, v8::Local<v8::String> source,
-    bool throw_on_side_effect);
+    v8::Isolate* isolate, v8::Local<v8::String> source, EvaluateGlobalMode mode,
+    bool repl_mode = false);
+
+V8_EXPORT_PRIVATE v8::MaybeLocal<v8::Value> EvaluateGlobalForTesting(
+    v8::Isolate* isolate, v8::Local<v8::Script> function,
+    v8::debug::EvaluateGlobalMode mode, bool repl);
 
 int GetDebuggingId(v8::Local<v8::Function> function);
 
@@ -479,7 +546,11 @@ bool SetFunctionBreakpoint(v8::Local<v8::Function> function,
 
 v8::Platform* GetCurrentPlatform();
 
-class PostponeInterruptsScope {
+void ForceGarbageCollection(
+    v8::Isolate* isolate,
+    v8::EmbedderHeapTracer::EmbedderStackState embedder_stack_state);
+
+class V8_NODISCARD PostponeInterruptsScope {
  public:
   explicit PostponeInterruptsScope(v8::Isolate* isolate);
   ~PostponeInterruptsScope();
@@ -488,9 +559,21 @@ class PostponeInterruptsScope {
   std::unique_ptr<i::PostponeInterruptsScope> scope_;
 };
 
+class V8_NODISCARD DisableBreakScope {
+ public:
+  explicit DisableBreakScope(v8::Isolate* isolate);
+  ~DisableBreakScope();
+
+ private:
+  std::unique_ptr<i::DisableBreak> scope_;
+};
+
 class WeakMap : public v8::Object {
  public:
+  WeakMap() = delete;
   V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT v8::MaybeLocal<v8::Value> Get(
+      v8::Local<v8::Context> context, v8::Local<v8::Value> key);
+  V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT v8::Maybe<bool> Delete(
       v8::Local<v8::Context> context, v8::Local<v8::Value> key);
   V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT v8::MaybeLocal<WeakMap> Set(
       v8::Local<v8::Context> context, v8::Local<v8::Value> key,
@@ -498,9 +581,25 @@ class WeakMap : public v8::Object {
 
   V8_EXPORT_PRIVATE static Local<WeakMap> New(v8::Isolate* isolate);
   V8_INLINE static WeakMap* Cast(Value* obj);
+};
+
+/**
+ * Pairs of accessors.
+ *
+ * In the case of private accessors, getters and setters are either null or
+ * Functions.
+ */
+class V8_EXPORT_PRIVATE AccessorPair : public v8::Value {
+ public:
+  AccessorPair() = delete;
+  v8::Local<v8::Value> getter();
+  v8::Local<v8::Value> setter();
+
+  static bool IsAccessorPair(v8::Local<v8::Value> obj);
+  V8_INLINE static AccessorPair* Cast(v8::Value* obj);
 
  private:
-  WeakMap();
+  static void CheckCast(v8::Value* obj);
 };
 
 struct PropertyDescriptor {
@@ -515,14 +614,19 @@ struct PropertyDescriptor {
   v8::Local<v8::Value> set;
 };
 
-class PropertyIterator {
+class V8_EXPORT_PRIVATE PropertyIterator {
  public:
-  static std::unique_ptr<PropertyIterator> Create(v8::Local<v8::Object> object);
+  // Creating a PropertyIterator can potentially throw an exception.
+  // The returned std::unique_ptr is empty iff that happens.
+  V8_WARN_UNUSED_RESULT static std::unique_ptr<PropertyIterator> Create(
+      v8::Local<v8::Context> context, v8::Local<v8::Object> object);
 
   virtual ~PropertyIterator() = default;
 
   virtual bool Done() const = 0;
-  virtual void Advance() = 0;
+  // Returns |Nothing| should |Advance| throw an exception,
+  // |true| otherwise.
+  V8_WARN_UNUSED_RESULT virtual Maybe<bool> Advance() = 0;
 
   virtual v8::Local<v8::Name> name() const = 0;
 
@@ -535,6 +639,35 @@ class PropertyIterator {
   virtual bool is_own() = 0;
   virtual bool is_array_index() = 0;
 };
+
+#if V8_ENABLE_WEBASSEMBLY
+class V8_EXPORT_PRIVATE WasmValueObject : public v8::Object {
+ public:
+  WasmValueObject() = delete;
+  static bool IsWasmValueObject(v8::Local<v8::Value> obj);
+  static WasmValueObject* Cast(v8::Value* value) {
+#ifdef V8_ENABLE_CHECKS
+    CheckCast(value);
+#endif
+    return static_cast<WasmValueObject*>(value);
+  }
+
+  v8::Local<v8::String> type() const;
+
+ private:
+  static void CheckCast(v8::Value* obj);
+};
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+AccessorPair* AccessorPair::Cast(v8::Value* value) {
+#ifdef V8_ENABLE_CHECKS
+  CheckCast(value);
+#endif
+  return static_cast<AccessorPair*>(value);
+}
+
+MaybeLocal<Message> GetMessageFromPromise(Local<Promise> promise);
+
 }  // namespace debug
 }  // namespace v8
 

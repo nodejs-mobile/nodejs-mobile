@@ -7,15 +7,15 @@
 
 #include "include/v8.h"
 #include "src/common/globals.h"
+#include "src/logging/counters-scopes.h"
 
 namespace v8 {
 namespace internal {
 
-// Logging and profiling.  A StateTag represents a possible state of
-// the VM. The logger maintains a stack of these. Creating a VMState
-// object enters a state by pushing on the stack, and destroying a
-// VMState object leaves a state by popping the current state from the
-// stack.
+// Logging and profiling. A StateTag represents a possible state of the VM. The
+// logger maintains a stack of these. Creating a VMState object enters a state
+// by pushing on the stack, and destroying a VMState object leaves a state by
+// popping the current state from the stack.
 template <StateTag Tag>
 class VMState {
  public:
@@ -27,7 +27,7 @@ class VMState {
   StateTag previous_tag_;
 };
 
-class ExternalCallbackScope {
+class V8_NODISCARD ExternalCallbackScope {
  public:
   inline ExternalCallbackScope(Isolate* isolate, Address callback);
   inline ~ExternalCallbackScope();
@@ -47,6 +47,8 @@ class ExternalCallbackScope {
   Isolate* isolate_;
   Address callback_;
   ExternalCallbackScope* previous_scope_;
+  VMState<EXTERNAL> vm_state_;
+  PauseNestedTimedHistogramScope pause_timed_histogram_scope_;
 #ifdef USE_SIMULATOR
   Address scope_address_;
 #endif

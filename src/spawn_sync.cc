@@ -703,8 +703,7 @@ Local<Object> SyncProcessRunner::BuildResultObject() {
   if (term_signal_ > 0)
     js_result->Set(context, env()->signal_string(),
                    String::NewFromUtf8(env()->isolate(),
-                                       signo_string(term_signal_),
-                                       v8::NewStringType::kNormal)
+                                       signo_string(term_signal_))
                        .ToLocalChecked())
         .Check();
   else
@@ -810,6 +809,9 @@ Maybe<int> SyncProcessRunner::ParseOptions(Local<Value> js_value) {
       js_options->Get(context, env()->windows_hide_string()).ToLocalChecked();
   if (js_win_hide->BooleanValue(isolate))
     uv_process_options_.flags |= UV_PROCESS_WINDOWS_HIDE;
+
+  if (env()->hide_console_windows())
+    uv_process_options_.flags |= UV_PROCESS_WINDOWS_HIDE_CONSOLE;
 
   Local<Value> js_wva =
       js_options->Get(context, env()->windows_verbatim_arguments_string())

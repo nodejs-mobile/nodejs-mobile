@@ -1,8 +1,11 @@
-#include <memory>
-
 #include "node_main_instance.h"
+#include <memory>
+#include "debug_utils-inl.h"
+#include "node_external_reference.h"
 #include "node_internals.h"
 #include "node_options-inl.h"
+#include "node_snapshot_builder.h"
+#include "node_snapshotable.h"
 #include "node_v8_platform-inl.h"
 #include "util-inl.h"
 #if defined(LEAK_SANITIZER)
@@ -20,7 +23,6 @@ using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
 using v8::Locker;
-using v8::SealHandleScope;
 
 NodeMainInstance::NodeMainInstance(Isolate* isolate,
                                    uv_loop_t* event_loop,
@@ -33,8 +35,7 @@ NodeMainInstance::NodeMainInstance(Isolate* isolate,
       isolate_(isolate),
       platform_(platform),
       isolate_data_(nullptr),
-      owns_isolate_(false),
-      deserialize_mode_(false) {
+      snapshot_data_(nullptr) {
   isolate_data_ =
       std::make_unique<IsolateData>(isolate_, event_loop, platform, nullptr);
 
@@ -51,55 +52,64 @@ std::unique_ptr<NodeMainInstance> NodeMainInstance::Create(
       new NodeMainInstance(isolate, event_loop, platform, args, exec_args));
 }
 
-NodeMainInstance::NodeMainInstance(
-    Isolate::CreateParams* params,
-    uv_loop_t* event_loop,
-    MultiIsolatePlatform* platform,
-    const std::vector<std::string>& args,
-    const std::vector<std::string>& exec_args,
-    const std::vector<size_t>* per_isolate_data_indexes)
+NodeMainInstance::NodeMainInstance(const SnapshotData* snapshot_data,
+                                   uv_loop_t* event_loop,
+                                   MultiIsolatePlatform* platform,
+                                   const std::vector<std::string>& args,
+                                   const std::vector<std::string>& exec_args)
     : args_(args),
       exec_args_(exec_args),
       array_buffer_allocator_(ArrayBufferAllocator::Create()),
       isolate_(nullptr),
       platform_(platform),
-      isolate_data_(nullptr),
-      owns_isolate_(true) {
-  params->array_buffer_allocator = array_buffer_allocator_.get();
+      isolate_data_(),
+      isolate_params_(std::make_unique<Isolate::CreateParams>()),
+      snapshot_data_(snapshot_data) {
+  isolate_params_->array_buffer_allocator = array_buffer_allocator_.get();
+  if (snapshot_data != nullptr) {
+    SnapshotBuilder::InitializeIsolateParams(snapshot_data,
+                                             isolate_params_.get());
+  }
+
   isolate_ = Isolate::Allocate();
   CHECK_NOT_NULL(isolate_);
   // Register the isolate on the platform before the isolate gets initialized,
   // so that the isolate can access the platform during initialization.
   platform->RegisterIsolate(isolate_, event_loop);
-  SetIsolateCreateParamsForNode(params);
-  Isolate::Initialize(isolate_, *params);
+  SetIsolateCreateParamsForNode(isolate_params_.get());
+  Isolate::Initialize(isolate_, *isolate_params_);
 
-  deserialize_mode_ = per_isolate_data_indexes != nullptr;
   // If the indexes are not nullptr, we are not deserializing
-  CHECK_IMPLIES(deserialize_mode_, params->external_references != nullptr);
-  isolate_data_ = std::make_unique<IsolateData>(isolate_,
-                                                event_loop,
-                                                platform,
-                                                array_buffer_allocator_.get(),
-                                                per_isolate_data_indexes);
+  isolate_data_ = std::make_unique<IsolateData>(
+      isolate_,
+      event_loop,
+      platform,
+      array_buffer_allocator_.get(),
+      snapshot_data == nullptr ? nullptr
+                               : &(snapshot_data->isolate_data_indices));
   IsolateSettings s;
   SetIsolateMiscHandlers(isolate_, s);
-  if (!deserialize_mode_) {
+  if (snapshot_data == nullptr) {
     // If in deserialize mode, delay until after the deserialization is
     // complete.
     SetIsolateErrorHandlers(isolate_, s);
   }
+  isolate_data_->max_young_gen_size =
+      isolate_params_->constraints.max_young_generation_size_in_bytes();
 }
 
 void NodeMainInstance::Dispose() {
-  CHECK(!owns_isolate_);
+  // This should only be called on a main instance that does not own its
+  // isolate.
+  CHECK_NULL(isolate_params_);
   platform_->DrainTasks(isolate_);
 }
 
 NodeMainInstance::~NodeMainInstance() {
-  if (!owns_isolate_) {
+  if (isolate_params_ == nullptr) {
     return;
   }
+  // This should only be done on a main instance that owns its isolate.
   platform_->UnregisterIsolate(isolate_);
   isolate_->Dispose();
 }
@@ -112,42 +122,18 @@ int NodeMainInstance::Run() {
   int exit_code = 0;
   DeleteFnPtr<Environment, FreeEnvironment> env =
       CreateMainEnvironment(&exit_code);
-
   CHECK_NOT_NULL(env);
+
   Context::Scope context_scope(env->context());
+  Run(&exit_code, env.get());
+  return exit_code;
+}
 
-  if (exit_code == 0) {
-    LoadEnvironment(env.get());
+void NodeMainInstance::Run(int* exit_code, Environment* env) {
+  if (*exit_code == 0) {
+    LoadEnvironment(env, StartExecutionCallback{});
 
-    env->set_trace_sync_io(env->options()->trace_sync_io);
-
-    {
-      SealHandleScope seal(isolate_);
-      bool more;
-      env->performance_state()->Mark(
-          node::performance::NODE_PERFORMANCE_MILESTONE_LOOP_START);
-      do {
-        uv_run(env->event_loop(), UV_RUN_DEFAULT);
-
-        per_process::v8_platform.DrainVMTasks(isolate_);
-
-        more = uv_loop_alive(env->event_loop());
-        if (more && !env->is_stopping()) continue;
-
-        if (!uv_loop_alive(env->event_loop())) {
-          EmitBeforeExit(env.get());
-        }
-
-        // Emit `beforeExit` if the loop became alive either after emitting
-        // event, or after running some callbacks.
-        more = uv_loop_alive(env->event_loop());
-      } while (more == true && !env->is_stopping());
-      env->performance_state()->Mark(
-          node::performance::NODE_PERFORMANCE_MILESTONE_LOOP_EXIT);
-    }
-
-    env->set_trace_sync_io(false);
-    exit_code = EmitExit(env.get());
+    *exit_code = SpinEventLoop(env).FromMaybe(1);
   }
 
   ResetStdio();
@@ -168,8 +154,6 @@ int NodeMainInstance::Run() {
 #if defined(LEAK_SANITIZER)
   __lsan_do_leak_check();
 #endif
-
-  return exit_code;
 }
 
 DeleteFnPtr<Environment, FreeEnvironment>
@@ -185,31 +169,47 @@ NodeMainInstance::CreateMainEnvironment(int* exit_code) {
   }
 
   Local<Context> context;
-  if (deserialize_mode_) {
-    context =
-        Context::FromSnapshot(isolate_, kNodeContextIndex).ToLocalChecked();
-    InitializeContextRuntime(context);
+  DeleteFnPtr<Environment, FreeEnvironment> env;
+
+  if (snapshot_data_ != nullptr) {
+    env.reset(new Environment(isolate_data_.get(),
+                              isolate_,
+                              args_,
+                              exec_args_,
+                              &(snapshot_data_->env_info),
+                              EnvironmentFlags::kDefaultFlags,
+                              {}));
+    context = Context::FromSnapshot(isolate_,
+                                    kNodeContextIndex,
+                                    {DeserializeNodeInternalFields, env.get()})
+                  .ToLocalChecked();
+
+    CHECK(!context.IsEmpty());
+    Context::Scope context_scope(context);
+    CHECK(InitializeContextRuntime(context).IsJust());
     SetIsolateErrorHandlers(isolate_, {});
+    env->InitializeMainContext(context, &(snapshot_data_->env_info));
+#if HAVE_INSPECTOR
+    env->InitializeInspector({});
+#endif
+    env->DoneBootstrapping();
   } else {
     context = NewContext(isolate_);
-  }
-
-  CHECK(!context.IsEmpty());
-  Context::Scope context_scope(context);
-
-  DeleteFnPtr<Environment, FreeEnvironment> env { CreateEnvironment(
-      isolate_data_.get(),
-      context,
-      args_,
-      exec_args_,
-      EnvironmentFlags::kDefaultFlags) };
-
-  if (*exit_code != 0) {
-    return env;
-  }
-
-  if (env == nullptr) {
-    *exit_code = 1;
+    CHECK(!context.IsEmpty());
+    Context::Scope context_scope(context);
+    env.reset(new Environment(isolate_data_.get(),
+                              context,
+                              args_,
+                              exec_args_,
+                              nullptr,
+                              EnvironmentFlags::kDefaultFlags,
+                              {}));
+#if HAVE_INSPECTOR
+    env->InitializeInspector({});
+#endif
+    if (env->RunBootstrapping().IsEmpty()) {
+      return nullptr;
+    }
   }
 
   return env;

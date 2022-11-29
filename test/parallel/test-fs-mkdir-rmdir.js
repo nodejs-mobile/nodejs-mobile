@@ -25,13 +25,11 @@ fs.rmdirSync(d);
 assert(!fs.existsSync(d));
 
 // Similarly test the Async version
-fs.mkdir(d, 0o666, common.mustCall(function(err) {
-  assert.ifError(err);
-
+fs.mkdir(d, 0o666, common.mustSucceed(() => {
   fs.mkdir(d, 0o666, common.mustCall(function(err) {
     assert.strictEqual(this, undefined);
     assert.ok(err, 'got no error');
-    assert.ok(/^EEXIST/.test(err.message), 'got no EEXIST message');
+    assert.match(err.message, /^EEXIST/);
     assert.strictEqual(err.code, 'EEXIST');
     assert.strictEqual(err.path, d);
 

@@ -1,4 +1,5 @@
 #include "env-inl.h"
+#include "node_external_reference.h"
 #include "node_internals.h"
 #include "util-inl.h"
 
@@ -20,7 +21,6 @@ using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
 using v8::MaybeLocal;
-using v8::NewStringType;
 using v8::Object;
 using v8::String;
 using v8::TryCatch;
@@ -34,23 +34,25 @@ bool linux_at_secure = false;
 namespace credentials {
 
 // Look up environment variable unless running as setuid root.
-bool SafeGetenv(const char* key, std::string* text, Environment* env) {
+bool SafeGetenv(const char* key,
+                std::string* text,
+                std::shared_ptr<KVStore> env_vars,
+                v8::Isolate* isolate) {
 #if !defined(__CloudABI__) && !defined(_WIN32)
   if (per_process::linux_at_secure || getuid() != geteuid() ||
       getgid() != getegid())
     goto fail;
 #endif
 
-  if (env != nullptr) {
-    HandleScope handle_scope(env->isolate());
-    TryCatch ignore_errors(env->isolate());
-    MaybeLocal<String> maybe_value = env->env_vars()->Get(
-        env->isolate(),
-        String::NewFromUtf8(env->isolate(), key, NewStringType::kNormal)
-            .ToLocalChecked());
+  if (env_vars != nullptr) {
+    DCHECK_NOT_NULL(isolate);
+    HandleScope handle_scope(isolate);
+    TryCatch ignore_errors(isolate);
+    MaybeLocal<String> maybe_value = env_vars->Get(
+        isolate, String::NewFromUtf8(isolate, key).ToLocalChecked());
     Local<String> value;
     if (!maybe_value.ToLocal(&value)) goto fail;
-    String::Utf8Value utf8_value(env->isolate(), value);
+    String::Utf8Value utf8_value(isolate, value);
     if (*utf8_value == nullptr) goto fail;
     *text = std::string(*utf8_value, utf8_value.length());
     return true;
@@ -87,7 +89,7 @@ static void SafeGetenv(const FunctionCallbackInfo<Value>& args) {
   Isolate* isolate = env->isolate();
   Utf8Value strenvtag(isolate, args[0]);
   std::string text;
-  if (!SafeGetenv(*strenvtag, &text, env)) return;
+  if (!SafeGetenv(*strenvtag, &text, env->env_vars(), isolate)) return;
   Local<Value> result =
       ToV8Value(isolate->GetCurrentContext(), text).ToLocalChecked();
   args.GetReturnValue().Set(result);
@@ -405,6 +407,25 @@ static void InitGroups(const FunctionCallbackInfo<Value>& args) {
 
 #endif  // NODE_IMPLEMENTS_POSIX_CREDENTIALS
 
+void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(SafeGetenv);
+
+#ifdef NODE_IMPLEMENTS_POSIX_CREDENTIALS
+  registry->Register(GetUid);
+  registry->Register(GetEUid);
+  registry->Register(GetGid);
+  registry->Register(GetEGid);
+  registry->Register(GetGroups);
+
+  registry->Register(InitGroups);
+  registry->Register(SetEGid);
+  registry->Register(SetEUid);
+  registry->Register(SetGid);
+  registry->Register(SetUid);
+  registry->Register(SetGroups);
+#endif  // NODE_IMPLEMENTS_POSIX_CREDENTIALS
+}
+
 static void Initialize(Local<Object> target,
                        Local<Value> unused,
                        Local<Context> context,
@@ -439,3 +460,5 @@ static void Initialize(Local<Object> target,
 }  // namespace node
 
 NODE_MODULE_CONTEXT_AWARE_INTERNAL(credentials, node::credentials::Initialize)
+NODE_MODULE_EXTERNAL_REFERENCE(credentials,
+                               node::credentials::RegisterExternalReferences)

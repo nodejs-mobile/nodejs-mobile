@@ -6,6 +6,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(V8_OS_STARBOARD)
+#include "starboard/system.h"
+#endif  //  V8_OS_STARBOARD
 
 #include <algorithm>
 #include <new>
@@ -14,6 +17,7 @@
 #include "src/base/macros.h"
 #include "src/base/platform/mutex.h"
 #include "src/base/platform/time.h"
+#include "src/base/platform/wrappers.h"
 
 namespace v8 {
 namespace base {
@@ -51,20 +55,22 @@ RandomNumberGenerator::RandomNumberGenerator() {
   result = rand_s(&second_half);
   DCHECK_EQ(0, result);
   SetSeed((static_cast<int64_t>(first_half) << 32) + second_half);
-#elif V8_OS_MACOSX
+#elif V8_OS_MACOSX || V8_OS_FREEBSD || V8_OS_OPENBSD
   // Despite its prefix suggests it is not RC4 algorithm anymore.
   // It always succeeds while having decent performance and
   // no file descriptor involved.
   int64_t seed;
   arc4random_buf(&seed, sizeof(seed));
   SetSeed(seed);
+#elif V8_OS_STARBOARD
+  SetSeed(SbSystemGetRandomUInt64());
 #else
   // Gather entropy from /dev/urandom if available.
-  FILE* fp = fopen("/dev/urandom", "rb");
+  FILE* fp = base::Fopen("/dev/urandom", "rb");
   if (fp != nullptr) {
     int64_t seed;
     size_t n = fread(&seed, sizeof(seed), 1, fp);
-    fclose(fp);
+    base::Fclose(fp);
     if (n == 1) {
       SetSeed(seed);
       return;

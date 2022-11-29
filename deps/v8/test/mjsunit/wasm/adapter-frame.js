@@ -4,7 +4,7 @@
 
 // Flags: --expose-wasm
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 const JS = false;  // for testing the tests.
 const WRONG1 = 0x0DEDFACE;
@@ -28,7 +28,7 @@ function makeSelect(type, args, which) {
   var params = [];
   for (var i = 0; i < args; i++) params.push(type);
   builder.addFunction("select", makeSig(params, [type]))
-    .addBody([kExprGetLocal, which])
+    .addBody([kExprLocalGet, which])
     .exportFunc();
 
   return builder.instantiate().exports.select;

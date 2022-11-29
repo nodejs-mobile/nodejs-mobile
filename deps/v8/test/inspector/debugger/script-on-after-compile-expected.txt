@@ -4,6 +4,7 @@ scriptParsed
     scriptSource : function foo1(){}//# sourceURL=oneline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -13,6 +14,7 @@ scriptParsed
     isModule : false
     length : 42
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -23,6 +25,7 @@ scriptParsed
     scriptSource : function foo2(){}//# sourceURL=oneline-without-nl.js
 }
 {
+    embedderName : 
     endColumn : 52
     endLine : 0
     executionContextId : <executionContextId>
@@ -32,6 +35,7 @@ scriptParsed
     isModule : false
     length : 52
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -42,6 +46,7 @@ scriptParsed
     scriptSource : function foo3(){}<nl>//# sourceURL=twoline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -51,6 +56,7 @@ scriptParsed
     isModule : false
     length : 43
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -61,6 +67,7 @@ scriptParsed
     scriptSource : function foo4(){}<nl><nl>//# sourceURL=threeline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -70,6 +77,7 @@ scriptParsed
     isModule : false
     length : 46
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -80,6 +88,7 @@ scriptParsed
     scriptSource : function foo5(){}//# sourceMappingURL=oneline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -89,6 +98,7 @@ scriptParsed
     isModule : false
     length : 50
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : oneline-map
     startColumn : 0
     startLine : 0
@@ -99,6 +109,7 @@ scriptParsed
     scriptSource : function foo6(){}//# sourceMappingURL=oneline-without-nl-map
 }
 {
+    embedderName : 
     endColumn : 60
     endLine : 0
     executionContextId : <executionContextId>
@@ -108,6 +119,7 @@ scriptParsed
     isModule : false
     length : 60
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : oneline-without-nl-map
     startColumn : 0
     startLine : 0
@@ -118,6 +130,7 @@ scriptParsed
     scriptSource : function foo7(){}<nl>//# sourceMappingURL=twoline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -127,6 +140,7 @@ scriptParsed
     isModule : false
     length : 51
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : twoline-map
     startColumn : 0
     startLine : 0
@@ -137,6 +151,7 @@ scriptParsed
     scriptSource : function foo8(){}<nl><nl>//# sourceMappingURL=threeline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -146,6 +161,7 @@ scriptParsed
     isModule : false
     length : 54
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : threeline-map
     startColumn : 0
     startLine : 0
@@ -156,6 +172,7 @@ scriptParsed
     scriptSource : function foo9(){}//# sourceMappingURL=source-mapping-url-map<nl>//# sourceURL=source-url.js
 }
 {
+    embedderName : 
     endColumn : 27
     endLine : 1
     executionContextId : <executionContextId>
@@ -165,6 +182,7 @@ scriptParsed
     isModule : false
     length : 88
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : source-mapping-url-map
     startColumn : 0
     startLine : 0
@@ -175,6 +193,7 @@ scriptParsed
     scriptSource : function foo10(){}//# sourceURL=source-url.js<nl>//# sourceMappingURL=source-mapping-url-map
 }
 {
+    embedderName : 
     endColumn : 43
     endLine : 1
     executionContextId : <executionContextId>
@@ -184,6 +203,7 @@ scriptParsed
     isModule : false
     length : 89
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : source-mapping-url-map
     startColumn : 0
     startLine : 0
@@ -194,6 +214,7 @@ scriptParsed
     scriptSource : function foo11(){}<nl>//# sourceURL=end1.js
 }
 {
+    embedderName : 
     endColumn : 21
     endLine : 1
     executionContextId : <executionContextId>
@@ -203,6 +224,7 @@ scriptParsed
     isModule : false
     length : 40
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -213,6 +235,7 @@ scriptParsed
     scriptSource : function foo12(){}<nl>//# sourceURL=end2.js 
 }
 {
+    embedderName : 
     endColumn : 22
     endLine : 1
     executionContextId : <executionContextId>
@@ -222,6 +245,7 @@ scriptParsed
     isModule : false
     length : 41
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -232,6 +256,7 @@ scriptParsed
     scriptSource : function foo13(){}
 }
 {
+    embedderName : 
     endColumn : 18
     endLine : 0
     executionContextId : <executionContextId>
@@ -241,6 +266,7 @@ scriptParsed
     isModule : false
     length : 18
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -251,6 +277,7 @@ scriptParsed
     scriptSource : function foo15(){}; eval("function foo14(){}//# sourceURL=eval.js")//# sourceURL=eval-wrapper.js
 }
 {
+    embedderName : 
     endColumn : 96
     endLine : 0
     executionContextId : <executionContextId>
@@ -260,6 +287,7 @@ scriptParsed
     isModule : false
     length : 96
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -270,6 +298,7 @@ scriptParsed
     scriptSource : function foo14(){}//# sourceURL=eval.js
 }
 {
+    embedderName : 
     endColumn : 39
     endLine : 0
     executionContextId : <executionContextId>
@@ -279,6 +308,7 @@ scriptParsed
     isModule : false
     length : 39
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -289,6 +319,7 @@ scriptParsed
     scriptSource : function foo16(){}<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -298,6 +329,7 @@ scriptParsed
     isModule : false
     length : 19
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -308,6 +340,7 @@ scriptParsed
     scriptSource : function foo17(){}<nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -317,6 +350,7 @@ scriptParsed
     isModule : false
     length : 20
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -327,6 +361,7 @@ scriptParsed
     scriptSource : function foo18(){}<nl><nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -336,6 +371,7 @@ scriptParsed
     isModule : false
     length : 21
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -346,6 +382,7 @@ scriptParsed
     scriptSource : function foo19(){}<nl><nl><nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 4
     executionContextId : <executionContextId>
@@ -355,6 +392,7 @@ scriptParsed
     isModule : false
     length : 22
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -365,6 +403,7 @@ scriptParsed
     scriptSource : function foo1(){}//# sourceURL=oneline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -374,6 +413,7 @@ scriptParsed
     isModule : false
     length : 42
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -384,6 +424,7 @@ scriptParsed
     scriptSource : function foo2(){}//# sourceURL=oneline-without-nl.js
 }
 {
+    embedderName : 
     endColumn : 52
     endLine : 0
     executionContextId : <executionContextId>
@@ -393,6 +434,7 @@ scriptParsed
     isModule : false
     length : 52
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -403,6 +445,7 @@ scriptParsed
     scriptSource : function foo3(){}<nl>//# sourceURL=twoline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -412,6 +455,7 @@ scriptParsed
     isModule : false
     length : 43
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -422,6 +466,7 @@ scriptParsed
     scriptSource : function foo4(){}<nl><nl>//# sourceURL=threeline.js<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -431,6 +476,7 @@ scriptParsed
     isModule : false
     length : 46
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -441,6 +487,7 @@ scriptParsed
     scriptSource : function foo5(){}//# sourceMappingURL=oneline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -450,6 +497,7 @@ scriptParsed
     isModule : false
     length : 50
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : oneline-map
     startColumn : 0
     startLine : 0
@@ -460,6 +508,7 @@ scriptParsed
     scriptSource : function foo6(){}//# sourceMappingURL=oneline-without-nl-map
 }
 {
+    embedderName : 
     endColumn : 60
     endLine : 0
     executionContextId : <executionContextId>
@@ -469,6 +518,7 @@ scriptParsed
     isModule : false
     length : 60
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : oneline-without-nl-map
     startColumn : 0
     startLine : 0
@@ -479,6 +529,7 @@ scriptParsed
     scriptSource : function foo7(){}<nl>//# sourceMappingURL=twoline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -488,6 +539,7 @@ scriptParsed
     isModule : false
     length : 51
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : twoline-map
     startColumn : 0
     startLine : 0
@@ -498,6 +550,7 @@ scriptParsed
     scriptSource : function foo8(){}<nl><nl>//# sourceMappingURL=threeline-map<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -507,6 +560,7 @@ scriptParsed
     isModule : false
     length : 54
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : threeline-map
     startColumn : 0
     startLine : 0
@@ -517,6 +571,7 @@ scriptParsed
     scriptSource : function foo9(){}//# sourceMappingURL=source-mapping-url-map<nl>//# sourceURL=source-url.js
 }
 {
+    embedderName : 
     endColumn : 27
     endLine : 1
     executionContextId : <executionContextId>
@@ -526,6 +581,7 @@ scriptParsed
     isModule : false
     length : 88
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : source-mapping-url-map
     startColumn : 0
     startLine : 0
@@ -536,6 +592,7 @@ scriptParsed
     scriptSource : function foo10(){}//# sourceURL=source-url.js<nl>//# sourceMappingURL=source-mapping-url-map
 }
 {
+    embedderName : 
     endColumn : 43
     endLine : 1
     executionContextId : <executionContextId>
@@ -545,6 +602,7 @@ scriptParsed
     isModule : false
     length : 89
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : source-mapping-url-map
     startColumn : 0
     startLine : 0
@@ -555,6 +613,7 @@ scriptParsed
     scriptSource : function foo11(){}<nl>//# sourceURL=end1.js
 }
 {
+    embedderName : 
     endColumn : 21
     endLine : 1
     executionContextId : <executionContextId>
@@ -564,6 +623,7 @@ scriptParsed
     isModule : false
     length : 40
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -574,6 +634,7 @@ scriptParsed
     scriptSource : function foo12(){}<nl>//# sourceURL=end2.js 
 }
 {
+    embedderName : 
     endColumn : 22
     endLine : 1
     executionContextId : <executionContextId>
@@ -583,6 +644,7 @@ scriptParsed
     isModule : false
     length : 41
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -593,6 +655,7 @@ scriptParsed
     scriptSource : function foo13(){}
 }
 {
+    embedderName : 
     endColumn : 18
     endLine : 0
     executionContextId : <executionContextId>
@@ -602,6 +665,7 @@ scriptParsed
     isModule : false
     length : 18
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -612,6 +676,7 @@ scriptParsed
     scriptSource : function foo15(){}; eval("function foo14(){}//# sourceURL=eval.js")//# sourceURL=eval-wrapper.js
 }
 {
+    embedderName : 
     endColumn : 96
     endLine : 0
     executionContextId : <executionContextId>
@@ -621,6 +686,7 @@ scriptParsed
     isModule : false
     length : 96
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -631,6 +697,7 @@ scriptParsed
     scriptSource : function foo14(){}//# sourceURL=eval.js
 }
 {
+    embedderName : 
     endColumn : 39
     endLine : 0
     executionContextId : <executionContextId>
@@ -640,6 +707,7 @@ scriptParsed
     isModule : false
     length : 39
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     stackTrace : {
         callFrames : [
@@ -661,6 +729,7 @@ scriptFailedToParse
     scriptSource : {a:2:<nl>//# sourceURL=http://a.js
 }
 {
+    embedderName : 
     endColumn : 25
     endLine : 1
     executionContextId : <executionContextId>
@@ -669,6 +738,7 @@ scriptFailedToParse
     isModule : false
     length : 31
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -679,6 +749,7 @@ scriptFailedToParse
     scriptSource : }//# sourceURL=failed.js<nl>//# sourceMappingURL=failed-map
 }
 {
+    embedderName : 
     endColumn : 31
     endLine : 1
     executionContextId : <executionContextId>
@@ -687,6 +758,7 @@ scriptFailedToParse
     isModule : false
     length : 56
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : failed-map
     startColumn : 0
     startLine : 0
@@ -697,6 +769,7 @@ scriptParsed
     scriptSource : function foo16(){}<nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 1
     executionContextId : <executionContextId>
@@ -706,6 +779,7 @@ scriptParsed
     isModule : false
     length : 19
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -716,6 +790,7 @@ scriptParsed
     scriptSource : function foo17(){}<nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 2
     executionContextId : <executionContextId>
@@ -725,6 +800,7 @@ scriptParsed
     isModule : false
     length : 20
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -735,6 +811,7 @@ scriptParsed
     scriptSource : function foo18(){}<nl><nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 3
     executionContextId : <executionContextId>
@@ -744,6 +821,7 @@ scriptParsed
     isModule : false
     length : 21
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0
@@ -754,6 +832,7 @@ scriptParsed
     scriptSource : function foo19(){}<nl><nl><nl><nl>
 }
 {
+    embedderName : 
     endColumn : 0
     endLine : 4
     executionContextId : <executionContextId>
@@ -763,6 +842,7 @@ scriptParsed
     isModule : false
     length : 22
     scriptId : <scriptId>
+    scriptLanguage : JavaScript
     sourceMapURL : 
     startColumn : 0
     startLine : 0

@@ -4,9 +4,9 @@
 
 #include "src/compiler/backend/instruction-scheduler.h"
 
-#include "src/base/adapters.h"
+#include "src/base/iterator.h"
+#include "src/base/optional.h"
 #include "src/base/utils/random-number-generator.h"
-#include "src/execution/isolate.h"
 
 namespace v8 {
 namespace internal {
@@ -50,7 +50,7 @@ InstructionScheduler::StressSchedulerQueue::PopBestCandidate(int cycle) {
   DCHECK(!IsEmpty());
   // Choose a random element from the ready list.
   auto candidate = nodes_.begin();
-  std::advance(candidate, isolate()->random_number_generator()->NextInt(
+  std::advance(candidate, random_number_generator()->NextInt(
                               static_cast<int>(nodes_.size())));
   ScheduleGraphNode* result = *candidate;
   nodes_.erase(candidate);
@@ -81,7 +81,12 @@ InstructionScheduler::InstructionScheduler(Zone* zone,
       pending_loads_(zone),
       last_live_in_reg_marker_(nullptr),
       last_deopt_or_trap_(nullptr),
-      operands_map_(zone) {}
+      operands_map_(zone) {
+  if (FLAG_turbo_stress_instruction_scheduling) {
+    random_number_generator_ =
+        base::Optional<base::RandomNumberGenerator>(FLAG_random_seed);
+  }
+}
 
 void InstructionScheduler::StartBlock(RpoNumber rpo) {
   DCHECK(graph_.empty());
@@ -95,21 +100,15 @@ void InstructionScheduler::StartBlock(RpoNumber rpo) {
 
 void InstructionScheduler::EndBlock(RpoNumber rpo) {
   if (FLAG_turbo_stress_instruction_scheduling) {
-    ScheduleBlock<StressSchedulerQueue>();
+    Schedule<StressSchedulerQueue>();
   } else {
-    ScheduleBlock<CriticalPathFirstQueue>();
+    Schedule<CriticalPathFirstQueue>();
   }
   sequence()->EndBlock(rpo);
-  graph_.clear();
-  last_side_effect_instr_ = nullptr;
-  pending_loads_.clear();
-  last_live_in_reg_marker_ = nullptr;
-  last_deopt_or_trap_ = nullptr;
-  operands_map_.clear();
 }
 
 void InstructionScheduler::AddTerminator(Instruction* instr) {
-  ScheduleGraphNode* new_node = new (zone()) ScheduleGraphNode(zone(), instr);
+  ScheduleGraphNode* new_node = zone()->New<ScheduleGraphNode>(zone(), instr);
   // Make sure that basic block terminators are not moved by adding them
   // as successor of every instruction.
   for (ScheduleGraphNode* node : graph_) {
@@ -119,11 +118,20 @@ void InstructionScheduler::AddTerminator(Instruction* instr) {
 }
 
 void InstructionScheduler::AddInstruction(Instruction* instr) {
-  ScheduleGraphNode* new_node = new (zone()) ScheduleGraphNode(zone(), instr);
+  if (IsBarrier(instr)) {
+    if (FLAG_turbo_stress_instruction_scheduling) {
+      Schedule<StressSchedulerQueue>();
+    } else {
+      Schedule<CriticalPathFirstQueue>();
+    }
+    sequence()->AddInstruction(instr);
+    return;
+  }
+
+  ScheduleGraphNode* new_node = zone()->New<ScheduleGraphNode>(zone(), instr);
 
   // We should not have branches in the middle of a block.
   DCHECK_NE(instr->flags_mode(), kFlags_branch);
-  DCHECK_NE(instr->flags_mode(), kFlags_branch_and_poison);
 
   if (IsFixedRegisterParameter(instr)) {
     if (last_live_in_reg_marker_ != nullptr) {
@@ -197,7 +205,7 @@ void InstructionScheduler::AddInstruction(Instruction* instr) {
 }
 
 template <typename QueueType>
-void InstructionScheduler::ScheduleBlock() {
+void InstructionScheduler::Schedule() {
   QueueType ready_list(this);
 
   // Compute total latencies so that we can schedule the critical path first.
@@ -231,11 +239,20 @@ void InstructionScheduler::ScheduleBlock() {
 
     cycle++;
   }
+
+  // Reset own state.
+  graph_.clear();
+  operands_map_.clear();
+  pending_loads_.clear();
+  last_deopt_or_trap_ = nullptr;
+  last_live_in_reg_marker_ = nullptr;
+  last_side_effect_instr_ = nullptr;
 }
 
 int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
   switch (instr->arch_opcode()) {
     case kArchNop:
+    case kArchStackCheckOffset:
     case kArchFramePointer:
     case kArchParentFramePointer:
     case kArchStackSlot:  // Despite its name this opcode will produce a
@@ -245,7 +262,6 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
     case kArchDeoptimize:
     case kArchJmp:
     case kArchBinarySearchSwitch:
-    case kArchLookupSwitch:
     case kArchRet:
     case kArchTableSwitch:
     case kArchThrowTerminator:
@@ -281,27 +297,35 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
       // effects.
       return kIsLoadOperation;
 
-    case kArchWordPoisonOnSpeculation:
-      // While poisoning operations have no side effect, they must not be
-      // reordered relative to branches.
+    case kArchPrepareCallCFunction:
+    case kArchPrepareTailCall:
+    case kArchTailCallCodeObject:
+    case kArchTailCallAddress:
+#if V8_ENABLE_WEBASSEMBLY
+    case kArchTailCallWasm:
+#endif  // V8_ENABLE_WEBASSEMBLY
+    case kArchAbortCSAAssert:
       return kHasSideEffect;
 
-    case kArchPrepareCallCFunction:
+    case kArchDebugBreak:
+      return kIsBarrier;
+
     case kArchSaveCallerRegisters:
     case kArchRestoreCallerRegisters:
-    case kArchPrepareTailCall:
+      return kIsBarrier;
+
     case kArchCallCFunction:
     case kArchCallCodeObject:
     case kArchCallJSFunction:
+#if V8_ENABLE_WEBASSEMBLY
     case kArchCallWasmFunction:
+#endif  // V8_ENABLE_WEBASSEMBLY
     case kArchCallBuiltinPointer:
-    case kArchTailCallCodeObjectFromJSFunction:
-    case kArchTailCallCodeObject:
-    case kArchTailCallAddress:
-    case kArchTailCallWasm:
-    case kArchAbortCSAAssert:
-    case kArchDebugBreak:
-      return kHasSideEffect;
+      // Calls can cause GC and GC may relocate objects. If a pure instruction
+      // operates on a tagged pointer that was cast to a word then it may be
+      // incorrect to move the instruction across the call. Hence we mark all
+      // (non-tail-)calls as barriers.
+      return kIsBarrier;
 
     case kArchStoreWithWriteBarrier:
       return kHasSideEffect;

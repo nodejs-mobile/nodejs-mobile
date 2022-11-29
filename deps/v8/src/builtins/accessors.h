@@ -6,6 +6,7 @@
 #define V8_BUILTINS_ACCESSORS_H_
 
 #include "include/v8.h"
+#include "src/base/bit-field.h"
 #include "src/common/globals.h"
 #include "src/objects/property-details.h"
 #include "src/utils/allocation.h"
@@ -99,8 +100,8 @@ class Accessors : public AllStatic {
                                       FieldIndex* field_index);
 
   static MaybeHandle<Object> ReplaceAccessorWithDataProperty(
-      Handle<Object> receiver, Handle<JSObject> holder, Handle<Name> name,
-      Handle<Object> value);
+      Isolate* isolate, Handle<Object> receiver, Handle<JSObject> holder,
+      Handle<Name> name, Handle<Object> value);
 
   // Create an AccessorInfo. The setter is optional (can be nullptr).
   //

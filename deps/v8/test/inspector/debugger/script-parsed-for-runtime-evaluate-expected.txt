@@ -3,6 +3,7 @@ Runtime.evaluate with valid expression
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 29
         endLine : 0
         executionContextId : <executionContextId>
@@ -12,6 +13,7 @@ Runtime.evaluate with valid expression
         isModule : false
         length : 29
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -22,6 +24,7 @@ Runtime.evaluate with syntax error
 {
     method : Debugger.scriptFailedToParse
     params : {
+        embedderName : 
         endColumn : 39
         endLine : 0
         executionContextId : <executionContextId>
@@ -30,6 +33,7 @@ Runtime.evaluate with syntax error
         isModule : false
         length : 39
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -40,6 +44,7 @@ Runtime.callFunctionOn with valid functionDeclaration
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 18
         endLine : 0
         executionContextId : <executionContextId>
@@ -49,6 +54,7 @@ Runtime.callFunctionOn with valid functionDeclaration
         isModule : false
         length : 18
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -59,6 +65,7 @@ Runtime.callFunctionOn with syntax error
 {
     method : Debugger.scriptFailedToParse
     params : {
+        embedderName : 
         endColumn : 3
         endLine : 0
         executionContextId : <executionContextId>
@@ -67,6 +74,7 @@ Runtime.callFunctionOn with syntax error
         isModule : false
         length : 3
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -77,6 +85,7 @@ Runtime.compileScript with valid expression
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : compile-script.js
         endColumn : 4
         endLine : 0
         executionContextId : <executionContextId>
@@ -86,6 +95,7 @@ Runtime.compileScript with valid expression
         isModule : false
         length : 4
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -96,6 +106,7 @@ Runtime.compileScript with syntax error
 {
     method : Debugger.scriptFailedToParse
     params : {
+        embedderName : compile-script-syntax-error.js
         endColumn : 1
         endLine : 0
         executionContextId : <executionContextId>
@@ -104,6 +115,7 @@ Runtime.compileScript with syntax error
         isModule : false
         length : 1
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -115,6 +127,7 @@ Runtime.evaluate compiled script with stack trace
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 8
         endLine : 0
         executionContextId : <executionContextId>
@@ -124,6 +137,7 @@ Runtime.evaluate compiled script with stack trace
         isModule : false
         length : 8
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -133,6 +147,7 @@ Runtime.evaluate compiled script with stack trace
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 39
         endLine : 4
         executionContextId : <executionContextId>
@@ -142,13 +157,14 @@ Runtime.evaluate compiled script with stack trace
         isModule : false
         length : 86
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         stackTrace : {
             callFrames : [
                 [0] : {
                     columnNumber : 2
                     functionName : fooTop
-                    lineNumber : 10
+                    lineNumber : 2
                     scriptId : <scriptId>
                     url : top-frame.js
                 }
@@ -162,6 +178,7 @@ Runtime.evaluate compiled script with stack trace
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 4
         endLine : 0
         executionContextId : <executionContextId>
@@ -171,6 +188,7 @@ Runtime.evaluate compiled script with stack trace
         isModule : false
         length : 4
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         stackTrace : {
             callFrames : [
@@ -192,6 +210,7 @@ Runtime.evaluate compile script error with stack trace
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 12
         endLine : 0
         executionContextId : <executionContextId>
@@ -201,6 +220,7 @@ Runtime.evaluate compile script error with stack trace
         isModule : false
         length : 12
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         startColumn : 0
         startLine : 0
@@ -210,6 +230,7 @@ Runtime.evaluate compile script error with stack trace
 {
     method : Debugger.scriptParsed
     params : {
+        embedderName : 
         endColumn : 48
         endLine : 4
         executionContextId : <executionContextId>
@@ -219,13 +240,14 @@ Runtime.evaluate compile script error with stack trace
         isModule : false
         length : 98
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         stackTrace : {
             callFrames : [
                 [0] : {
                     columnNumber : 2
                     functionName : fooTopFail
-                    lineNumber : 20
+                    lineNumber : 2
                     scriptId : <scriptId>
                     url : top-frame-fail.js
                 }
@@ -239,6 +261,7 @@ Runtime.evaluate compile script error with stack trace
 {
     method : Debugger.scriptFailedToParse
     params : {
+        embedderName : 
         endColumn : 3
         endLine : 0
         executionContextId : <executionContextId>
@@ -247,6 +270,7 @@ Runtime.evaluate compile script error with stack trace
         isModule : false
         length : 3
         scriptId : <scriptId>
+        scriptLanguage : JavaScript
         sourceMapURL : 
         stackTrace : {
             callFrames : [

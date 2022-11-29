@@ -3,8 +3,6 @@
 // found in the LICENSE file.
 
 type FrameType extends Smi constexpr 'StackFrame::Type';
-const ARGUMENTS_ADAPTOR_FRAME: constexpr FrameType
-    generates 'StackFrame::ARGUMENTS_ADAPTOR';
 const STUB_FRAME: constexpr FrameType
     generates 'StackFrame::STUB';
 const kFrameTypeCount:
@@ -24,17 +22,16 @@ Cast<FrameType>(o: Object): FrameType
     labels CastError {
   if (TaggedIsNotSmi(o)) goto CastError;
   assert(
-      (Convert<uintptr>(BitcastTaggedToWord(o)) >>> kSmiTagSize) <
-      kFrameTypeCount);
+      Convert<int32>(BitcastTaggedToWordForTagAndSmiBits(o)) <
+      Convert<int32>(kFrameTypeCount << kSmiTagSize));
   return %RawDownCast<FrameType>(o);
 }
 
 type FrameBase extends RawPtr constexpr 'void*';
 type StandardFrame extends FrameBase constexpr 'void*';
-type ArgumentsAdaptorFrame extends FrameBase constexpr 'void*';
 type StubFrame extends FrameBase constexpr 'void*';
-type FrameWithArguments = StandardFrame | ArgumentsAdaptorFrame;
-type Frame = FrameWithArguments | StubFrame;
+type FrameWithArguments = StandardFrame;
+type Frame = FrameWithArguments|StubFrame;
 
 extern macro LoadFramePointer(): Frame;
 extern macro LoadParentFramePointer(): Frame;
@@ -46,8 +43,8 @@ macro LoadObjectFromFrame(f: Frame, o: constexpr int32): Object {
 macro LoadPointerFromFrame(f: Frame, o: constexpr int32): RawPtr {
   return LoadBufferPointer(f, o);
 }
-macro LoadSmiFromFrame(f: Frame, o: constexpr int32): Smi {
-  return LoadBufferSmi(f, o);
+macro LoadIntptrFromFrame(f: Frame, o: constexpr int32): intptr {
+  return LoadBufferIntptr(f, o);
 }
 
 const kStandardFrameFunctionOffset: constexpr int31
@@ -67,7 +64,13 @@ operator '.caller' macro LoadCallerFromFrame(f: Frame): Frame {
   return %RawDownCast<Frame>(result);
 }
 
-type ContextOrFrameType = Context | FrameType;
+const kStandardFrameArgCOffset: constexpr int31
+    generates 'StandardFrameConstants::kArgCOffset';
+operator '.argument_count' macro LoadArgCFromFrame(f: Frame): intptr {
+  return LoadIntptrFromFrame(f, kStandardFrameArgCOffset);
+}
+
+type ContextOrFrameType = Context|FrameType;
 Cast<ContextOrFrameType>(implicit context: Context)(o: Object):
     ContextOrFrameType
     labels CastError {
@@ -93,19 +96,12 @@ macro LoadContextOrFrameTypeFromFrame(implicit context: Context)(f: Frame):
       LoadObjectFromFrame(f, kStandardFrameContextOrFrameTypeOffset));
 }
 
-const kArgumentsAdaptorFrameLengthOffset: constexpr int31
-    generates 'ArgumentsAdaptorFrameConstants::kLengthOffset';
-operator '.length'
-macro LoadLengthFromAdapterFrame(implicit context: Context)(
-    f: ArgumentsAdaptorFrame): Smi {
-  return LoadSmiFromFrame(f, kArgumentsAdaptorFrameLengthOffset);
-}
-
 operator '==' macro FrameTypeEquals(f1: FrameType, f2: FrameType): bool {
   return TaggedEqual(f1, f2);
 }
 
-macro Cast<A: type>(implicit context: Context)(o: Frame): A labels CastError;
+macro Cast<A : type extends Frame>(implicit context: Context)(o: Frame):
+    A labels CastError;
 Cast<StandardFrame>(implicit context: Context)(f: Frame):
     StandardFrame labels CastError {
   const o: HeapObject =
@@ -121,16 +117,6 @@ Cast<StandardFrame>(implicit context: Context)(f: Frame):
   // See the descriptions and frame layouts in src/frame-constants.h.
   if (IsContext(o)) {
     return %RawDownCast<StandardFrame>(f);
-  }
-  goto CastError;
-}
-
-Cast<ArgumentsAdaptorFrame>(implicit context: Context)(f: Frame):
-    ArgumentsAdaptorFrame labels CastError {
-  const t: FrameType =
-      Cast<FrameType>(f.context_or_frame_type) otherwise CastError;
-  if (t == ARGUMENTS_ADAPTOR_FRAME) {
-    return %RawDownCast<ArgumentsAdaptorFrame>(f);
   }
   goto CastError;
 }

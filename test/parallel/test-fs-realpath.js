@@ -106,9 +106,11 @@ function test_simple_relative_symlink(realpath, realpathSync, callback) {
   const entry = `${tmpDir}/symlink`;
   const expected = `${tmpDir}/cycles/root.js`;
   [
-    [entry, `../${path.basename(tmpDir)}/cycles/root.js`]
+    [entry, `../${path.basename(tmpDir)}/cycles/root.js`],
   ].forEach(function(t) {
-    try { fs.unlinkSync(t[0]); } catch {}
+    try { fs.unlinkSync(t[0]); } catch {
+      // Continue regardless of error.
+    }
     console.log('fs.symlinkSync(%j, %j, %j)', t[1], t[0], 'file');
     fs.symlinkSync(t[1], t[0], 'file');
     unlink.push(t[0]);
@@ -132,9 +134,11 @@ function test_simple_absolute_symlink(realpath, realpathSync, callback) {
   const entry = `${tmpAbsDir}/symlink`;
   const expected = fixtures.path('nested-index', 'one');
   [
-    [entry, expected]
+    [entry, expected],
   ].forEach(function(t) {
-    try { fs.unlinkSync(t[0]); } catch {}
+    try { fs.unlinkSync(t[0]); } catch {
+      // Continue regardless of error.
+    }
     console.error('fs.symlinkSync(%j, %j, %j)', t[1], t[0], type);
     fs.symlinkSync(t[1], t[0], type);
     unlink.push(t[0]);
@@ -159,13 +163,17 @@ function test_deep_relative_file_symlink(realpath, realpathSync, callback) {
                                 expected);
   const linkPath1 = path.join(targetsAbsDir,
                               'nested-index', 'one', 'symlink1.js');
-  try { fs.unlinkSync(linkPath1); } catch {}
+  try { fs.unlinkSync(linkPath1); } catch {
+    // Continue regardless of error.
+  }
   fs.symlinkSync(linkData1, linkPath1, 'file');
 
   const linkData2 = '../one/symlink1.js';
   const entry = path.join(targetsAbsDir,
                           'nested-index', 'two', 'symlink1-b.js');
-  try { fs.unlinkSync(entry); } catch {}
+  try { fs.unlinkSync(entry); } catch {
+    // Continue regardless of error.
+  }
   fs.symlinkSync(linkData2, entry, 'file');
   unlink.push(linkPath1);
   unlink.push(entry);
@@ -186,13 +194,17 @@ function test_deep_relative_dir_symlink(realpath, realpathSync, callback) {
   const path1b = path.join(targetsAbsDir, 'nested-index', 'one');
   const linkPath1b = path.join(path1b, 'symlink1-dir');
   const linkData1b = path.relative(path1b, expected);
-  try { fs.unlinkSync(linkPath1b); } catch {}
+  try { fs.unlinkSync(linkPath1b); } catch {
+    // Continue regardless of error.
+  }
   fs.symlinkSync(linkData1b, linkPath1b, 'dir');
 
   const linkData2b = '../one/symlink1-dir';
   const entry = path.join(targetsAbsDir,
                           'nested-index', 'two', 'symlink12-dir');
-  try { fs.unlinkSync(entry); } catch {}
+  try { fs.unlinkSync(entry); } catch {
+    // Continue regardless of error.
+  }
   fs.symlinkSync(linkData2b, entry, 'dir');
   unlink.push(linkPath1b);
   unlink.push(entry);
@@ -214,9 +226,11 @@ function test_cyclic_link_protection(realpath, realpathSync, callback) {
   [
     [entry, '../cycles/realpath-3b'],
     [path.join(tmpDir, '/cycles/realpath-3b'), '../cycles/realpath-3c'],
-    [path.join(tmpDir, '/cycles/realpath-3c'), '../cycles/realpath-3a']
+    [path.join(tmpDir, '/cycles/realpath-3c'), '../cycles/realpath-3a'],
   ].forEach(function(t) {
-    try { fs.unlinkSync(t[0]); } catch {}
+    try { fs.unlinkSync(t[0]); } catch {
+      // Continue regardless of error.
+    }
     fs.symlinkSync(t[1], t[0], 'dir');
     unlink.push(t[0]);
   });
@@ -249,7 +263,9 @@ function test_cyclic_link_overprotection(realpath, realpathSync, callback) {
   } else {
     testPath += '/folder/cycles'.repeat(10);
   }
-  try { fs.unlinkSync(link); } catch {}
+  try { fs.unlinkSync(link); } catch {
+    // Continue regardless of error.
+  }
   fs.symlinkSync(cycles, link, 'dir');
   unlink.push(link);
   assertEqualPath(realpathSync(testPath), path.resolve(expected));
@@ -273,11 +289,13 @@ function test_relative_input_cwd(realpath, realpathSync, callback) {
   [
     [entry, '../cycles/realpath-3b'],
     [`${tmpDir}/cycles/realpath-3b`, '../cycles/realpath-3c'],
-    [`${tmpDir}/cycles/realpath-3c`, 'root.js']
+    [`${tmpDir}/cycles/realpath-3c`, 'root.js'],
   ].forEach(function(t) {
     const fn = t[0];
     console.error('fn=%j', fn);
-    try { fs.unlinkSync(fn); } catch {}
+    try { fs.unlinkSync(fn); } catch {
+      // Continue regardless of error.
+    }
     const b = path.basename(t[1]);
     const type = (b === 'root.js' ? 'file' : 'dir');
     console.log('fs.symlinkSync(%j, %j, %j)', t[1], fn, type);
@@ -304,20 +322,23 @@ function test_deep_symlink_mix(realpath, realpathSync, callback) {
     return callback();
   }
 
-  /*
-  /tmp/node-test-realpath-f1 -> $tmpDir/node-test-realpath-d1/foo
-  /tmp/node-test-realpath-d1 -> $tmpDir/node-test-realpath-d2
-  /tmp/node-test-realpath-d2/foo -> $tmpDir/node-test-realpath-f2
-  /tmp/node-test-realpath-f2
-    -> $tmpDir/targets/nested-index/one/realpath-c
-  $tmpDir/targets/nested-index/one/realpath-c
-    -> $tmpDir/targets/nested-index/two/realpath-c
-  $tmpDir/targets/nested-index/two/realpath-c -> $tmpDir/cycles/root.js
-  $tmpDir/targets/cycles/root.js (hard)
-  */
+  // /tmp/node-test-realpath-f1 -> $tmpDir/node-test-realpath-d1/foo
+  // /tmp/node-test-realpath-d1 -> $tmpDir/node-test-realpath-d2
+  // /tmp/node-test-realpath-d2/foo -> $tmpDir/node-test-realpath-f2
+  // /tmp/node-test-realpath-f2
+  //   -> $tmpDir/targets/nested-index/one/realpath-c
+  // $tmpDir/targets/nested-index/one/realpath-c
+  //   -> $tmpDir/targets/nested-index/two/realpath-c
+  // $tmpDir/targets/nested-index/two/realpath-c -> $tmpDir/cycles/root.js
+  // $tmpDir/targets/cycles/root.js (hard)
+
   const entry = tmp('node-test-realpath-f1');
-  try { fs.unlinkSync(tmp('node-test-realpath-d2/foo')); } catch {}
-  try { fs.rmdirSync(tmp('node-test-realpath-d2')); } catch {}
+  try { fs.unlinkSync(tmp('node-test-realpath-d2/foo')); } catch {
+    // Continue regardless of error.
+  }
+  try { fs.rmdirSync(tmp('node-test-realpath-d2')); } catch {
+    // Continue regardless of error.
+  }
   fs.mkdirSync(tmp('node-test-realpath-d2'), 0o700);
   try {
     [
@@ -330,9 +351,11 @@ function test_deep_symlink_mix(realpath, realpathSync, callback) {
       [`${targetsAbsDir}/nested-index/one/realpath-c`,
        `${targetsAbsDir}/nested-index/two/realpath-c`],
       [`${targetsAbsDir}/nested-index/two/realpath-c`,
-       `${tmpDir}/cycles/root.js`]
+       `${tmpDir}/cycles/root.js`],
     ].forEach(function(t) {
-      try { fs.unlinkSync(t[0]); } catch {}
+      try { fs.unlinkSync(t[0]); } catch {
+        // Continue regardless of error.
+      }
       fs.symlinkSync(t[1], t[0]);
       unlink.push(t[0]);
     });
@@ -484,16 +507,20 @@ function test_abs_with_kids(realpath, realpathSync, cb) {
   const root = `${tmpAbsDir}/node-test-realpath-abs-kids`;
   function cleanup() {
     ['/a/b/c/x.txt',
-     '/a/link'
+     '/a/link',
     ].forEach(function(file) {
-      try { fs.unlinkSync(root + file); } catch {}
+      try { fs.unlinkSync(root + file); } catch {
+        // Continue regardless of error.
+      }
     });
     ['/a/b/c',
      '/a/b',
      '/a',
-     ''
+     '',
     ].forEach(function(folder) {
-      try { fs.rmdirSync(root + folder); } catch {}
+      try { fs.rmdirSync(root + folder); } catch {
+        // Continue regardless of error.
+      }
     });
   }
 
@@ -502,7 +529,7 @@ function test_abs_with_kids(realpath, realpathSync, cb) {
     ['',
      '/a',
      '/a/b',
-     '/a/b/c'
+     '/a/b/c',
     ].forEach(function(folder) {
       console.log(`mkdir ${root}${folder}`);
       fs.mkdirSync(root + folder, 0o700);
@@ -560,7 +587,7 @@ const tests = [
   test_up_multiple,
   test_up_multiple_with_null_options,
   test_root,
-  test_root_with_null_options
+  test_root_with_null_options,
 ];
 const numtests = tests.length;
 let testsRun = 0;
@@ -571,8 +598,7 @@ function runNextTest(err) {
     return console.log(`${numtests} subtests completed OK for fs.realpath`);
   }
   testsRun++;
-  test(fs.realpath, fs.realpathSync, common.mustCall((err) => {
-    assert.ifError(err);
+  test(fs.realpath, fs.realpathSync, common.mustSucceed(() => {
     testsRun++;
     test(fs.realpath.native,
          fs.realpathSync.native,

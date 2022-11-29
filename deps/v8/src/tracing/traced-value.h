@@ -12,13 +12,21 @@
 
 #include "include/v8-platform.h"
 #include "src/base/macros.h"
+#include "src/tracing/trace-event.h"
 
 namespace v8 {
 namespace tracing {
 
-class V8_EXPORT_PRIVATE TracedValue : public ConvertableToTraceFormat {
+class V8_EXPORT_PRIVATE TracedValue : public ConvertableToTraceFormat
+#ifdef V8_USE_PERFETTO
+    ,
+                                      public perfetto::DebugAnnotation
+#endif  // V8_USE_PERFETTO
+{
  public:
   ~TracedValue() override;
+  TracedValue(const TracedValue&) = delete;
+  TracedValue& operator=(const TracedValue&) = delete;
 
   static std::unique_ptr<TracedValue> Create();
 
@@ -54,6 +62,11 @@ class V8_EXPORT_PRIVATE TracedValue : public ConvertableToTraceFormat {
   // ConvertableToTraceFormat implementation.
   void AppendAsTraceFormat(std::string* out) const override;
 
+#ifdef V8_USE_PERFETTO
+  // DebugAnnotation implementation.
+  void Add(perfetto::protos::pbzero::DebugAnnotation*) const override;
+#endif  // V8_USE_PERFETTO
+
  private:
   TracedValue();
 
@@ -67,8 +80,6 @@ class V8_EXPORT_PRIVATE TracedValue : public ConvertableToTraceFormat {
 
   std::string data_;
   bool first_item_;
-
-  DISALLOW_COPY_AND_ASSIGN(TracedValue);
 };
 
 }  // namespace tracing

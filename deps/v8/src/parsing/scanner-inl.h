@@ -8,6 +8,7 @@
 #include "src/parsing/keywords-gen.h"
 #include "src/parsing/scanner.h"
 #include "src/strings/char-predicates-inl.h"
+#include "src/utils/utils.h"
 
 namespace v8 {
 namespace internal {
@@ -250,7 +251,7 @@ static constexpr const uint8_t character_scan_flags[128] = {
 #undef CALL_GET_SCAN_FLAGS
 };
 
-inline bool CharCanBeKeyword(uc32 c) {
+inline bool CharCanBeKeyword(base::uc32 c) {
   return static_cast<uint32_t>(c) < arraysize(character_scan_flags) &&
          CanBeKeyword(character_scan_flags[c]);
 }
@@ -272,7 +273,7 @@ V8_INLINE Token::Value Scanner::ScanIdentifierOrKeywordInner() {
       // Otherwise we'll fall into the slow path after scanning the identifier.
       DCHECK(!IdentifierNeedsSlowPath(scan_flags));
       AddLiteralChar(static_cast<char>(c0_));
-      AdvanceUntil([this, &scan_flags](uc32 c0) {
+      AdvanceUntil([this, &scan_flags](base::uc32 c0) {
         if (V8_UNLIKELY(static_cast<uint32_t>(c0) > kMaxAscii)) {
           // A non-ascii character means we need to drop through to the slow
           // path.
@@ -295,7 +296,8 @@ V8_INLINE Token::Value Scanner::ScanIdentifierOrKeywordInner() {
       if (V8_LIKELY(!IdentifierNeedsSlowPath(scan_flags))) {
         if (!CanBeKeyword(scan_flags)) return Token::IDENTIFIER;
         // Could be a keyword or identifier.
-        Vector<const uint8_t> chars = next().literal_chars.one_byte_literal();
+        base::Vector<const uint8_t> chars =
+            next().literal_chars.one_byte_literal();
         return KeywordOrIdentifierToken(chars.begin(), chars.length());
       }
 
@@ -303,8 +305,8 @@ V8_INLINE Token::Value Scanner::ScanIdentifierOrKeywordInner() {
     } else {
       // Special case for escapes at the start of an identifier.
       escaped = true;
-      uc32 c = ScanIdentifierUnicodeEscape();
-      DCHECK(!IsIdentifierStart(-1));
+      base::uc32 c = ScanIdentifierUnicodeEscape();
+      DCHECK(!IsIdentifierStart(Invalid()));
       if (c == '\\' || !IsIdentifierStart(c)) {
         return Token::ILLEGAL;
       }
@@ -363,14 +365,14 @@ V8_INLINE Token::Value Scanner::ScanSingleToken() {
           return Select(token);
 
         case Token::CONDITIONAL:
-          // ? ?. ??
+          // ? ?. ?? ??=
           Advance();
-          if (V8_UNLIKELY(allow_harmony_optional_chaining() && c0_ == '.')) {
+          if (c0_ == '.') {
             Advance();
             if (!IsDecimalDigit(c0_)) return Token::QUESTION_PERIOD;
             PushBack('.');
-          } else if (V8_UNLIKELY(allow_harmony_nullish() && c0_ == '?')) {
-            return Select(Token::NULLISH);
+          } else if (c0_ == '?') {
+            return Select('=', Token::ASSIGN_NULLISH, Token::NULLISH);
           }
           return Token::CONDITIONAL;
 
@@ -452,7 +454,7 @@ V8_INLINE Token::Value Scanner::ScanSingleToken() {
           // /  // /* /=
           Advance();
           if (c0_ == '/') {
-            uc32 c = Peek();
+            base::uc32 c = Peek();
             if (c == '#' || c == '@') {
               Advance();
               Advance();
@@ -470,16 +472,16 @@ V8_INLINE Token::Value Scanner::ScanSingleToken() {
           return Token::DIV;
 
         case Token::BIT_AND:
-          // & && &=
+          // & && &= &&=
           Advance();
-          if (c0_ == '&') return Select(Token::AND);
+          if (c0_ == '&') return Select('=', Token::ASSIGN_AND, Token::AND);
           if (c0_ == '=') return Select(Token::ASSIGN_BIT_AND);
           return Token::BIT_AND;
 
         case Token::BIT_OR:
-          // | || |=
+          // | || |= ||=
           Advance();
-          if (c0_ == '|') return Select(Token::OR);
+          if (c0_ == '|') return Select('=', Token::ASSIGN_OR, Token::OR);
           if (c0_ == '=') return Select(Token::ASSIGN_BIT_OR);
           return Token::BIT_OR;
 

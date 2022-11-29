@@ -16,13 +16,9 @@
 namespace node {
 
 #define SECURITY_REVERSIONS(XX)                                            \
-  XX(CVE_2019_9512, "CVE-2019-9512", "HTTP/2 Ping/Settings Flood")         \
-  XX(CVE_2019_9514, "CVE-2019-9514", "HTTP/2 Reset Flood")                 \
-  XX(CVE_2019_9516, "CVE-2019-9516", "HTTP/2 0-Length Headers Leak")       \
-  XX(CVE_2019_9518, "CVE-2019-9518", "HTTP/2 Empty DATA Frame Flooding")   \
+  XX(CVE_2021_44531, "CVE-2021-44531", "Cert Verif Bypass via URI SAN")    \
+  XX(CVE_2021_44532, "CVE-2021-44532", "Cert Verif Bypass via Str Inject") \
 //  XX(CVE_2016_PEND, "CVE-2016-PEND", "Vulnerability Title")
-  // TODO(addaleax): Remove all of the above before Node.js 13 as the comment
-  // at the start of the file indicates.
 
 enum reversion {
 #define V(code, ...) SECURITY_REVERT_##code,
@@ -34,6 +30,12 @@ namespace per_process {
 extern unsigned int reverted_cve;
 }
 
+#ifdef _MSC_VER
+#pragma warning(push)
+// MSVC C4065: switch statement contains 'default' but no 'case' labels
+#pragma warning(disable : 4065)
+#endif
+
 inline const char* RevertMessage(const reversion cve) {
 #define V(code, label, msg) case SECURITY_REVERT_##code: return label ": " msg;
   switch (cve) {
@@ -43,6 +45,10 @@ inline const char* RevertMessage(const reversion cve) {
   }
 #undef V
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 inline void Revert(const reversion cve) {
   per_process::reverted_cve |= 1 << cve;

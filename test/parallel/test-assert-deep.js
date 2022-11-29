@@ -164,7 +164,7 @@ assert.throws(
     new Int32Array([1]), // Int32Array
     new Uint32Array([1]), // Uint32Array
     Buffer.from([1]), // Uint8Array
-    (function() { return arguments; })(1)
+    (function() { return arguments; })(1),
   ]);
 
   for (const a of similar) {
@@ -524,7 +524,7 @@ assertNotDeepOrStrict(
     {
       code: 'ERR_ASSERTION',
       message: `${defaultMsgStartFull}\n\n` +
-               "  Map {\n+   1 => 1\n-   1 => '1'\n  }"
+               "  Map(1) {\n+   1 => 1\n-   1 => '1'\n  }"
     }
   );
 }
@@ -567,8 +567,10 @@ assertNotDeepOrStrict(
 
 // Handle sparse arrays.
 {
+  /* eslint-disable no-sparse-arrays */
   assertDeepAndStrictEqual([1, , , 3], [1, , , 3]);
   assertNotDeepOrStrict([1, , , 3], [1, , , 3, , , ]);
+  /* eslint-enable no-sparse-arrays */
   const a = new Array(3);
   const b = new Array(3);
   a[2] = true;
@@ -590,10 +592,9 @@ assertNotDeepOrStrict(
 }
 
 // Handle NaN
-assert.notDeepEqual(NaN, NaN);
-assert.deepStrictEqual(NaN, NaN);
-assert.deepStrictEqual({ a: NaN }, { a: NaN });
-assert.deepStrictEqual([ 1, 2, NaN, 4 ], [ 1, 2, NaN, 4 ]);
+assertDeepAndStrictEqual(NaN, NaN);
+assertDeepAndStrictEqual({ a: NaN }, { a: NaN });
+assertDeepAndStrictEqual([ 1, 2, NaN, 4 ], [ 1, 2, NaN, 4 ]);
 
 // Handle boxed primitives
 {
@@ -863,11 +864,13 @@ assert.throws(
 }
 
 assert.throws(
+  // eslint-disable-next-line no-restricted-syntax
   () => assert.deepStrictEqual(4, '4'),
   { message: `${defaultMsgStart}\n4 !== '4'\n` }
 );
 
 assert.throws(
+  // eslint-disable-next-line no-restricted-syntax
   () => assert.deepStrictEqual(true, 1),
   { message: `${defaultMsgStart}\ntrue !== 1\n` }
 );
@@ -1128,7 +1131,7 @@ assert.throws(
     {
       code: 'ERR_ASSERTION',
       name: 'AssertionError',
-      message: /a: \[Getter: 5]\n-   a: \[Getter: 6]\n  /
+      message: /a: \[Getter: 5]\n- {3}a: \[Getter: 6]\n {2}/
     }
   );
 
@@ -1200,4 +1203,14 @@ assert.throws(
   });
   Object.setPrototypeOf(b, null);
   assertNotDeepOrStrict(a, b, assert.AssertionError);
+}
+
+{
+  // Verify commutativity
+  // Regression test for https://github.com/nodejs/node/issues/37710
+  const a = { x: 1 };
+  const b = { y: 1 };
+  Object.defineProperty(b, 'x', { value: 1 });
+
+  assertNotDeepOrStrict(a, b);
 }

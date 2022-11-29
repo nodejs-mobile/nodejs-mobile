@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --experimental-wasm-anyref --experimental-wasm-return-call
+// Flags: --expose-wasm --experimental-wasm-reftypes --experimental-wasm-return-call
 
-load("test/mjsunit/wasm/wasm-module-builder.js");
+d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 (function IndirectCallToNonZeroTable() {
   print(arguments.callee.name);
@@ -41,37 +41,38 @@ load("test/mjsunit/wasm/wasm-module-builder.js");
     .index;
 
   builder.addFunction('call1', kSig_i_i)
-    .addBody([kExprGetLocal, 0,   // function index
+    .addBody([kExprLocalGet, 0,   // function index
       kExprCallIndirect, sig_index, table1])
     .exportAs('call1');
   builder.addFunction('return_call1', kSig_i_i)
-    .addBody([kExprGetLocal, 0,   // function index
+    .addBody([kExprLocalGet, 0,   // function index
       kExprReturnCallIndirect, sig_index, table1])
     .exportAs('return_call1');
   builder.addFunction('call2', kSig_i_i)
-    .addBody([kExprGetLocal, 0,   // function index
+    .addBody([kExprLocalGet, 0,   // function index
       kExprCallIndirect, sig_index, table2])
     .exportAs('call2');
   builder.addFunction('return_call2', kSig_i_i)
-    .addBody([kExprGetLocal, 0,   // function index
+    .addBody([kExprLocalGet, 0,   // function index
       kExprReturnCallIndirect, sig_index, table2])
     .exportAs('return_call2');
 
   builder.addFunction('call_invalid_sig', kSig_i_i)
-    .addBody([kExprGetLocal, 0, kExprGetLocal, 0,   // function index + param
+    .addBody([kExprLocalGet, 0, kExprLocalGet, 0,   // function index + param
       kExprCallIndirect, other_sig, table2])
     .exportAs('call_invalid_sig');
   builder.addFunction('return_call_invalid_sig', kSig_i_i)
-    .addBody([kExprGetLocal, 0, kExprGetLocal, 0,   // function index + param
+    .addBody([kExprLocalGet, 0, kExprLocalGet, 0,   // function index + param
       kExprReturnCallIndirect, other_sig, table2])
     .exportAs('return_call_invalid_sig');
 
   // We want to crash if we call through the table with index 0.
-  builder.addElementSegment(placeholder, 0, false,
+  builder.addActiveElementSegment(placeholder, WasmInitExpr.I32Const(0),
     [f_unreachable, f_unreachable, f_unreachable]);
-  builder.addElementSegment(table1, 0, false, [f1, f2, f3]);
+  builder.addActiveElementSegment(table1, WasmInitExpr.I32Const(0),
+                                  [f1, f2, f3]);
   // Keep one slot in table2 uninitialized. We should trap if we call it.
-  builder.addElementSegment(table2, 1, false,
+  builder.addActiveElementSegment(table2, WasmInitExpr.I32Const(1),
     [f_unreachable, f_unreachable, f4, f5]);
 
   const instance = builder.instantiate();
@@ -79,11 +80,11 @@ load("test/mjsunit/wasm/wasm-module-builder.js");
   assertEquals(v1, instance.exports.call1(0));
   assertEquals(v2, instance.exports.call1(1));
   assertEquals(v3, instance.exports.call1(2));
-  assertTraps(kTrapFuncInvalid, () => instance.exports.call1(3));
+  assertTraps(kTrapTableOutOfBounds, () => instance.exports.call1(3));
   assertEquals(v1, instance.exports.return_call1(0));
   assertEquals(v2, instance.exports.return_call1(1));
   assertEquals(v3, instance.exports.return_call1(2));
-  assertTraps(kTrapFuncInvalid, () => instance.exports.return_call1(3));
+  assertTraps(kTrapTableOutOfBounds, () => instance.exports.return_call1(3));
 
   // Try to call through the uninitialized table entry.
   assertTraps(kTrapFuncSigMismatch, () => instance.exports.call2(0));
@@ -119,14 +120,14 @@ load("test/mjsunit/wasm/wasm-module-builder.js");
 
   const sig_index = builder.addType(kSig_i_v);
   const f1 = builder.addFunction("foo", sig_index)
-    .addBody([kExprGetGlobal, g, kExprI32Const, 12, kExprI32Add]);
+    .addBody([kExprGlobalGet, g, kExprI32Const, 12, kExprI32Add]);
 
   builder.addFunction('call', kSig_i_i)
-    .addBody([kExprGetLocal, 0,   // function index
+    .addBody([kExprLocalGet, 0,   // function index
       kExprCallIndirect, sig_index, t1])
     .exportAs('call');
 
-  builder.addElementSegment(t1, g, true, [f1.index]);
+  builder.addActiveElementSegment(t1, WasmInitExpr.GlobalGet(g), [f1.index]);
   const base1 = 3;
   const base2 = 5;
 
@@ -162,19 +163,21 @@ function js_div(a, b) { return (a / b) | 0; }
 
   let div = builder.addImport("q", "js_div", kSig_i_ii);
   builder.addImportedTable("q", "placeholder", kTableSize, kTableSize);
-  let table_index = builder.addImportedTable("q", "table", kTableSize, kTableSize);
+  let table_index = builder.addImportedTable("q", "table", kTableSize,
+                                             kTableSize);
   let g = builder.addImportedGlobal("q", "base", kWasmI32);
 
   let sig_index = builder.addType(kSig_i_ii);
   builder.addFunction("placeholder", sig_index)
-    .addBody([kExprGetLocal, 0]);
+    .addBody([kExprLocalGet, 0]);
 
-  builder.addElementSegment(table_index, g, true, [div]);
+  builder.addActiveElementSegment(table_index, WasmInitExpr.GlobalGet(g),
+                                  [div]);
   builder.addFunction("main", kSig_i_ii)
     .addBody([
       kExprI32Const, 55,  // --
-      kExprGetLocal, 0,   // --
-      kExprGetLocal, 1,   // --
+      kExprLocalGet, 0,   // --
+      kExprLocalGet, 1,   // --
       kExprCallIndirect, 0, table_index])  // --
     .exportAs("main");
 

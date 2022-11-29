@@ -5,8 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const fixtures = require('../common/fixtures');
 const { spawn } = require('child_process');
-const { parse: parseURL } = require('url');
-const { pathToFileURL } = require('url');
+const { URL, pathToFileURL } = require('url');
 const { EventEmitter } = require('events');
 
 const _MAINSCRIPT = fixtures.path('loop.js');
@@ -25,7 +24,6 @@ function spawnChildProcess(inspectorFlags, scriptContents, scriptFile) {
   const handler = tearDown.bind(null, child);
   process.on('exit', handler);
   process.on('uncaughtException', handler);
-  common.disableCrashOnUnhandledRejection();
   process.on('unhandledRejection', handler);
   process.on('SIGINT', handler);
 
@@ -130,6 +128,7 @@ class InspectorSession {
     this._unprocessedNotifications = [];
     this._notificationCallback = null;
     this._scriptsIdsByUrl = new Map();
+    this._pausedDetails = null;
 
     let buffer = Buffer.alloc(0);
     socket.on('data', (data) => {
@@ -179,6 +178,10 @@ class InspectorSession {
           this.mainScriptId = scriptId;
         }
       }
+      if (message.method === 'Debugger.paused')
+        this._pausedDetails = message.params;
+      if (message.method === 'Debugger.resumed')
+        this._pausedDetails = null;
 
       if (this._notificationCallback) {
         // In case callback needs to install another
@@ -223,7 +226,7 @@ class InspectorSession {
 
   waitForNotification(methodOrPredicate, description) {
     const desc = description || methodOrPredicate;
-    const message = `Timed out waiting for matching notification (${desc}))`;
+    const message = `Timed out waiting for matching notification (${desc})`;
     return fires(
       this._asyncWaitForNotification(methodOrPredicate), message, TIMEOUT);
   }
@@ -265,6 +268,10 @@ class InspectorSession {
         (notification) =>
           this._isBreakOnLineNotification(notification, line, url),
         `break on ${url}:${line}`);
+  }
+
+  pausedDetails() {
+    return this._pausedDetails;
   }
 
   _matchesConsoleOutputNotification(notification, type, values) {
@@ -357,8 +364,7 @@ class NodeInstance extends EventEmitter {
       ['--expose-internals'],
       `${scriptContents}\nprocess._rawDebug('started');`, undefined);
     const msg = 'Timed out waiting for process to start';
-    while (await fires(instance.nextStderrString(), msg, TIMEOUT) !==
-             'started') {}
+    while (await fires(instance.nextStderrString(), msg, TIMEOUT) !== 'started');
     process._debugProcess(instance._process.pid);
     return instance;
   }
@@ -410,7 +416,7 @@ class NodeInstance extends EventEmitter {
     const port = await this.portPromise;
     return http.get({
       port,
-      path: parseURL(devtoolsUrl).path,
+      path: new URL(devtoolsUrl).pathname,
       headers: {
         'Connection': 'Upgrade',
         'Upgrade': 'websocket',
@@ -506,7 +512,7 @@ function fires(promise, error, timeoutMs) {
   const timeout = timeoutPromise(error, timeoutMs);
   return Promise.race([
     onResolvedOrRejected(promise, () => timeout.clear()),
-    timeout
+    timeout,
   ]);
 }
 

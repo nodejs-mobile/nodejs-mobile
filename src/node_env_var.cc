@@ -1,12 +1,18 @@
 #include "debug_utils-inl.h"
 #include "env-inl.h"
 #include "node_errors.h"
-#include "node_process.h"
+#include "node_external_reference.h"
+#include "node_i18n.h"
+#include "node_process-inl.h"
+
+#include <time.h>  // tzset(), _tzset()
 
 namespace node {
 using v8::Array;
 using v8::Boolean;
 using v8::Context;
+using v8::DontDelete;
+using v8::DontEnum;
 using v8::EscapableHandleScope;
 using v8::HandleScope;
 using v8::Integer;
@@ -23,6 +29,7 @@ using v8::Object;
 using v8::ObjectTemplate;
 using v8::PropertyCallbackInfo;
 using v8::PropertyHandlerFlags;
+using v8::ReadOnly;
 using v8::String;
 using v8::Value;
 
@@ -62,6 +69,36 @@ Mutex env_var_mutex;
 std::shared_ptr<KVStore> system_environment = std::make_shared<RealEnvStore>();
 }  // namespace per_process
 
+template <typename T>
+void DateTimeConfigurationChangeNotification(
+    Isolate* isolate,
+    const T& key,
+    const char* val = nullptr) {
+  if (key.length() == 2 && key[0] == 'T' && key[1] == 'Z') {
+#ifdef __POSIX__
+    tzset();
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kRedetect);
+#else
+    _tzset();
+
+# if defined(NODE_HAVE_I18N_SUPPORT)
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kSkip);
+
+    // On windows, the TZ environment is not supported out of the box.
+    // By default, v8 will only be able to detect the system configured
+    // timezone. This supports using the TZ environment variable to set
+    // the default timezone instead.
+    if (val != nullptr) i18n::SetDefaultTimeZone(val);
+# else
+    isolate->DateTimeConfigurationChangeNotification(
+        Isolate::TimeZoneDetection::kRedetect);
+# endif
+#endif
+  }
+}
+
 Maybe<std::string> RealEnvStore::Get(const char* key) const {
   Mutex::ScopedLock lock(per_process::env_var_mutex);
 
@@ -77,10 +114,10 @@ Maybe<std::string> RealEnvStore::Get(const char* key) const {
   }
 
   if (ret >= 0) {  // Env key value fetch success.
-    return v8::Just(std::string(*val, init_sz));
+    return Just(std::string(*val, init_sz));
   }
 
-  return v8::Nothing<std::string>();
+  return Nothing<std::string>();
 }
 
 MaybeLocal<String> RealEnvStore::Get(Isolate* isolate,
@@ -109,6 +146,7 @@ void RealEnvStore::Set(Isolate* isolate,
   if (key.length() > 0 && key[0] == '=') return;
 #endif
   uv_os_setenv(*key, *val);
+  DateTimeConfigurationChangeNotification(isolate, key, *val);
 }
 
 int32_t RealEnvStore::Query(const char* key) const {
@@ -124,9 +162,9 @@ int32_t RealEnvStore::Query(const char* key) const {
 
 #ifdef _WIN32
   if (key[0] == '=') {
-    return static_cast<int32_t>(v8::ReadOnly) |
-           static_cast<int32_t>(v8::DontDelete) |
-           static_cast<int32_t>(v8::DontEnum);
+    return static_cast<int32_t>(ReadOnly) |
+           static_cast<int32_t>(DontDelete) |
+           static_cast<int32_t>(DontEnum);
   }
 #endif
 
@@ -143,6 +181,7 @@ void RealEnvStore::Delete(Isolate* isolate, Local<String> property) {
 
   node::Utf8Value key(isolate, property);
   uv_os_unsetenv(*key);
+  DateTimeConfigurationChangeNotification(isolate, key);
 }
 
 Local<Array> RealEnvStore::Enumerate(Isolate* isolate) const {
@@ -158,12 +197,9 @@ Local<Array> RealEnvStore::Enumerate(Isolate* isolate) const {
   for (int i = 0; i < count; i++) {
 #ifdef _WIN32
     // If the key starts with '=' it is a hidden environment variable.
-    // The '\0' check is a workaround for the bug behind
-    // https://github.com/libuv/libuv/pull/2473 and can be removed later.
-    if (items[i].name[0] == '=' || items[i].name[0] == '\0') continue;
+    if (items[i].name[0] == '=') continue;
 #endif
-    MaybeLocal<String> str = String::NewFromUtf8(
-        isolate, items[i].name, NewStringType::kNormal);
+    MaybeLocal<String> str = String::NewFromUtf8(isolate, items[i].name);
     if (str.IsEmpty()) {
       isolate->ThrowException(ERR_STRING_TOO_LONG(isolate));
       return Local<Array>();
@@ -174,7 +210,7 @@ Local<Array> RealEnvStore::Enumerate(Isolate* isolate) const {
   return Array::New(isolate, env_v.out(), env_v_index);
 }
 
-std::shared_ptr<KVStore> KVStore::Clone(v8::Isolate* isolate) const {
+std::shared_ptr<KVStore> KVStore::Clone(Isolate* isolate) const {
   HandleScope handle_scope(isolate);
   Local<Context> context = isolate->GetCurrentContext();
 
@@ -197,7 +233,7 @@ std::shared_ptr<KVStore> KVStore::Clone(v8::Isolate* isolate) const {
 Maybe<std::string> MapKVStore::Get(const char* key) const {
   Mutex::ScopedLock lock(mutex_);
   auto it = map_.find(key);
-  return it == map_.end() ? v8::Nothing<std::string>() : v8::Just(it->second);
+  return it == map_.end() ? Nothing<std::string>() : Just(it->second);
 }
 
 MaybeLocal<String> MapKVStore::Get(Isolate* isolate, Local<String> key) const {
@@ -363,14 +399,22 @@ static void EnvEnumerator(const PropertyCallbackInfo<Array>& info) {
       env->env_vars()->Enumerate(env->isolate()));
 }
 
-MaybeLocal<Object> CreateEnvVarProxy(Local<Context> context,
-                                     Isolate* isolate,
-                                     Local<Object> data) {
+MaybeLocal<Object> CreateEnvVarProxy(Local<Context> context, Isolate* isolate) {
   EscapableHandleScope scope(isolate);
   Local<ObjectTemplate> env_proxy_template = ObjectTemplate::New(isolate);
   env_proxy_template->SetHandler(NamedPropertyHandlerConfiguration(
-      EnvGetter, EnvSetter, EnvQuery, EnvDeleter, EnvEnumerator, data,
+      EnvGetter, EnvSetter, EnvQuery, EnvDeleter, EnvEnumerator, Local<Value>(),
       PropertyHandlerFlags::kHasNoSideEffect));
   return scope.EscapeMaybe(env_proxy_template->NewInstance(context));
 }
+
+void RegisterEnvVarExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(EnvGetter);
+  registry->Register(EnvSetter);
+  registry->Register(EnvQuery);
+  registry->Register(EnvDeleter);
+  registry->Register(EnvEnumerator);
+}
 }  // namespace node
+
+NODE_MODULE_EXTERNAL_REFERENCE(env_var, node::RegisterEnvVarExternalReferences)

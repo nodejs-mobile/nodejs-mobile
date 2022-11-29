@@ -29,8 +29,7 @@ if (process.argv[2] === 'you-are-the-child') {
   assert.strictEqual('NODE_PROCESS_ENV_DELETED' in process.env, false);
   assert.strictEqual(process.env.NODE_PROCESS_ENV, '42');
   assert.strictEqual(process.env.hasOwnProperty, 'asdf');
-  const hasOwnProperty = Object.prototype.hasOwnProperty;
-  const has = hasOwnProperty.call(process.env, 'hasOwnProperty');
+  const has = Object.hasOwn(process.env, 'hasOwnProperty');
   assert.strictEqual(has, true);
   process.exit(0);
 }
@@ -40,7 +39,7 @@ if (process.argv[2] === 'you-are-the-child') {
 
   assert.strictEqual(Object.prototype.hasOwnProperty,
                      process.env.hasOwnProperty);
-  const has = process.env.hasOwnProperty('hasOwnProperty');
+  const has = Object.hasOwn(process.env, 'hasOwnProperty');
   assert.strictEqual(has, false);
 
   process.env.hasOwnProperty = 'asdf';
@@ -70,22 +69,21 @@ if (process.argv[2] === 'you-are-the-child') {
 delete process.env.NON_EXISTING_VARIABLE;
 assert(delete process.env.NON_EXISTING_VARIABLE);
 
-/* For the moment we are not going to support setting the timezone via the
- * environment variables. The problem is that various V8 platform backends
- * deal with timezone in different ways. The windows platform backend caches
- * the timezone value while the Linux one hits libc for every query.
-
-https://github.com/joyent/node/blob/08782931205bc4f6d28102ebc29fd806e8ccdf1f/deps/v8/src/platform-linux.cc#L339-345
-https://github.com/joyent/node/blob/08782931205bc4f6d28102ebc29fd806e8ccdf1f/deps/v8/src/platform-win32.cc#L590-596
-
-// set the timezone; see tzset(3)
-process.env.TZ = 'Europe/Amsterdam';
-
-// time difference between Greenwich and Amsterdam is +2 hours in the summer
-date = new Date('Fri, 10 Sep 1982 03:15:00 GMT');
-assert.strictEqual(3, date.getUTCHours());
-assert.strictEqual(5, date.getHours());
-*/
+// For the moment we are not going to support setting the timezone via the
+// environment variables. The problem is that various V8 platform backends
+// deal with timezone in different ways. The Windows platform backend caches
+// the timezone value while the Linux one hits libc for every query.
+//
+// https://github.com/joyent/node/blob/08782931205bc4f6d28102ebc29fd806e8ccdf1f/deps/v8/src/platform-linux.cc#L339-345
+// https://github.com/joyent/node/blob/08782931205bc4f6d28102ebc29fd806e8ccdf1f/deps/v8/src/platform-win32.cc#L590-596
+//
+// // set the timezone; see tzset(3)
+// process.env.TZ = 'Europe/Amsterdam';
+//
+// // time difference between Greenwich and Amsterdam is +2 hours in the summer
+// date = new Date('Fri, 10 Sep 1982 03:15:00 GMT');
+// assert.strictEqual(3, date.getUTCHours());
+// assert.strictEqual(5, date.getHours());
 
 // Environment variables should be case-insensitive on Windows, and
 // case-sensitive on other platforms.

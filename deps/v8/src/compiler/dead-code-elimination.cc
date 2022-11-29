@@ -46,7 +46,6 @@ Node* FindDeadInput(Node* node) {
 }  // namespace
 
 Reduction DeadCodeElimination::Reduce(Node* node) {
-  DisallowHeapAccess no_heap_access;
   switch (node->opcode()) {
     case IrOpcode::kEnd:
       return ReduceEnd(node);
@@ -317,7 +316,10 @@ Reduction DeadCodeElimination::ReduceDeoptimizeOrReturnOrTerminateOrTailCall(
          node->opcode() == IrOpcode::kTailCall);
   Reduction reduction = PropagateDeadControl(node);
   if (reduction.Changed()) return reduction;
-  if (FindDeadInput(node) != nullptr) {
+  // Terminate nodes are not part of actual control flow, so they should never
+  // be replaced with Throw.
+  if (node->opcode() != IrOpcode::kTerminate &&
+      FindDeadInput(node) != nullptr) {
     Node* effect = NodeProperties::GetEffectInput(node, 0);
     Node* control = NodeProperties::GetControlInput(node, 0);
     if (effect->opcode() != IrOpcode::kUnreachable) {

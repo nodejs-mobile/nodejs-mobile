@@ -9,7 +9,6 @@ if (!common.hasCrypto)
 const fixtures = require('../common/fixtures');
 const h2 = require('http2');
 const url = require('url');
-const URL = url.URL;
 
 {
   const server = h2.createServer();
@@ -23,7 +22,7 @@ const URL = url.URL;
       [new URL(`http://localhost:${port}`)],
       [url.parse(`http://localhost:${port}`)],
       [{ port }, { protocol: 'http:' }],
-      [{ port, hostname: '127.0.0.1' }, { protocol: 'http:' }]
+      [{ port, hostname: '127.0.0.1' }, { protocol: 'http:' }],
     ];
 
     const serverClose = new Countdown(items.length + 1,
@@ -38,11 +37,13 @@ const URL = url.URL;
       const client =
         h2.connect.apply(null, i)
           .on('connect', common.mustCall(() => maybeClose(client)));
+      client.on('close', common.mustCall());
     });
 
     // Will fail because protocol does not match the server.
-    h2.connect({ port: port, protocol: 'https:' })
+    const client = h2.connect({ port: port, protocol: 'https:' })
       .on('error', common.mustCall(() => serverClose.dec()));
+    client.on('close', common.mustCall());
   }));
 }
 
@@ -65,7 +66,7 @@ const URL = url.URL;
       [new URL(`https://localhost:${port}`), opts],
       [url.parse(`https://localhost:${port}`), opts],
       [{ port: port, protocol: 'https:' }, opts],
-      [{ port: port, hostname: '127.0.0.1', protocol: 'https:' }, opts]
+      [{ port: port, hostname: '127.0.0.1', protocol: 'https:' }, opts],
     ];
 
     const serverClose = new Countdown(items.length,

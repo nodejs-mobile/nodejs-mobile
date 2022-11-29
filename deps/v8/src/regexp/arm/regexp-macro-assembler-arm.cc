@@ -110,6 +110,8 @@ RegExpMacroAssemblerARM::RegExpMacroAssemblerARM(Isolate* isolate, Zone* zone,
       success_label_(),
       backtrack_label_(),
       exit_label_() {
+  masm_->set_root_array_available(false);
+
   DCHECK_EQ(0, registers_to_save % 2);
   __ jmp(&entry_label_);   // We'll write the entry code later.
   __ bind(&start_label_);  // And then continue from here.
@@ -125,6 +127,7 @@ RegExpMacroAssemblerARM::~RegExpMacroAssemblerARM() {
   exit_label_.Unuse();
   check_preempt_label_.Unuse();
   stack_overflow_label_.Unuse();
+  fallback_label_.Unuse();
 }
 
 
@@ -154,6 +157,24 @@ void RegExpMacroAssemblerARM::AdvanceRegister(int reg, int by) {
 
 void RegExpMacroAssemblerARM::Backtrack() {
   CheckPreemption();
+  if (has_backtrack_limit()) {
+    Label next;
+    __ ldr(r0, MemOperand(frame_pointer(), kBacktrackCount));
+    __ add(r0, r0, Operand(1));
+    __ str(r0, MemOperand(frame_pointer(), kBacktrackCount));
+    __ cmp(r0, Operand(backtrack_limit()));
+    __ b(ne, &next);
+
+    // Backtrack limit exceeded.
+    if (can_fallback()) {
+      __ jmp(&fallback_label_);
+    } else {
+      // Can't fallback, so we treat it as a failed match.
+      Fail();
+    }
+
+    __ bind(&next);
+  }
   // Pop Code offset from backtrack stack, add Code and jump to location.
   Pop(r0);
   __ add(pc, r0, Operand(code_pointer()));
@@ -170,8 +191,8 @@ void RegExpMacroAssemblerARM::CheckCharacter(uint32_t c, Label* on_equal) {
   BranchOrBacktrack(eq, on_equal);
 }
 
-
-void RegExpMacroAssemblerARM::CheckCharacterGT(uc16 limit, Label* on_greater) {
+void RegExpMacroAssemblerARM::CheckCharacterGT(base::uc16 limit,
+                                               Label* on_greater) {
   __ cmp(current_character(), Operand(limit));
   BranchOrBacktrack(gt, on_greater);
 }
@@ -193,12 +214,11 @@ void RegExpMacroAssemblerARM::CheckNotAtStart(int cp_offset,
   BranchOrBacktrack(ne, on_not_at_start);
 }
 
-
-void RegExpMacroAssemblerARM::CheckCharacterLT(uc16 limit, Label* on_less) {
+void RegExpMacroAssemblerARM::CheckCharacterLT(base::uc16 limit,
+                                               Label* on_less) {
   __ cmp(current_character(), Operand(limit));
   BranchOrBacktrack(lt, on_less);
 }
-
 
 void RegExpMacroAssemblerARM::CheckGreedyLoop(Label* on_equal) {
   __ ldr(r0, MemOperand(backtrack_stackpointer(), 0));
@@ -207,7 +227,6 @@ void RegExpMacroAssemblerARM::CheckGreedyLoop(Label* on_equal) {
          backtrack_stackpointer(), Operand(kPointerSize), LeaveCC, eq);
   BranchOrBacktrack(eq, on_equal);
 }
-
 
 void RegExpMacroAssemblerARM::CheckNotBackReferenceIgnoreCase(
     int start_reg, bool read_backward, bool unicode, Label* on_no_match) {
@@ -302,7 +321,7 @@ void RegExpMacroAssemblerARM::CheckNotBackReferenceIgnoreCase(
     //   r0: Address byte_offset1 - Address captured substring's start.
     //   r1: Address byte_offset2 - Address of current character position.
     //   r2: size_t byte_length - length of capture in bytes(!)
-    //   r3: Isolate* isolate or 0 if unicode flag.
+    //   r3: Isolate* isolate.
 
     // Address of start of capture.
     __ add(r0, r0, Operand(end_of_input_address()));
@@ -316,19 +335,15 @@ void RegExpMacroAssemblerARM::CheckNotBackReferenceIgnoreCase(
       __ sub(r1, r1, r4);
     }
     // Isolate.
-#ifdef V8_INTL_SUPPORT
-    if (unicode) {
-      __ mov(r3, Operand(0));
-    } else  // NOLINT
-#endif      // V8_INTL_SUPPORT
-    {
-      __ mov(r3, Operand(ExternalReference::isolate_address(isolate())));
-    }
+    __ mov(r3, Operand(ExternalReference::isolate_address(isolate())));
 
     {
       AllowExternalCallThatCantCauseGC scope(masm_);
       ExternalReference function =
-          ExternalReference::re_case_insensitive_compare_uc16(isolate());
+          unicode ? ExternalReference::re_case_insensitive_compare_unicode(
+                        isolate())
+                  : ExternalReference::re_case_insensitive_compare_non_unicode(
+                        isolate());
       __ CallCFunction(function, argument_count);
     }
 
@@ -346,7 +361,6 @@ void RegExpMacroAssemblerARM::CheckNotBackReferenceIgnoreCase(
 
   __ bind(&fallthrough);
 }
-
 
 void RegExpMacroAssemblerARM::CheckNotBackReference(int start_reg,
                                                     bool read_backward,
@@ -443,12 +457,8 @@ void RegExpMacroAssemblerARM::CheckNotCharacterAfterAnd(unsigned c,
   BranchOrBacktrack(ne, on_not_equal);
 }
 
-
 void RegExpMacroAssemblerARM::CheckNotCharacterAfterMinusAnd(
-    uc16 c,
-    uc16 minus,
-    uc16 mask,
-    Label* on_not_equal) {
+    base::uc16 c, base::uc16 minus, base::uc16 mask, Label* on_not_equal) {
   DCHECK_GT(String::kMaxUtf16CodeUnit, minus);
   __ sub(r0, current_character(), Operand(minus));
   __ and_(r0, r0, Operand(mask));
@@ -456,26 +466,21 @@ void RegExpMacroAssemblerARM::CheckNotCharacterAfterMinusAnd(
   BranchOrBacktrack(ne, on_not_equal);
 }
 
-
-void RegExpMacroAssemblerARM::CheckCharacterInRange(
-    uc16 from,
-    uc16 to,
-    Label* on_in_range) {
+void RegExpMacroAssemblerARM::CheckCharacterInRange(base::uc16 from,
+                                                    base::uc16 to,
+                                                    Label* on_in_range) {
   __ sub(r0, current_character(), Operand(from));
   __ cmp(r0, Operand(to - from));
   BranchOrBacktrack(ls, on_in_range);  // Unsigned lower-or-same condition.
 }
 
-
-void RegExpMacroAssemblerARM::CheckCharacterNotInRange(
-    uc16 from,
-    uc16 to,
-    Label* on_not_in_range) {
+void RegExpMacroAssemblerARM::CheckCharacterNotInRange(base::uc16 from,
+                                                       base::uc16 to,
+                                                       Label* on_not_in_range) {
   __ sub(r0, current_character(), Operand(from));
   __ cmp(r0, Operand(to - from));
   BranchOrBacktrack(hi, on_not_in_range);  // Unsigned higher condition.
 }
-
 
 void RegExpMacroAssemblerARM::CheckBitInTable(
     Handle<ByteArray> table,
@@ -494,8 +499,7 @@ void RegExpMacroAssemblerARM::CheckBitInTable(
   BranchOrBacktrack(ne, on_bit_set);
 }
 
-
-bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(uc16 type,
+bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(base::uc16 type,
                                                          Label* on_no_match) {
   // Range checks (c in min..max) are generally implemented by an unsigned
   // (c - min) <= (max - min) check
@@ -610,7 +614,6 @@ bool RegExpMacroAssemblerARM::CheckSpecialCharacterClass(uc16 type,
   }
 }
 
-
 void RegExpMacroAssemblerARM::Fail() {
   __ mov(r0, Operand(FAILURE));
   __ jmp(&exit_label_);
@@ -642,9 +645,16 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
   // Set frame pointer in space for it if this is not a direct call
   // from generated code.
   __ add(frame_pointer(), sp, Operand(4 * kPointerSize));
+
+  STATIC_ASSERT(kSuccessfulCaptures == kInputString - kSystemPointerSize);
   __ mov(r0, Operand::Zero());
   __ push(r0);  // Make room for success counter and initialize it to 0.
+  STATIC_ASSERT(kStringStartMinusOne ==
+                kSuccessfulCaptures - kSystemPointerSize);
   __ push(r0);  // Make room for "string start - 1" constant.
+  STATIC_ASSERT(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
+  __ push(r0);  // The backtrack counter.
+
   // Check if we have space on the stack for registers.
   Label stack_limit_hit;
   Label stack_ok;
@@ -806,8 +816,7 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
         // Advance current position after a zero-length match.
         Label advance;
         __ bind(&advance);
-        __ add(current_input_offset(),
-               current_input_offset(),
+        __ add(current_input_offset(), current_input_offset(),
                Operand((mode_ == UC16) ? 2 : 1));
         if (global_unicode()) CheckNotInSurrogatePair(0, &advance);
       }
@@ -885,13 +894,20 @@ Handle<HeapObject> RegExpMacroAssemblerARM::GetCode(Handle<String> source) {
     __ jmp(&return_r0);
   }
 
+  if (fallback_label_.is_linked()) {
+    __ bind(&fallback_label_);
+    __ mov(r0, Operand(FALLBACK_TO_EXPERIMENTAL));
+    __ jmp(&return_r0);
+  }
+
   CodeDesc code_desc;
   masm_->GetCode(isolate(), &code_desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate(), code_desc, Code::REGEXP)
-                          .set_self_reference(masm_->CodeObject())
-                          .Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate(), code_desc, CodeKind::REGEXP)
+          .set_self_reference(masm_->CodeObject())
+          .Build();
   PROFILE(masm_->isolate(),
-          RegExpCodeCreateEvent(AbstractCode::cast(*code), *source));
+          RegExpCodeCreateEvent(Handle<AbstractCode>::cast(code), source));
   return Handle<HeapObject>::cast(code);
 }
 
@@ -932,25 +948,6 @@ RegExpMacroAssembler::IrregexpImplementation
   return kARMImplementation;
 }
 
-void RegExpMacroAssemblerARM::LoadCurrentCharacterImpl(int cp_offset,
-                                                       Label* on_end_of_input,
-                                                       bool check_bounds,
-                                                       int characters,
-                                                       int eats_at_least) {
-  // It's possible to preload a small number of characters when each success
-  // path requires a large number of characters, but not the reverse.
-  DCHECK_GE(eats_at_least, characters);
-
-  DCHECK(cp_offset < (1<<30));  // Be sane! (And ensure negation works)
-  if (check_bounds) {
-    if (cp_offset >= 0) {
-      CheckPosition(cp_offset + eats_at_least - 1, on_end_of_input);
-    } else {
-      CheckPosition(cp_offset, on_end_of_input);
-    }
-  }
-  LoadCurrentCharacterUnchecked(cp_offset, characters);
-}
 
 void RegExpMacroAssemblerARM::PopCurrentPosition() {
   Pop(current_input_offset());
@@ -1073,17 +1070,9 @@ void RegExpMacroAssemblerARM::CallCheckStackGuardState() {
       ExternalReference::re_check_stack_guard_state(isolate());
   __ mov(ip, Operand(stack_guard_check));
 
-  if (FLAG_embedded_builtins) {
-    EmbeddedData d = EmbeddedData::FromBlob();
-    CHECK(Builtins::IsIsolateIndependent(Builtins::kDirectCEntry));
-    Address entry = d.InstructionStartOfBuiltin(Builtins::kDirectCEntry);
-    __ mov(lr, Operand(entry, RelocInfo::OFF_HEAP_TARGET));
-  } else {
-    // TODO(v8:8519): Remove this once embedded builtins are on unconditionally.
-    Handle<Code> code = BUILTIN_CODE(isolate(), DirectCEntry);
-    __ mov(lr, Operand(reinterpret_cast<intptr_t>(code.location()),
-                       RelocInfo::CODE_TARGET));
-  }
+  EmbeddedData d = EmbeddedData::FromBlob();
+  Address entry = d.InstructionStartOfBuiltin(Builtin::kDirectCEntry);
+  __ mov(lr, Operand(entry, RelocInfo::OFF_HEAP_TARGET));
   __ Call(lr);
 
   // Drop the return address from the stack.

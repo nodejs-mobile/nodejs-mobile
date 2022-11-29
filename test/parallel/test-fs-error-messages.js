@@ -199,8 +199,7 @@ function re(literals, ...values) {
               `expect ${err.dest} to end with 'foo'`);
     const regexp = new RegExp('^ENOENT: no such file or directory, link ' +
                               re`'${nonexistentFile}' -> ` + '\'.*foo\'');
-    assert.ok(regexp.test(err.message),
-              `Expect ${err.message} to match ${regexp}`);
+    assert.match(err.message, regexp);
     assert.strictEqual(err.errno, UV_ENOENT);
     assert.strictEqual(err.code, 'ENOENT');
     assert.strictEqual(err.syscall, 'link');
@@ -291,8 +290,7 @@ function re(literals, ...values) {
               `expect ${err.dest} to end with 'foo'`);
     const regexp = new RegExp('ENOENT: no such file or directory, rename ' +
                               re`'${nonexistentFile}' -> ` + '\'.*foo\'');
-    assert.ok(regexp.test(err.message),
-              `Expect ${err.message} to match ${regexp}`);
+    assert.match(err.message, regexp);
     assert.strictEqual(err.errno, UV_ENOENT);
     assert.strictEqual(err.code, 'ENOENT');
     assert.strictEqual(err.syscall, 'rename');
@@ -641,13 +639,11 @@ if (!common.isAIX) {
 {
   const validateError = (err) => {
     const pathPrefix = new RegExp('^' + re`${nonexistentDir}`);
-    assert(pathPrefix.test(err.path),
-           `Expect ${err.path} to match ${pathPrefix}`);
+    assert.match(err.path, pathPrefix);
 
     const prefix = new RegExp('^ENOENT: no such file or directory, mkdtemp ' +
                               re`'${nonexistentDir}`);
-    assert(prefix.test(err.message),
-           `Expect ${err.message} to match ${prefix}`);
+    assert.match(err.message, prefix);
 
     assert.strictEqual(err.errno, UV_ENOENT);
     assert.strictEqual(err.code, 'ENOENT');
@@ -663,21 +659,17 @@ if (!common.isAIX) {
   );
 }
 
-// Check copyFile with invalid flags.
+// Check copyFile with invalid modes.
 {
   const validateError = {
-    // TODO: Make sure the error message always also contains the src.
-    message: `EINVAL: invalid argument, copyfile -> '${nonexistentFile}'`,
-    errno: UV_EINVAL,
-    code: 'EINVAL',
-    syscall: 'copyfile'
+    message: /"mode".+must be an integer >= 0 && <= 7\. Received -1/,
+    code: 'ERR_OUT_OF_RANGE'
   };
 
-  fs.copyFile(existingFile, nonexistentFile, -1,
-              common.expectsError(validateError));
-
-  validateError.message = 'EINVAL: invalid argument, copyfile ' +
-                          `'${existingFile}' -> '${nonexistentFile}'`;
+  assert.throws(
+    () => fs.copyFile(existingFile, nonexistentFile, -1, () => {}),
+    validateError
+  );
   assert.throws(
     () => fs.copyFileSync(existingFile, nonexistentFile, -1),
     validateError

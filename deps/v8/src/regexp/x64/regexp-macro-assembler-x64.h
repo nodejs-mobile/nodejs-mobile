@@ -5,6 +5,7 @@
 #ifndef V8_REGEXP_X64_REGEXP_MACRO_ASSEMBLER_X64_H_
 #define V8_REGEXP_X64_REGEXP_MACRO_ASSEMBLER_X64_H_
 
+#include "src/base/strings.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/codegen/x64/assembler-x64.h"
 #include "src/regexp/regexp-macro-assembler.h"
@@ -28,8 +29,8 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   void CheckCharacter(uint32_t c, Label* on_equal) override;
   void CheckCharacterAfterAnd(uint32_t c, uint32_t mask,
                               Label* on_equal) override;
-  void CheckCharacterGT(uc16 limit, Label* on_greater) override;
-  void CheckCharacterLT(uc16 limit, Label* on_less) override;
+  void CheckCharacterGT(base::uc16 limit, Label* on_greater) override;
+  void CheckCharacterLT(base::uc16 limit, Label* on_less) override;
   // A "greedy loop" is a loop that is both greedy and with a simple
   // body. It has a particularly simple implementation.
   void CheckGreedyLoop(Label* on_tos_equals_current_position) override;
@@ -42,17 +43,19 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   void CheckNotCharacter(uint32_t c, Label* on_not_equal) override;
   void CheckNotCharacterAfterAnd(uint32_t c, uint32_t mask,
                                  Label* on_not_equal) override;
-  void CheckNotCharacterAfterMinusAnd(uc16 c, uc16 minus, uc16 mask,
+  void CheckNotCharacterAfterMinusAnd(base::uc16 c, base::uc16 minus,
+                                      base::uc16 mask,
                                       Label* on_not_equal) override;
-  void CheckCharacterInRange(uc16 from, uc16 to, Label* on_in_range) override;
-  void CheckCharacterNotInRange(uc16 from, uc16 to,
+  void CheckCharacterInRange(base::uc16 from, base::uc16 to,
+                             Label* on_in_range) override;
+  void CheckCharacterNotInRange(base::uc16 from, base::uc16 to,
                                 Label* on_not_in_range) override;
   void CheckBitInTable(Handle<ByteArray> table, Label* on_bit_set) override;
 
   // Checks whether the given offset from the current position is before
   // the end of the string.
   void CheckPosition(int cp_offset, Label* on_outside_input) override;
-  bool CheckSpecialCharacterClass(uc16 type, Label* on_no_match) override;
+  bool CheckSpecialCharacterClass(base::uc16 type, Label* on_no_match) override;
   void Fail() override;
   Handle<HeapObject> GetCode(Handle<String> source) override;
   void GoTo(Label* label) override;
@@ -60,9 +63,8 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   void IfRegisterLT(int reg, int comparand, Label* if_lt) override;
   void IfRegisterEqPos(int reg, Label* if_eq) override;
   IrregexpImplementation Implementation() override;
-  void LoadCurrentCharacterImpl(int cp_offset, Label* on_end_of_input,
-                                bool check_bounds, int characters,
-                                int eats_at_least) override;
+  void LoadCurrentCharacterUnchecked(int cp_offset,
+                                     int character_count) override;
   void PopCurrentPosition() override;
   void PopRegister(int register_index) override;
   void PushBacktrack(Label* label) override;
@@ -92,7 +94,7 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   static const int kReturn_eip = kFramePointer + kSystemPointerSize;
   static const int kFrameAlign = kReturn_eip + kSystemPointerSize;
 
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
   // Parameters (first four passed as registers, but with room on stack).
   // In Microsoft 64-bit Calling Convention, there is room on the callers
   // stack (before the return address) to spill parameter registers. We
@@ -131,7 +133,7 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   static const int kIsolate = kDirectCall + kSystemPointerSize;
 #endif
 
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
   // Microsoft calling convention has three callee-saved registers
   // (that we are using). We push these after the frame pointer.
   static const int kBackup_rsi = kFramePointer - kSystemPointerSize;
@@ -146,22 +148,19 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   static const int kLastCalleeSaveRegister = kBackup_rbx;
 #endif
 
-  static const int kSuccessfulCaptures =
-      kLastCalleeSaveRegister - kSystemPointerSize;
   // When adding local variables remember to push space for them in
   // the frame in GetCode.
+  static const int kSuccessfulCaptures =
+      kLastCalleeSaveRegister - kSystemPointerSize;
   static const int kStringStartMinusOne =
       kSuccessfulCaptures - kSystemPointerSize;
+  static const int kBacktrackCount = kStringStartMinusOne - kSystemPointerSize;
 
   // First register address. Following registers are below it on the stack.
-  static const int kRegisterZero = kStringStartMinusOne - kSystemPointerSize;
+  static const int kRegisterZero = kBacktrackCount - kSystemPointerSize;
 
   // Initial size of code buffer.
   static const int kRegExpCodeSize = 1024;
-
-  // Load a number of characters at the given offset from the
-  // current position, into the current-character register.
-  void LoadCurrentCharacterUnchecked(int cp_offset, int character_count);
 
   // Check whether preemption has been requested.
   void CheckPreemption();
@@ -252,6 +251,7 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerX64
   Label exit_label_;
   Label check_preempt_label_;
   Label stack_overflow_label_;
+  Label fallback_label_;
 };
 
 }  // namespace internal

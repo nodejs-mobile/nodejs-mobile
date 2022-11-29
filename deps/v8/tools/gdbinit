@@ -31,20 +31,15 @@ end
 
 # Print Code objects containing given PC.
 define jco
-call (void) _v8_internal_Print_Code((void*)($arg0))
+  if $argc == 0
+    call (void) _v8_internal_Print_Code((void*)($pc))
+  else
+    call (void) _v8_internal_Print_Code((void*)($arg0))
+  end
 end
 document jco
 Print a v8 Code object from an internal code address
 Usage: jco pc
-end
-
-# Print LayoutDescriptor.
-define jld
-call (void) _v8_internal_Print_LayoutDescriptor((void*)($arg0))
-end
-document jld
-Print a v8 LayoutDescriptor object
-Usage: jld tagged_ptr
 end
 
 # Print TransitionTree.
@@ -84,6 +79,24 @@ end
 document jss
 Skip the jitted stack on x64 to where we entered JS last.
 Usage: jss
+end
+
+# Execute a simulator command.
+python
+import gdb
+
+class SimCommand(gdb.Command):
+  """Sim the current program."""
+
+  def __init__ (self):
+    super (SimCommand, self).__init__ ("sim", gdb.COMMAND_SUPPORT)
+
+  def invoke (self, arg, from_tty):
+    arg_c_string = gdb.Value(arg)
+    cmd_func = gdb.selected_frame().read_var("_v8_internal_Simulator_ExecDebugCommand")
+    cmd_func(arg_c_string)
+
+SimCommand()
 end
 
 # Print stack trace with assertion scopes.
@@ -138,7 +151,13 @@ Find the location of a given address in V8 pages.
 Usage: heap_find address
 end
 
-set disassembly-flavor intel
+# The 'disassembly-flavor' command is only available on i386 and x84_64.
+python
+try:
+  gdb.execute("set disassembly-flavor intel")
+except gdb.error:
+  pass
+end
 set disable-randomization off
 
 # Install a handler whenever the debugger stops due to a signal. It walks up the
@@ -152,7 +171,7 @@ def dcheck_stop_handler(event):
   count = 0
   # limit stack scanning since they're usually shallow and otherwise stack
   # overflows can be very slow.
-  while frame is not None and count < 5:
+  while frame is not None and count < 7:
     count += 1
     if frame.name() == 'V8_Dcheck':
       frame_message = gdb.lookup_symbol('message', frame.block())[0]

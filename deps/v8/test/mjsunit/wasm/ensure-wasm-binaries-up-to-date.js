@@ -10,11 +10,11 @@
 (function print_incrementer() {
   if (true) return; // remove to regenerate the module
 
-  load('test/mjsunit/wasm/wasm-module-builder.js');
+  d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
   var module = new WasmModuleBuilder();
   module.addFunction(undefined, kSig_i_i)
-    .addBody([kExprGetLocal, 0, kExprI32Const, 1, kExprI32Add])
+    .addBody([kExprLocalGet, 0, kExprI32Const, 1, kExprI32Add])
     .exportAs("increment");
 
   var buffer = module.toBuffer(true);

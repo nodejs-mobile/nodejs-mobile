@@ -200,11 +200,12 @@ void TestInvalidateExclusiveAccess(TestData initial_data, MemoryAccess access1,
   AssembleLoadExcl(&masm, access1, w1, x1);
   AssembleMemoryAccess(&masm, access2, w3, w2, x1);
   AssembleStoreExcl(&masm, access3, w0, w3, x1);
-  __ br(lr);
+  __ Ret();
 
   CodeDesc desc;
   masm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
   TestData t = initial_data;
   Simulator::current(isolate)->Call<void>(code->entry(), &t);
@@ -271,11 +272,12 @@ int ExecuteMemoryAccess(Isolate* isolate, TestData* test_data,
   HandleScope scope(isolate);
   MacroAssembler masm(isolate, v8::internal::CodeObjectRequired::kYes);
   AssembleMemoryAccess(&masm, access, w0, w2, x1);
-  __ br(lr);
+  __ Ret();
 
   CodeDesc desc;
   masm.GetCode(isolate, &desc);
-  Handle<Code> code = Factory::CodeBuilder(isolate, desc, Code::STUB).Build();
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
   Simulator::current(isolate)->Call<void>(code->entry(), test_data);
   return Simulator::current(isolate)->wreg(0);
 }

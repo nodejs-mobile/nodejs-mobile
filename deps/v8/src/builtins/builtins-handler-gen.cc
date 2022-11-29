@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/base/optional.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
 #include "src/codegen/code-stub-assembler.h"
 #include "src/ic/ic.h"
 #include "src/ic/keyed-store-generic.h"
 #include "src/objects/objects-inl.h"
+#include "torque-generated/exported-macros-assembler.h"
 
 namespace v8 {
 namespace internal {
@@ -19,8 +21,6 @@ class HandlerBuiltinsAssembler : public CodeStubAssembler {
 
  protected:
   void Generate_KeyedStoreIC_SloppyArguments();
-  void Generate_KeyedStoreIC_Slow();
-  void Generate_StoreInArrayLiteralIC_Slow();
 
   // Essentially turns runtime elements kinds (TNode<Int32T>) into
   // compile-time types (int) by dispatching over the runtime type and
@@ -43,22 +43,14 @@ class HandlerBuiltinsAssembler : public CodeStubAssembler {
 };
 
 TF_BUILTIN(LoadIC_StringLength, CodeStubAssembler) {
-  Node* string = Parameter(Descriptor::kReceiver);
+  auto string = Parameter<String>(Descriptor::kReceiver);
   Return(LoadStringLengthAsSmi(string));
 }
 
 TF_BUILTIN(LoadIC_StringWrapperLength, CodeStubAssembler) {
-  Node* value = Parameter(Descriptor::kReceiver);
-  Node* string = LoadJSPrimitiveWrapperValue(value);
+  auto value = Parameter<JSPrimitiveWrapper>(Descriptor::kReceiver);
+  TNode<String> string = CAST(LoadJSPrimitiveWrapperValue(value));
   Return(LoadStringLengthAsSmi(string));
-}
-
-TF_BUILTIN(KeyedLoadIC_Slow, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* context = Parameter(Descriptor::kContext);
-
-  TailCallRuntime(Runtime::kGetProperty, context, receiver, name);
 }
 
 void Builtins::Generate_KeyedStoreIC_Megamorphic(
@@ -71,76 +63,8 @@ void Builtins::Generate_StoreIC_NoFeedback(
   StoreICNoFeedbackGenerator::Generate(state);
 }
 
-// TODO(mythria): Check if we can remove feedback vector and slot parameters in
-// descriptor.
-void HandlerBuiltinsAssembler::Generate_KeyedStoreIC_Slow() {
-  using Descriptor = StoreWithVectorDescriptor;
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* context = Parameter(Descriptor::kContext);
-
-  // The slow case calls into the runtime to complete the store without causing
-  // an IC miss that would otherwise cause a transition to the generic stub.
-  TailCallRuntime(Runtime::kKeyedStoreIC_Slow, context, value, receiver, name);
-}
-
-TF_BUILTIN(KeyedStoreIC_Slow, HandlerBuiltinsAssembler) {
-  Generate_KeyedStoreIC_Slow();
-}
-
-TF_BUILTIN(KeyedStoreIC_Slow_Standard, HandlerBuiltinsAssembler) {
-  Generate_KeyedStoreIC_Slow();
-}
-
-TF_BUILTIN(KeyedStoreIC_Slow_GrowNoTransitionHandleCOW,
-           HandlerBuiltinsAssembler) {
-  Generate_KeyedStoreIC_Slow();
-}
-
-TF_BUILTIN(KeyedStoreIC_Slow_NoTransitionIgnoreOOB, HandlerBuiltinsAssembler) {
-  Generate_KeyedStoreIC_Slow();
-}
-
-TF_BUILTIN(KeyedStoreIC_Slow_NoTransitionHandleCOW, HandlerBuiltinsAssembler) {
-  Generate_KeyedStoreIC_Slow();
-}
-
-void HandlerBuiltinsAssembler::Generate_StoreInArrayLiteralIC_Slow() {
-  using Descriptor = StoreWithVectorDescriptor;
-  Node* array = Parameter(Descriptor::kReceiver);
-  Node* index = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* context = Parameter(Descriptor::kContext);
-  TailCallRuntime(Runtime::kStoreInArrayLiteralIC_Slow, context, value, array,
-                  index);
-}
-
-TF_BUILTIN(StoreInArrayLiteralIC_Slow, HandlerBuiltinsAssembler) {
-  Generate_StoreInArrayLiteralIC_Slow();
-}
-
-TF_BUILTIN(StoreInArrayLiteralIC_Slow_Standard, HandlerBuiltinsAssembler) {
-  Generate_StoreInArrayLiteralIC_Slow();
-}
-
-TF_BUILTIN(StoreInArrayLiteralIC_Slow_GrowNoTransitionHandleCOW,
-           HandlerBuiltinsAssembler) {
-  Generate_StoreInArrayLiteralIC_Slow();
-}
-
-TF_BUILTIN(StoreInArrayLiteralIC_Slow_NoTransitionIgnoreOOB,
-           HandlerBuiltinsAssembler) {
-  Generate_StoreInArrayLiteralIC_Slow();
-}
-
-TF_BUILTIN(StoreInArrayLiteralIC_Slow_NoTransitionHandleCOW,
-           HandlerBuiltinsAssembler) {
-  Generate_StoreInArrayLiteralIC_Slow();
-}
-
 // All possible fast-to-fast transitions. Transitions to dictionary mode are not
-// handled by ElementsTransitionAndStore.
+// handled by ElementsTransitionAndStore builtins.
 #define ELEMENTS_KIND_TRANSITIONS(V)               \
   V(PACKED_SMI_ELEMENTS, HOLEY_SMI_ELEMENTS)       \
   V(PACKED_SMI_ELEMENTS, PACKED_DOUBLE_ELEMENTS)   \
@@ -206,13 +130,13 @@ void HandlerBuiltinsAssembler::DispatchForElementsKindTransition(
 void HandlerBuiltinsAssembler::Generate_ElementsTransitionAndStore(
     KeyedAccessStoreMode store_mode) {
   using Descriptor = StoreTransitionDescriptor;
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* map = Parameter(Descriptor::kMap);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto value = Parameter<Object>(Descriptor::kValue);
+  auto map = Parameter<Map>(Descriptor::kMap);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<FeedbackVector>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Comment("ElementsTransitionAndStore: store_mode=", store_mode);
 
@@ -259,28 +183,39 @@ TF_BUILTIN(ElementsTransitionAndStore_NoTransitionHandleCOW,
 
 // All elements kinds handled by EmitElementStore. Specifically, this includes
 // fast elements and fixed typed array elements.
-#define ELEMENTS_KINDS(V)          \
-  V(PACKED_SMI_ELEMENTS)           \
-  V(HOLEY_SMI_ELEMENTS)            \
-  V(PACKED_ELEMENTS)               \
-  V(PACKED_NONEXTENSIBLE_ELEMENTS) \
-  V(PACKED_SEALED_ELEMENTS)        \
-  V(HOLEY_ELEMENTS)                \
-  V(HOLEY_NONEXTENSIBLE_ELEMENTS)  \
-  V(HOLEY_SEALED_ELEMENTS)         \
-  V(PACKED_DOUBLE_ELEMENTS)        \
-  V(HOLEY_DOUBLE_ELEMENTS)         \
-  V(UINT8_ELEMENTS)                \
-  V(INT8_ELEMENTS)                 \
-  V(UINT16_ELEMENTS)               \
-  V(INT16_ELEMENTS)                \
-  V(UINT32_ELEMENTS)               \
-  V(INT32_ELEMENTS)                \
-  V(FLOAT32_ELEMENTS)              \
-  V(FLOAT64_ELEMENTS)              \
-  V(UINT8_CLAMPED_ELEMENTS)        \
-  V(BIGUINT64_ELEMENTS)            \
-  V(BIGINT64_ELEMENTS)
+#define ELEMENTS_KINDS(V)            \
+  V(PACKED_SMI_ELEMENTS)             \
+  V(HOLEY_SMI_ELEMENTS)              \
+  V(PACKED_ELEMENTS)                 \
+  V(PACKED_NONEXTENSIBLE_ELEMENTS)   \
+  V(PACKED_SEALED_ELEMENTS)          \
+  V(HOLEY_ELEMENTS)                  \
+  V(HOLEY_NONEXTENSIBLE_ELEMENTS)    \
+  V(HOLEY_SEALED_ELEMENTS)           \
+  V(PACKED_DOUBLE_ELEMENTS)          \
+  V(HOLEY_DOUBLE_ELEMENTS)           \
+  V(UINT8_ELEMENTS)                  \
+  V(INT8_ELEMENTS)                   \
+  V(UINT16_ELEMENTS)                 \
+  V(INT16_ELEMENTS)                  \
+  V(UINT32_ELEMENTS)                 \
+  V(INT32_ELEMENTS)                  \
+  V(FLOAT32_ELEMENTS)                \
+  V(FLOAT64_ELEMENTS)                \
+  V(UINT8_CLAMPED_ELEMENTS)          \
+  V(BIGUINT64_ELEMENTS)              \
+  V(BIGINT64_ELEMENTS)               \
+  V(RAB_GSAB_UINT8_ELEMENTS)         \
+  V(RAB_GSAB_INT8_ELEMENTS)          \
+  V(RAB_GSAB_UINT16_ELEMENTS)        \
+  V(RAB_GSAB_INT16_ELEMENTS)         \
+  V(RAB_GSAB_UINT32_ELEMENTS)        \
+  V(RAB_GSAB_INT32_ELEMENTS)         \
+  V(RAB_GSAB_FLOAT32_ELEMENTS)       \
+  V(RAB_GSAB_FLOAT64_ELEMENTS)       \
+  V(RAB_GSAB_UINT8_CLAMPED_ELEMENTS) \
+  V(RAB_GSAB_BIGUINT64_ELEMENTS)     \
+  V(RAB_GSAB_BIGINT64_ELEMENTS)
 
 void HandlerBuiltinsAssembler::DispatchByElementsKind(
     TNode<Int32T> elements_kind, const ElementsKindSwitchCase& case_function,
@@ -309,20 +244,20 @@ void HandlerBuiltinsAssembler::DispatchByElementsKind(
   Switch(elements_kind, &if_unknown_type, elements_kinds, elements_kind_labels,
          arraysize(elements_kinds));
 
-#define ELEMENTS_KINDS_CASE(KIND)                                \
-  BIND(&if_##KIND);                                              \
-  {                                                              \
-    if (!FLAG_enable_sealed_frozen_elements_kind &&              \
-        IsAnyNonextensibleElementsKindUnchecked(KIND)) {         \
-      /* Disable support for frozen or sealed elements kinds. */ \
-      Unreachable();                                             \
-    } else if (!handle_typed_elements_kind &&                    \
-               IsTypedArrayElementsKind(KIND)) {                 \
-      Unreachable();                                             \
-    } else {                                                     \
-      case_function(KIND);                                       \
-      Goto(&next);                                               \
-    }                                                            \
+#define ELEMENTS_KINDS_CASE(KIND)                                   \
+  BIND(&if_##KIND);                                                 \
+  {                                                                 \
+    if (!FLAG_enable_sealed_frozen_elements_kind &&                 \
+        IsAnyNonextensibleElementsKindUnchecked(KIND)) {            \
+      /* Disable support for frozen or sealed elements kinds. */    \
+      Unreachable();                                                \
+    } else if (!handle_typed_elements_kind &&                       \
+               IsTypedArrayOrRabGsabTypedArrayElementsKind(KIND)) { \
+      Unreachable();                                                \
+    } else {                                                        \
+      case_function(KIND);                                          \
+      Goto(&next);                                                  \
+    }                                                               \
   }
   ELEMENTS_KINDS(ELEMENTS_KINDS_CASE)
 #undef ELEMENTS_KINDS_CASE
@@ -338,12 +273,12 @@ void HandlerBuiltinsAssembler::DispatchByElementsKind(
 void HandlerBuiltinsAssembler::Generate_StoreFastElementIC(
     KeyedAccessStoreMode store_mode) {
   using Descriptor = StoreWithVectorDescriptor;
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto value = Parameter<Object>(Descriptor::kValue);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Comment("StoreFastElementStub: store_mode=", store_mode);
 
@@ -354,8 +289,7 @@ void HandlerBuiltinsAssembler::Generate_StoreFastElementIC(
   // For typed arrays maybe_converted_value contains the value obtained after
   // calling ToNumber. We should pass the converted value to the runtime to
   // avoid doing the user visible conversion again.
-  VARIABLE(maybe_converted_value, MachineRepresentation::kTagged, value);
-  maybe_converted_value.Bind(value);
+  TVARIABLE(Object, maybe_converted_value, value);
   // TODO(v8:8481): Pass elements_kind in feedback vector slots.
   DispatchByElementsKind(
       LoadElementsKind(receiver),
@@ -388,44 +322,27 @@ TF_BUILTIN(StoreFastElementIC_NoTransitionHandleCOW, HandlerBuiltinsAssembler) {
   Generate_StoreFastElementIC(STORE_HANDLE_COW);
 }
 
-TF_BUILTIN(LoadGlobalIC_Slow, CodeStubAssembler) {
-  Node* name = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
-
-  TailCallRuntime(Runtime::kLoadGlobalIC_Slow, context, name, slot, vector);
-}
-
 TF_BUILTIN(LoadIC_FunctionPrototype, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSFunction>(Descriptor::kReceiver);
+  auto name = Parameter<Name>(Descriptor::kName);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<FeedbackVector>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label miss(this, Label::kDeferred);
-  Return(LoadJSFunctionPrototype(CAST(receiver), &miss));
+  Return(LoadJSFunctionPrototype(receiver, &miss));
 
   BIND(&miss);
   TailCallRuntime(Runtime::kLoadIC_Miss, context, receiver, name, slot, vector);
 }
 
-TF_BUILTIN(LoadIC_Slow, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* context = Parameter(Descriptor::kContext);
-
-  TailCallRuntime(Runtime::kGetProperty, context, receiver, name);
-}
-
 TF_BUILTIN(StoreGlobalIC_Slow, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<Object>(Descriptor::kReceiver);
+  auto name = Parameter<Name>(Descriptor::kName);
+  auto value = Parameter<Object>(Descriptor::kValue);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<FeedbackVector>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   // The slow case calls into the runtime to complete the store without causing
   // an IC miss that would otherwise cause a transition to the generic stub.
@@ -433,16 +350,16 @@ TF_BUILTIN(StoreGlobalIC_Slow, CodeStubAssembler) {
                   receiver, name);
 }
 
-TF_BUILTIN(KeyedLoadIC_SloppyArguments, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+TF_BUILTIN(KeyedLoadIC_SloppyArguments, HandlerBuiltinsAssembler) {
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label miss(this);
 
-  Node* result = LoadKeyedSloppyArguments(receiver, key, &miss);
+  TNode<Object> result = SloppyArgumentsLoad(receiver, key, &miss);
   Return(result);
 
   BIND(&miss);
@@ -455,16 +372,16 @@ TF_BUILTIN(KeyedLoadIC_SloppyArguments, CodeStubAssembler) {
 
 void HandlerBuiltinsAssembler::Generate_KeyedStoreIC_SloppyArguments() {
   using Descriptor = StoreWithVectorDescriptor;
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto value = Parameter<Object>(Descriptor::kValue);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label miss(this);
 
-  StoreKeyedSloppyArguments(receiver, key, value, &miss);
+  SloppyArgumentsStore(receiver, key, value, &miss);
   Return(value);
 
   BIND(&miss);
@@ -491,23 +408,12 @@ TF_BUILTIN(KeyedStoreIC_SloppyArguments_NoTransitionHandleCOW,
   Generate_KeyedStoreIC_SloppyArguments();
 }
 
-TF_BUILTIN(StoreInterceptorIC, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* value = Parameter(Descriptor::kValue);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
-  TailCallRuntime(Runtime::kStorePropertyWithInterceptor, context, value, slot,
-                  vector, receiver, name);
-}
-
 TF_BUILTIN(LoadIndexedInterceptorIC, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label if_keyispositivesmi(this), if_keyisinvalid(this);
   Branch(TaggedIsPositiveSmi(key), &if_keyispositivesmi, &if_keyisinvalid);
@@ -519,16 +425,16 @@ TF_BUILTIN(LoadIndexedInterceptorIC, CodeStubAssembler) {
                   vector);
 }
 
-TF_BUILTIN(KeyedHasIC_SloppyArguments, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+TF_BUILTIN(KeyedHasIC_SloppyArguments, HandlerBuiltinsAssembler) {
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label miss(this);
 
-  Node* result = HasKeyedSloppyArguments(receiver, key, &miss);
+  TNode<Object> result = SloppyArgumentsHas(receiver, key, &miss);
   Return(result);
 
   BIND(&miss);
@@ -540,11 +446,11 @@ TF_BUILTIN(KeyedHasIC_SloppyArguments, CodeStubAssembler) {
 }
 
 TF_BUILTIN(HasIndexedInterceptorIC, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* key = Parameter(Descriptor::kName);
-  Node* slot = Parameter(Descriptor::kSlot);
-  Node* vector = Parameter(Descriptor::kVector);
-  Node* context = Parameter(Descriptor::kContext);
+  auto receiver = Parameter<JSObject>(Descriptor::kReceiver);
+  auto key = Parameter<Object>(Descriptor::kName);
+  auto slot = Parameter<Smi>(Descriptor::kSlot);
+  auto vector = Parameter<HeapObject>(Descriptor::kVector);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   Label if_keyispositivesmi(this), if_keyisinvalid(this);
   Branch(TaggedIsPositiveSmi(key), &if_keyispositivesmi, &if_keyisinvalid);
@@ -554,14 +460,6 @@ TF_BUILTIN(HasIndexedInterceptorIC, CodeStubAssembler) {
   BIND(&if_keyisinvalid);
   TailCallRuntime(Runtime::kKeyedHasIC_Miss, context, receiver, key, slot,
                   vector);
-}
-
-TF_BUILTIN(HasIC_Slow, CodeStubAssembler) {
-  Node* receiver = Parameter(Descriptor::kReceiver);
-  Node* name = Parameter(Descriptor::kName);
-  Node* context = Parameter(Descriptor::kContext);
-
-  TailCallRuntime(Runtime::kHasProperty, context, receiver, name);
 }
 
 }  // namespace internal

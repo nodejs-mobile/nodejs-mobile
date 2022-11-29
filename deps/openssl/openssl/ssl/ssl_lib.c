@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  * Copyright 2005 Nokia. All rights reserved.
  *
@@ -574,7 +574,56 @@ static void clear_ciphers(SSL *s)
     ssl_clear_hash_ctx(&s->write_hash);
 }
 
+#ifndef OPENSSL_NO_QUIC
 int SSL_clear(SSL *s)
+{
+    if (!SSL_clear_not_quic(s))
+        return 0;
+    return SSL_clear_quic(s);
+}
+
+int SSL_clear_quic(SSL *s)
+{
+    OPENSSL_free(s->ext.peer_quic_transport_params_draft);
+    s->ext.peer_quic_transport_params_draft = NULL;
+    s->ext.peer_quic_transport_params_draft_len = 0;
+    OPENSSL_free(s->ext.peer_quic_transport_params);
+    s->ext.peer_quic_transport_params = NULL;
+    s->ext.peer_quic_transport_params_len = 0;
+    s->quic_read_level = ssl_encryption_initial;
+    s->quic_write_level = ssl_encryption_initial;
+    s->quic_latest_level_received = ssl_encryption_initial;
+    while (s->quic_input_data_head != NULL) {
+        QUIC_DATA *qd;
+
+        qd = s->quic_input_data_head;
+        s->quic_input_data_head = qd->next;
+        OPENSSL_free(qd);
+    }
+    s->quic_input_data_tail = NULL;
+    BUF_MEM_free(s->quic_buf);
+    s->quic_buf = NULL;
+    s->quic_next_record_start = 0;
+    memset(s->client_hand_traffic_secret, 0, EVP_MAX_MD_SIZE);
+    memset(s->server_hand_traffic_secret, 0, EVP_MAX_MD_SIZE);
+    memset(s->client_early_traffic_secret, 0, EVP_MAX_MD_SIZE);
+    /*
+     * CONFIG - DON'T CLEAR
+     * s->ext.quic_transport_params
+     * s->ext.quic_transport_params_len
+     * s->quic_transport_version
+     * s->quic_method = NULL;
+     */
+    return 1;
+}
+#endif
+
+/* Keep this conditional very local */
+#ifndef OPENSSL_NO_QUIC
+int SSL_clear_not_quic(SSL *s)
+#else
+int SSL_clear(SSL *s)
+#endif
 {
     if (s->method == NULL) {
         SSLerr(SSL_F_SSL_CLEAR, SSL_R_NO_METHOD_SPECIFIED);
@@ -779,8 +828,10 @@ SSL *SSL_new(SSL_CTX *ctx)
         s->ext.ecpointformats =
             OPENSSL_memdup(ctx->ext.ecpointformats,
                            ctx->ext.ecpointformats_len);
-        if (!s->ext.ecpointformats)
+        if (!s->ext.ecpointformats) {
+            s->ext.ecpointformats_len = 0;
             goto err;
+        }
         s->ext.ecpointformats_len =
             ctx->ext.ecpointformats_len;
     }
@@ -789,8 +840,10 @@ SSL *SSL_new(SSL_CTX *ctx)
             OPENSSL_memdup(ctx->ext.supportedgroups,
                            ctx->ext.supportedgroups_len
                                 * sizeof(*ctx->ext.supportedgroups));
-        if (!s->ext.supportedgroups)
+        if (!s->ext.supportedgroups) {
+            s->ext.supportedgroups_len = 0;
             goto err;
+        }
         s->ext.supportedgroups_len = ctx->ext.supportedgroups_len;
     }
 #endif
@@ -800,8 +853,10 @@ SSL *SSL_new(SSL_CTX *ctx)
 
     if (s->ctx->ext.alpn) {
         s->ext.alpn = OPENSSL_malloc(s->ctx->ext.alpn_len);
-        if (s->ext.alpn == NULL)
+        if (s->ext.alpn == NULL) {
+            s->ext.alpn_len = 0;
             goto err;
+        }
         memcpy(s->ext.alpn, s->ctx->ext.alpn, s->ctx->ext.alpn_len);
         s->ext.alpn_len = s->ctx->ext.alpn_len;
     }
@@ -838,6 +893,10 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->psk_use_session_cb = ctx->psk_use_session_cb;
 
     s->job = NULL;
+
+#ifndef OPENSSL_NO_QUIC
+    s->quic_method = ctx->quic_method;
+#endif
 
 #ifndef OPENSSL_NO_CT
     if (!SSL_set_ct_validation_callback(s, ctx->ct_validation_callback,
@@ -1200,9 +1259,25 @@ void SSL_free(SSL *s)
     OPENSSL_free(s->ext.ocsp.resp);
     OPENSSL_free(s->ext.alpn);
     OPENSSL_free(s->ext.tls13_cookie);
+    if (s->clienthello != NULL)
+        OPENSSL_free(s->clienthello->pre_proc_exts);
     OPENSSL_free(s->clienthello);
     OPENSSL_free(s->pha_context);
     EVP_MD_CTX_free(s->pha_dgst);
+
+#ifndef OPENSSL_NO_QUIC
+    OPENSSL_free(s->ext.quic_transport_params);
+    OPENSSL_free(s->ext.peer_quic_transport_params_draft);
+    OPENSSL_free(s->ext.peer_quic_transport_params);
+    BUF_MEM_free(s->quic_buf);
+    while (s->quic_input_data_head != NULL) {
+        QUIC_DATA *qd;
+
+        qd = s->quic_input_data_head;
+        s->quic_input_data_head = qd->next;
+        OPENSSL_free(qd);
+    }
+#endif
 
     sk_X509_NAME_pop_free(s->ca_names, X509_NAME_free);
     sk_X509_NAME_pop_free(s->client_ca_names, X509_NAME_free);
@@ -1676,6 +1751,8 @@ static int ssl_start_async_job(SSL *s, struct ssl_async_args *args,
         if (s->waitctx == NULL)
             return -1;
     }
+
+    s->rwstate = SSL_NOTHING;
     switch (ASYNC_start_job(&s->job, s->waitctx, &ret, func, args,
                             sizeof(struct ssl_async_args))) {
     case ASYNC_ERR:
@@ -1723,6 +1800,12 @@ static int ssl_io_intern(void *vargs)
 
 int ssl_read_internal(SSL *s, void *buf, size_t num, size_t *readbytes)
 {
+#ifndef OPENSSL_NO_QUIC
+    if (SSL_IS_QUIC(s)) {
+        SSLerr(SSL_F_SSL_READ_INTERNAL, ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+        return -1;
+    }
+#endif
     if (s->handshake_func == NULL) {
         SSLerr(SSL_F_SSL_READ_INTERNAL, SSL_R_UNINITIALIZED);
         return -1;
@@ -1855,6 +1938,12 @@ int SSL_get_early_data_status(const SSL *s)
 
 static int ssl_peek_internal(SSL *s, void *buf, size_t num, size_t *readbytes)
 {
+#ifndef OPENSSL_NO_QUIC
+    if (SSL_IS_QUIC(s)) {
+        SSLerr(SSL_F_SSL_PEEK_INTERNAL, ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+        return -1;
+    }
+#endif
     if (s->handshake_func == NULL) {
         SSLerr(SSL_F_SSL_PEEK_INTERNAL, SSL_R_UNINITIALIZED);
         return -1;
@@ -1915,6 +2004,12 @@ int SSL_peek_ex(SSL *s, void *buf, size_t num, size_t *readbytes)
 
 int ssl_write_internal(SSL *s, const void *buf, size_t num, size_t *written)
 {
+#ifndef OPENSSL_NO_QUIC
+    if (SSL_IS_QUIC(s)) {
+        SSLerr(SSL_F_SSL_WRITE_INTERNAL, ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+        return -1;
+    }
+#endif
     if (s->handshake_func == NULL) {
         SSLerr(SSL_F_SSL_WRITE_INTERNAL, SSL_R_UNINITIALIZED);
         return -1;
@@ -2074,6 +2169,7 @@ int SSL_shutdown(SSL *s)
         if ((s->mode & SSL_MODE_ASYNC) && ASYNC_get_current_job() == NULL) {
             struct ssl_async_args args;
 
+            memset(&args, 0, sizeof(args));
             args.s = s;
             args.type = OTHERFUNC;
             args.f.func_other = s->method->ssl_shutdown;
@@ -2108,6 +2204,11 @@ int SSL_key_update(SSL *s, int updatetype)
 
     if (!SSL_is_init_finished(s)) {
         SSLerr(SSL_F_SSL_KEY_UPDATE, SSL_R_STILL_IN_INIT);
+        return 0;
+    }
+
+    if (RECORD_LAYER_write_pending(&s->rlayer)) {
+        SSLerr(SSL_F_SSL_KEY_UPDATE, SSL_R_BAD_WRITE_RETRY);
         return 0;
     }
 
@@ -2164,6 +2265,19 @@ int SSL_renegotiate_pending(const SSL *s)
      * handshake has finished
      */
     return (s->renegotiate != 0);
+}
+
+int SSL_new_session_ticket(SSL *s)
+{
+    /* If we are in init because we're sending tickets, okay to send more. */
+    if ((SSL_in_init(s) && s->ext.extra_tickets_expected == 0)
+            || SSL_IS_FIRST_HANDSHAKE(s) || !s->server
+            || !SSL_IS_TLS13(s))
+        return 0;
+    s->ext.extra_tickets_expected++;
+    if (s->rlayer.wbuf[0].left == 0 && !SSL_in_init(s))
+        ossl_statem_set_in_init(s, 1);
+    return 1;
 }
 
 long SSL_ctrl(SSL *s, int cmd, long larg, void *parg)
@@ -2630,7 +2744,7 @@ char *SSL_get_shared_ciphers(const SSL *s, char *buf, int size)
  * - if we are before or during/after the handshake,
  * - if a resumption or normal handshake is being attempted/has occurred
  * - whether we have negotiated TLSv1.2 (or below) or TLSv1.3
- *
+ * 
  * Note that only the host_name type is defined (RFC 3546).
  */
 const char *SSL_get_servername(const SSL *s, const int type)
@@ -2676,7 +2790,7 @@ const char *SSL_get_servername(const SSL *s, const int type)
          *  - Otherwise it returns NULL
          *
          * During/after the handshake (TLSv1.2 or below resumption occurred):
-         * - If the session from the orignal handshake had a servername accepted
+         * - If the session from the original handshake had a servername accepted
          *   by the server then it will return that servername.
          * - Otherwise it returns the servername set via
          *   SSL_set_tlsext_host_name() (or NULL if it was not called).
@@ -2821,6 +2935,19 @@ void SSL_CTX_set_npn_select_cb(SSL_CTX *ctx,
 }
 #endif
 
+static int alpn_value_ok(const unsigned char *protos, unsigned int protos_len)
+{
+    unsigned int idx;
+
+    if (protos_len < 2 || protos == NULL)
+        return 0;
+
+    for (idx = 0; idx < protos_len; idx += protos[idx] + 1) {
+        if (protos[idx] == 0)
+            return 0;
+    }
+    return idx == protos_len;
+}
 /*
  * SSL_CTX_set_alpn_protos sets the ALPN protocol list on |ctx| to |protos|.
  * |protos| must be in wire-format (i.e. a series of non-empty, 8-bit
@@ -2829,12 +2956,25 @@ void SSL_CTX_set_npn_select_cb(SSL_CTX *ctx,
 int SSL_CTX_set_alpn_protos(SSL_CTX *ctx, const unsigned char *protos,
                             unsigned int protos_len)
 {
-    OPENSSL_free(ctx->ext.alpn);
-    ctx->ext.alpn = OPENSSL_memdup(protos, protos_len);
-    if (ctx->ext.alpn == NULL) {
+    unsigned char *alpn;
+
+    if (protos_len == 0 || protos == NULL) {
+        OPENSSL_free(ctx->ext.alpn);
+        ctx->ext.alpn = NULL;
+        ctx->ext.alpn_len = 0;
+        return 0;
+    }
+    /* Not valid per RFC */
+    if (!alpn_value_ok(protos, protos_len))
+        return 1;
+
+    alpn = OPENSSL_memdup(protos, protos_len);
+    if (alpn == NULL) {
         SSLerr(SSL_F_SSL_CTX_SET_ALPN_PROTOS, ERR_R_MALLOC_FAILURE);
         return 1;
     }
+    OPENSSL_free(ctx->ext.alpn);
+    ctx->ext.alpn = alpn;
     ctx->ext.alpn_len = protos_len;
 
     return 0;
@@ -2848,12 +2988,25 @@ int SSL_CTX_set_alpn_protos(SSL_CTX *ctx, const unsigned char *protos,
 int SSL_set_alpn_protos(SSL *ssl, const unsigned char *protos,
                         unsigned int protos_len)
 {
-    OPENSSL_free(ssl->ext.alpn);
-    ssl->ext.alpn = OPENSSL_memdup(protos, protos_len);
-    if (ssl->ext.alpn == NULL) {
+    unsigned char *alpn;
+
+    if (protos_len == 0 || protos == NULL) {
+        OPENSSL_free(ssl->ext.alpn);
+        ssl->ext.alpn = NULL;
+        ssl->ext.alpn_len = 0;
+        return 0;
+    }
+    /* Not valid per RFC */
+    if (!alpn_value_ok(protos, protos_len))
+        return 1;
+
+    alpn = OPENSSL_memdup(protos, protos_len);
+    if (alpn == NULL) {
         SSLerr(SSL_F_SSL_SET_ALPN_PROTOS, ERR_R_MALLOC_FAILURE);
         return 1;
     }
+    OPENSSL_free(ssl->ext.alpn);
+    ssl->ext.alpn = alpn;
     ssl->ext.alpn_len = protos_len;
 
     return 0;
@@ -2895,7 +3048,8 @@ int SSL_export_keying_material(SSL *s, unsigned char *out, size_t olen,
                                const unsigned char *context, size_t contextlen,
                                int use_context)
 {
-    if (s->version < TLS1_VERSION && s->version != DTLS1_BAD_VER)
+    if (s->session == NULL
+        || (s->version < TLS1_VERSION && s->version != DTLS1_BAD_VER))
         return -1;
 
     return s->method->ssl3_enc->export_keying_material(s, out, olen, label,
@@ -3565,6 +3719,11 @@ int SSL_get_error(const SSL *s, int i)
     }
 
     if (SSL_want_read(s)) {
+#ifndef OPENSSL_NO_QUIC
+        if (SSL_IS_QUIC(s)) {
+            return SSL_ERROR_WANT_READ;
+        }
+#endif
         bio = SSL_get_rbio(s);
         if (BIO_should_read(bio))
             return SSL_ERROR_WANT_READ;
@@ -3654,6 +3813,7 @@ int SSL_do_handshake(SSL *s)
         if ((s->mode & SSL_MODE_ASYNC) && ASYNC_get_current_job() == NULL) {
             struct ssl_async_args args;
 
+            memset(&args, 0, sizeof(args));
             args.s = s;
 
             ret = ssl_start_async_job(s, &args, ssl_do_handshake_intern);
@@ -3661,6 +3821,21 @@ int SSL_do_handshake(SSL *s)
             ret = s->handshake_func(s);
         }
     }
+#ifndef OPENSSL_NO_QUIC
+    if (SSL_IS_QUIC(s) && ret == 1) {
+        if (s->server) {
+            if (s->early_data_state == SSL_EARLY_DATA_ACCEPTING) {
+                s->early_data_state = SSL_EARLY_DATA_FINISHED_READING;
+                s->rwstate = SSL_READING;
+                ret = 0;
+            }
+        } else if (s->early_data_state == SSL_EARLY_DATA_CONNECTING) {
+            s->early_data_state = SSL_EARLY_DATA_WRITE_RETRY;
+            s->rwstate = SSL_READING;
+            ret = 0;
+        }
+    }
+#endif
     return ret;
 }
 
@@ -3824,6 +3999,8 @@ SSL *SSL_dup(SSL *s)
         goto err;
     ret->version = s->version;
     ret->options = s->options;
+    ret->min_proto_version = s->min_proto_version;
+    ret->max_proto_version = s->max_proto_version;
     ret->mode = s->mode;
     SSL_set_max_cert_list(ret, SSL_get_max_cert_list(s));
     SSL_set_read_ahead(ret, SSL_get_read_ahead(s));
@@ -3838,21 +4015,6 @@ SSL *SSL_dup(SSL *s)
     /* copy app data, a little dangerous perhaps */
     if (!CRYPTO_dup_ex_data(CRYPTO_EX_INDEX_SSL, &ret->ex_data, &s->ex_data))
         goto err;
-
-    /* setup rbio, and wbio */
-    if (s->rbio != NULL) {
-        if (!BIO_dup_state(s->rbio, (char *)&ret->rbio))
-            goto err;
-    }
-    if (s->wbio != NULL) {
-        if (s->wbio != s->rbio) {
-            if (!BIO_dup_state(s->wbio, (char *)&ret->wbio))
-                goto err;
-        } else {
-            BIO_up_ref(ret->rbio);
-            ret->wbio = ret->rbio;
-        }
-    }
 
     ret->server = s->server;
     if (s->handshake_func) {
@@ -4522,8 +4684,11 @@ int ssl_handshake_hash(SSL *s, unsigned char *out, size_t outlen,
     }
 
     ctx = EVP_MD_CTX_new();
-    if (ctx == NULL)
+    if (ctx == NULL) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_F_SSL_HANDSHAKE_HASH,
+                 ERR_R_INTERNAL_ERROR);
         goto err;
+    }
 
     if (!EVP_MD_CTX_copy_ex(ctx, hdgst)
         || EVP_DigestFinal_ex(ctx, out, NULL) <= 0) {

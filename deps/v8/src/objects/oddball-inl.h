@@ -10,13 +10,14 @@
 #include "src/handles/handles.h"
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/objects-inl.h"
-#include "src/objects/string-inl.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
 namespace v8 {
 namespace internal {
+
+#include "torque-generated/src/objects/oddball-tq-inl.inc"
 
 TQ_OBJECT_CONSTRUCTORS_IMPL(Oddball)
 
@@ -25,13 +26,9 @@ void Oddball::set_to_number_raw_as_bits(uint64_t bits) {
   base::WriteUnalignedValue<uint64_t>(field_address(kToNumberRawOffset), bits);
 }
 
-byte Oddball::kind() const {
-  return Smi::ToInt(TorqueGeneratedOddball::kind());
-}
+byte Oddball::kind() const { return TorqueGeneratedOddball::kind(); }
 
-void Oddball::set_kind(byte value) {
-  TorqueGeneratedOddball::set_kind(Smi::FromInt(value));
-}
+void Oddball::set_kind(byte value) { TorqueGeneratedOddball::set_kind(value); }
 
 // static
 Handle<Object> Oddball::ToNumber(Isolate* isolate, Handle<Oddball> input) {
@@ -39,7 +36,7 @@ Handle<Object> Oddball::ToNumber(Isolate* isolate, Handle<Oddball> input) {
 }
 
 DEF_GETTER(HeapObject, IsBoolean, bool) {
-  return IsOddball(isolate) &&
+  return IsOddball(cage_base) &&
          ((Oddball::cast(*this).kind() & Oddball::kNotBooleanMask) == 0);
 }
 

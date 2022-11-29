@@ -4,6 +4,8 @@
 
 #include "src/snapshot/embedded/platform-embedded-file-writer-mac.h"
 
+#include "src/objects/code.h"
+
 namespace v8 {
 namespace internal {
 
@@ -54,6 +56,7 @@ void PlatformEmbeddedFileWriterMac::DeclareSymbolGlobal(const char* name) {
   // prevents something along the compilation chain from messing with the
   // embedded blob. Using .global here causes embedded blob hash verification
   // failures at runtime.
+  STATIC_ASSERT(32 >= kCodeAlignment);
   fprintf(fp_, ".private_extern _%s\n", name);
 }
 
@@ -62,6 +65,7 @@ void PlatformEmbeddedFileWriterMac::AlignToCodeAlignment() {
 }
 
 void PlatformEmbeddedFileWriterMac::AlignToDataAlignment() {
+  STATIC_ASSERT(8 >= Code::kMetadataAlignment);
   fprintf(fp_, ".balign 8\n");
 }
 
@@ -78,7 +82,13 @@ void PlatformEmbeddedFileWriterMac::SourceInfo(int fileid, const char* filename,
   fprintf(fp_, ".loc %d %d\n", fileid, line);
 }
 
-void PlatformEmbeddedFileWriterMac::DeclareFunctionBegin(const char* name) {
+// TODO(mmarchini): investigate emitting size annotations for OS X
+void PlatformEmbeddedFileWriterMac::DeclareFunctionBegin(const char* name,
+                                                         uint32_t size) {
+  if (ENABLE_CONTROL_FLOW_INTEGRITY_BOOL) {
+    DeclareSymbolGlobal(name);
+  }
+
   DeclareLabel(name);
 
   // TODO(mvstanton): Investigate the proper incantations to mark the label as
@@ -86,10 +96,6 @@ void PlatformEmbeddedFileWriterMac::DeclareFunctionBegin(const char* name) {
 }
 
 void PlatformEmbeddedFileWriterMac::DeclareFunctionEnd(const char* name) {}
-
-int PlatformEmbeddedFileWriterMac::HexLiteral(uint64_t value) {
-  return fprintf(fp_, "0x%" PRIx64, value);
-}
 
 void PlatformEmbeddedFileWriterMac::FilePrologue() {}
 

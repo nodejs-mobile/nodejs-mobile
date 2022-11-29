@@ -19,22 +19,30 @@ class GeneratorBuiltinsAssembler : public CodeStubAssembler {
       : CodeStubAssembler(state) {}
 
  protected:
-  void GeneratorPrototypeResume(CodeStubArguments* args, Node* receiver,
-                                Node* value, Node* context,
+  // Currently, AsyncModules in V8 are built on top of JSAsyncFunctionObjects
+  // with an initial yield. Thus, we need some way to 'resume' the
+  // underlying JSAsyncFunctionObject owned by an AsyncModule. To support this
+  // the body of resume is factored out below, and shared by JSGeneratorObject
+  // prototype methods as well as AsyncModuleEvaluate. The only difference
+  // between AsyncModuleEvaluate and JSGeneratorObject::PrototypeNext is
+  // the expected receiver.
+  void InnerResume(CodeStubArguments* args, TNode<JSGeneratorObject> receiver,
+                   TNode<Object> value, TNode<Context> context,
+                   JSGeneratorObject::ResumeMode resume_mode,
+                   char const* const method_name);
+  void GeneratorPrototypeResume(CodeStubArguments* args, TNode<Object> receiver,
+                                TNode<Object> value, TNode<Context> context,
                                 JSGeneratorObject::ResumeMode resume_mode,
                                 char const* const method_name);
 };
 
-void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
-    CodeStubArguments* args, Node* receiver, Node* value, Node* context,
+void GeneratorBuiltinsAssembler::InnerResume(
+    CodeStubArguments* args, TNode<JSGeneratorObject> receiver,
+    TNode<Object> value, TNode<Context> context,
     JSGeneratorObject::ResumeMode resume_mode, char const* const method_name) {
-  // Check if the {receiver} is actually a JSGeneratorObject.
-  ThrowIfNotInstanceType(context, receiver, JS_GENERATOR_OBJECT_TYPE,
-                         method_name);
-
   // Check if the {receiver} is running or already closed.
   TNode<Smi> receiver_continuation =
-      CAST(LoadObjectField(receiver, JSGeneratorObject::kContinuationOffset));
+      LoadObjectField<Smi>(receiver, JSGeneratorObject::kContinuationOffset);
   Label if_receiverisclosed(this, Label::kDeferred),
       if_receiverisrunning(this, Label::kDeferred);
   TNode<Smi> closed = SmiConstant(JSGeneratorObject::kGeneratorClosed);
@@ -48,17 +56,21 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
                                  SmiConstant(resume_mode));
 
   // Resume the {receiver} using our trampoline.
-  VARIABLE(var_exception, MachineRepresentation::kTagged, UndefinedConstant());
+  // Close the generator if there was an exception.
+  TVARIABLE(Object, var_exception);
   Label if_exception(this, Label::kDeferred), if_final_return(this);
-  TNode<Object> result = CallStub(CodeFactory::ResumeGenerator(isolate()),
-                                  context, value, receiver);
-  // Make sure we close the generator if there was an exception.
-  GotoIfException(result, &if_exception, &var_exception);
+  TNode<Object> result;
+  {
+    compiler::ScopedExceptionHandler handler(this, &if_exception,
+                                             &var_exception);
+    result = CallStub(CodeFactory::ResumeGenerator(isolate()), context, value,
+                      receiver);
+  }
 
   // If the generator is not suspended (i.e., its state is 'executing'),
   // close it and wrap the return value in IteratorResult.
   TNode<Smi> result_continuation =
-      CAST(LoadObjectField(receiver, JSGeneratorObject::kContinuationOffset));
+      LoadObjectField<Smi>(receiver, JSGeneratorObject::kContinuationOffset);
 
   // The generator function should not close the generator by itself, let's
   // check it is indeed not closed yet.
@@ -75,21 +87,21 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
     StoreObjectFieldNoWriteBarrier(
         receiver, JSGeneratorObject::kContinuationOffset, closed);
     // Return the wrapped result.
-    args->PopAndReturn(CallBuiltin(Builtins::kCreateIterResultObject, context,
+    args->PopAndReturn(CallBuiltin(Builtin::kCreateIterResultObject, context,
                                    result, TrueConstant()));
   }
 
   BIND(&if_receiverisclosed);
   {
     // The {receiver} is closed already.
-    Node* result = nullptr;
+    TNode<Object> result;
     switch (resume_mode) {
       case JSGeneratorObject::kNext:
-        result = CallBuiltin(Builtins::kCreateIterResultObject, context,
+        result = CallBuiltin(Builtin::kCreateIterResultObject, context,
                              UndefinedConstant(), TrueConstant());
         break;
       case JSGeneratorObject::kReturn:
-        result = CallBuiltin(Builtins::kCreateIterResultObject, context, value,
+        result = CallBuiltin(Builtin::kCreateIterResultObject, context, value,
                              TrueConstant());
         break;
       case JSGeneratorObject::kThrow:
@@ -111,17 +123,47 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
   }
 }
 
-// ES6 #sec-generator.prototype.next
-TF_BUILTIN(GeneratorPrototypeNext, GeneratorBuiltinsAssembler) {
+void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
+    CodeStubArguments* args, TNode<Object> receiver, TNode<Object> value,
+    TNode<Context> context, JSGeneratorObject::ResumeMode resume_mode,
+    char const* const method_name) {
+  // Check if the {receiver} is actually a JSGeneratorObject.
+  ThrowIfNotInstanceType(context, receiver, JS_GENERATOR_OBJECT_TYPE,
+                         method_name);
+  TNode<JSGeneratorObject> generator = CAST(receiver);
+  InnerResume(args, generator, value, context, resume_mode, method_name);
+}
+
+TF_BUILTIN(AsyncModuleEvaluate, GeneratorBuiltinsAssembler) {
   const int kValueArg = 0;
 
-  TNode<IntPtrT> argc =
-      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount);
   CodeStubArguments args(this, argc);
 
   TNode<Object> receiver = args.GetReceiver();
   TNode<Object> value = args.GetOptionalArgumentValue(kValueArg);
-  Node* context = Parameter(Descriptor::kContext);
+  auto context = Parameter<Context>(Descriptor::kContext);
+
+  // AsyncModules act like JSAsyncFunctions. Thus we check here
+  // that the {receiver} is a JSAsyncFunction.
+  char const* const method_name = "[AsyncModule].evaluate";
+  ThrowIfNotInstanceType(context, receiver, JS_ASYNC_FUNCTION_OBJECT_TYPE,
+                         method_name);
+  TNode<JSAsyncFunctionObject> async_function = CAST(receiver);
+  InnerResume(&args, async_function, value, context, JSGeneratorObject::kNext,
+              method_name);
+}
+
+// ES6 #sec-generator.prototype.next
+TF_BUILTIN(GeneratorPrototypeNext, GeneratorBuiltinsAssembler) {
+  const int kValueArg = 0;
+
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount);
+  CodeStubArguments args(this, argc);
+
+  TNode<Object> receiver = args.GetReceiver();
+  TNode<Object> value = args.GetOptionalArgumentValue(kValueArg);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, value, context,
                            JSGeneratorObject::kNext,
@@ -132,13 +174,12 @@ TF_BUILTIN(GeneratorPrototypeNext, GeneratorBuiltinsAssembler) {
 TF_BUILTIN(GeneratorPrototypeReturn, GeneratorBuiltinsAssembler) {
   const int kValueArg = 0;
 
-  TNode<IntPtrT> argc =
-      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount);
   CodeStubArguments args(this, argc);
 
   TNode<Object> receiver = args.GetReceiver();
   TNode<Object> value = args.GetOptionalArgumentValue(kValueArg);
-  Node* context = Parameter(Descriptor::kContext);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, value, context,
                            JSGeneratorObject::kReturn,
@@ -149,17 +190,125 @@ TF_BUILTIN(GeneratorPrototypeReturn, GeneratorBuiltinsAssembler) {
 TF_BUILTIN(GeneratorPrototypeThrow, GeneratorBuiltinsAssembler) {
   const int kExceptionArg = 0;
 
-  TNode<IntPtrT> argc =
-      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
+  auto argc = UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount);
   CodeStubArguments args(this, argc);
 
   TNode<Object> receiver = args.GetReceiver();
   TNode<Object> exception = args.GetOptionalArgumentValue(kExceptionArg);
-  Node* context = Parameter(Descriptor::kContext);
+  auto context = Parameter<Context>(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, exception, context,
                            JSGeneratorObject::kThrow,
                            "[Generator].prototype.throw");
+}
+
+// TODO(cbruni): Merge with corresponding bytecode handler.
+TF_BUILTIN(SuspendGeneratorBaseline, GeneratorBuiltinsAssembler) {
+  auto generator = Parameter<JSGeneratorObject>(Descriptor::kGeneratorObject);
+  auto context = LoadContextFromBaseline();
+  StoreJSGeneratorObjectContext(generator, context);
+  auto suspend_id = SmiTag(UncheckedParameter<IntPtrT>(Descriptor::kSuspendId));
+  StoreJSGeneratorObjectContinuation(generator, suspend_id);
+  // Store the bytecode offset in the [input_or_debug_pos] field, to be used by
+  // the inspector.
+  auto bytecode_offset =
+      SmiTag(UncheckedParameter<IntPtrT>(Descriptor::kBytecodeOffset));
+  // Avoid the write barrier by using the generic helper.
+  StoreObjectFieldNoWriteBarrier(
+      generator, JSGeneratorObject::kInputOrDebugPosOffset, bytecode_offset);
+
+  TNode<JSFunction> closure = LoadJSGeneratorObjectFunction(generator);
+  auto sfi = LoadJSFunctionSharedFunctionInfo(closure);
+  TNode<IntPtrT> formal_parameter_count = Signed(
+      ChangeUint32ToWord(LoadSharedFunctionInfoFormalParameterCount(sfi)));
+  CSA_ASSERT(this, Word32BinaryNot(IntPtrEqual(
+                       formal_parameter_count,
+                       IntPtrConstant(kDontAdaptArgumentsSentinel))));
+
+  TNode<FixedArray> parameters_and_registers =
+      LoadJSGeneratorObjectParametersAndRegisters(generator);
+  auto parameters_and_registers_length =
+      SmiUntag(LoadFixedArrayBaseLength(parameters_and_registers));
+
+  // Copy over the function parameters
+  auto parameter_base_index = IntPtrConstant(
+      interpreter::Register::FromParameterIndex(0, 1).ToOperand() + 1);
+  CSA_CHECK(this, UintPtrLessThan(formal_parameter_count,
+                                  parameters_and_registers_length));
+  auto parent_frame_pointer = LoadParentFramePointer();
+  BuildFastLoop<IntPtrT>(
+      IntPtrConstant(0), formal_parameter_count,
+      [=](TNode<IntPtrT> index) {
+        auto reg_index = IntPtrAdd(parameter_base_index, index);
+        TNode<Object> value = LoadFullTagged(parent_frame_pointer,
+                                             TimesSystemPointerSize(reg_index));
+        UnsafeStoreFixedArrayElement(parameters_and_registers, index, value);
+      },
+      1, IndexAdvanceMode::kPost);
+
+  // Iterate over register file and write values into array.
+  // The mapping of register to array index must match that used in
+  // BytecodeGraphBuilder::VisitResumeGenerator.
+  auto register_base_index =
+      IntPtrAdd(formal_parameter_count,
+                IntPtrConstant(interpreter::Register(0).ToOperand()));
+  auto register_count = UncheckedParameter<IntPtrT>(Descriptor::kRegisterCount);
+  auto end_index = IntPtrAdd(formal_parameter_count, register_count);
+  CSA_CHECK(this, UintPtrLessThan(end_index, parameters_and_registers_length));
+  BuildFastLoop<IntPtrT>(
+      formal_parameter_count, end_index,
+      [=](TNode<IntPtrT> index) {
+        auto reg_index = IntPtrSub(register_base_index, index);
+        TNode<Object> value = LoadFullTagged(parent_frame_pointer,
+                                             TimesSystemPointerSize(reg_index));
+        UnsafeStoreFixedArrayElement(parameters_and_registers, index, value);
+      },
+      1, IndexAdvanceMode::kPost);
+
+  // The return value is unused, defaulting to undefined.
+  Return(UndefinedConstant());
+}
+
+// TODO(cbruni): Merge with corresponding bytecode handler.
+TF_BUILTIN(ResumeGeneratorBaseline, GeneratorBuiltinsAssembler) {
+  auto generator = Parameter<JSGeneratorObject>(Descriptor::kGeneratorObject);
+  TNode<JSFunction> closure = LoadJSGeneratorObjectFunction(generator);
+  auto sfi = LoadJSFunctionSharedFunctionInfo(closure);
+  TNode<IntPtrT> formal_parameter_count = Signed(
+      ChangeUint32ToWord(LoadSharedFunctionInfoFormalParameterCount(sfi)));
+  CSA_ASSERT(this, Word32BinaryNot(IntPtrEqual(
+                       formal_parameter_count,
+                       IntPtrConstant(kDontAdaptArgumentsSentinel))));
+
+  TNode<FixedArray> parameters_and_registers =
+      LoadJSGeneratorObjectParametersAndRegisters(generator);
+
+  // Iterate over array and write values into register file.  Also erase the
+  // array contents to not keep them alive artificially.
+  auto register_base_index =
+      IntPtrAdd(formal_parameter_count,
+                IntPtrConstant(interpreter::Register(0).ToOperand()));
+  auto register_count = UncheckedParameter<IntPtrT>(Descriptor::kRegisterCount);
+  auto end_index = IntPtrAdd(formal_parameter_count, register_count);
+  auto parameters_and_registers_length =
+      SmiUntag(LoadFixedArrayBaseLength(parameters_and_registers));
+  CSA_CHECK(this, UintPtrLessThan(end_index, parameters_and_registers_length));
+  auto parent_frame_pointer = LoadParentFramePointer();
+  BuildFastLoop<IntPtrT>(
+      formal_parameter_count, end_index,
+      [=](TNode<IntPtrT> index) {
+        TNode<Object> value =
+            UnsafeLoadFixedArrayElement(parameters_and_registers, index);
+        auto reg_index = IntPtrSub(register_base_index, index);
+        StoreFullTaggedNoWriteBarrier(parent_frame_pointer,
+                                      TimesSystemPointerSize(reg_index), value);
+        UnsafeStoreFixedArrayElement(parameters_and_registers, index,
+                                     StaleRegisterConstant(),
+                                     SKIP_WRITE_BARRIER);
+      },
+      1, IndexAdvanceMode::kPost);
+
+  Return(LoadJSGeneratorObjectInputOrDebugPos(generator));
 }
 
 }  // namespace internal

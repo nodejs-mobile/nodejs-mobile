@@ -4,7 +4,7 @@
 
 // Flags: --expose-wasm --expose-gc --verify-heap
 
-load("test/mjsunit/wasm/user-properties-common.js");
+d8.file.execute("test/mjsunit/wasm/user-properties-common.js");
 
 (function ImportReexportChain() {
   print("ImportReexportChain");
@@ -23,7 +23,7 @@ load("test/mjsunit/wasm/user-properties-common.js");
     testProperties(g);
     printName(" after", g);
 
-    // The WASM-internal fields of {g} are only inspected when {g} is
+    // The Wasm-internal fields of {g} are only inspected when {g} is
     // used as an import into another instance. Use {g} as the import
     // the next time through the loop.
     f = g;

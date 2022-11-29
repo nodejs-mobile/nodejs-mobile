@@ -1,6 +1,7 @@
 #include "diagnosticfilename-inl.h"
 #include "env-inl.h"
 #include "memory_tracker-inl.h"
+#include "node_external_reference.h"
 #include "stream_base-inl.h"
 #include "util-inl.h"
 
@@ -118,17 +119,16 @@ class JSGraph : public EmbedderGraph {
           name_str += " ";
           name_str += n->Name();
         }
-        if (!String::NewFromUtf8(
-                 isolate_, name_str.c_str(), v8::NewStringType::kNormal)
-                 .ToLocal(&value) ||
+        if (!String::NewFromUtf8(isolate_, name_str.c_str()).ToLocal(&value) ||
             obj->Set(context, name_string, value).IsNothing() ||
             obj->Set(context,
                      is_root_string,
                      Boolean::New(isolate_, n->IsRootNode()))
                 .IsNothing() ||
-            obj->Set(context,
-                     size_string,
-                     Number::New(isolate_, n->SizeInBytes()))
+            obj->Set(
+                   context,
+                   size_string,
+                   Number::New(isolate_, static_cast<double>(n->SizeInBytes())))
                 .IsNothing() ||
             obj->Set(context, edges_string, Array::New(isolate_)).IsNothing()) {
           return MaybeLocal<Array>();
@@ -168,13 +168,12 @@ class JSGraph : public EmbedderGraph {
         Local<Value> edge_name_value;
         const char* edge_name = edge.first;
         if (edge_name != nullptr) {
-          if (!String::NewFromUtf8(
-                  isolate_, edge_name, v8::NewStringType::kNormal)
-                  .ToLocal(&edge_name_value)) {
+          if (!String::NewFromUtf8(isolate_, edge_name)
+              .ToLocal(&edge_name_value)) {
             return MaybeLocal<Array>();
           }
         } else {
-          edge_name_value = Number::New(isolate_, j++);
+          edge_name_value = Number::New(isolate_, static_cast<double>(j++));
         }
         if (edge_obj->Set(context, name_string, edge_name_value).IsNothing() ||
             edge_obj->Set(context, to_string, to_object).IsNothing() ||
@@ -264,7 +263,7 @@ class HeapSnapshotStream : public AsyncWrap,
         avail = buf.len;
       memcpy(buf.base, data, avail);
       data += avail;
-      len -= avail;
+      len -= static_cast<int>(avail);
       EmitRead(size, buf);
     }
     return kContinue;
@@ -315,7 +314,9 @@ inline void TakeSnapshot(Isolate* isolate, v8::OutputStream* out) {
   snapshot->Serialize(out, HeapSnapshot::kJSON);
 }
 
-inline bool WriteSnapshot(Isolate* isolate, const char* filename) {
+}  // namespace
+
+bool WriteSnapshot(Isolate* isolate, const char* filename) {
   FILE* fp = fopen(filename, "w");
   if (fp == nullptr)
     return false;
@@ -324,8 +325,6 @@ inline bool WriteSnapshot(Isolate* isolate, const char* filename) {
   fclose(fp);
   return true;
 }
-
-}  // namespace
 
 void DeleteHeapSnapshot(const HeapSnapshot* snapshot) {
   const_cast<HeapSnapshot*>(snapshot)->Delete();
@@ -377,8 +376,7 @@ void TriggerHeapSnapshot(const FunctionCallbackInfo<Value>& args) {
     DiagnosticFilename name(env, "Heap", "heapsnapshot");
     if (!WriteSnapshot(isolate, *name))
       return;
-    if (String::NewFromUtf8(isolate, *name, v8::NewStringType::kNormal)
-            .ToLocal(&filename_v)) {
+    if (String::NewFromUtf8(isolate, *name).ToLocal(&filename_v)) {
       args.GetReturnValue().Set(filename_v);
     }
     return;
@@ -402,7 +400,15 @@ void Initialize(Local<Object> target,
   env->SetMethod(target, "createHeapSnapshotStream", CreateHeapSnapshotStream);
 }
 
+void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(BuildEmbedderGraph);
+  registry->Register(TriggerHeapSnapshot);
+  registry->Register(CreateHeapSnapshotStream);
+}
+
 }  // namespace heap
 }  // namespace node
 
 NODE_MODULE_CONTEXT_AWARE_INTERNAL(heap_utils, node::heap::Initialize)
+NODE_MODULE_EXTERNAL_REFERENCE(heap_utils,
+                               node::heap::RegisterExternalReferences)

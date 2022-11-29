@@ -5,25 +5,21 @@
 #ifndef V8_IC_ACCESSOR_ASSEMBLER_H_
 #define V8_IC_ACCESSOR_ASSEMBLER_H_
 
+#include "src/base/optional.h"
 #include "src/codegen/code-stub-assembler.h"
+#include "src/compiler/code-assembler.h"
 
 namespace v8 {
 namespace internal {
 
 namespace compiler {
 class CodeAssemblerState;
-}
+}  // namespace compiler
 
 class ExitPoint;
 
 class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
  public:
-  using Node = compiler::Node;
-  template <class T>
-  using TNode = compiler::TNode<T>;
-  template <class T>
-  using SloppyTNode = compiler::SloppyTNode<T>;
-
   explicit AccessorAssembler(compiler::CodeAssemblerState* state)
       : CodeStubAssembler(state) {}
 
@@ -31,51 +27,71 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   void GenerateLoadIC_Megamorphic();
   void GenerateLoadIC_Noninlined();
   void GenerateLoadIC_NoFeedback();
+  void GenerateLoadGlobalIC_NoFeedback();
   void GenerateLoadICTrampoline();
+  void GenerateLoadICBaseline();
   void GenerateLoadICTrampoline_Megamorphic();
+  void GenerateLoadSuperIC();
+  void GenerateLoadSuperICBaseline();
   void GenerateKeyedLoadIC();
   void GenerateKeyedLoadIC_Megamorphic();
   void GenerateKeyedLoadIC_PolymorphicName();
   void GenerateKeyedLoadICTrampoline();
+  void GenerateKeyedLoadICBaseline();
   void GenerateKeyedLoadICTrampoline_Megamorphic();
   void GenerateStoreIC();
   void GenerateStoreICTrampoline();
+  void GenerateStoreICBaseline();
   void GenerateStoreGlobalIC();
   void GenerateStoreGlobalICTrampoline();
+  void GenerateStoreGlobalICBaseline();
   void GenerateCloneObjectIC();
+  void GenerateCloneObjectICBaseline();
   void GenerateCloneObjectIC_Slow();
   void GenerateKeyedHasIC();
+  void GenerateKeyedHasICBaseline();
   void GenerateKeyedHasIC_Megamorphic();
   void GenerateKeyedHasIC_PolymorphicName();
 
   void GenerateLoadGlobalIC(TypeofMode typeof_mode);
   void GenerateLoadGlobalICTrampoline(TypeofMode typeof_mode);
+  void GenerateLoadGlobalICBaseline(TypeofMode typeof_mode);
+  void GenerateLookupGlobalICBaseline(TypeofMode typeof_mode);
+  void GenerateLookupContextBaseline(TypeofMode typeof_mode);
 
   void GenerateKeyedStoreIC();
   void GenerateKeyedStoreICTrampoline();
+  void GenerateKeyedStoreICBaseline();
 
   void GenerateStoreInArrayLiteralIC();
+  void GenerateStoreInArrayLiteralICBaseline();
 
-  void TryProbeStubCache(StubCache* stub_cache, Node* receiver,
-                         TNode<Object> name, Label* if_handler,
-                         TVariable<MaybeObject>* var_handler, Label* if_miss);
+  void TryProbeStubCache(StubCache* stub_cache,
+                         TNode<Object> lookup_start_object, TNode<Name> name,
+                         Label* if_handler, TVariable<MaybeObject>* var_handler,
+                         Label* if_miss);
 
-  Node* StubCachePrimaryOffsetForTesting(Node* name, Node* map) {
+  TNode<IntPtrT> StubCachePrimaryOffsetForTesting(TNode<Name> name,
+                                                  TNode<Map> map) {
     return StubCachePrimaryOffset(name, map);
   }
-  Node* StubCacheSecondaryOffsetForTesting(Node* name, Node* map) {
-    return StubCacheSecondaryOffset(name, map);
+  TNode<IntPtrT> StubCacheSecondaryOffsetForTesting(TNode<Name> name,
+                                                    TNode<IntPtrT> seed) {
+    return StubCacheSecondaryOffset(name, seed);
   }
 
   struct LoadICParameters {
-    LoadICParameters(TNode<Context> context, Node* receiver, TNode<Object> name,
-                     Node* slot, Node* vector, Node* holder = nullptr)
+    LoadICParameters(
+        TNode<Context> context, TNode<Object> receiver, TNode<Object> name,
+        TNode<TaggedIndex> slot, TNode<HeapObject> vector,
+        base::Optional<TNode<Object>> lookup_start_object = base::nullopt)
         : context_(context),
           receiver_(receiver),
           name_(name),
           slot_(slot),
           vector_(vector),
-          holder_(holder ? holder : receiver) {}
+          lookup_start_object_(lookup_start_object ? lookup_start_object.value()
+                                                   : receiver) {}
 
     LoadICParameters(const LoadICParameters* p, TNode<Object> unique_name)
         : context_(p->context_),
@@ -83,67 +99,86 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
           name_(unique_name),
           slot_(p->slot_),
           vector_(p->vector_),
-          holder_(p->holder_) {}
+          lookup_start_object_(p->lookup_start_object_) {}
 
     TNode<Context> context() const { return context_; }
-    Node* receiver() const { return receiver_; }
+    TNode<Object> receiver() const { return receiver_; }
     TNode<Object> name() const { return name_; }
-    Node* slot() const { return slot_; }
-    Node* vector() const { return vector_; }
-    Node* holder() const { return holder_; }
+    TNode<TaggedIndex> slot() const { return slot_; }
+    TNode<HeapObject> vector() const { return vector_; }
+    TNode<Object> lookup_start_object() const {
+      return lookup_start_object_.value();
+    }
+
+    // Usable in cases where the receiver and the lookup start object are
+    // expected to be the same, i.e., when "receiver != lookup_start_object"
+    // case is not supported or not expected by the surrounding code.
+    TNode<Object> receiver_and_lookup_start_object() const {
+      DCHECK_EQ(receiver_, lookup_start_object_);
+      return receiver_;
+    }
 
    private:
     TNode<Context> context_;
-    Node* receiver_;
+    TNode<Object> receiver_;
     TNode<Object> name_;
-    Node* slot_;
-    Node* vector_;
-    Node* holder_;
+    TNode<TaggedIndex> slot_;
+    TNode<HeapObject> vector_;
+    base::Optional<TNode<Object>> lookup_start_object_;
   };
 
   struct LazyLoadICParameters {
-    LazyLoadICParameters(LazyNode<Context> context, Node* receiver,
-                         LazyNode<Object> name, Node* slot, Node* vector,
-                         Node* holder = nullptr)
+    LazyLoadICParameters(
+        LazyNode<Context> context, TNode<Object> receiver,
+        LazyNode<Object> name, LazyNode<TaggedIndex> slot,
+        TNode<HeapObject> vector,
+        base::Optional<TNode<Object>> lookup_start_object = base::nullopt)
         : context_(context),
           receiver_(receiver),
           name_(name),
           slot_(slot),
           vector_(vector),
-          holder_(holder ? holder : receiver) {}
+          lookup_start_object_(lookup_start_object ? lookup_start_object.value()
+                                                   : receiver) {}
 
     explicit LazyLoadICParameters(const LoadICParameters* p)
         : receiver_(p->receiver()),
-          slot_(p->slot()),
           vector_(p->vector()),
-          holder_(p->holder()) {
-      TNode<Context> p_context = p->context();
-      context_ = [=] { return p_context; };
-      TNode<Object> p_name = p->name();
-      name_ = [=] { return p_name; };
+          lookup_start_object_(p->lookup_start_object()) {
+      slot_ = [=] { return p->slot(); };
+      context_ = [=] { return p->context(); };
+      name_ = [=] { return p->name(); };
     }
 
     TNode<Context> context() const { return context_(); }
-    Node* receiver() const { return receiver_; }
+    TNode<Object> receiver() const { return receiver_; }
     TNode<Object> name() const { return name_(); }
-    Node* slot() const { return slot_; }
-    Node* vector() const { return vector_; }
-    Node* holder() const { return holder_; }
+    TNode<TaggedIndex> slot() const { return slot_(); }
+    TNode<HeapObject> vector() const { return vector_; }
+    TNode<Object> lookup_start_object() const { return lookup_start_object_; }
+
+    // Usable in cases where the receiver and the lookup start object are
+    // expected to be the same, i.e., when "receiver != lookup_start_object"
+    // case is not supported or not expected by the surrounding code.
+    TNode<Object> receiver_and_lookup_start_object() const {
+      DCHECK_EQ(receiver_, lookup_start_object_);
+      return receiver_;
+    }
 
    private:
     LazyNode<Context> context_;
-    Node* receiver_;
+    TNode<Object> receiver_;
     LazyNode<Object> name_;
-    Node* slot_;
-    Node* vector_;
-    Node* holder_;
+    LazyNode<TaggedIndex> slot_;
+    TNode<HeapObject> vector_;
+    TNode<Object> lookup_start_object_;
   };
 
-  void LoadGlobalIC(Node* vector, Node* slot,
+  void LoadGlobalIC(TNode<HeapObject> maybe_feedback_vector,
+                    const LazyNode<TaggedIndex>& lazy_slot,
                     const LazyNode<Context>& lazy_context,
                     const LazyNode<Name>& lazy_name, TypeofMode typeof_mode,
-                    ExitPoint* exit_point,
-                    ParameterMode slot_mode = SMI_PARAMETERS);
+                    ExitPoint* exit_point);
 
   // Specialized LoadIC for inlined bytecode handler, hand-tuned to omit frame
   // construction on common paths.
@@ -151,21 +186,40 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                               ExitPoint* exit_point);
 
   // Loads dataX field from the DataHandler object.
-  TNode<MaybeObject> LoadHandlerDataField(SloppyTNode<DataHandler> handler,
+  TNode<MaybeObject> LoadHandlerDataField(TNode<DataHandler> handler,
                                           int data_index);
 
  protected:
-  struct StoreICParameters : public LoadICParameters {
-    StoreICParameters(TNode<Context> context, Node* receiver,
-                      TNode<Object> name, SloppyTNode<Object> value, Node* slot,
-                      Node* vector)
-        : LoadICParameters(context, receiver, name, slot, vector),
-          value_(value) {}
+  struct StoreICParameters {
+    StoreICParameters(TNode<Context> context,
+                      base::Optional<TNode<Object>> receiver,
+                      TNode<Object> name, TNode<Object> value,
+                      TNode<TaggedIndex> slot, TNode<HeapObject> vector)
+        : context_(context),
+          receiver_(receiver),
+          name_(name),
+          value_(value),
+          slot_(slot),
+          vector_(vector) {}
 
-    SloppyTNode<Object> value() const { return value_; }
+    TNode<Context> context() const { return context_; }
+    TNode<Object> receiver() const { return receiver_.value(); }
+    TNode<Object> name() const { return name_; }
+    TNode<Object> value() const { return value_; }
+    TNode<TaggedIndex> slot() const { return slot_; }
+    TNode<HeapObject> vector() const { return vector_; }
+
+    TNode<Object> lookup_start_object() const { return receiver(); }
+
+    bool receiver_is_null() const { return !receiver_.has_value(); }
 
    private:
-    SloppyTNode<Object> value_;
+    TNode<Context> context_;
+    base::Optional<TNode<Object>> receiver_;
+    TNode<Object> name_;
+    TNode<Object> value_;
+    TNode<TaggedIndex> slot_;
+    TNode<HeapObject> vector_;
   };
 
   enum class LoadAccessMode { kLoad, kHas };
@@ -185,20 +239,25 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                                              Label* miss,
                                              StoreTransitionMapFlags flags);
 
-  void JumpIfDataProperty(Node* details, Label* writable, Label* readonly);
+  void JumpIfDataProperty(TNode<Uint32T> details, Label* writable,
+                          Label* readonly);
 
-  void InvalidateValidityCellIfPrototype(Node* map, Node* bitfield3 = nullptr);
+  void InvalidateValidityCellIfPrototype(
+      TNode<Map> map, base::Optional<TNode<Uint32T>> bitfield3 = base::nullopt);
 
-  void OverwriteExistingFastDataProperty(Node* object, Node* object_map,
-                                         Node* descriptors,
-                                         Node* descriptor_name_index,
-                                         Node* details, TNode<Object> value,
-                                         Label* slow,
+  void OverwriteExistingFastDataProperty(TNode<HeapObject> object,
+                                         TNode<Map> object_map,
+                                         TNode<DescriptorArray> descriptors,
+                                         TNode<IntPtrT> descriptor_name_index,
+                                         TNode<Uint32T> details,
+                                         TNode<Object> value, Label* slow,
                                          bool do_transitioning_store);
 
-  void CheckFieldType(TNode<DescriptorArray> descriptors, Node* name_index,
-                      TNode<Word32T> representation, Node* value,
-                      Label* bailout);
+  TNode<BoolT> IsPropertyDetailsConst(TNode<Uint32T> details);
+
+  void CheckFieldType(TNode<DescriptorArray> descriptors,
+                      TNode<IntPtrT> name_index, TNode<Word32T> representation,
+                      TNode<Object> value, Label* bailout);
 
  private:
   // Stub generation entry points.
@@ -206,17 +265,25 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   // LoadIC contains the full LoadIC logic, while LoadIC_Noninlined contains
   // logic not inlined into Ignition bytecode handlers.
   void LoadIC(const LoadICParameters* p);
-  void LoadIC_Noninlined(const LoadICParameters* p, TNode<Map> receiver_map,
+
+  // Can be used in the receiver != lookup_start_object case.
+  void LoadIC_Noninlined(const LoadICParameters* p,
+                         TNode<Map> lookup_start_object_map,
                          TNode<HeapObject> feedback,
                          TVariable<MaybeObject>* var_handler, Label* if_handler,
                          Label* miss, ExitPoint* exit_point);
+
+  void LoadSuperIC(const LoadICParameters* p);
 
   TNode<Object> LoadDescriptorValue(TNode<Map> map,
                                     TNode<IntPtrT> descriptor_entry);
   TNode<MaybeObject> LoadDescriptorValueOrFieldType(
       TNode<Map> map, TNode<IntPtrT> descriptor_entry);
 
-  void LoadIC_NoFeedback(const LoadICParameters* p);
+  void LoadIC_NoFeedback(const LoadICParameters* p, TNode<Smi> smi_typeof_mode);
+  void LoadSuperIC_NoFeedback(const LoadICParameters* p);
+  void LoadGlobalIC_NoFeedback(TNode<Context> context, TNode<Object> name,
+                               TNode<Smi> smi_typeof_mode);
 
   void KeyedLoadIC(const LoadICParameters* p, LoadAccessMode access_mode);
   void KeyedLoadICGeneric(const LoadICParameters* p);
@@ -224,7 +291,8 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                                   LoadAccessMode access_mode);
   void StoreIC(const StoreICParameters* p);
   void StoreGlobalIC(const StoreICParameters* p);
-  void StoreGlobalIC_PropertyCellCase(Node* property_cell, TNode<Object> value,
+  void StoreGlobalIC_PropertyCellCase(TNode<PropertyCell> property_cell,
+                                      TNode<Object> value,
                                       ExitPoint* exit_point, Label* miss);
   void KeyedStoreIC(const StoreICParameters* p);
   void StoreInArrayLiteralIC(const StoreICParameters* p);
@@ -232,14 +300,22 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   // IC dispatcher behavior.
 
   // Checks monomorphic case. Returns {feedback} entry of the vector.
-  TNode<MaybeObject> TryMonomorphicCase(Node* slot, Node* vector,
-                                        Node* receiver_map, Label* if_handler,
+  TNode<MaybeObject> TryMonomorphicCase(TNode<TaggedIndex> slot,
+                                        TNode<FeedbackVector> vector,
+                                        TNode<Map> lookup_start_object_map,
+                                        Label* if_handler,
                                         TVariable<MaybeObject>* var_handler,
                                         Label* if_miss);
-  void HandlePolymorphicCase(Node* receiver_map, TNode<WeakFixedArray> feedback,
-                             Label* if_handler,
+  void HandlePolymorphicCase(TNode<Map> lookup_start_object_map,
+                             TNode<WeakFixedArray> feedback, Label* if_handler,
                              TVariable<MaybeObject>* var_handler,
                              Label* if_miss);
+
+  void TryMegaDOMCase(TNode<Object> lookup_start_object,
+                      TNode<Map> lookup_start_object_map,
+                      TVariable<MaybeObject>* var_handler, TNode<Object> vector,
+                      TNode<TaggedIndex> slot, Label* miss,
+                      ExitPoint* exit_point);
 
   // LoadIC implementation.
   void HandleLoadICHandlerCase(
@@ -249,16 +325,18 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
       ElementSupport support_elements = kOnlyProperties,
       LoadAccessMode access_mode = LoadAccessMode::kLoad);
 
-  void HandleLoadICSmiHandlerCase(const LazyLoadICParameters* p, Node* holder,
-                                  SloppyTNode<Smi> smi_handler,
-                                  SloppyTNode<Object> handler, Label* miss,
-                                  ExitPoint* exit_point,
+  void HandleLoadICSmiHandlerCase(const LazyLoadICParameters* p,
+                                  TNode<Object> holder, TNode<Smi> smi_handler,
+                                  TNode<Object> handler, Label* miss,
+                                  ExitPoint* exit_point, ICMode ic_mode,
                                   OnNonExistent on_nonexistent,
                                   ElementSupport support_elements,
                                   LoadAccessMode access_mode);
 
-  void HandleLoadICProtoHandler(const LazyLoadICParameters* p, Node* handler,
-                                Variable* var_holder, Variable* var_smi_handler,
+  void HandleLoadICProtoHandler(const LazyLoadICParameters* p,
+                                TNode<DataHandler> handler,
+                                TVariable<Object>* var_holder,
+                                TVariable<Object>* var_smi_handler,
                                 Label* if_smi_handler, Label* miss,
                                 ExitPoint* exit_point, ICMode ic_mode,
                                 LoadAccessMode access_mode);
@@ -273,40 +351,58 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                           TNode<WordT> handler_word, TNode<DataHandler> handler,
                           TNode<IntPtrT> handler_kind, ExitPoint* exit_point);
 
-  void HandleLoadField(Node* holder, Node* handler_word,
-                       Variable* var_double_value, Label* rebox_double,
-                       ExitPoint* exit_point);
+  void HandleLoadField(TNode<JSObject> holder, TNode<WordT> handler_word,
+                       TVariable<Float64T>* var_double_value,
+                       Label* rebox_double, Label* miss, ExitPoint* exit_point);
+
+#if V8_ENABLE_WEBASSEMBLY
+  void HandleLoadWasmField(TNode<WasmObject> holder,
+                           TNode<Int32T> wasm_value_type,
+                           TNode<IntPtrT> field_offset,
+                           TVariable<Float64T>* var_double_value,
+                           Label* rebox_double, ExitPoint* exit_point);
+
+  void HandleLoadWasmField(TNode<WasmObject> holder, TNode<WordT> handler_word,
+                           TVariable<Float64T>* var_double_value,
+                           Label* rebox_double, ExitPoint* exit_point);
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   void EmitAccessCheck(TNode<Context> expected_native_context,
-                       TNode<Context> context, Node* receiver,
+                       TNode<Context> context, TNode<Object> receiver,
                        Label* can_access, Label* miss);
 
   void HandleLoadICSmiHandlerLoadNamedCase(
-      const LazyLoadICParameters* p, Node* holder, TNode<IntPtrT> handler_kind,
-      TNode<WordT> handler_word, Label* rebox_double,
-      Variable* var_double_value, SloppyTNode<Object> handler, Label* miss,
-      ExitPoint* exit_point, OnNonExistent on_nonexistent,
-      ElementSupport support_elements);
+      const LazyLoadICParameters* p, TNode<Object> holder,
+      TNode<IntPtrT> handler_kind, TNode<WordT> handler_word,
+      Label* rebox_double, TVariable<Float64T>* var_double_value,
+      TNode<Object> handler, Label* miss, ExitPoint* exit_point, ICMode ic_mode,
+      OnNonExistent on_nonexistent, ElementSupport support_elements);
 
   void HandleLoadICSmiHandlerHasNamedCase(const LazyLoadICParameters* p,
-                                          Node* holder,
+                                          TNode<Object> holder,
                                           TNode<IntPtrT> handler_kind,
-                                          Label* miss, ExitPoint* exit_point);
+                                          Label* miss, ExitPoint* exit_point,
+                                          ICMode ic_mode);
 
   // LoadGlobalIC implementation.
 
-  void LoadGlobalIC_TryPropertyCellCase(
-      TNode<FeedbackVector> vector, Node* slot,
-      const LazyNode<Context>& lazy_context, ExitPoint* exit_point,
-      Label* try_handler, Label* miss,
-      ParameterMode slot_mode = SMI_PARAMETERS);
+  void LoadGlobalIC_TryPropertyCellCase(TNode<FeedbackVector> vector,
+                                        TNode<TaggedIndex> slot,
+                                        const LazyNode<Context>& lazy_context,
+                                        ExitPoint* exit_point,
+                                        Label* try_handler, Label* miss);
 
-  void LoadGlobalIC_TryHandlerCase(TNode<FeedbackVector> vector, Node* slot,
+  void LoadGlobalIC_TryHandlerCase(TNode<FeedbackVector> vector,
+                                   TNode<TaggedIndex> slot,
                                    const LazyNode<Context>& lazy_context,
                                    const LazyNode<Name>& lazy_name,
                                    TypeofMode typeof_mode,
-                                   ExitPoint* exit_point, Label* miss,
-                                   ParameterMode slot_mode);
+                                   ExitPoint* exit_point, Label* miss);
+
+  // This is a copy of ScriptContextTable::Lookup. They should be kept in sync.
+  void ScriptContextTableLookup(TNode<Name> name,
+                                TNode<NativeContext> native_context,
+                                Label* found_hole, Label* not_found);
 
   // StoreIC implementation.
 
@@ -314,72 +410,80 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
                                  TNode<StoreHandler> handler, Label* miss,
                                  ICMode ic_mode,
                                  ElementSupport support_elements);
-  void HandleStoreICSmiHandlerCase(Node* handler_word, Node* holder,
-                                   Node* value, Label* miss);
-  void HandleStoreFieldAndReturn(Node* handler_word, Node* holder,
-                                 Representation representation, Node* value,
-                                 Label* miss);
+  void HandleStoreICSmiHandlerCase(TNode<Word32T> handler_word,
+                                   TNode<JSObject> holder, TNode<Object> value,
+                                   Label* miss);
+  void HandleStoreFieldAndReturn(TNode<Word32T> handler_word,
+                                 TNode<JSObject> holder, TNode<Object> value,
+                                 base::Optional<TNode<Float64T>> double_value,
+                                 Representation representation, Label* miss);
 
   void CheckPrototypeValidityCell(TNode<Object> maybe_validity_cell,
                                   Label* miss);
-  void HandleStoreICNativeDataProperty(const StoreICParameters* p, Node* holder,
-                                       Node* handler_word);
+  void HandleStoreICNativeDataProperty(const StoreICParameters* p,
+                                       TNode<HeapObject> holder,
+                                       TNode<Word32T> handler_word);
 
-  void HandleStoreToProxy(const StoreICParameters* p, Node* proxy, Label* miss,
-                          ElementSupport support_elements);
+  void HandleStoreToProxy(const StoreICParameters* p, TNode<JSProxy> proxy,
+                          Label* miss, ElementSupport support_elements);
 
-  void HandleStoreAccessor(const StoreICParameters* p, Node* holder,
-                           Node* handler_word);
+  void HandleStoreAccessor(const StoreICParameters* p, TNode<HeapObject> holder,
+                           TNode<Word32T> handler_word);
 
   // KeyedLoadIC_Generic implementation.
 
-  void GenericElementLoad(Node* receiver, Node* receiver_map,
-                          SloppyTNode<Int32T> instance_type, Node* index,
-                          Label* slow);
+  void GenericElementLoad(TNode<HeapObject> lookup_start_object,
+                          TNode<Map> lookup_start_object_map,
+                          TNode<Int32T> lookup_start_object_instance_type,
+                          TNode<IntPtrT> index, Label* slow);
 
   enum UseStubCache { kUseStubCache, kDontUseStubCache };
-  void GenericPropertyLoad(Node* receiver, Node* receiver_map,
-                           SloppyTNode<Int32T> instance_type,
+  void GenericPropertyLoad(TNode<HeapObject> lookup_start_object,
+                           TNode<Map> lookup_start_object_map,
+                           TNode<Int32T> lookup_start_object_instance_type,
                            const LoadICParameters* p, Label* slow,
                            UseStubCache use_stub_cache = kUseStubCache);
 
   // Low-level helpers.
 
-  using OnCodeHandler = std::function<void(Node* code_handler)>;
-  using OnFoundOnReceiver =
-      std::function<void(Node* properties, Node* name_index)>;
+  using OnCodeHandler = std::function<void(TNode<Code> code_handler)>;
+  using OnFoundOnLookupStartObject = std::function<void(
+      TNode<PropertyDictionary> properties, TNode<IntPtrT> name_index)>;
 
   template <typename ICHandler, typename ICParameters>
-  Node* HandleProtoHandler(const ICParameters* p, Node* handler,
-                           const OnCodeHandler& on_code_handler,
-                           const OnFoundOnReceiver& on_found_on_receiver,
-                           Label* miss, ICMode ic_mode);
+  TNode<Object> HandleProtoHandler(
+      const ICParameters* p, TNode<DataHandler> handler,
+      const OnCodeHandler& on_code_handler,
+      const OnFoundOnLookupStartObject& on_found_on_lookup_start_object,
+      Label* miss, ICMode ic_mode);
 
-  Node* PrepareValueForStore(Node* handler_word, Node* holder,
-                             Representation representation, Node* value,
-                             Label* bailout);
+  void CheckHeapObjectTypeMatchesDescriptor(TNode<Word32T> handler_word,
+                                            TNode<JSObject> holder,
+                                            TNode<Object> value,
+                                            Label* bailout);
+  // Double fields store double values in a mutable box, where stores are
+  // writes into this box rather than HeapNumber assignment.
+  void CheckDescriptorConsidersNumbersMutable(TNode<Word32T> handler_word,
+                                              TNode<JSObject> holder,
+                                              Label* bailout);
 
   // Extends properties backing store by JSObject::kFieldsAdded elements,
   // returns updated properties backing store.
-  Node* ExtendPropertiesBackingStore(Node* object, Node* index);
+  TNode<PropertyArray> ExtendPropertiesBackingStore(TNode<HeapObject> object,
+                                                    TNode<IntPtrT> index);
 
-  void StoreNamedField(Node* handler_word, Node* object, bool is_inobject,
-                       Representation representation, Node* value,
-                       Label* bailout);
-
-  void EmitFastElementsBoundsCheck(Node* object, Node* elements,
-                                   Node* intptr_index,
-                                   Node* is_jsarray_condition, Label* miss);
-  void EmitElementLoad(Node* object, TNode<Word32T> elements_kind,
-                       SloppyTNode<IntPtrT> key, Node* is_jsarray_condition,
+  void EmitFastElementsBoundsCheck(TNode<JSObject> object,
+                                   TNode<FixedArrayBase> elements,
+                                   TNode<IntPtrT> intptr_index,
+                                   TNode<BoolT> is_jsarray_condition,
+                                   Label* miss);
+  void EmitElementLoad(TNode<HeapObject> object, TNode<Word32T> elements_kind,
+                       TNode<IntPtrT> key, TNode<BoolT> is_jsarray_condition,
                        Label* if_hole, Label* rebox_double,
-                       Variable* var_double_value,
+                       TVariable<Float64T>* var_double_value,
                        Label* unimplemented_elements_kind, Label* out_of_bounds,
                        Label* miss, ExitPoint* exit_point,
                        LoadAccessMode access_mode = LoadAccessMode::kLoad);
-  void NameDictionaryNegativeLookup(Node* object, SloppyTNode<Name> name,
-                                    Label* miss);
-  TNode<BoolT> IsPropertyDetailsConst(Node* details);
 
   // Stub cache access helpers.
 
@@ -387,14 +491,19 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
   // including stub cache header.
   enum StubCacheTable : int;
 
-  Node* StubCachePrimaryOffset(Node* name, Node* map);
-  Node* StubCacheSecondaryOffset(Node* name, Node* seed);
+  TNode<IntPtrT> StubCachePrimaryOffset(TNode<Name> name, TNode<Map> map);
+  TNode<IntPtrT> StubCacheSecondaryOffset(TNode<Name> name,
+                                          TNode<IntPtrT> seed);
 
   void TryProbeStubCacheTable(StubCache* stub_cache, StubCacheTable table_id,
-                              Node* entry_offset, TNode<Object> name,
+                              TNode<IntPtrT> entry_offset, TNode<Object> name,
                               TNode<Map> map, Label* if_handler,
                               TVariable<MaybeObject>* var_handler,
                               Label* if_miss);
+
+  void BranchIfPrototypesHaveNoElements(TNode<Map> receiver_map,
+                                        Label* definitely_no_elements,
+                                        Label* possibly_elements);
 };
 
 // Abstraction over direct and indirect exit points. Direct exits correspond to
@@ -402,12 +511,10 @@ class V8_EXPORT_PRIVATE AccessorAssembler : public CodeStubAssembler {
 // and then jump to an exit label.
 class ExitPoint {
  private:
-  using Node = compiler::Node;
   using CodeAssemblerLabel = compiler::CodeAssemblerLabel;
-  using CodeAssemblerVariable = compiler::CodeAssemblerVariable;
 
  public:
-  using IndirectReturnHandler = std::function<void(Node* result)>;
+  using IndirectReturnHandler = std::function<void(TNode<Object> result)>;
 
   explicit ExitPoint(CodeStubAssembler* assembler)
       : ExitPoint(assembler, nullptr) {}
@@ -417,16 +524,16 @@ class ExitPoint {
       : asm_(assembler), indirect_return_handler_(indirect_return_handler) {}
 
   ExitPoint(CodeStubAssembler* assembler, CodeAssemblerLabel* out,
-            CodeAssemblerVariable* var_result)
-      : ExitPoint(assembler, [=](Node* result) {
-          var_result->Bind(result);
+            compiler::CodeAssembler::TVariable<Object>* var_result)
+      : ExitPoint(assembler, [=](TNode<Object> result) {
+          *var_result = result;
           assembler->Goto(out);
         }) {
     DCHECK_EQ(out != nullptr, var_result != nullptr);
   }
 
   template <class... TArgs>
-  void ReturnCallRuntime(Runtime::FunctionId function, Node* context,
+  void ReturnCallRuntime(Runtime::FunctionId function, TNode<Context> context,
                          TArgs... args) {
     if (IsDirect()) {
       asm_->TailCallRuntime(function, context, args...);
@@ -436,7 +543,8 @@ class ExitPoint {
   }
 
   template <class... TArgs>
-  void ReturnCallStub(Callable const& callable, Node* context, TArgs... args) {
+  void ReturnCallStub(Callable const& callable, TNode<Context> context,
+                      TArgs... args) {
     if (IsDirect()) {
       asm_->TailCallStub(callable, context, args...);
     } else {
@@ -445,8 +553,9 @@ class ExitPoint {
   }
 
   template <class... TArgs>
-  void ReturnCallStub(const CallInterfaceDescriptor& descriptor, Node* target,
-                      Node* context, TArgs... args) {
+  void ReturnCallStub(const CallInterfaceDescriptor& descriptor,
+                      TNode<Code> target, TNode<Context> context,
+                      TArgs... args) {
     if (IsDirect()) {
       asm_->TailCallStub(descriptor, target, context, args...);
     } else {
@@ -455,7 +564,7 @@ class ExitPoint {
     }
   }
 
-  void Return(Node* const result) {
+  void Return(const TNode<Object> result) {
     if (IsDirect()) {
       asm_->Return(result);
     } else {

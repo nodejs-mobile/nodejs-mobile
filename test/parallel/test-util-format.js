@@ -74,6 +74,38 @@ assert.strictEqual(
   '1180591620717411303424n 12345678901234567890123n'
 );
 
+{
+  const { numericSeparator } = util.inspect.defaultOptions;
+  util.inspect.defaultOptions.numericSeparator = true;
+
+  assert.strictEqual(
+    util.format('%d', 1180591620717411303424),
+    '1.1805916207174113e+21'
+  );
+
+  assert.strictEqual(
+    util.format(
+      // eslint-disable-next-line no-loss-of-precision
+      '%d %s %i', 118059162071741130342, 118059162071741130342, 123_123_123),
+    '118_059_162_071_741_140_000 118_059_162_071_741_140_000 123_123_123'
+  );
+
+  assert.strictEqual(
+    util.format(
+      '%d %s',
+      1_180_591_620_717_411_303_424n,
+      12_345_678_901_234_567_890_123n
+    ),
+    '1_180_591_620_717_411_303_424n 12_345_678_901_234_567_890_123n'
+  );
+
+  assert.strictEqual(
+    util.format('%i', 1_180_591_620_717_411_303_424n),
+    '1_180_591_620_717_411_303_424n'
+  );
+
+  util.inspect.defaultOptions.numericSeparator = numericSeparator;
+}
 // Integer format specifier
 assert.strictEqual(util.format('%i'), '%i');
 assert.strictEqual(util.format('%i', 42.0), '42');
@@ -109,6 +141,13 @@ assert.strictEqual(
 assert.strictEqual(
   util.format('%i %d', 1180591620717411303424n, 12345678901234567890123n),
   '1180591620717411303424n 12345678901234567890123n'
+);
+
+assert.strictEqual(
+  util.formatWithOptions(
+    { numericSeparator: true },
+    '%i %d', 1180591620717411303424n, 12345678901234567890123n),
+  '1_180_591_620_717_411_303_424n 12_345_678_901_234_567_890_123n'
 );
 
 // Float format specifier
@@ -263,10 +302,10 @@ assert.strictEqual(
   '{\n' +
   '  foo: \'bar\',\n' +
   '  foobar: 1,\n' +
-  '  func: [Function: func] {\n' +
+  '  func: <ref *1> [Function: func] {\n' +
   '    [length]: 0,\n' +
   '    [name]: \'func\',\n' +
-  '    [prototype]: func { [constructor]: [Circular] }\n' +
+  '    [prototype]: { [constructor]: [Circular *1] }\n' +
   '  }\n' +
   '}');
 assert.strictEqual(
@@ -276,10 +315,10 @@ assert.strictEqual(
   '  foobar: 1,\n' +
   '  func: [\n' +
   '    {\n' +
-  '      a: [Function: a] {\n' +
+  '      a: <ref *1> [Function: a] {\n' +
   '        [length]: 0,\n' +
   '        [name]: \'a\',\n' +
-  '        [prototype]: a { [constructor]: [Circular] }\n' +
+  '        [prototype]: { [constructor]: [Circular *1] }\n' +
   '      }\n' +
   '    },\n' +
   '    [length]: 1\n' +
@@ -291,10 +330,10 @@ assert.strictEqual(
   '  foo: \'bar\',\n' +
   '  foobar: {\n' +
   '    foo: \'bar\',\n' +
-  '    func: [Function: func] {\n' +
+  '    func: <ref *1> [Function: func] {\n' +
   '      [length]: 0,\n' +
   '      [name]: \'func\',\n' +
-  '      [prototype]: func { [constructor]: [Circular] }\n' +
+  '      [prototype]: { [constructor]: [Circular *1] }\n' +
   '    }\n' +
   '  }\n' +
   '}');
@@ -303,18 +342,18 @@ assert.strictEqual(
   '{\n' +
   '  foo: \'bar\',\n' +
   '  foobar: 1,\n' +
-  '  func: [Function: func] {\n' +
+  '  func: <ref *1> [Function: func] {\n' +
   '    [length]: 0,\n' +
   '    [name]: \'func\',\n' +
-  '    [prototype]: func { [constructor]: [Circular] }\n' +
+  '    [prototype]: { [constructor]: [Circular *1] }\n' +
   '  }\n' +
   '} {\n' +
   '  foo: \'bar\',\n' +
   '  foobar: 1,\n' +
-  '  func: [Function: func] {\n' +
+  '  func: <ref *1> [Function: func] {\n' +
   '    [length]: 0,\n' +
   '    [name]: \'func\',\n' +
-  '    [prototype]: func { [constructor]: [Circular] }\n' +
+  '    [prototype]: { [constructor]: [Circular *1] }\n' +
   '  }\n' +
   '}');
 assert.strictEqual(
@@ -322,10 +361,10 @@ assert.strictEqual(
   '{\n' +
   '  foo: \'bar\',\n' +
   '  foobar: 1,\n' +
-  '  func: [Function: func] {\n' +
+  '  func: <ref *1> [Function: func] {\n' +
   '    [length]: 0,\n' +
   '    [name]: \'func\',\n' +
-  '    [prototype]: func { [constructor]: [Circular] }\n' +
+  '    [prototype]: { [constructor]: [Circular *1] }\n' +
   '  }\n' +
   '} %o');
 
@@ -383,7 +422,7 @@ assert.strictEqual(util.format('abc%', 1), 'abc% 1');
 
 // Additional arguments after format specifiers
 assert.strictEqual(util.format('%i', 1, 'number'), '1 number');
-assert.strictEqual(util.format('%i', 1, () => {}), '1 [Function]');
+assert.strictEqual(util.format('%i', 1, () => {}), '1 [Function (anonymous)]');
 
 // %c from https://console.spec.whatwg.org/
 assert.strictEqual(util.format('%c'), '%c');
@@ -440,8 +479,8 @@ assert.strictEqual(util.format('1', '1'), '1 1');
 assert.strictEqual(util.format(1, '1'), '1 1');
 assert.strictEqual(util.format('1', 1), '1 1');
 assert.strictEqual(util.format(1, -0), '1 -0');
-assert.strictEqual(util.format('1', () => {}), '1 [Function]');
-assert.strictEqual(util.format(1, () => {}), '1 [Function]');
+assert.strictEqual(util.format('1', () => {}), '1 [Function (anonymous)]');
+assert.strictEqual(util.format(1, () => {}), '1 [Function (anonymous)]');
 assert.strictEqual(util.format('1', "'"), "1 '");
 assert.strictEqual(util.format(1, "'"), "1 '");
 assert.strictEqual(util.format('1', 'number'), '1 number');
@@ -476,3 +515,20 @@ assert.strictEqual(
   ),
   '[ 1, [Object] ]'
 );
+
+[
+  undefined,
+  null,
+  false,
+  5n,
+  5,
+  'test',
+  Symbol(),
+].forEach((invalidOptions) => {
+  assert.throws(() => {
+    util.formatWithOptions(invalidOptions, { a: true });
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    message: /"inspectOptions".+object/
+  });
+});

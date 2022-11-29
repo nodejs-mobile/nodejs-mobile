@@ -8,11 +8,12 @@
 #include "src/builtins/builtins.h"
 #include "src/codegen/constants-arch.h"
 #include "src/codegen/external-reference-table.h"
+#include "src/execution/external-pointer-table.h"
 #include "src/execution/stack-guard.h"
 #include "src/execution/thread-local-top.h"
 #include "src/roots/roots.h"
 #include "src/utils/utils.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"  // nogncheck
 
 namespace v8 {
 namespace internal {
@@ -28,9 +29,18 @@ class Isolate;
 // register.
 class IsolateData final {
  public:
-  explicit IsolateData(Isolate* isolate) : stack_guard_(isolate) {}
+  IsolateData(Isolate* isolate, Address cage_base)
+      : stack_guard_(isolate), cage_base_(cage_base) {}
+
+  IsolateData(const IsolateData&) = delete;
+  IsolateData& operator=(const IsolateData&) = delete;
 
   static constexpr intptr_t kIsolateRootBias = kRootRegisterBias;
+
+  // The value of kPointerCageBaseRegister
+  Address cage_base() const {
+    return COMPRESS_POINTERS_BOOL ? cage_base_ : kNullAddress;
+  }
 
   // The value of the kRootRegister.
   Address isolate_root() const {
@@ -56,10 +66,38 @@ class IsolateData final {
   static constexpr int builtin_entry_table_offset() {
     return kBuiltinEntryTableOffset - kIsolateRootBias;
   }
+  static constexpr int builtin_entry_slot_offset(Builtin builtin) {
+    DCHECK(Builtins::IsBuiltinId(builtin));
+    return builtin_entry_table_offset() +
+           static_cast<int>(builtin) * kSystemPointerSize;
+  }
 
   // Root-register-relative offset of the builtins table.
   static constexpr int builtins_table_offset() {
     return kBuiltinsTableOffset - kIsolateRootBias;
+  }
+
+  // Root-register-relative offset of the external pointer table.
+#ifdef V8_HEAP_SANDBOX
+  static constexpr int external_pointer_table_offset() {
+    return kExternalPointerTableOffset - kIsolateRootBias;
+  }
+#endif
+
+  static constexpr int fast_c_call_caller_fp_offset() {
+    return kFastCCallCallerFPOffset - kIsolateRootBias;
+  }
+
+  static constexpr int fast_c_call_caller_pc_offset() {
+    return kFastCCallCallerPCOffset - kIsolateRootBias;
+  }
+
+  static constexpr int fast_api_call_target_offset() {
+    return kFastApiCallTargetOffset - kIsolateRootBias;
+  }
+
+  static constexpr int cage_base_offset() {
+    return kCageBaseOffset - kIsolateRootBias;
   }
 
   // Root-register-relative offset of the given builtin table entry.
@@ -70,22 +108,21 @@ class IsolateData final {
   }
 
   // Root-register-relative offset of the builtin table entry.
-  static int builtin_slot_offset(Builtins::Name id) {
-    return builtins_table_offset() + id * kSystemPointerSize;
-  }
-
-  // Root-register-relative offset of the virtual call target register value.
-  static constexpr int virtual_call_target_register_offset() {
-    return kVirtualCallTargetRegisterOffset - kIsolateRootBias;
+  static int builtin_slot_offset(Builtin id) {
+    return builtins_table_offset() + static_cast<int>(id) * kSystemPointerSize;
   }
 
   // The FP and PC that are saved right before TurboAssembler::CallCFunction.
   Address* fast_c_call_caller_fp_address() { return &fast_c_call_caller_fp_; }
   Address* fast_c_call_caller_pc_address() { return &fast_c_call_caller_pc_; }
+  // The address of the fast API callback right before it's executed from
+  // generated code.
+  Address* fast_api_call_target_address() { return &fast_api_call_target_; }
   StackGuard* stack_guard() { return &stack_guard_; }
   uint8_t* stack_is_iterable_address() { return &stack_is_iterable_; }
   Address fast_c_call_caller_fp() { return fast_c_call_caller_fp_; }
   Address fast_c_call_caller_pc() { return fast_c_call_caller_pc_; }
+  Address fast_api_call_target() { return fast_api_call_target_; }
   uint8_t stack_is_iterable() { return stack_is_iterable_; }
 
   // Returns true if this address points to data stored in this instance.
@@ -111,27 +148,39 @@ class IsolateData final {
   Address* builtins() { return builtins_; }
 
  private:
-// Static layout definition.
+  // Static layout definition.
+  //
+  // Note: The location of fields within IsolateData is significant. The
+  // closer they are to the value of kRootRegister (i.e.: isolate_root()), the
+  // cheaper it is to access them. See also: https://crbug.com/993264.
+  // The recommend guideline is to put frequently-accessed fields close to the
+  // beginning of IsolateData.
 #define FIELDS(V)                                                             \
   V(kEmbedderDataOffset, Internals::kNumIsolateDataSlots* kSystemPointerSize) \
-  V(kExternalMemoryOffset, kInt64Size)                                        \
-  V(kExternalMemoryLlimitOffset, kInt64Size)                                  \
-  V(kExternalMemoryAtLastMarkCompactOffset, kInt64Size)                       \
-  V(kRootsTableOffset, RootsTable::kEntriesCount* kSystemPointerSize)         \
-  V(kExternalReferenceTableOffset, ExternalReferenceTable::kSizeInBytes)      \
-  V(kThreadLocalTopOffset, ThreadLocalTop::kSizeInBytes)                      \
-  V(kBuiltinEntryTableOffset, Builtins::builtin_count* kSystemPointerSize)    \
-  V(kBuiltinsTableOffset, Builtins::builtin_count* kSystemPointerSize)        \
-  V(kVirtualCallTargetRegisterOffset, kSystemPointerSize)                     \
   V(kFastCCallCallerFPOffset, kSystemPointerSize)                             \
   V(kFastCCallCallerPCOffset, kSystemPointerSize)                             \
+  V(kFastApiCallTargetOffset, kSystemPointerSize)                             \
   V(kStackGuardOffset, StackGuard::kSizeInBytes)                              \
+  V(kRootsTableOffset, RootsTable::kEntriesCount* kSystemPointerSize)         \
+  V(kCageBaseOffset, kSystemPointerSize)                                      \
+  V(kExternalReferenceTableOffset, ExternalReferenceTable::kSizeInBytes)      \
+  V(kThreadLocalTopOffset, ThreadLocalTop::kSizeInBytes)                      \
+  V(kBuiltinEntryTableOffset, Builtins::kBuiltinCount* kSystemPointerSize)    \
+  V(kBuiltinsTableOffset, Builtins::kBuiltinCount* kSystemPointerSize)        \
+  FIELDS_HEAP_SANDBOX(V)                                                      \
   V(kStackIsIterableOffset, kUInt8Size)                                       \
   /* This padding aligns IsolateData size by 8 bytes. */                      \
   V(kPaddingOffset,                                                           \
     8 + RoundUp<8>(static_cast<int>(kPaddingOffset)) - kPaddingOffset)        \
   /* Total size. */                                                           \
   V(kSize, 0)
+
+#ifdef V8_HEAP_SANDBOX
+#define FIELDS_HEAP_SANDBOX(V) \
+  V(kExternalPointerTableOffset, kSystemPointerSize * 3)
+#else
+#define FIELDS_HEAP_SANDBOX(V)
+#endif  // V8_HEAP_SANDBOX
 
   DEFINE_FIELD_OFFSET_CONSTANTS(0, FIELDS)
 #undef FIELDS
@@ -142,18 +191,21 @@ class IsolateData final {
   // runtime checks.
   void* embedder_data_[Internals::kNumIsolateDataSlots] = {};
 
-  // TODO(ishell): Move these external memory counters back to Heap once the
-  // Node JS bot issue is solved.
-  // The amount of external memory registered through the API.
-  int64_t external_memory_ = 0;
+  // Stores the state of the caller for TurboAssembler::CallCFunction so that
+  // the sampling CPU profiler can iterate the stack during such calls. These
+  // are stored on IsolateData so that they can be stored to with only one move
+  // instruction in compiled code.
+  Address fast_c_call_caller_fp_ = kNullAddress;
+  Address fast_c_call_caller_pc_ = kNullAddress;
+  Address fast_api_call_target_ = kNullAddress;
 
-  // The limit when to trigger memory pressure from the API.
-  int64_t external_memory_limit_ = kExternalAllocationSoftLimit;
-
-  // Caches the amount of external memory registered at the last MC.
-  int64_t external_memory_at_last_mark_compact_ = 0;
+  // Fields related to the system and JS stack. In particular, this contains
+  // the stack limit used by stack checks in generated code.
+  StackGuard stack_guard_;
 
   RootsTable roots_;
+
+  Address cage_base_ = kNullAddress;
 
   ExternalReferenceTable external_reference_table_;
 
@@ -162,26 +214,15 @@ class IsolateData final {
   // The entry points for all builtins. This corresponds to
   // Code::InstructionStart() for each Code object in the builtins table below.
   // The entry table is in IsolateData for easy access through kRootRegister.
-  Address builtin_entry_table_[Builtins::builtin_count] = {};
+  Address builtin_entry_table_[Builtins::kBuiltinCount] = {};
 
   // The entries in this array are tagged pointers to Code objects.
-  Address builtins_[Builtins::builtin_count] = {};
+  Address builtins_[Builtins::kBuiltinCount] = {};
 
-  // For isolate-independent calls on ia32.
-  // TODO(v8:6666): Remove once wasm supports pc-relative jumps to builtins on
-  // ia32 (otherwise the arguments adaptor call runs out of registers).
-  void* virtual_call_target_register_ = nullptr;
-
-  // Stores the state of the caller for TurboAssembler::CallCFunction so that
-  // the sampling CPU profiler can iterate the stack during such calls. These
-  // are stored on IsolateData so that they can be stored to with only one move
-  // instruction in compiled code.
-  Address fast_c_call_caller_fp_ = kNullAddress;
-  Address fast_c_call_caller_pc_ = kNullAddress;
-
-  // Fields related to the system and JS stack. In particular, this contains the
-  // stack limit used by stack checks in generated code.
-  StackGuard stack_guard_;
+  // Table containing pointers to external objects.
+#ifdef V8_HEAP_SANDBOX
+  ExternalPointerTable external_pointer_table_;
+#endif
 
   // Whether the SafeStackFrameIterator can successfully iterate the current
   // stack. Only valid values are 0 or 1.
@@ -202,8 +243,6 @@ class IsolateData final {
   friend class Heap;
   FRIEND_TEST(HeapTest, ExternalLimitDefault);
   FRIEND_TEST(HeapTest, ExternalLimitStaysAboveDefaultForExplicitHandling);
-
-  DISALLOW_COPY_AND_ASSIGN(IsolateData);
 };
 
 // IsolateData object must have "predictable" layout which does not change when
@@ -221,19 +260,18 @@ void IsolateData::AssertPredictableLayout() {
   STATIC_ASSERT(offsetof(IsolateData, thread_local_top_) ==
                 kThreadLocalTopOffset);
   STATIC_ASSERT(offsetof(IsolateData, builtins_) == kBuiltinsTableOffset);
-  STATIC_ASSERT(offsetof(IsolateData, virtual_call_target_register_) ==
-                kVirtualCallTargetRegisterOffset);
-  STATIC_ASSERT(offsetof(IsolateData, external_memory_) ==
-                kExternalMemoryOffset);
-  STATIC_ASSERT(offsetof(IsolateData, external_memory_limit_) ==
-                kExternalMemoryLlimitOffset);
-  STATIC_ASSERT(offsetof(IsolateData, external_memory_at_last_mark_compact_) ==
-                kExternalMemoryAtLastMarkCompactOffset);
   STATIC_ASSERT(offsetof(IsolateData, fast_c_call_caller_fp_) ==
                 kFastCCallCallerFPOffset);
   STATIC_ASSERT(offsetof(IsolateData, fast_c_call_caller_pc_) ==
                 kFastCCallCallerPCOffset);
+  STATIC_ASSERT(offsetof(IsolateData, fast_api_call_target_) ==
+                kFastApiCallTargetOffset);
+  STATIC_ASSERT(offsetof(IsolateData, cage_base_) == kCageBaseOffset);
   STATIC_ASSERT(offsetof(IsolateData, stack_guard_) == kStackGuardOffset);
+#ifdef V8_HEAP_SANDBOX
+  STATIC_ASSERT(offsetof(IsolateData, external_pointer_table_) ==
+                kExternalPointerTableOffset);
+#endif
   STATIC_ASSERT(offsetof(IsolateData, stack_is_iterable_) ==
                 kStackIsIterableOffset);
   STATIC_ASSERT(sizeof(IsolateData) == IsolateData::kSize);

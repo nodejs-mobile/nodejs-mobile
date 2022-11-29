@@ -6,7 +6,7 @@
 #define V8_OBJECTS_PROPERTY_ARRAY_H_
 
 #include "src/objects/heap-object.h"
-#include "torque-generated/field-offsets-tq.h"
+#include "torque-generated/field-offsets.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -14,13 +14,14 @@
 namespace v8 {
 namespace internal {
 
-class PropertyArray : public HeapObject {
+#include "torque-generated/src/objects/property-array-tq.inc"
+
+class PropertyArray
+    : public TorqueGeneratedPropertyArray<PropertyArray, HeapObject> {
  public:
   // [length]: length of the array.
   inline int length() const;
-
-  // Get the length using acquire loads.
-  inline int synchronized_length() const;
+  inline int length(AcquireLoadTag) const;
 
   // This is only used on a newly allocated PropertyArray which
   // doesn't have an existing hash.
@@ -30,7 +31,7 @@ class PropertyArray : public HeapObject {
   inline int Hash() const;
 
   inline Object get(int index) const;
-  inline Object get(Isolate* isolate, int index) const;
+  inline Object get(PtrComprCageBase cage_base, int index) const;
 
   inline void set(int index, Object value);
   // Setter with explicit barrier mode.
@@ -49,31 +50,26 @@ class PropertyArray : public HeapObject {
   }
   static constexpr int OffsetOfElementAt(int index) { return SizeFor(index); }
 
-  DECL_CAST(PropertyArray)
   DECL_PRINTER(PropertyArray)
   DECL_VERIFIER(PropertyArray)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(HeapObject::kHeaderSize,
-                                TORQUE_GENERATED_PROPERTY_ARRAY_FIELDS)
-  static const int kHeaderSize = kSize;
 
   // Garbage collection support.
   using BodyDescriptor = FlexibleBodyDescriptor<kHeaderSize>;
 
   static const int kLengthFieldSize = 10;
-  using LengthField = BitField<int, 0, kLengthFieldSize>;
+  using LengthField = base::BitField<int, 0, kLengthFieldSize>;
   static const int kMaxLength = LengthField::kMax;
-  using HashField =
-      BitField<int, kLengthFieldSize, kSmiValueSize - kLengthFieldSize - 1>;
+  using HashField = base::BitField<int, kLengthFieldSize,
+                                   kSmiValueSize - kLengthFieldSize - 1>;
 
   static const int kNoHashSentinel = 0;
 
  private:
   DECL_INT_ACCESSORS(length_and_hash)
 
-  DECL_SYNCHRONIZED_INT_ACCESSORS(length_and_hash)
+  DECL_RELEASE_ACQUIRE_INT_ACCESSORS(length_and_hash)
 
-  OBJECT_CONSTRUCTORS(PropertyArray, HeapObject);
+  TQ_OBJECT_CONSTRUCTORS(PropertyArray)
 };
 
 }  // namespace internal

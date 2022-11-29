@@ -1,6 +1,5 @@
 'use strict';
-
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs').promises;
@@ -19,7 +18,7 @@ function getFileName() {
 const allocateEmptyBuffers = (combinedLength) => {
   const bufferArr = [];
   // Allocate two buffers, each half the size of exptectedBuff
-  bufferArr[0] = Buffer.alloc(Math.floor(combinedLength / 2)),
+  bufferArr[0] = Buffer.alloc(Math.floor(combinedLength / 2));
   bufferArr[1] = Buffer.alloc(combinedLength - bufferArr[0].length);
 
   return bufferArr;
@@ -36,11 +35,11 @@ const allocateEmptyBuffers = (combinedLength) => {
 
     let { bytesRead, buffers } = await handle.readv([Buffer.from('')],
                                                     null);
-    assert.deepStrictEqual(bytesRead, 0);
+    assert.strictEqual(bytesRead, 0);
     assert.deepStrictEqual(buffers, [Buffer.from('')]);
 
     ({ bytesRead, buffers } = await handle.readv(bufferArr, null));
-    assert.deepStrictEqual(bytesRead, expectedLength);
+    assert.strictEqual(bytesRead, expectedLength);
     assert.deepStrictEqual(buffers, bufferArr);
     assert(Buffer.concat(bufferArr).equals(await fs.readFile(filename)));
     handle.close();
@@ -55,13 +54,13 @@ const allocateEmptyBuffers = (combinedLength) => {
     const expectedLength = exptectedBuff.length;
 
     let { bytesRead, buffers } = await handle.readv([Buffer.from('')]);
-    assert.deepStrictEqual(bytesRead, 0);
+    assert.strictEqual(bytesRead, 0);
     assert.deepStrictEqual(buffers, [Buffer.from('')]);
 
     ({ bytesRead, buffers } = await handle.readv(bufferArr));
-    assert.deepStrictEqual(bytesRead, expectedLength);
+    assert.strictEqual(bytesRead, expectedLength);
     assert.deepStrictEqual(buffers, bufferArr);
     assert(Buffer.concat(bufferArr).equals(await fs.readFile(filename)));
     handle.close();
   }
-})();
+})().then(common.mustCall());

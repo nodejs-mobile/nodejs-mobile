@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-weak-refs --expose-gc --noincremental-marking --allow-natives-syntax
+// Flags: --expose-gc --noincremental-marking --allow-natives-syntax
 
 // This test asserts that the cleanup function call, scheduled by GC, is a
 // microtask and not a normal task.
@@ -19,12 +19,11 @@ function scheduleMicrotask(func) {
 
 let log = [];
 
-let cleanup = (iter) => {
+let cleanup = (holdings) => {
   cleanedUp = true;
-  for (holdings of iter) { }
 }
 
-let fg = new FinalizationGroup(cleanup);
+let fg = new FinalizationRegistry(cleanup);
 let o = null;
 
 (function() {

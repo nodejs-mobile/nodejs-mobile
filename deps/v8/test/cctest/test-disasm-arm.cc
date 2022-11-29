@@ -33,6 +33,7 @@
 // former isn't available in V8.
 #include <regex>  // NOLINT(build/c++11)
 
+#include "src/base/numbers/double.h"
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/debug/debug.h"
@@ -40,7 +41,6 @@
 #include "src/diagnostics/disassembler.h"
 #include "src/execution/frames-inl.h"
 #include "src/init/v8.h"
-#include "src/numbers/double.h"
 #include "src/objects/objects-inl.h"
 #include "src/utils/boxed-float.h"
 #include "test/cctest/cctest.h"
@@ -55,7 +55,7 @@ bool DisassembleAndCompare(byte* begin, UseRegex use_regex,
                            S... expected_strings) {
   disasm::NameConverter converter;
   disasm::Disassembler disasm(converter);
-  EmbeddedVector<char, 128> buffer;
+  base::EmbeddedVector<char, 128> buffer;
 
   std::vector<std::string> expected_disassembly = {expected_strings...};
   size_t n_expected = expected_disassembly.size();
@@ -667,9 +667,9 @@ TEST(Vfp) {
     COMPARE(vsqrt(s2, s3, ne),
             "1eb11ae1       vsqrtne.f32 s2, s3");
 
-    COMPARE(vmov(d0, Double(1.0)),
+    COMPARE(vmov(d0, base::Double(1.0)),
             "eeb70b00       vmov.f64 d0, #1");
-    COMPARE(vmov(d2, Double(-13.0)),
+    COMPARE(vmov(d2, base::Double(-13.0)),
             "eeba2b0a       vmov.f64 d2, #-13");
 
     COMPARE(vmov(s1, Float32(-1.0f)),
@@ -835,7 +835,7 @@ TEST(Vfp) {
       COMPARE(vsqrt(d16, d17),
               "eef10be1       vsqrt.f64 d16, d17");
 
-      COMPARE(vmov(d30, Double(16.0)),
+      COMPARE(vmov(d30, base::Double(16.0)),
               "eef3eb00       vmov.f64 d30, #16");
 
       COMPARE(vmov(NeonS32, d31, 0, r7),
@@ -916,6 +916,12 @@ TEST(ARMv8_vrintX_disasm) {
 
     COMPARE(vrintz(d0, d0), "eeb60bc0       vrintz.f64.f64 d0, d0");
     COMPARE(vrintz(d2, d3, ne), "1eb62bc3       vrintzne.f64.f64 d2, d3");
+
+    // Advanced SIMD
+    COMPARE(vrintm(NeonS32, q0, q3), "f3ba06c6       vrintm.f32 q0, q3");
+    COMPARE(vrintn(NeonS32, q0, q3), "f3ba0446       vrintn.f32 q0, q3");
+    COMPARE(vrintp(NeonS32, q0, q3), "f3ba07c6       vrintp.f32 q0, q3");
+    COMPARE(vrintz(NeonS32, q0, q3), "f3ba05c6       vrintz.f32 q0, q3");
   }
 
   VERIFY_RUN();
@@ -988,18 +994,49 @@ TEST(Neon) {
 
   if (CpuFeatures::IsSupported(NEON)) {
     CpuFeatureScope scope(&assm, NEON);
+      COMPARE(vld1(Neon8, NeonListOperand(d4, 1), NeonMemOperand(r1)),
+              "f421470f       vld1.8 {d4}, [r1]");
+      COMPARE(vld1(Neon8, NeonListOperand(d4, 2), NeonMemOperand(r1)),
+              "f4214a0f       vld1.8 {d4, d5}, [r1]");
+      COMPARE(vld1(Neon8, NeonListOperand(d4, 3), NeonMemOperand(r1)),
+              "f421460f       vld1.8 {d4, d5, d6}, [r1]");
       COMPARE(vld1(Neon8, NeonListOperand(d4, 4), NeonMemOperand(r1)),
               "f421420f       vld1.8 {d4, d5, d6, d7}, [r1]");
+      COMPARE(vld1s(Neon32, NeonListOperand(d4, 1), 0, NeonMemOperand(r1)),
+              "f4a1480f       vld1.32 {d4[0]}, [r1]");
+      COMPARE(vld1s(Neon16, NeonListOperand(d4, 1), 3, NeonMemOperand(r1)),
+              "f4a144cf       vld1.16 {d4[3]}, [r1]");
+      COMPARE(vld1r(Neon8, NeonListOperand(d4, 1), NeonMemOperand(r1)),
+              "f4a14c0f       vld1.8 {d4}, [r1]");
+      COMPARE(vld1r(Neon16, NeonListOperand(d4, 2), NeonMemOperand(r1)),
+              "f4a14c6f       vld1.16 {d4, d5}, [r1]");
+      COMPARE(vst1(Neon8, NeonListOperand(d4, 1), NeonMemOperand(r6)),
+              "f406470f       vst1.8 {d4}, [r6]")
+      COMPARE(vst1(Neon8, NeonListOperand(q4), NeonMemOperand(r6)),
+              "f4068a0f       vst1.8 {d8, d9}, [r6]")
+      COMPARE(vst1(Neon8, NeonListOperand(d4, 3), NeonMemOperand(r6)),
+              "f406460f       vst1.8 {d4, d5, d6}, [r6]")
       COMPARE(vst1(Neon16, NeonListOperand(d17, 4), NeonMemOperand(r9)),
               "f449124f       vst1.16 {d17, d18, d19, d20}, [r9]");
+      COMPARE(vst1s(Neon8, NeonListOperand(d4), 1, NeonMemOperand(r1)),
+              "f481402f       vst1.8 {d4[1]}, [r1]");
+      COMPARE(vst1s(Neon16, NeonListOperand(d4), 2, NeonMemOperand(r1)),
+              "f481448f       vst1.16 {d4[2]}, [r1]");
+      COMPARE(vst1s(Neon32, NeonListOperand(d4), 0, NeonMemOperand(r1)),
+              "f481480f       vst1.32 {d4[0]}, [r1]");
       COMPARE(vmovl(NeonU8, q3, d1), "f3886a11       vmovl.u8 q3, d1");
       COMPARE(vmovl(NeonU8, q4, d2), "f3888a12       vmovl.u8 q4, d2");
       COMPARE(vmovl(NeonS16, q4, d2), "f2908a12       vmovl.s16 q4, d2");
       COMPARE(vmovl(NeonU32, q4, d2), "f3a08a12       vmovl.u32 q4, d2");
 
-      COMPARE(vqmovn(NeonU8, d16, q8), "f3f202e0       vqmovn.u16 d16, q8");
-      COMPARE(vqmovn(NeonS16, d16, q8), "f3f602a0       vqmovn.s32 d16, q8");
-      COMPARE(vqmovn(NeonU32, d2, q4), "f3ba22c8       vqmovn.u64 d2, q4");
+      COMPARE(vqmovn(NeonU8, NeonU8, d16, q8),
+              "f3f202e0       vqmovn.u16 d16, q8");
+      COMPARE(vqmovn(NeonS16, NeonS16, d16, q8),
+              "f3f602a0       vqmovn.s32 d16, q8");
+      COMPARE(vqmovn(NeonU32, NeonU32, d2, q4),
+              "f3ba22c8       vqmovn.u64 d2, q4");
+      COMPARE(vqmovn(NeonU32, NeonS32, d2, q4),
+              "f3ba2248       vqmovun.s64 d2, q4");
 
       COMPARE(vmov(NeonS8, d0, 0, r0), "ee400b10       vmov.8 d0[0], r0");
       COMPARE(vmov(NeonU8, d1, 1, r1), "ee411b30       vmov.8 d1[1], r1");
@@ -1038,6 +1075,14 @@ TEST(Neon) {
               "f22e01fe       vmov q0, q15");
       COMPARE(vmov(q8, q9),
               "f26201f2       vmov q8, q9");
+      COMPARE(vmov(q1, 0),
+              "f2802050       vmov.i32 q1, 0");
+      COMPARE(vmov(q1, 0x0000001200000012),
+              "f2812052       vmov.i32 q1, 18");
+      COMPARE(vmov(q0, 0xffffffffffffffff),
+              "f3870e5f       vmov.i8 q0, 255");
+      COMPARE(vmov(d0, 0xffffffffffffffff),
+              "f3870e1f       vmov.i8 q0, 255");
       COMPARE(vmvn(q0, q15),
               "f3b005ee       vmvn q0, q15");
       COMPARE(vmvn(q8, q9),
@@ -1072,6 +1117,12 @@ TEST(Neon) {
               "f3fbe742       vcvt.s32.f32 q15, q1");
       COMPARE(vcvt_u32_f32(q8, q9),
               "f3fb07e2       vcvt.u32.f32 q8, q9");
+      COMPARE(vclt(Neon8, q1, q3, 0),
+              "f3b12246       vclt.s8 q1, q3, #0");
+      COMPARE(vclt(Neon16, q1, q3, 0),
+              "f3b52246       vclt.s16 q1, q3, #0");
+      COMPARE(vclt(Neon32, q1, q3, 0),
+              "f3b92246       vclt.s32 q1, q3, #0");
       COMPARE(vabs(q0, q1),
               "f3b90742       vabs.f32 q0, q1");
       COMPARE(vabs(Neon8, q6, q7),
@@ -1098,6 +1149,8 @@ TEST(Neon) {
               "f340e170       veor q15, q0, q8");
       COMPARE(vand(q15, q0, q8),
               "f240e170       vand q15, q0, q8");
+      COMPARE(vbic(q15, q0, q8),
+              "f250e170       vbic q15, q0, q8");
       COMPARE(vorr(q15, q0, q8),
               "f260e170       vorr q15, q0, q8");
       COMPARE(vmin(q15, q0, q8),
@@ -1118,6 +1171,30 @@ TEST(Neon) {
               "f2110b12       vpadd.i16 d0, d1, d2");
       COMPARE(vpadd(Neon32, d0, d1, d2),
               "f2210b12       vpadd.i32 d0, d1, d2");
+      COMPARE(vpadal(NeonS8, q0, q1),
+              "f3b00642       vpadal.s8 q0, q1");
+      COMPARE(vpadal(NeonS16, q0, q1),
+              "f3b40642       vpadal.s16 q0, q1");
+      COMPARE(vpadal(NeonS32, q0, q1),
+              "f3b80642       vpadal.s32 q0, q1");
+      COMPARE(vpadal(NeonU8, q14, q15),
+              "f3f0c6ee       vpadal.u8 q14, q15");
+      COMPARE(vpadal(NeonU16, q14, q15),
+              "f3f4c6ee       vpadal.u16 q14, q15");
+      COMPARE(vpadal(NeonU32, q14, q15),
+              "f3f8c6ee       vpadal.u32 q14, q15");
+      COMPARE(vpaddl(NeonS8, q0, q1),
+              "f3b00242       vpaddl.s8 q0, q1");
+      COMPARE(vpaddl(NeonS16, q0, q1),
+              "f3b40242       vpaddl.s16 q0, q1");
+      COMPARE(vpaddl(NeonS32, q0, q1),
+              "f3b80242       vpaddl.s32 q0, q1");
+      COMPARE(vpaddl(NeonU8, q14, q15),
+              "f3f0c2ee       vpaddl.u8 q14, q15");
+      COMPARE(vpaddl(NeonU16, q14, q15),
+              "f3f4c2ee       vpaddl.u16 q14, q15");
+      COMPARE(vpaddl(NeonU32, q14, q15),
+              "f3f8c2ee       vpaddl.u32 q14, q15");
       COMPARE(vpmax(NeonS8, d0, d1, d2),
               "f2010a02       vpmax.s8 d0, d1, d2");
       COMPARE(vpmin(NeonU16, d1, d2, d8),
@@ -1160,18 +1237,45 @@ TEST(Neon) {
               "f2142970       vmul.i16 q1, q2, q8");
       COMPARE(vmul(Neon32, q15, q0, q8),
               "f260e970       vmul.i32 q15, q0, q8");
+
+      COMPARE(vqrdmulh(NeonS16, q0, q1, q8),
+              "f3120b60       vqrdmulh.s16 q0, q1, q8");
+      COMPARE(vqrdmulh(NeonS32, q15, q0, q8),
+              "f360eb60       vqrdmulh.s32 q15, q0, q8");
+
+      COMPARE(vmull(NeonU8, q15, d0, d8),
+              "f3c0ec08       vmull.u8 q15, d0, d8");
+      COMPARE(vmull(NeonS16, q15, d0, d8),
+              "f2d0ec08       vmull.s16 q15, d0, d8");
+      COMPARE(vmull(NeonU32, q15, d0, d8),
+              "f3e0ec08       vmull.u32 q15, d0, d8");
+      COMPARE(vmlal(NeonU32, q15, d0, d8),
+              "f3e0e808       vmlal.u32 q15, d0, d8");
+
       COMPARE(vshl(NeonS8, q15, q0, 6),
               "f2cee550       vshl.i8 q15, q0, #6");
       COMPARE(vshl(NeonU16, q15, q0, 10),
               "f2dae550       vshl.i16 q15, q0, #10");
       COMPARE(vshl(NeonS32, q15, q0, 17),
               "f2f1e550       vshl.i32 q15, q0, #17");
+      COMPARE(vshl(NeonS64, q15, q0, 40),
+              "f2e8e5d0       vshl.i64 q15, q0, #40");
+      COMPARE(vshl(NeonS8, q15, q0, q1),
+              "f242e440       vshl.s8 q15, q0, q1");
+      COMPARE(vshl(NeonU16, q15, q2, q3),
+              "f356e444       vshl.u16 q15, q2, q3");
+      COMPARE(vshl(NeonS32, q15, q4, q5),
+              "f26ae448       vshl.s32 q15, q4, q5");
       COMPARE(vshr(NeonS8, q15, q0, 6),
               "f2cae050       vshr.s8 q15, q0, #6");
       COMPARE(vshr(NeonU16, q15, q0, 10),
               "f3d6e050       vshr.u16 q15, q0, #10");
       COMPARE(vshr(NeonS32, q15, q0, 17),
               "f2efe050       vshr.s32 q15, q0, #17");
+      COMPARE(vshr(NeonS64, q15, q0, 40),
+              "f2d8e0d0       vshr.s64 q15, q0, #40");
+      COMPARE(vshr(NeonU64, q15, q0, 40),
+              "f3d8e0d0       vshr.u64 q15, q0, #40");
       COMPARE(vsli(Neon64, d2, d0, 32),
               "f3a02590       vsli.64 d2, d0, #32");
       COMPARE(vsli(Neon32, d7, d8, 17),
@@ -1218,6 +1322,12 @@ TEST(Neon) {
               "f3142360       vcgt.u16 q1, q2, q8");
       COMPARE(vcgt(NeonS32, q15, q0, q8),
               "f260e360       vcgt.s32 q15, q0, q8");
+      COMPARE(vrhadd(NeonU8, q0, q1, q2),
+              "f3020144       vrhadd.u8 q0, q1, q2");
+      COMPARE(vrhadd(NeonU16, q1, q2, q8),
+              "f3142160       vrhadd.u16 q1, q2, q8");
+      COMPARE(vrhadd(NeonU32, q15, q0, q8),
+              "f360e160       vrhadd.u32 q15, q0, q8");
       COMPARE(vbsl(q0, q1, q2),
               "f3120154       vbsl q0, q1, q2");
       COMPARE(vbsl(q15, q0, q8),
@@ -1232,6 +1342,10 @@ TEST(Neon) {
               "f3b6f100       vuzp.16 d15, d0");
       COMPARE(vuzp(Neon16, q15, q0),
               "f3f6e140       vuzp.16 q15, q0");
+      COMPARE(vrev16(Neon8, q15, q0),
+              "f3f0e140       vrev16.8 q15, q0");
+      COMPARE(vrev32(Neon8, q15, q0),
+              "f3f0e0c0       vrev32.8 q15, q0");
       COMPARE(vrev64(Neon8, q15, q0),
               "f3f0e040       vrev64.8 q15, q0");
       COMPARE(vtrn(Neon16, d15, d0),
@@ -1254,6 +1368,8 @@ TEST(Neon) {
               "f3b1fa45       vtbx.8 d15, {d1, d2, d3}, d5");
       COMPARE(vtbx(d15, NeonListOperand(d1, 4), d5),
               "f3b1fb45       vtbx.8 d15, {d1, d2, d3, d4}, d5");
+      COMPARE(vcnt(q1, q2),
+              "f3b02544       vcnt.8 q1, q2");
   }
 
   VERIFY_RUN();

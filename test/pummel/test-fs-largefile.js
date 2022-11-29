@@ -34,7 +34,7 @@ const fd = fs.openSync(filepath, 'w+');
 const offset = 5 * 1024 * 1024 * 1024; // 5GB
 const message = 'Large File';
 
-fs.truncateSync(fd, offset);
+fs.ftruncateSync(fd, offset);
 assert.strictEqual(fs.statSync(filepath).size, offset);
 const writeBuf = Buffer.from(message);
 fs.writeSync(fd, writeBuf, 0, writeBuf.length, offset);
@@ -47,9 +47,3 @@ assert.strictEqual(readBuf[0], 0);
 // Verify that floating point positions do not throw.
 fs.writeSync(fd, writeBuf, 0, writeBuf.length, 42.000001);
 fs.close(fd, common.mustCall());
-
-// Normally, we don't clean up tmp files at the end of a test, but we'll make an
-// exception for a 5 GB file.
-process.on('exit', function() {
-  fs.unlinkSync(filepath);
-});

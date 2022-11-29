@@ -72,7 +72,6 @@ events.captureRejections = true;
   }));
 }
 
-
 {
   // Test error thrown in 'request' event
 
@@ -91,8 +90,7 @@ events.captureRejections = true;
 
     req.on('response', common.mustCall((headers) => {
       assert.strictEqual(headers[':status'], 500);
-      assert.strictEqual(Object.hasOwnProperty.call(headers, 'content-type'),
-                         false);
+      assert.strictEqual(Object.hasOwn(headers, 'content-type'), false);
     }));
 
     req.on('close', common.mustCall(() => {
@@ -136,6 +134,7 @@ events.captureRejections = true;
     const session = connect(`http://localhost:${port}`);
 
     const req = session.request();
+    req.resume();
 
     session.on('stream', common.mustCall(async (stream) => {
       session.close();

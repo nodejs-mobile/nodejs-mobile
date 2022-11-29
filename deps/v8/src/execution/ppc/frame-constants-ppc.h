@@ -5,7 +5,9 @@
 #ifndef V8_EXECUTION_PPC_FRAME_CONSTANTS_PPC_H_
 #define V8_EXECUTION_PPC_FRAME_CONSTANTS_PPC_H_
 
+#include "src/base/bits.h"
 #include "src/base/macros.h"
+#include "src/codegen/ppc/register-ppc.h"
 #include "src/execution/frame-constants.h"
 
 namespace v8 {
@@ -13,23 +15,10 @@ namespace internal {
 
 class EntryFrameConstants : public AllStatic {
  public:
-  static constexpr int kCallerFPOffset =
-      -(StandardFrameConstants::kFixedFrameSizeFromFp + kPointerSize);
-};
-
-class ExitFrameConstants : public TypedFrameConstants {
- public:
-  static constexpr int kSPOffset = TYPED_FRAME_PUSHED_VALUE_OFFSET(0);
-  DEFINE_TYPED_FRAME_SIZES(1);
-
-  // The caller fields are below the frame pointer on the stack.
-  static constexpr int kCallerFPOffset = 0 * kPointerSize;
-  // The calling JS function is below FP.
-  static constexpr int kCallerPCOffset = 1 * kPointerSize;
-
-  // FP-relative displacement of the caller's SP.  It points just
-  // below the saved PC.
-  static constexpr int kCallerSPDisplacement = 2 * kPointerSize;
+  // Need to take constant pool into account.
+  static constexpr int kCallerFPOffset = FLAG_enable_embedded_constant_pool
+                                             ? -4 * kSystemPointerSize
+                                             : -3 * kSystemPointerSize;
 };
 
 class WasmCompileLazyFrameConstants : public TypedFrameConstants {
@@ -38,25 +27,53 @@ class WasmCompileLazyFrameConstants : public TypedFrameConstants {
   static constexpr int kNumberOfSavedFpParamRegs = 8;
 
   // FP-relative.
+  // The instance is pushed as part of the saved registers. Being in {r10}, it
+  // is the first register pushed (highest register code in
+  // {wasm::kGpParamRegisters}).
   static constexpr int kWasmInstanceOffset = TYPED_FRAME_PUSHED_VALUE_OFFSET(0);
   static constexpr int kFixedFrameSizeFromFp =
       TypedFrameConstants::kFixedFrameSizeFromFp +
-      kNumberOfSavedGpParamRegs * kPointerSize +
-      kNumberOfSavedFpParamRegs * kDoubleSize;
+      kNumberOfSavedGpParamRegs * kSystemPointerSize +
+      kNumberOfSavedFpParamRegs * kDoubleSize +
+      kNumberOfSavedFpParamRegs * kSimd128Size;
 };
 
-class JavaScriptFrameConstants : public AllStatic {
+// Frame constructed by the {WasmDebugBreak} builtin.
+// After pushing the frame type marker, the builtin pushes all Liftoff cache
+// registers (see liftoff-assembler-defs.h).
+class WasmDebugBreakFrameConstants : public TypedFrameConstants {
  public:
-  // FP-relative.
-  static constexpr int kLocal0Offset =
-      StandardFrameConstants::kExpressionsOffset;
-  static constexpr int kLastParameterOffset = +2 * kPointerSize;
-  static constexpr int kFunctionOffset =
-      StandardFrameConstants::kFunctionOffset;
+  static constexpr RegList kPushedGpRegs =
+      Register::ListOf(r3, r4, r5, r6, r7, r8, r9, r10, r11, cp);
 
-  // Caller SP-relative.
-  static constexpr int kParam0Offset = -2 * kPointerSize;
-  static constexpr int kReceiverOffset = -1 * kPointerSize;
+  static constexpr RegList kPushedFpRegs = DoubleRegister::ListOf(
+      d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12);
+
+  static constexpr int kNumPushedGpRegisters =
+      base::bits::CountPopulation(kPushedGpRegs);
+  static constexpr int kNumPushedFpRegisters =
+      base::bits::CountPopulation(kPushedFpRegs);
+
+  static constexpr int kLastPushedGpRegisterOffset =
+      -TypedFrameConstants::kFixedFrameSizeFromFp -
+      kSystemPointerSize * kNumPushedGpRegisters;
+  static constexpr int kLastPushedFpRegisterOffset =
+      kLastPushedGpRegisterOffset - kDoubleSize * kNumPushedFpRegisters;
+
+  // Offsets are fp-relative.
+  static int GetPushedGpRegisterOffset(int reg_code) {
+    DCHECK_NE(0, kPushedGpRegs & (1 << reg_code));
+    uint32_t lower_regs = kPushedGpRegs & ((uint32_t{1} << reg_code) - 1);
+    return kLastPushedGpRegisterOffset +
+           base::bits::CountPopulation(lower_regs) * kSystemPointerSize;
+  }
+
+  static int GetPushedFpRegisterOffset(int reg_code) {
+    DCHECK_NE(0, kPushedFpRegs & (1 << reg_code));
+    uint32_t lower_regs = kPushedFpRegs & ((uint32_t{1} << reg_code) - 1);
+    return kLastPushedFpRegisterOffset +
+           base::bits::CountPopulation(lower_regs) * kDoubleSize;
+  }
 };
 
 }  // namespace internal

@@ -5,8 +5,12 @@
 #include "src/tracing/traced-value.h"
 
 #include "src/base/platform/platform.h"
+#include "src/base/vector.h"
 #include "src/numbers/conversions.h"
-#include "src/utils/vector.h"
+
+#ifdef V8_USE_PERFETTO
+#include "protos/perfetto/trace/track_event/debug_annotation.pbzero.h"
+#endif
 
 namespace v8 {
 namespace tracing {
@@ -91,8 +95,8 @@ void TracedValue::SetInteger(const char* name, int value) {
 void TracedValue::SetDouble(const char* name, double value) {
   DCHECK_CURRENT_CONTAINER_IS(kStackTypeDict);
   WriteName(name);
-  i::EmbeddedVector<char, 100> buffer;
-  data_ += DoubleToCString(value, buffer);
+  base::EmbeddedVector<char, 100> buffer;
+  data_ += internal::DoubleToCString(value, buffer);
 }
 
 void TracedValue::SetBoolean(const char* name, bool value) {
@@ -140,8 +144,8 @@ void TracedValue::AppendInteger(int value) {
 void TracedValue::AppendDouble(double value) {
   DCHECK_CURRENT_CONTAINER_IS(kStackTypeArray);
   WriteComma();
-  i::EmbeddedVector<char, 100> buffer;
-  data_ += DoubleToCString(value, buffer);
+  base::EmbeddedVector<char, 100> buffer;
+  data_ += internal::DoubleToCString(value, buffer);
 }
 
 void TracedValue::AppendBoolean(bool value) {
@@ -206,6 +210,17 @@ void TracedValue::AppendAsTraceFormat(std::string* out) const {
   *out += data_;
   *out += '}';
 }
+
+#ifdef V8_USE_PERFETTO
+void TracedValue::Add(
+    perfetto::protos::pbzero::DebugAnnotation* annotation) const {
+  std::string json;
+  json += "{";
+  json += data_;
+  json += "}";
+  annotation->set_legacy_json_value(json);
+}
+#endif  // V8_USE_PERFETTO
 
 }  // namespace tracing
 }  // namespace v8

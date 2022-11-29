@@ -2,22 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-weak-refs --expose-gc --noincremental-marking
+// Flags: --expose-gc --noincremental-marking
 
 let cleanup_call_count = 0;
 let cleanup_holdings_count = 0;
-let cleanup = function(iter) {
-  for (holdings of iter) {
-    assertEquals("holdings2", holdings);
-    ++cleanup_holdings_count;
-  }
+let cleanup = function(holdings) {
+  assertEquals("holdings2", holdings);
+  ++cleanup_holdings_count;
   ++cleanup_call_count;
 }
 
-let fg = new FinalizationGroup(cleanup);
+let fg = new FinalizationRegistry(cleanup);
 let key1 = {"k": "key1"};
 let key2 = {"k": "key2"};
-// Create three objects and register them in the FinalizationGroup. The objects
+// Create three objects and register them in the FinalizationRegistry. The objects
 // need to be inside a closure so that we can reliably kill them!
 
 (function() {

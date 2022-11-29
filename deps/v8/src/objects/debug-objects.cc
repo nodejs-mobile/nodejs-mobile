@@ -4,6 +4,7 @@
 
 #include "src/objects/debug-objects.h"
 
+#include "src/base/platform/mutex.h"
 #include "src/debug/debug-evaluate.h"
 #include "src/handles/handles-inl.h"
 #include "src/objects/debug-objects-inl.h"
@@ -13,26 +14,27 @@ namespace v8 {
 namespace internal {
 
 bool DebugInfo::IsEmpty() const {
-  return flags() == kNone && debugger_hints() == 0;
+  return flags(kRelaxedLoad) == kNone && debugger_hints() == 0;
 }
 
-bool DebugInfo::HasBreakInfo() const { return (flags() & kHasBreakInfo) != 0; }
+bool DebugInfo::HasBreakInfo() const {
+  return (flags(kRelaxedLoad) & kHasBreakInfo) != 0;
+}
 
 DebugInfo::ExecutionMode DebugInfo::DebugExecutionMode() const {
-  return (flags() & kDebugExecutionMode) != 0 ? kSideEffects : kBreakpoints;
+  return (flags(kRelaxedLoad) & kDebugExecutionMode) != 0 ? kSideEffects
+                                                          : kBreakpoints;
 }
 
 void DebugInfo::SetDebugExecutionMode(ExecutionMode value) {
-  set_flags(value == kSideEffects ? (flags() | kDebugExecutionMode)
-                                  : (flags() & ~kDebugExecutionMode));
+  set_flags(value == kSideEffects
+                ? (flags(kRelaxedLoad) | kDebugExecutionMode)
+                : (flags(kRelaxedLoad) & ~kDebugExecutionMode),
+            kRelaxedStore);
 }
 
 void DebugInfo::ClearBreakInfo(Isolate* isolate) {
   if (HasInstrumentedBytecodeArray()) {
-    // Reset function's bytecode array field to point to the original bytecode
-    // array.
-    shared().SetDebugBytecodeArray(OriginalBytecodeArray());
-
     // If the function is currently running on the stack, we need to update the
     // bytecode pointers on the stack so they point to the original
     // BytecodeArray before releasing that BytecodeArray from this DebugInfo.
@@ -44,32 +46,33 @@ void DebugInfo::ClearBreakInfo(Isolate* isolate) {
       isolate->thread_manager()->IterateArchivedThreads(&redirect_visitor);
     }
 
-    set_original_bytecode_array(ReadOnlyRoots(isolate).undefined_value());
-    set_debug_bytecode_array(ReadOnlyRoots(isolate).undefined_value());
+    SharedFunctionInfo::UninstallDebugBytecode(shared(), isolate);
   }
   set_break_points(ReadOnlyRoots(isolate).empty_fixed_array());
 
-  int new_flags = flags();
+  int new_flags = flags(kRelaxedLoad);
   new_flags &= ~kHasBreakInfo & ~kPreparedForDebugExecution;
   new_flags &= ~kBreakAtEntry & ~kCanBreakAtEntry;
   new_flags &= ~kDebugExecutionMode;
-  set_flags(new_flags);
+  set_flags(new_flags, kRelaxedStore);
 }
 
 void DebugInfo::SetBreakAtEntry() {
   DCHECK(CanBreakAtEntry());
-  set_flags(flags() | kBreakAtEntry);
+  set_flags(flags(kRelaxedLoad) | kBreakAtEntry, kRelaxedStore);
 }
 
 void DebugInfo::ClearBreakAtEntry() {
   DCHECK(CanBreakAtEntry());
-  set_flags(flags() & ~kBreakAtEntry);
+  set_flags(flags(kRelaxedLoad) & ~kBreakAtEntry, kRelaxedStore);
 }
 
-bool DebugInfo::BreakAtEntry() const { return (flags() & kBreakAtEntry) != 0; }
+bool DebugInfo::BreakAtEntry() const {
+  return (flags(kRelaxedLoad) & kBreakAtEntry) != 0;
+}
 
 bool DebugInfo::CanBreakAtEntry() const {
-  return (flags() & kCanBreakAtEntry) != 0;
+  return (flags(kRelaxedLoad) & kCanBreakAtEntry) != 0;
 }
 
 // Check if there is a break point at this source position.
@@ -203,15 +206,15 @@ Handle<Object> DebugInfo::FindBreakPointInfo(Isolate* isolate,
 }
 
 bool DebugInfo::HasCoverageInfo() const {
-  return (flags() & kHasCoverageInfo) != 0;
+  return (flags(kRelaxedLoad) & kHasCoverageInfo) != 0;
 }
 
 void DebugInfo::ClearCoverageInfo(Isolate* isolate) {
   if (HasCoverageInfo()) {
     set_coverage_info(ReadOnlyRoots(isolate).undefined_value());
 
-    int new_flags = flags() & ~kHasCoverageInfo;
-    set_flags(new_flags);
+    int new_flags = flags(kRelaxedLoad) & ~kHasCoverageInfo;
+    set_flags(new_flags, kRelaxedStore);
   }
 }
 
@@ -274,10 +277,13 @@ void BreakPointInfo::SetBreakPoint(Isolate* isolate,
     break_point_info->set_break_points(*break_point);
     return;
   }
-  // If the break point object is the same as before just ignore.
-  if (break_point_info->break_points() == *break_point) return;
   // If there was one break point object before replace with array.
   if (!break_point_info->break_points().IsFixedArray()) {
+    if (IsEqual(BreakPoint::cast(break_point_info->break_points()),
+        *break_point)) {
+          return;
+    }
+
     Handle<FixedArray> array = isolate->factory()->NewFixedArray(2);
     array->set(0, break_point_info->break_points());
     array->set(1, *break_point);
@@ -321,6 +327,32 @@ bool BreakPointInfo::HasBreakPoint(Isolate* isolate,
   return false;
 }
 
+MaybeHandle<BreakPoint> BreakPointInfo::GetBreakPointById(
+    Isolate* isolate, Handle<BreakPointInfo> break_point_info,
+    int breakpoint_id) {
+  // No break point.
+  if (break_point_info->break_points().IsUndefined(isolate)) {
+    return MaybeHandle<BreakPoint>();
+  }
+  // Single break point.
+  if (!break_point_info->break_points().IsFixedArray()) {
+    BreakPoint breakpoint = BreakPoint::cast(break_point_info->break_points());
+    if (breakpoint.id() == breakpoint_id) {
+      return handle(breakpoint, isolate);
+    }
+  } else {
+    // Multiple break points.
+    FixedArray array = FixedArray::cast(break_point_info->break_points());
+    for (int i = 0; i < array.length(); i++) {
+      BreakPoint breakpoint = BreakPoint::cast(array.get(i));
+      if (breakpoint.id() == breakpoint_id) {
+        return handle(breakpoint, isolate);
+      }
+    }
+  }
+  return MaybeHandle<BreakPoint>();
+}
+
 // Get the number of break points.
 int BreakPointInfo::GetBreakPointCount(Isolate* isolate) {
   // No break point.
@@ -331,66 +363,35 @@ int BreakPointInfo::GetBreakPointCount(Isolate* isolate) {
   return FixedArray::cast(break_points()).length();
 }
 
-int CoverageInfo::SlotCount() const {
-  DCHECK_EQ(kFirstSlotIndex, length() % kSlotIndexCount);
-  return (length() - kFirstSlotIndex) / kSlotIndexCount;
-}
-
-int CoverageInfo::StartSourcePosition(int slot_index) const {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  return Smi::ToInt(get(slot_start + kSlotStartSourcePositionIndex));
-}
-
-int CoverageInfo::EndSourcePosition(int slot_index) const {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  return Smi::ToInt(get(slot_start + kSlotEndSourcePositionIndex));
-}
-
-int CoverageInfo::BlockCount(int slot_index) const {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  return Smi::ToInt(get(slot_start + kSlotBlockCountIndex));
-}
-
 void CoverageInfo::InitializeSlot(int slot_index, int from_pos, int to_pos) {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  set(slot_start + kSlotStartSourcePositionIndex, Smi::FromInt(from_pos));
-  set(slot_start + kSlotEndSourcePositionIndex, Smi::FromInt(to_pos));
-  set(slot_start + kSlotBlockCountIndex, Smi::kZero);
-}
-
-void CoverageInfo::IncrementBlockCount(int slot_index) {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  const int old_count = BlockCount(slot_index);
-  set(slot_start + kSlotBlockCountIndex, Smi::FromInt(old_count + 1));
+  set_slots_start_source_position(slot_index, from_pos);
+  set_slots_end_source_position(slot_index, to_pos);
+  ResetBlockCount(slot_index);
+  set_slots_padding(slot_index, 0);
 }
 
 void CoverageInfo::ResetBlockCount(int slot_index) {
-  DCHECK_LT(slot_index, SlotCount());
-  const int slot_start = CoverageInfo::FirstIndexForSlot(slot_index);
-  set(slot_start + kSlotBlockCountIndex, Smi::kZero);
+  set_slots_block_count(slot_index, 0);
 }
 
-void CoverageInfo::Print(std::unique_ptr<char[]> function_name) {
+void CoverageInfo::CoverageInfoPrint(std::ostream& os,
+                                     std::unique_ptr<char[]> function_name) {
   DCHECK(FLAG_trace_block_coverage);
-  DisallowHeapAllocation no_gc;
+  DisallowGarbageCollection no_gc;
 
-  StdoutStream os;
   os << "Coverage info (";
-  if (strlen(function_name.get()) > 0) {
+  if (function_name == nullptr) {
+    os << "{unknown}";
+  } else if (strlen(function_name.get()) > 0) {
     os << function_name.get();
   } else {
     os << "{anonymous}";
   }
   os << "):" << std::endl;
 
-  for (int i = 0; i < SlotCount(); i++) {
-    os << "{" << StartSourcePosition(i) << "," << EndSourcePosition(i) << "}"
-       << std::endl;
+  for (int i = 0; i < slot_count(); i++) {
+    os << "{" << slots_start_source_position(i) << ","
+       << slots_end_source_position(i) << "}" << std::endl;
   }
 }
 

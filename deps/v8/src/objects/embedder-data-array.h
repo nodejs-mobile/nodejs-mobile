@@ -8,13 +8,14 @@
 #include "src/common/globals.h"
 #include "src/handles/maybe-handles.h"
 #include "src/objects/heap-object.h"
-#include "torque-generated/class-definitions-tq.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
 namespace v8 {
 namespace internal {
+
+#include "torque-generated/src/objects/embedder-data-array-tq.inc"
 
 // This is a storage array for embedder data fields stored in native context.
 // It's basically an "array of EmbedderDataSlots".
@@ -23,10 +24,6 @@ namespace internal {
 class EmbedderDataArray
     : public TorqueGeneratedEmbedderDataArray<EmbedderDataArray, HeapObject> {
  public:
-  // [length]: length of the array in an embedder data slots.
-  V8_INLINE int length() const;
-  V8_INLINE void set_length(int value);
-
   // TODO(v8:8989): [torque] Support marker constants.
   static const int kHeaderSize = kSize;
 

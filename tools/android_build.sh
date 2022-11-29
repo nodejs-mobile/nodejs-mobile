@@ -4,12 +4,14 @@ set -e
 
 ROOT=${PWD}
 
-if [ $# -eq 0 ]
+if [ $# -lt 3 ]
 then
-  echo "Requires a path to the Android NDK"
-  echo "Usage: android_build.sh <ndk_path> [target_arch]"
+  echo "Requires a path to the Android NDK, target arch, and an SDK version number"
+  echo "Usage: android_build.sh <ndk_path> <target_arch> <sdk_version>"
   exit
 fi
+
+ANDROID_SDK_VERSION="$3"
 
 SCRIPT_DIR="$(dirname "$BASH_SOURCE")"
 cd "$SCRIPT_DIR"
@@ -25,7 +27,7 @@ BUILD_ARCH() {
   make clean
   # Clean previous toolchain.
   rm -rf android-toolchain/
-  source ./android-configure "$ANDROID_NDK_PATH" $TARGET_ARCH
+  source ./android-configure "$ANDROID_NDK_PATH" $TARGET_ARCH $ANDROID_SDK_VERSION
   make -j $(getconf _NPROCESSORS_ONLN)
   TARGET_ARCH_FOLDER="$TARGET_ARCH"
   if [ "$TARGET_ARCH_FOLDER" == "arm" ]; then
@@ -39,11 +41,8 @@ BUILD_ARCH() {
   cp "out/Release/lib.target/libnode.so" "out_android/$TARGET_ARCH_FOLDER/libnode.so"
 }
 
-if [ $# -eq 2 ]
+if [ $2 == "x" ]
 then
-  TARGET_ARCH=$2
-  BUILD_ARCH
-else
   TARGET_ARCH="arm"
   BUILD_ARCH
   TARGET_ARCH="x86"
@@ -52,7 +51,9 @@ else
   BUILD_ARCH
   TARGET_ARCH="x86_64"
   BUILD_ARCH
+else
+  TARGET_ARCH=$2
+  BUILD_ARCH
 fi
 
 cd "$ROOT"
-

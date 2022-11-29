@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-weak-refs --expose-gc --noincremental-marking
+// Flags: --expose-gc --noincremental-marking
 
 let r = Realm.create();
 
 let cleanup = Realm.eval(r, "var stored_global; function cleanup() { stored_global = globalThis; } cleanup");
 let realm_global_this = Realm.eval(r, "globalThis");
 
-let fg = new FinalizationGroup(cleanup);
+let fg = new FinalizationRegistry(cleanup);
 
-// Create an object and a register it in the FinalizationGroup. The object needs
+// Create an object and a register it in the FinalizationRegistry. The object needs
 // to be inside a closure so that we can reliably kill them!
 let weak_cell;
 

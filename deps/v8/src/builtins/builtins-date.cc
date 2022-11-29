@@ -112,7 +112,7 @@ const char* kShortMonths[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
 double ParseDateTimeString(Isolate* isolate, Handle<String> str) {
   str = String::Flatten(isolate, str);
   double out[DateParser::OUTPUT_SIZE];
-  DisallowHeapAllocation no_gc;
+  DisallowGarbageCollection no_gc;
   String::FlatContent str_content = str->GetFlatContent(no_gc);
   bool result;
   if (str_content.IsOneByte()) {
@@ -209,7 +209,7 @@ BUILTIN(DateConstructor) {
     double const time_val = JSDate::CurrentTimeValue(isolate);
     DateBuffer buffer = ToDateString(time_val, isolate->date_cache());
     RETURN_RESULT_OR_FAILURE(
-        isolate, isolate->factory()->NewStringFromUtf8(VectorOf(buffer)));
+        isolate, isolate->factory()->NewStringFromUtf8(base::VectorOf(buffer)));
   }
   // [Construct]
   int const argc = args.length() - 1;
@@ -797,7 +797,7 @@ BUILTIN(DatePrototypeToDateString) {
   DateBuffer buffer =
       ToDateString(date->value().Number(), isolate->date_cache(), kDateOnly);
   RETURN_RESULT_OR_FAILURE(
-      isolate, isolate->factory()->NewStringFromUtf8(VectorOf(buffer)));
+      isolate, isolate->factory()->NewStringFromUtf8(base::VectorOf(buffer)));
 }
 
 // ES6 section 20.3.4.36 Date.prototype.toISOString ( )
@@ -815,14 +815,14 @@ BUILTIN(DatePrototypeToISOString) {
                                        &hour, &min, &sec, &ms);
   char buffer[128];
   if (year >= 0 && year <= 9999) {
-    SNPrintF(ArrayVector(buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", year,
-             month + 1, day, hour, min, sec, ms);
+    SNPrintF(base::ArrayVector(buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+             year, month + 1, day, hour, min, sec, ms);
   } else if (year < 0) {
-    SNPrintF(ArrayVector(buffer), "-%06d-%02d-%02dT%02d:%02d:%02d.%03dZ", -year,
-             month + 1, day, hour, min, sec, ms);
+    SNPrintF(base::ArrayVector(buffer), "-%06d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+             -year, month + 1, day, hour, min, sec, ms);
   } else {
-    SNPrintF(ArrayVector(buffer), "+%06d-%02d-%02dT%02d:%02d:%02d.%03dZ", year,
-             month + 1, day, hour, min, sec, ms);
+    SNPrintF(base::ArrayVector(buffer), "+%06d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+             year, month + 1, day, hour, min, sec, ms);
   }
   return *isolate->factory()->NewStringFromAsciiChecked(buffer);
 }
@@ -834,7 +834,7 @@ BUILTIN(DatePrototypeToString) {
   DateBuffer buffer =
       ToDateString(date->value().Number(), isolate->date_cache());
   RETURN_RESULT_OR_FAILURE(
-      isolate, isolate->factory()->NewStringFromUtf8(VectorOf(buffer)));
+      isolate, isolate->factory()->NewStringFromUtf8(base::VectorOf(buffer)));
 }
 
 // ES6 section 20.3.4.42 Date.prototype.toTimeString ( )
@@ -844,7 +844,7 @@ BUILTIN(DatePrototypeToTimeString) {
   DateBuffer buffer =
       ToDateString(date->value().Number(), isolate->date_cache(), kTimeOnly);
   RETURN_RESULT_OR_FAILURE(
-      isolate, isolate->factory()->NewStringFromUtf8(VectorOf(buffer)));
+      isolate, isolate->factory()->NewStringFromUtf8(base::VectorOf(buffer)));
 }
 
 #ifdef V8_INTL_SUPPORT
@@ -854,16 +854,18 @@ BUILTIN(DatePrototypeToLocaleDateString) {
 
   isolate->CountUsage(v8::Isolate::UseCounterFeature::kDateToLocaleDateString);
 
-  CHECK_RECEIVER(JSDate, date, "Date.prototype.toLocaleDateString");
+  const char* method = "Date.prototype.toLocaleDateString";
+  CHECK_RECEIVER(JSDate, date, method);
 
   RETURN_RESULT_OR_FAILURE(
       isolate, JSDateTimeFormat::ToLocaleDateTime(
                    isolate,
-                   date,                                       // date
-                   args.atOrUndefined(isolate, 1),             // locales
-                   args.atOrUndefined(isolate, 2),             // options
-                   JSDateTimeFormat::RequiredOption::kDate,    // required
-                   JSDateTimeFormat::DefaultsOption::kDate));  // defaults
+                   date,                                     // date
+                   args.atOrUndefined(isolate, 1),           // locales
+                   args.atOrUndefined(isolate, 2),           // options
+                   JSDateTimeFormat::RequiredOption::kDate,  // required
+                   JSDateTimeFormat::DefaultsOption::kDate,  // defaults
+                   method));                                 // method
 }
 
 // ecma402 #sup-date.prototype.tolocalestring
@@ -872,16 +874,18 @@ BUILTIN(DatePrototypeToLocaleString) {
 
   isolate->CountUsage(v8::Isolate::UseCounterFeature::kDateToLocaleString);
 
-  CHECK_RECEIVER(JSDate, date, "Date.prototype.toLocaleString");
+  const char* method = "Date.prototype.toLocaleString";
+  CHECK_RECEIVER(JSDate, date, method);
 
   RETURN_RESULT_OR_FAILURE(
       isolate, JSDateTimeFormat::ToLocaleDateTime(
                    isolate,
-                   date,                                      // date
-                   args.atOrUndefined(isolate, 1),            // locales
-                   args.atOrUndefined(isolate, 2),            // options
-                   JSDateTimeFormat::RequiredOption::kAny,    // required
-                   JSDateTimeFormat::DefaultsOption::kAll));  // defaults
+                   date,                                    // date
+                   args.atOrUndefined(isolate, 1),          // locales
+                   args.atOrUndefined(isolate, 2),          // options
+                   JSDateTimeFormat::RequiredOption::kAny,  // required
+                   JSDateTimeFormat::DefaultsOption::kAll,  // defaults
+                   method));                                // method
 }
 
 // ecma402 #sup-date.prototype.tolocaletimestring
@@ -890,16 +894,18 @@ BUILTIN(DatePrototypeToLocaleTimeString) {
 
   isolate->CountUsage(v8::Isolate::UseCounterFeature::kDateToLocaleTimeString);
 
-  CHECK_RECEIVER(JSDate, date, "Date.prototype.toLocaleTimeString");
+  const char* method = "Date.prototype.toLocaleTimeString";
+  CHECK_RECEIVER(JSDate, date, method);
 
   RETURN_RESULT_OR_FAILURE(
       isolate, JSDateTimeFormat::ToLocaleDateTime(
                    isolate,
-                   date,                                       // date
-                   args.atOrUndefined(isolate, 1),             // locales
-                   args.atOrUndefined(isolate, 2),             // options
-                   JSDateTimeFormat::RequiredOption::kTime,    // required
-                   JSDateTimeFormat::DefaultsOption::kTime));  // defaults
+                   date,                                     // date
+                   args.atOrUndefined(isolate, 1),           // locales
+                   args.atOrUndefined(isolate, 2),           // options
+                   JSDateTimeFormat::RequiredOption::kTime,  // required
+                   JSDateTimeFormat::DefaultsOption::kTime,  // defaults
+                   method));                                 // method
 }
 #endif  // V8_INTL_SUPPORT
 
@@ -916,7 +922,7 @@ BUILTIN(DatePrototypeToUTCString) {
   int year, month, day, weekday, hour, min, sec, ms;
   isolate->date_cache()->BreakDownTime(time_ms, &year, &month, &day, &weekday,
                                        &hour, &min, &sec, &ms);
-  SNPrintF(ArrayVector(buffer),
+  SNPrintF(base::ArrayVector(buffer),
            (year < 0) ? "%s, %02d %s %05d %02d:%02d:%02d GMT"
                       : "%s, %02d %s %04d %02d:%02d:%02d GMT",
            kShortWeekDays[weekday], day, kShortMonths[month], year, hour, min,

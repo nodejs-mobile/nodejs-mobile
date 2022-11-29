@@ -40,13 +40,14 @@ fs.write = function() {
       console.error('first write');
       // First time is ok.
       return write.apply(fs, arguments);
-    case 1:
+    case 1: {
       // Then it breaks.
       console.error('second write');
       const cb = arguments[arguments.length - 1];
       return process.nextTick(function() {
         cb(err);
       });
+    }
     default:
       // It should not be called again!
       throw new Error('BOOM!');
@@ -56,6 +57,7 @@ fs.write = function() {
 fs.close = common.mustCall(function(fd_, cb) {
   console.error('fs.close', fd_, stream.fd);
   assert.strictEqual(fd_, stream.fd);
+  fs.closeSync(fd_);
   process.nextTick(cb);
 });
 
