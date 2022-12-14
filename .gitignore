@@ -38,6 +38,7 @@
 /*.exe
 /*.swp
 /out
+/out_android
 /*.msi
 /*.wixpdb
 /*.qlog
