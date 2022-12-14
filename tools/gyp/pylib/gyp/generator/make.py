@@ -785,7 +785,7 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
         self.toolset = spec["toolset"]
 
         self.is_mac_bundle = gyp.xcode_emulation.IsMacBundle(self.flavor, spec)
-        if self.flavor == "mac":
+        if self.flavor in ("mac", "ios"):
             self.xcode_settings = gyp.xcode_emulation.XcodeSettings(spec)
         else:
             self.xcode_settings = None

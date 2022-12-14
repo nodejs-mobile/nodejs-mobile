@@ -4,11 +4,10 @@ set -e
 
 ROOT=${PWD}
 
-if [ $# -lt 3 ]
-then
+if [ $# -lt 3 ]; then
   echo "Requires a path to the Android NDK, target arch, and an SDK version number"
   echo "Usage: android_build.sh <ndk_path> <target_arch> <sdk_version>"
-  exit
+  exit 1
 fi
 
 ANDROID_SDK_VERSION="$3"
@@ -38,11 +37,19 @@ BUILD_ARCH() {
     TARGET_ARCH_FOLDER="arm64-v8a"
   fi
   mkdir -p "out_android/$TARGET_ARCH_FOLDER/"
-  cp "out/Release/lib.target/libnode.so" "out_android/$TARGET_ARCH_FOLDER/libnode.so"
+  OUTPUT1="out/Release/lib.target/libnode.so"
+  OUTPUT2="out/Release/obj.target/libnode.so"
+  if [ -f "$OUTPUT1" ]; then
+    cp "$OUTPUT1" "out_android/$TARGET_ARCH_FOLDER/libnode.so"
+  elif [ -f "$OUTPUT2" ]; then
+    cp "$OUTPUT2" "out_android/$TARGET_ARCH_FOLDER/libnode.so"
+  else
+    echo "Could not find libnode.so file after compilation"
+    exit 1
+  fi
 }
 
-if [ $2 == "x" ]
-then
+if [ $2 == "x" ]; then
   TARGET_ARCH="arm"
   BUILD_ARCH
   TARGET_ARCH="x86"
