@@ -418,11 +418,13 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(GetGroups);
 
   registry->Register(InitGroups);
+  #ifndef __ANDROID__
   registry->Register(SetEGid);
   registry->Register(SetEUid);
   registry->Register(SetGid);
   registry->Register(SetUid);
   registry->Register(SetGroups);
+  #endif
 #endif  // NODE_IMPLEMENTS_POSIX_CREDENTIALS
 }
 
