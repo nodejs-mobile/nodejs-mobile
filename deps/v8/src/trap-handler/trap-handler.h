@@ -17,22 +17,13 @@ namespace v8 {
 namespace internal {
 namespace trap_handler {
 
-// X64 on Linux, Windows, MacOS, FreeBSD.
-#if V8_HOST_ARCH_X64 && V8_TARGET_ARCH_X64 &&                        \
-    ((V8_OS_LINUX && !V8_OS_ANDROID) || V8_OS_WIN || V8_OS_MACOSX || \
-     V8_OS_FREEBSD)
-#define V8_TRAP_HANDLER_SUPPORTED true
-// Arm64 (non-simulator) on Mac.
-#elif V8_TARGET_ARCH_ARM64 && V8_HOST_ARCH_ARM64 && V8_OS_MACOSX
-#define V8_TRAP_HANDLER_SUPPORTED true
-// Arm64 simulator on x64 on Linux or Mac.
-#elif V8_TARGET_ARCH_ARM64 && V8_HOST_ARCH_X64 && (V8_OS_LINUX || V8_OS_MACOSX)
-#define V8_TRAP_HANDLER_VIA_SIMULATOR
-#define V8_TRAP_HANDLER_SUPPORTED true
-// Everything else is unsupported.
-#else
+// nodejs-mobile patch.
+//
+// It would require some careful security review before the trap handler
+// can be enabled on Android.  Android may do unexpected things with signal
+// handling and crash reporting that could open up security holes in V8's
+// trap handling.
 #define V8_TRAP_HANDLER_SUPPORTED false
-#endif
 
 // Setup for shared library export.
 #if defined(BUILDING_V8_SHARED) && defined(V8_OS_WIN)

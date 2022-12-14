@@ -264,11 +264,13 @@ bool EnableTrapHandler(bool use_v8_handler) {
   if (!V8_TRAP_HANDLER_SUPPORTED) {
     return false;
   }
+#if V8_TRAP_HANDLER_SUPPORTED
   if (use_v8_handler) {
     g_is_trap_handler_enabled = RegisterDefaultTrapHandler();
     return g_is_trap_handler_enabled;
   }
   g_is_trap_handler_enabled = true;
+#endif
   return true;
 }
 
