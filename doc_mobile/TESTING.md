@@ -95,12 +95,14 @@ Run the helper script to build and install the Android test application. It will
 This should be done the first time you run the tests and be repeated any time you change any of the tests or rebuild nodejs-mobile.
 
 If you have more than one device connected to the development machine you can use the environment variable `DEVICE_ID` to select the device you want to run the tests on. Start by listing the devices:
+
 ```sh
 adb devices
 ```
+
 and then run the helper script setting `DEVICE_ID` to the device id you intend on using:
 ```sh
-DEVICE_ID=ENU7N123456789A ./tools/mobile-test/android/prepare-android-tests.sh
+DEVICE_ID=ENU7N123456789A ./tools/mobile-test/android/prepare-android-test.sh
 ```
 
 ### Run test suites on an Android device
