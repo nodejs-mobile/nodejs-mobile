@@ -111,7 +111,7 @@ Connect the Android device on which you intend to run tests, and make sure its s
 
 You can run the Node.js test scripts in Android by calling `./tools/test.py` with `--arch android`. Here's an example to run the `parallel`, `sequential` and `message` test suites:
 ```sh
-./tools/test.py --report --flaky-tests=skip --arch android parallel sequential message
+JOBS=0 ./tools/test.py --report -j 0 --flaky-tests=skip --arch android parallel sequential message
 ```
 
 While the tests are running, you will see the test application being repeatedly restarted on your test device.
@@ -122,5 +122,5 @@ adb devices
 ```
 and then run the tests setting `DEVICE_ID` to the device id you intend on using:
 ```sh
-DEVICE_ID=ENU7N123456789A ./tools/test.py --report --flaky-tests=skip --arch android parallel sequential message
+DEVICE_ID=ENU7N123456789A JOBS=0 ./tools/test.py --report -j 0 --flaky-tests=skip --arch android parallel sequential message
 ```
