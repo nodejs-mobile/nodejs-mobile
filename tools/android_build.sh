@@ -23,11 +23,15 @@ cd "$SCRIPT_DIR"
 cd ../
 
 BUILD_ARCH() {
+  # Clean previous compilation
   make clean
-  # Clean previous toolchain.
   rm -rf android-toolchain/
+
+  # Compile
   source ./android-configure "$ANDROID_NDK_PATH" $TARGET_ARCH $ANDROID_SDK_VERSION
   make -j $(getconf _NPROCESSORS_ONLN)
+
+  # Move binaries
   TARGET_ARCH_FOLDER="$TARGET_ARCH"
   if [ "$TARGET_ARCH_FOLDER" == "arm" ]; then
     # Use the Android NDK ABI name.
@@ -62,5 +66,7 @@ else
   TARGET_ARCH=$2
   BUILD_ARCH
 fi
+
+source $SCRIPT_DIR/copy_libnode_headers.sh android
 
 cd "$ROOT"

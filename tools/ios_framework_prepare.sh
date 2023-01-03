@@ -92,4 +92,6 @@ xcodebuild  -create-xcframework -framework $FRAMEWORK_TARGET_DIR/Release-iphoneo
 
 echo "Frameworks built to $FRAMEWORK_TARGET_DIR"
 
+source $SCRIPT_DIR/copy_libnode_headers.sh ios
+
 cd "$ROOT"
