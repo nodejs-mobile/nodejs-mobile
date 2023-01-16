@@ -52,7 +52,7 @@ Connect the iOS device on which you intend to run tests, and make sure its scree
 
 You can run the Node.js test scripts in iOS by calling `./tools/test.py` with `--arch ios`. Here's an example to run the `parallel`, `sequential` and `message` test suites:
 ```sh
-./tools/test.py --report --flaky-tests=skip --arch ios parallel sequential message
+JOBS=0 ./tools/test.py --report -j 0 --flaky-tests=skip --arch ios parallel sequential message
 ```
 
 While the tests are running, you will see the test application being repeatedly restarted on your test device.
@@ -63,7 +63,7 @@ ios-deploy --detect
 ```
 and then run the tests setting `DEVICE_ID` to the device id you intend on using:
 ```sh
-DEVICE_ID=1234567890abcdef123456789abcdef987654321 ./tools/test.py --report --flaky-tests=skip --arch ios parallel sequential message
+DEVICE_ID=1234567890abcdef123456789abcdef987654321 JOBS=0 ./tools/test.py --report -j 0 --flaky-tests=skip --arch ios parallel sequential message
 ```
 
 ## Android
