@@ -659,7 +659,10 @@ class XcodeSettings:
         # If GYP_CROSSCOMPILE (--cross-compiling), disable architecture-specific
         # additions and assume these will be provided as required via CC_host,
         # CXX_host, CC_target and CXX_target.
-        if not gyp.common.CrossCompileRequested():
+        #
+        # nodejs-mobile patch: force this to run because we need to compile
+        # on x64 macs targetting iOS:
+        if not gyp.common.CrossCompileRequested() or True:
             if arch is not None:
                 archs = [arch]
             else:
@@ -944,7 +947,8 @@ class XcodeSettings:
                 + gyp_to_build_path(self._Settings()["ORDER_FILE"])
             )
 
-        if not gyp.common.CrossCompileRequested():
+        # nodejs-mobile patch to add `or True`:
+        if not gyp.common.CrossCompileRequested() or True:
             if arch is not None:
                 archs = [arch]
             else:
