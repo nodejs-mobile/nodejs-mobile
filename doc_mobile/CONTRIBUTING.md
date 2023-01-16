@@ -12,6 +12,24 @@ Platform-specific fixes for Android or iOS should be implemented in separate com
 
 <a id="developers-certificate-of-origin"></a>
 
+## Updating nodejs-mobile from upstream nodejs/node
+
+To update the version of node.js used in this project, carefully follow these steps:
+
+1. Suppose the current version in nodejs-mobile is `A.b.c` and the newer version in nodejs/node is `X.y.z`
+2. Locally clone the nodejs/node repository
+3. `cd` into the nodejs/node repository
+4. Create a single commit that squashes all changes from git tag `vA.b.c` to `vX.y.z`
+    4.1. `git checkout vX.y.z` to go to the newer version
+    4.2. Delete the branch `nodejs-mobile-update` if it exists
+    4.3. `git checkout -b nodejs-mobile-update` to create a branch at the newer version
+    4.4. `git reset --soft vA.b.c` to reset the branch all the way to the older version
+    4.5. `git commit -m "Update node.js to vX.y.z"` to create a single commit with all changes
+5. `git format-patch -1 HEAD -o ../` which will create a patch file in the parent directory
+6. `cd` into the nodejs-mobile repository
+7. Apply the patch file with `git am --3way --ignore-space-change ../0001-Node.js-vA.b.c.patch`
+8. Manually resolve git conflicts that may arise
+
 ## Developer's Certificate of Origin 1.1
 
 By making a contribution to this project, I certify that:
