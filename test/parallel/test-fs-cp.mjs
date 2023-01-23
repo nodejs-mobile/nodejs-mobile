@@ -1,4 +1,5 @@
-import { mustCall } from '../common/index.mjs';
+import { mustCall, isIOS } from '../common/index.mjs';
+import { path as fixturesPath } from '../common/fixtures.mjs'; // nodejs-mobile patch
 
 import assert from 'assert';
 import fs from 'fs';
@@ -32,7 +33,7 @@ function nextdir() {
 
 // It copies a nested folder structure with files and folders.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(src, dest, { recursive: true });
   assertDirEquivalent(src, dest);
@@ -55,7 +56,7 @@ function nextdir() {
 
 // It overwrites existing files if force is true.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   mkdirSync(dest, { recursive: true });
   writeFileSync(join(dest, 'README.md'), '# Goodbye', 'utf8');
@@ -68,7 +69,7 @@ function nextdir() {
 // It does not fail if the same directory is copied to dest twice,
 // when dereference is true, and force is false (fails silently).
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   const destFile = join(dest, 'a/b/README2.md');
   cpSync(src, dest, { dereference: true, recursive: true });
@@ -97,7 +98,7 @@ function nextdir() {
 
 // It throws error when verbatimSymlinks is not a boolean.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   [1, [], {}, null, 1n, undefined, null, Symbol(), '', () => {}]
     .forEach((verbatimSymlinks) => {
       assert.throws(
@@ -110,7 +111,7 @@ function nextdir() {
 
 // It throws an error when both dereference and verbatimSymlinks are enabled.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   assert.throws(
     () => cpSync(src, src, { dereference: true, verbatimSymlinks: true }),
     { code: 'ERR_INCOMPATIBLE_OPTION_PAIR' }
@@ -168,7 +169,7 @@ function nextdir() {
 
 // It throws error when src and dest are identical.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   assert.throws(
     () => cpSync(src, src),
     { code: 'ERR_FS_CP_EINVAL' }
@@ -225,7 +226,7 @@ function nextdir() {
 {
   const src = nextdir();
   mkdirSync(src, { recursive: true });
-  const dest = './test/fixtures/copy/kitchen-sink/README.md';
+  const dest = fixturesPath('copy/kitchen-sink/README.md'); // nodejs-mobile patch
   assert.throws(
     () => cpSync(src, dest),
     { code: 'ERR_FS_CP_DIR_TO_NON_DIR' }
@@ -234,7 +235,7 @@ function nextdir() {
 
 // It allows file to be copied to a file path.
 {
-  const srcFile = './test/fixtures/copy/kitchen-sink/index.js';
+  const srcFile = fixturesPath('copy/kitchen-sink/index.js'); // nodejs-mobile patch
   const destFile = join(nextdir(), 'index.js');
   cpSync(srcFile, destFile, { dereference: true });
   const stat = lstatSync(destFile);
@@ -243,7 +244,7 @@ function nextdir() {
 
 // It throws error if directory copied without recursive flag.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   assert.throws(
     () => cpSync(src, dest),
@@ -254,7 +255,7 @@ function nextdir() {
 
 // It throws error if attempt is made to copy file to directory.
 {
-  const src = './test/fixtures/copy/kitchen-sink/README.md';
+  const src = fixturesPath('copy/kitchen-sink/README.md'); // nodejs-mobile patch
   const dest = nextdir();
   mkdirSync(dest, { recursive: true });
   assert.throws(
@@ -265,8 +266,8 @@ function nextdir() {
 
 // It throws error if attempt is made to copy to subdirectory of self.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
-  const dest = './test/fixtures/copy/kitchen-sink/a';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
+  const dest = fixturesPath('copy/kitchen-sink/a'); // nodejs-mobile patch
   assert.throws(
     () => cpSync(src, dest),
     { code: 'ERR_FS_CP_EINVAL' }
@@ -274,7 +275,7 @@ function nextdir() {
 }
 
 // It throws an error if attempt is made to copy socket.
-if (!isWindows) {
+if (!isWindows && !isIOS) {
   const dest = nextdir();
   const sock = `${process.pid}.sock`;
   const server = net.createServer();
@@ -288,7 +289,7 @@ if (!isWindows) {
 
 // It copies timestamps from src to dest if preserveTimestamps is true.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(src, dest, { preserveTimestamps: true, recursive: true });
   assertDirEquivalent(src, dest);
@@ -299,7 +300,7 @@ if (!isWindows) {
 
 // It applies filter function.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(src, dest, {
     filter: (path) => {
@@ -321,7 +322,7 @@ if (!isWindows) {
 
 // It throws error if filter function is asynchronous.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   assert.throws(() => {
     cpSync(src, dest, {
@@ -339,7 +340,7 @@ if (!isWindows) {
 // It throws error if errorOnExist is true, force is false, and file or folder
 // copied over.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(src, dest, { recursive: true });
   assert.throws(
@@ -397,7 +398,7 @@ if (!isWindows) {
 
 // It accepts file URL as src and dest.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(pathToFileURL(src), pathToFileURL(dest), { recursive: true });
   assertDirEquivalent(src, dest);
@@ -415,7 +416,7 @@ if (!isWindows) {
 
 // It copies a nested folder structure with files and folders.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, { recursive: true }, mustCall((err) => {
     assert.strictEqual(err, null);
@@ -446,7 +447,7 @@ if (!isWindows) {
 
 // It overwrites existing files if force is true.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   mkdirSync(dest, { recursive: true });
   writeFileSync(join(dest, 'README.md'), '# Goodbye', 'utf8');
@@ -462,7 +463,7 @@ if (!isWindows) {
 // It does not fail if the same directory is copied to dest twice,
 // when dereference is true, and force is false (fails silently).
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   const destFile = join(dest, 'a/b/README2.md');
   cpSync(src, dest, { dereference: true, recursive: true });
@@ -498,7 +499,7 @@ if (!isWindows) {
 
 // It returns error when src and dest are identical.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   cp(src, src, mustCall((err) => {
     assert.strictEqual(err.code, 'ERR_FS_CP_EINVAL');
   }));
@@ -549,7 +550,7 @@ if (!isWindows) {
 {
   const src = nextdir();
   mkdirSync(src, { recursive: true });
-  const dest = './test/fixtures/copy/kitchen-sink/README.md';
+  const dest = fixturesPath('copy/kitchen-sink/README.md'); // nodejs-mobile patch
   cp(src, dest, mustCall((err) => {
     assert.strictEqual(err.code, 'ERR_FS_CP_DIR_TO_NON_DIR');
   }));
@@ -557,7 +558,7 @@ if (!isWindows) {
 
 // It allows file to be copied to a file path.
 {
-  const srcFile = './test/fixtures/copy/kitchen-sink/README.md';
+  const srcFile = fixturesPath('copy/kitchen-sink/README.md'); // nodejs-mobile patch
   const destFile = join(nextdir(), 'index.js');
   cp(srcFile, destFile, { dereference: true }, mustCall((err) => {
     assert.strictEqual(err, null);
@@ -568,7 +569,7 @@ if (!isWindows) {
 
 // It returns error if directory copied without recursive flag.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, mustCall((err) => {
     assert.strictEqual(err.code, 'ERR_FS_EISDIR');
@@ -577,7 +578,7 @@ if (!isWindows) {
 
 // It returns error if attempt is made to copy file to directory.
 {
-  const src = './test/fixtures/copy/kitchen-sink/README.md';
+  const src = fixturesPath('copy/kitchen-sink/README.md'); // nodejs-mobile patch
   const dest = nextdir();
   mkdirSync(dest, { recursive: true });
   cp(src, dest, mustCall((err) => {
@@ -587,15 +588,15 @@ if (!isWindows) {
 
 // It returns error if attempt is made to copy to subdirectory of self.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
-  const dest = './test/fixtures/copy/kitchen-sink/a';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
+  const dest = fixturesPath('copy/kitchen-sink/a'); // nodejs-mobile patch
   cp(src, dest, mustCall((err) => {
     assert.strictEqual(err.code, 'ERR_FS_CP_EINVAL');
   }));
 }
 
 // It returns an error if attempt is made to copy socket.
-if (!isWindows) {
+if (!isWindows && !isIOS) {
   const dest = nextdir();
   const sock = `${process.pid}.sock`;
   const server = net.createServer();
@@ -608,7 +609,7 @@ if (!isWindows) {
 
 // It copies timestamps from src to dest if preserveTimestamps is true.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, {
     preserveTimestamps: true,
@@ -624,7 +625,7 @@ if (!isWindows) {
 
 // It applies filter function.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, {
     filter: (path) => {
@@ -648,7 +649,7 @@ if (!isWindows) {
 
 // It supports async filter function.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, {
     filter: async (path) => {
@@ -674,7 +675,7 @@ if (!isWindows) {
 // It returns error if errorOnExist is true, force is false, and file or folder
 // copied over.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cpSync(src, dest, { recursive: true });
   cp(src, dest, {
@@ -737,7 +738,7 @@ if (!isWindows) {
 
 // It accepts file URL as src and dest.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(pathToFileURL(src), pathToFileURL(dest), { recursive: true },
      mustCall((err) => {
@@ -758,7 +759,7 @@ if (!isWindows) {
 
 // It copies a nested folder structure with files and folders.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   const p = await fs.promises.cp(src, dest, { recursive: true });
   assert.strictEqual(p, undefined);
@@ -767,7 +768,7 @@ if (!isWindows) {
 
 // It accepts file URL as src and dest.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   const p = await fs.promises.cp(
     pathToFileURL(src),
@@ -780,7 +781,7 @@ if (!isWindows) {
 
 // It allows async error to be caught.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   await fs.promises.cp(src, dest, { recursive: true });
   await assert.rejects(

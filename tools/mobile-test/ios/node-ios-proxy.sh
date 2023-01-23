@@ -9,10 +9,14 @@ fi
 TEMP_COMMAND="$BASH_SOURCE $@"
 
 PROXY_BASE_DIR="$( cd "$( dirname "$0" )" && pwd )"
-LOG_FILE_PATH="$PROXY_BASE_DIR/testsrun_$DEVICE_ID.log"
-STDOUT_FILE_PATH="$PROXY_BASE_DIR/stdout_$DEVICE_ID.log"
-STDERR_FILE_PATH="$PROXY_BASE_DIR/stderr_$DEVICE_ID.log"
+MYID=$(uuidgen)
+SHORTDEVICE=$(echo $DEVICE_ID | head -c 4)
+LOG_FILE_PATH="$PROXY_BASE_DIR/testsrun_$SHORTDEVICE.$MYID.log"
+STDOUT_FILE_PATH="$PROXY_BASE_DIR/stdout_$SHORTDEVICE.$MYID.log"
+STDERR_FILE_PATH="$PROXY_BASE_DIR/stderr_$SHORTDEVICE.$MYID.log"
 IOS_APP_PATH="$PROXY_BASE_DIR/Release-iphoneos/testnode.app"
+touch $STDOUT_FILE_PATH
+touch $STDERR_FILE_PATH
 
 TEST_BASE_DIR="$( cd "$( dirname "$0" )" && cd .. && cd .. && cd test && pwd )"
 

@@ -312,6 +312,7 @@ test-worker-process-env: SKIP
 test-benchmark-cli: SKIP
 test-icu-minimum-version: SKIP
 test-npm-version: SKIP
+test-corepack-version: SKIP
 test-process-config: SKIP
 test-process-env-allowed-flags-are-documented: SKIP
 test-release-npm: SKIP
@@ -478,6 +479,7 @@ test-fs-syncwritestream: SKIP
 test-fs-write-sigxfsz: SKIP
 test-fs-write-stream-patch-open: SKIP
 test-handle-wrap-isrefed: SKIP
+test-handle-wrap-hasref: SKIP
 test-heapsnapshot-near-heap-limit-worker: SKIP
 test-http-chunk-problem: SKIP
 test-http-debug: SKIP
@@ -658,6 +660,7 @@ test-worker-process-env: SKIP
 test-benchmark-cli: SKIP
 test-icu-minimum-version: SKIP
 test-npm-version: SKIP
+test-corepack-version: SKIP
 test-process-config: SKIP
 test-process-env-allowed-flags-are-documented: SKIP
 test-release-npm: SKIP
@@ -703,6 +706,9 @@ test-eslint-*: SKIP
 # Tests that require WebAssembly, not supported in JIT-less V8
 #
 test-freeze-intrinsics: SKIP
+test-errors-systemerror-frozen-intrinsics: SKIP
+test-fetch: SKIP
+test-whatwg-webstreams-transfer: SKIP
 test-vm-codegen: SKIP
 test-wasm-simple: SKIP
 test-worker-message-port-wasm-module: SKIP
@@ -788,6 +794,11 @@ test-whatwg-url-toascii: SKIP
 # FAILING test because calling setpriority on iOS fails with EPERM
 #
 test-os-process-priority : SKIP
+#
+# FAILING test because iOS apps should not get POSIX signals or process.exit
+#
+test-signal-args: SKIP
+test-signal-handler: SKIP
 #
 # Test that requires user interaction to allow using udp6 link local address on iOS 14.
 #
