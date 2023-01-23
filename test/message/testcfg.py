@@ -46,8 +46,10 @@ class MessageTestCase(test.TestCase):
     self.parallel = True
 
   def IgnoreLine(self, str):
-    """Ignore empty lines and valgrind output."""
+    """Ignore empty lines and valgrind output and warnings."""
+    # nodejs-mobile patch
     if not str.strip(): return True
+    elif str.startswith('Warning: disabling flag --expose_wasm'): return True
     else: return str.startswith('==') or str.startswith('**')
 
   def IsFailureOutput(self, output):
