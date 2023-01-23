@@ -1,4 +1,4 @@
-import { mustCall, isIOS } from '../common/index.mjs';
+import { mustCall, isIOS, isAndroid } from '../common/index.mjs';
 import { path as fixturesPath } from '../common/fixtures.mjs'; // nodejs-mobile patch
 
 import assert from 'assert';
@@ -275,7 +275,7 @@ function nextdir() {
 }
 
 // It throws an error if attempt is made to copy socket.
-if (!isWindows && !isIOS) {
+if (!isWindows && !isIOS && !isAndroid) {
   const dest = nextdir();
   const sock = `${process.pid}.sock`;
   const server = net.createServer();
@@ -596,7 +596,7 @@ if (!isWindows && !isIOS) {
 }
 
 // It returns an error if attempt is made to copy socket.
-if (!isWindows && !isIOS) {
+if (!isWindows && !isIOS && !isAndroid) {
   const dest = nextdir();
   const sock = `${process.pid}.sock`;
   const server = net.createServer();

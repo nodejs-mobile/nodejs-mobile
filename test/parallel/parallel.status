@@ -153,6 +153,7 @@ test-listen-fd-cluster: SKIP
 test-listen-fd-detached: SKIP
 test-listen-fd-detached-inherit: SKIP
 test-listen-fd-server: SKIP
+test-loaders-unknown-builtin-module: SKIP
 test-macos-signed-deps: SKIP
 test-math-random: SKIP
 test-module-loading-globalpaths: SKIP
@@ -424,6 +425,7 @@ test-dgram-udp6-link-local-address : SKIP
 #
 test-listen-fd-ebadf: SKIP # uses stderr as a socket, which the test app redirects.
 test-process-exit-recursive: SKIP # catches exit codes, like the test app does to output to logcat.
+test-process-beforeexit-throw-exit: SKIP
 #
 # Tests that required zipped files, which the Android build system uncompresses to include in the APK.
 #
@@ -436,6 +438,11 @@ test-trace-events-api: SKIP
 test-trace-events-async-hooks: SKIP
 test-trace-events-async-hooks-dynamic: SKIP
 test-trace-events-async-hooks-worker: SKIP
+#
+# Tests that require more memory than what is usually available on the device,
+# causing the app to crash without being handled inside Node.js, and the test
+# to hang indefinitely, waiting for the results.
+test-blob-buffer-too-large: SKIP
 
 [$system==ios]
 #
