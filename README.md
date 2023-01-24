@@ -30,6 +30,12 @@ Binaries for Android and iOS are available at https://github.com/nodejs-mobile/n
 
 ***Disclaimer:***  documentation found in this repository is currently unchanged from parent repository and may only be applicable to upstream node.
 
+## Versioning
+
+This project does *NOT* follow SemVer, instead it aims to reflect the upstream Node.js version is is based on.
+
+`nodejs-mobile` version `A.B.C` is based on Node.js version `A.B.*`, while the `C` is incremented whenever there are *any* changes to our codebase, be them fixes, features or otherwise.
+
 ## Build Instructions
 
 Please see the [BUILDING.md](./doc_mobile/BUILDING.md) file in the `doc_mobile` folder in this source distribution.
