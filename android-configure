@@ -27,7 +27,7 @@ case $ARCH in
     arm)
         DEST_CPU="arm"
         V8_ARCH="arm"
-        TOOLCHAIN_NAME="armv7-linux-androideabi"
+        TOOLCHAIN_NAME="armv7a-linux-androideabi"
         ;;
     x86)
         DEST_CPU="ia32"
