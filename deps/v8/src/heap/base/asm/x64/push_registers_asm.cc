@@ -23,6 +23,12 @@
 // at the call.
 // Source: https://docs.microsoft.com/en-us/cpp/build/x64-calling-convention
 asm(".globl PushAllRegistersAndIterateStack             \n"
+// nodejs-mobile patch: actually, we SHOULD depend on V8_TARGET_* defines:
+// These situations happen because we compile both "host" and "target" code but
+// with flags that reflect only the "target" platform, so we end up incorrectly
+// mixing "host" files (such as this one) with "target" flags (such as
+// V8_TARGET_ARCH_*)
+#ifndef V8_TARGET_ARCH_ARM
     "PushAllRegistersAndIterateStack:                   \n"
     // rbp is callee-saved. Maintain proper frame pointer for debugging.
     "  push %rbp                                        \n"
@@ -60,6 +66,7 @@ asm(".globl PushAllRegistersAndIterateStack             \n"
     "  add $224, %rsp                                   \n"
     // Restore rbp as it was used as frame pointer.
     "  pop %rbp                                         \n"
+#endif  // !V8_TARGET_ARCH_ARM
     "  ret                                              \n");
 
 #else  // !_WIN64
@@ -79,6 +86,8 @@ asm(
     ".hidden PushAllRegistersAndIterateStack            \n"
     "PushAllRegistersAndIterateStack:                   \n"
 #endif  // !__APPLE__
+// nodejs-mobile patch: actually, we SHOULD depend on V8_TARGET_* defines.
+#ifndef V8_TARGET_ARCH_ARM
     // rbp is callee-saved. Maintain proper frame pointer for debugging.
     "  push %rbp                                        \n"
     "  mov %rsp, %rbp                                   \n"
@@ -101,6 +110,7 @@ asm(
     "  add $48, %rsp                                    \n"
     // Restore rbp as it was used as frame pointer.
     "  pop %rbp                                         \n"
+#endif  // !V8_TARGET_ARCH_ARM
     "  ret                                              \n");
 
 #endif  // !_WIN64
