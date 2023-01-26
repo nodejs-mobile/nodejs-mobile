@@ -27,8 +27,19 @@
 </tr>
 </table>
 
+<a id="16.17.0"></a>
+## 2023-01-26, Version 16.17.0 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 16.17.1
+* Minimum iOS version targeted is now 11.0
+* Disabled iOS Simulator support for now
+* Disabled Android 32-bit x86 support for now
+
+
 <a id="0.3.3"></a>
-## 2021-08-16, Version 0.3.3 (Current)
+## 2021-08-16, Version 0.3.3
 
 ### Notable Changes
 
