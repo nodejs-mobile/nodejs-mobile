@@ -22,8 +22,12 @@ namespace trap_handler {
 // It would require some careful security review before the trap handler
 // can be enabled on Android.  Android may do unexpected things with signal
 // handling and crash reporting that could open up security holes in V8's
-// trap handling.
+// trap handling.  So we disable the trap handler on Android, but enable on iOS.
+#if V8_TARGET_OS_ANDROID
 #define V8_TRAP_HANDLER_SUPPORTED false
+#else
+#define V8_TRAP_HANDLER_SUPPORTED true
+#endif
 
 // Setup for shared library export.
 #if defined(BUILDING_V8_SHARED) && defined(V8_OS_WIN)
