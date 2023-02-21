@@ -35,7 +35,7 @@
 ### Notable Changes
 
 * Restored support for iOS Simulator on x86_64 hosts
-* Enable V8's trap handler on iOS
+* Enable V8's trap handler only for iOS Simulator on x86_64 hosts
 
 
 <a id="16.17.0"></a>
