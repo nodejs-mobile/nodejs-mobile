@@ -6,6 +6,8 @@
 </tr>
 <tr>
 <td>
+<a href="#16.17.1">16.17.1</a><br/>
+<a href="#16.17.0">16.17.0</a><br/>
 <a href="#0.3.3">0.3.3</a><br/>
 <a href="#0.3.2">0.3.2</a><br/>
 <a href="#0.3.1">0.3.1</a><br/>
@@ -27,8 +29,17 @@
 </tr>
 </table>
 
+<a id="16.17.1"></a>
+## 2023-02-21, Version 16.17.1 (Current)
+
+### Notable Changes
+
+* Restored support for iOS Simulator on x86_64 hosts
+* Enable V8's trap handler on iOS
+
+
 <a id="16.17.0"></a>
-## 2023-01-26, Version 16.17.0 (Current)
+## 2023-01-26, Version 16.17.0
 
 ### Notable Changes
 
