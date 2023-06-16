@@ -112,12 +112,12 @@ pod 'NodeMobile', :git => 'https://github.com/janeasystems/nodejs-mobile.git'
 
 ## Building the iOS .framework library on macOS:
 
-### 1) Clone this repo and check out the `mobile-master` branch:
+### 1) Clone this repo and check out the `main` branch:
 
 ```sh
-git clone https://github.com/janeasystems/nodejs-mobile
+git clone https://github.com/nodejs-mobile/nodejs-mobile
 cd nodejs-mobile
-git checkout mobile-master
+git checkout main
 ```
 
 ### 2) Run the helper script:
