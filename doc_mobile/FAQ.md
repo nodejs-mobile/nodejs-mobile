@@ -16,9 +16,15 @@ npm modules can be used with nodejs-mobile. They need to be installed at develop
 ## Are all Node.js APIs supported on mobile?
 
 Not every API is supported on mobile, the main reason for this being that the mobile operating systems won't allow applications to call certain APIs that are expected to be available on other operating systems. Examples:
-- APIs that create new processes, such as `child_process.spawn()` or `child_process.fork()` will run into permission issues.
-- Using `process.exit()` is not allowed by the Apple App Store guildelines.
-- `os.cpus()` may return inconsistent/unreliable results, since different OS versions will have different permissions for accessing CPU information.
+
+- `child_process.spawn()`, `child_process.fork()` and other APIs that create new processes will run into permission issues
+- `process.exit()` is not allowed by the Apple App Store guildelines
+- `os.cpus()` may return inconsistent/unreliable results, since different OS versions will have different permissions for accessing CPU information
+- `os.availableParallelism()`
+
+A few other general JavaScript APIs are also unsupported due to Node.js Mobile not including full internationalization support:
+
+- RegExp Unicode Property Names, for example `/\p{Letter}+/u`
 
 ## Trying to write a file results in an error. What's going on?
 
@@ -30,7 +36,7 @@ Node native modules, which contain native code, are able to run on nodejs-mobile
 
 ## How can I improve Node.js load times?
 
-Applications that contain a large number of files in the Node.js project can have their load times decreased by reducing the number of files. While installing npm modules, these can be installed with the `--production` flag, so that modules that are used for development only are not included in your project, e.g.: `npm install --production <module_name>`. Using tools that merge all nodejs project files into a bundle, such as [`noderify`](https://www.npmjs.com/package/noderify) and using the bundle instead has been observed to improve load times in most situations.
+Applications that contain a large number of files in the Node.js project can have their load times decreased by reducing the number of files. While installing npm modules, these can be installed with the `--production` flag, so that modules that are used for development only are not included in your project, e.g.: `npm install --production <module_name>`. Using tools that merge all nodejs project files into a bundle, such as [`noderify`](https://www.npmjs.com/package/noderify) or [`esbuild`](https://esbuild.github.io/) and using the bundle instead has been observed to improve load times in most situations.
 
 ## Can I run two or more Node.js instances?
 
