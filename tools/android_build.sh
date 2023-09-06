@@ -4,13 +4,13 @@ set -e
 
 ROOT=${PWD}
 
-if [ $# -lt 3 ]; then
-  echo "Requires a path to the Android NDK, target arch, and an SDK version number"
-  echo "Usage: android_build.sh <ndk_path> <target_arch> <sdk_version>"
+if [ $# -lt 2 ]; then
+  echo "Requires a path to the Android NDK and an SDK version number (optionally: target arch)"
+  echo "Usage: android_build.sh <ndk_path> <sdk_version> [target_arch]"
   exit 1
 fi
 
-ANDROID_SDK_VERSION="$3"
+ANDROID_SDK_VERSION="$2"
 
 SCRIPT_DIR="$(dirname "$BASH_SOURCE")"
 cd "$SCRIPT_DIR"
@@ -28,7 +28,7 @@ BUILD_ARCH() {
   rm -rf android-toolchain/
 
   # Compile
-  source ./android-configure "$ANDROID_NDK_PATH" $TARGET_ARCH $ANDROID_SDK_VERSION
+  eval '"./android-configure" "$ANDROID_NDK_PATH" $ANDROID_SDK_VERSION $TARGET_ARCH'
   make -j $(getconf _NPROCESSORS_ONLN)
 
   # Move binaries
@@ -53,7 +53,7 @@ BUILD_ARCH() {
   fi
 }
 
-if [ $2 == "x" ]; then
+if [ $# -eq 2 ]; then
   TARGET_ARCH="arm"
   BUILD_ARCH
   TARGET_ARCH="x86"
@@ -63,7 +63,7 @@ if [ $2 == "x" ]; then
   TARGET_ARCH="x86_64"
   BUILD_ARCH
 else
-  TARGET_ARCH=$2
+  TARGET_ARCH=$3
   BUILD_ARCH
 fi
 

@@ -50,12 +50,12 @@ git checkout mobile-master
 
 ### 2a) Using the Android helper script:
 
-The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/android-ndk-r21b`). The second argument is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. If you provide `x`, then it will build all available architectures. The third argument must be the Android SDK version as a two-digit number. All three arguments are required.
+The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/android-ndk-r21b`). The second argument must be the Android SDK version as a two-digit number. The third argument is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. You can omit the third argument, and it will build all available architectures.
 
 Run (example arguments):
 
 ```sh
-./tools/android_build.sh ~/android-ndk-r21b x 23
+./tools/android_build.sh ~/android-ndk-r21b 23
 ```
 
 When done, each built shared library will be placed in `out_android/$(ARCHITECTURE)/libnode.so`.
