@@ -177,11 +177,18 @@
           'sources': [
             '<!@pymod_do_main(GN-scraper "<(ZLIB_ROOT)/BUILD.gn" "\\"zlib\\".*?sources = ")',
           ],
-          'include_dirs': [ '<(ZLIB_ROOT)' ],
+          # nodejs-mobile patch: silenced this 'include_dirs', in favor of the next patch below.
+          # 'include_dirs': [ '<(ZLIB_ROOT)' ],
           'direct_dependent_settings': {
             'include_dirs': [ '<(ZLIB_ROOT)' ],
           },
           'conditions': [
+            # nodejs-mobile patch: for Android, make available <cpu_features.h> from the NDK:
+            ['OS=="android"', {
+              'include_dirs': [ '<(ZLIB_ROOT)', '<(ANDROID_NDK_ROOT)/sources/android/cpufeatures' ],
+            }, {
+              'include_dirs': [ '<(ZLIB_ROOT)' ],
+            }],
             ['OS!="win"', {
               'cflags!': [ '-ansi' ],
               'cflags': [ '-Wno-implicit-fallthrough' ],
