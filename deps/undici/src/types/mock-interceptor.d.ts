@@ -1,5 +1,5 @@
-import { IncomingHttpHeaders } from 'http'
-import Dispatcher = require('./dispatcher');
+import { IncomingHttpHeaders } from './header'
+import Dispatcher from './dispatcher';
 import { BodyInit, Headers } from './fetch'
 
 export {
@@ -74,7 +74,7 @@ declare namespace MockInterceptor {
     origin: string;
     method: string;
     body?: BodyInit | Dispatcher.DispatchOptions['body'];
-    headers: Headers;
+    headers: Headers | Record<string, string>;
     maxRedirections: number;
   }
 

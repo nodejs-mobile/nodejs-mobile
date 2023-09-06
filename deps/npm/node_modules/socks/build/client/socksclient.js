@@ -45,6 +45,7 @@ class SocksClient extends events_1.EventEmitter {
             catch (err) {
                 if (typeof callback === 'function') {
                     callback(err);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     return resolve(err); // Resolves pending promise (prevents memory leaks).
                 }
                 else {
@@ -68,6 +69,7 @@ class SocksClient extends events_1.EventEmitter {
                 client.removeAllListeners();
                 if (typeof callback === 'function') {
                     callback(err);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     resolve(err); // Resolves pending promise (prevents memory leaks).
                 }
                 else {
@@ -86,6 +88,7 @@ class SocksClient extends events_1.EventEmitter {
      * @returns { Promise }
      */
     static createConnectionChain(options, callback) {
+        // eslint-disable-next-line no-async-promise-executor
         return new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
             // Validate SocksClientChainOptions
             try {
@@ -94,19 +97,19 @@ class SocksClient extends events_1.EventEmitter {
             catch (err) {
                 if (typeof callback === 'function') {
                     callback(err);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     return resolve(err); // Resolves pending promise (prevents memory leaks).
                 }
                 else {
                     return reject(err);
                 }
             }
-            let sock;
             // Shuffle proxies
             if (options.randomizeChain) {
                 (0, util_1.shuffleArray)(options.proxies);
             }
             try {
-                // tslint:disable-next-line:no-increment-decrement
+                let sock;
                 for (let i = 0; i < options.proxies.length; i++) {
                     const nextProxy = options.proxies[i];
                     // If we've reached the last proxy in the chain, the destination is the actual destination, otherwise it's the next proxy.
@@ -122,12 +125,10 @@ class SocksClient extends events_1.EventEmitter {
                         command: 'connect',
                         proxy: nextProxy,
                         destination: nextDestination,
-                        // Initial connection ignores this as sock is undefined. Subsequent connections re-use the first proxy socket to form a chain.
+                        existing_socket: sock,
                     });
                     // If sock is undefined, assign it here.
-                    if (!sock) {
-                        sock = result.socket;
-                    }
+                    sock = sock || result.socket;
                 }
                 if (typeof callback === 'function') {
                     callback(null, { socket: sock });
@@ -140,6 +141,7 @@ class SocksClient extends events_1.EventEmitter {
             catch (err) {
                 if (typeof callback === 'function') {
                     callback(err);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     resolve(err); // Resolves pending promise (prevents memory leaks).
                 }
                 else {

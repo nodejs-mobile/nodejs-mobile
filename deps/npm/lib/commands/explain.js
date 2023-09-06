@@ -1,6 +1,4 @@
 const { explainNode } = require('../utils/explain-dep.js')
-const completion = require('../utils/completion/installed-deep.js')
-const Arborist = require('@npmcli/arborist')
 const npa = require('npm-package-arg')
 const semver = require('semver')
 const { relative, resolve } = require('path')
@@ -21,6 +19,7 @@ class Explain extends ArboristWorkspaceCmd {
   // TODO
   /* istanbul ignore next */
   async completion (opts) {
+    const completion = require('../utils/completion/installed-deep.js')
     return completion(this.npm, opts)
   }
 
@@ -29,6 +28,7 @@ class Explain extends ArboristWorkspaceCmd {
       throw this.usageError()
     }
 
+    const Arborist = require('@npmcli/arborist')
     const arb = new Arborist({ path: this.npm.prefix, ...this.npm.flatOptions })
     const tree = await arb.loadActual()
 
@@ -59,7 +59,7 @@ class Explain extends ArboristWorkspaceCmd {
 
     const expls = []
     for (const node of nodes) {
-      const { extraneous, dev, optional, devOptional, peer, inBundle } = node
+      const { extraneous, dev, optional, devOptional, peer, inBundle, overridden } = node
       const expl = node.explain()
       if (extraneous) {
         expl.extraneous = true
@@ -69,6 +69,7 @@ class Explain extends ArboristWorkspaceCmd {
         expl.devOptional = devOptional
         expl.peer = peer
         expl.bundled = inBundle
+        expl.overridden = overridden
       }
       expls.push(expl)
     }
@@ -77,7 +78,7 @@ class Explain extends ArboristWorkspaceCmd {
       this.npm.output(JSON.stringify(expls, null, 2))
     } else {
       this.npm.output(expls.map(expl => {
-        return explainNode(expl, Infinity, this.npm.color)
+        return explainNode(expl, Infinity, this.npm.chalk)
       }).join('\n\n'))
     }
   }

@@ -7,8 +7,13 @@ prefix sequential
 [true] # This section applies to all platforms
 # https://github.com/nodejs/node/issues/27611#issuecomment-613100468
 test-cpu-prof-dir-worker: PASS, FLAKY
+# https://github.com/nodejs/node/issues/44898
+test-watch-mode: PASS, FLAKY
+test-watch-mode-inspect: PASS, FLAKY
 
 [$system==win32]
+# https://github.com/nodejs/node/issues/47116
+test-http-max-sockets: PASS, FLAKY
 
 [$system==linux]
 
@@ -30,12 +35,6 @@ test-perf-hooks: SKIP
 # https://github.com/nodejs/node/issues/39683
 test-tls-psk-client: PASS, FLAKY
 test-tls-securepair-client: PASS, FLAKY
-
-[$arch==arm]
-# https://github.com/nodejs/node/issues/26401#issuecomment-613095719
-test-worker-prof: PASS, FLAKY
-# https://github.com/nodejs/node/issues/43638
-test-gc-http-client-timeout: PASS,FLAKY
 
 [$system==android]
 #

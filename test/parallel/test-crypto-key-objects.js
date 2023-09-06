@@ -34,18 +34,6 @@ const privateDsa = fixtures.readKey('dsa_private_encrypted_1025.pem',
                                     'ascii');
 
 {
-  // Attempting to create an empty key should throw.
-  assert.throws(() => {
-    createSecretKey(Buffer.alloc(0));
-  }, {
-    name: 'RangeError',
-    code: 'ERR_OUT_OF_RANGE',
-    message: 'The value of "key.byteLength" is out of range. ' +
-             'It must be > 0. Received 0'
-  });
-}
-
-{
   // Attempting to create a key of a wrong type should throw
   const TYPE = 'wrong_type';
 
@@ -81,6 +69,7 @@ const privateDsa = fixtures.readKey('dsa_private_encrypted_1025.pem',
   const keybuf = randomBytes(32);
   const key = createSecretKey(keybuf);
   assert.strictEqual(key.type, 'secret');
+  assert.strictEqual(key.toString(), '[object KeyObject]');
   assert.strictEqual(key.symmetricKeySize, 32);
   assert.strictEqual(key.asymmetricKeyType, undefined);
   assert.strictEqual(key.asymmetricKeyDetails, undefined);
@@ -162,27 +151,32 @@ const privateDsa = fixtures.readKey('dsa_private_encrypted_1025.pem',
 
   const publicKey = createPublicKey(publicPem);
   assert.strictEqual(publicKey.type, 'public');
+  assert.strictEqual(publicKey.toString(), '[object KeyObject]');
   assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
   assert.strictEqual(publicKey.symmetricKeySize, undefined);
 
   const privateKey = createPrivateKey(privatePem);
   assert.strictEqual(privateKey.type, 'private');
+  assert.strictEqual(privateKey.toString(), '[object KeyObject]');
   assert.strictEqual(privateKey.asymmetricKeyType, 'rsa');
   assert.strictEqual(privateKey.symmetricKeySize, undefined);
 
   // It should be possible to derive a public key from a private key.
   const derivedPublicKey = createPublicKey(privateKey);
   assert.strictEqual(derivedPublicKey.type, 'public');
+  assert.strictEqual(derivedPublicKey.toString(), '[object KeyObject]');
   assert.strictEqual(derivedPublicKey.asymmetricKeyType, 'rsa');
   assert.strictEqual(derivedPublicKey.symmetricKeySize, undefined);
 
   const publicKeyFromJwk = createPublicKey({ key: publicJwk, format: 'jwk' });
   assert.strictEqual(publicKey.type, 'public');
+  assert.strictEqual(publicKey.toString(), '[object KeyObject]');
   assert.strictEqual(publicKey.asymmetricKeyType, 'rsa');
   assert.strictEqual(publicKey.symmetricKeySize, undefined);
 
   const privateKeyFromJwk = createPrivateKey({ key: jwk, format: 'jwk' });
   assert.strictEqual(privateKey.type, 'private');
+  assert.strictEqual(privateKey.toString(), '[object KeyObject]');
   assert.strictEqual(privateKey.asymmetricKeyType, 'rsa');
   assert.strictEqual(privateKey.symmetricKeySize, undefined);
 
@@ -869,4 +863,26 @@ const privateDsa = fixtures.readKey('dsa_private_encrypted_1025.pem',
   assert(!first.publicKey.equals(second.privateKey));
   assert(!first.privateKey.equals(second.privateKey));
   assert(!first.privateKey.equals(second.publicKey));
+}
+
+{
+  const first = createSecretKey(Buffer.alloc(0));
+  const second = createSecretKey(new ArrayBuffer(0));
+  const third = createSecretKey(Buffer.alloc(1));
+  assert(first.equals(first));
+  assert(first.equals(second));
+  assert(!first.equals(third));
+  assert(!third.equals(first));
+}
+
+{
+  // This should not cause a crash: https://github.com/nodejs/node/issues/44471
+  for (const key of ['', 'foo', null, undefined, true, Boolean]) {
+    assert.throws(() => {
+      createPublicKey({ key, format: 'jwk' });
+    }, { code: 'ERR_INVALID_ARG_TYPE', message: /The "key\.key" property must be of type object/ });
+    assert.throws(() => {
+      createPrivateKey({ key, format: 'jwk' });
+    }, { code: 'ERR_INVALID_ARG_TYPE', message: /The "key\.key" property must be of type object/ });
+  }
 }

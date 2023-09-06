@@ -253,6 +253,10 @@ current job but re-run everything else. Start a fresh CI if more than seven days
 have elapsed since the original failing CI as the compiled binaries for the
 Windows and ARM platforms are only kept for seven days.
 
+If new commits are pushed to the pull request branch after the latest Jenkins
+CI run, a fresh CI run is required. It can be started by pressing "Retry" on
+the left sidebar, or by adding the `request-ci` label to the pull request.
+
 #### Useful Jenkins CI jobs
 
 * [`node-test-pull-request`](https://ci.nodejs.org/job/node-test-pull-request/)
@@ -336,8 +340,8 @@ For undocumented APIs that are public, open a pull request documenting the API.
 
 ### Breaking changes
 
-At least two TSC members must approve backward-incompatible changes to the
-`main` branch.
+At least two TSC voting members must approve backward-incompatible changes to
+the `main` branch.
 
 Examples of breaking changes include:
 
@@ -377,6 +381,24 @@ change. If such a change lands on the `main` branch, a collaborator can revert
 it. As an alternative to reverting, the TSC can apply the semver-major label
 after-the-fact.
 
+If the change has already been backported to release lines open
+an issue in the TSC repository to discuss how best to proceed. In the past
+we have often reverted in the release lines and kept the change on main. The
+decision to revert or not most often is based on limiting the impact
+to the ecosystem and how quickly the breaking change is discovered.
+
+If the change is reverted make sure to:
+
+* consider if additional tests can be added to avoid a similar breaking change
+  being missed in the future.
+* consider if adding packages to CITGM would have helped catch
+  the breaking change.
+* ensure the changelog with the revert clearly explains the situation and
+  it's impact on those who may have already used the updated API.
+
+In either case make sure that the documentation and changelog for the
+original breaking change are updated to reflect the breaking behavior.
+
 ##### Reverting commits
 
 Revert commits with `git revert <HASH>` or `git revert <FROM>..<TO>`. The
@@ -388,18 +410,26 @@ metadata. Raise a pull request like any other change.
 
 Treat commits that introduce new core modules with extra care.
 
-Check if the module's name conflicts with an existing ecosystem module. If it
-does, choose a different name unless the module owner has agreed in writing to
-transfer it.
+New modules must only be added with the `node:` prefix.
 
-If the new module name is free, register a placeholder in the module registry as
-soon as possible. Link to the pull request that introduces the new core module
-in the placeholder's `README`.
+When adding promises to an existing API, add `/promises`
+(`inspector/promises`, etc.). Apply the `semver-major` label to the addition.
+
+If the new module name is free in npm, register
+a placeholder in the module registry as soon as possible. Link to the pull
+request that introduces the new core module in the placeholder's `README`.
+
+If the module name is not free and the module is
+not widely used, contact the owner to see if they would be willing to transfer
+it to the project.
+
+We register a placeholder without the `node:` prefix whenever
+possible to avoid confusion and typosquatting attacks.
 
 For pull requests introducing new core modules:
 
 * Allow at least one week for review.
-* Land only after sign-off from at least two TSC members.
+* Land only after sign-off from at least two TSC voting members.
 * Land with a [Stability Index][] of Experimental. The module must remain
   Experimental until a semver-major release.
 
@@ -432,7 +462,7 @@ documentation must state the deprecation status.
   * Backward-incompatible changes including complete removal of such APIs can
     occur at any time.
 
-Apply the `notable change` label to all pull requests that introduce
+Apply the `notable-change` label to all pull requests that introduce
 Documentation-Only Deprecations. Such deprecations have no impact on code
 execution. Thus, they are not breaking changes (`semver-major`).
 
@@ -497,7 +527,7 @@ The TSC serves as the final arbiter where required.
      squashing only keeps one author.
    * The "Rebase and merge" method has no way of adding metadata to the commit.
 3. Make sure CI is complete and green. If the CI is not green, check for
-   unreliable tests and infrastructure failures. If there are not corresponding
+   unreliable tests and infrastructure failures. If there are no corresponding
    issues in the [node][unreliable tests] or
    [build](https://github.com/nodejs/build/issues) repositories, open new
    issues. Run a new CI any time someone pushes new code to the pull request.
@@ -730,7 +760,7 @@ git push upstream main
 
 ### I made a mistake
 
-* Ping a TSC member.
+* Ping a TSC voting member.
 * With `git`, there's a way to override remote trees by force pushing
   (`git push -f`). This is generally forbidden as it creates conflicts in other
   people's forks. It is permissible for simpler slip-ups such as typos in commit

@@ -1,10 +1,6 @@
-const util = require('util')
-const Arborist = require('@npmcli/arborist')
-const rimraf = util.promisify(require('rimraf'))
 const reifyFinish = require('../utils/reify-finish.js')
 const runScript = require('@npmcli/run-script')
-const fs = require('fs')
-const readdir = util.promisify(fs.readdir)
+const fs = require('fs/promises')
 const log = require('../utils/log-shim.js')
 const validateLockfile = require('../utils/validate-lockfile.js')
 
@@ -13,11 +9,22 @@ const ArboristWorkspaceCmd = require('../arborist-cmd.js')
 class CI extends ArboristWorkspaceCmd {
   static description = 'Clean install a project'
   static name = 'ci'
+
+  // These are in the order they will show up in when running "-h"
   static params = [
-    'audit',
+    'install-strategy',
+    'legacy-bundling',
+    'global-style',
+    'omit',
+    'strict-peer-deps',
+    'package-lock',
     'foreground-scripts',
     'ignore-scripts',
-    'script-shell',
+    'audit',
+    'bin-links',
+    'fund',
+    'dry-run',
+    ...super.params,
   ]
 
   async exec () {
@@ -28,6 +35,7 @@ class CI extends ArboristWorkspaceCmd {
     }
 
     const where = this.npm.prefix
+    const Arborist = require('@npmcli/arborist')
     const opts = {
       ...this.npm.flatOptions,
       packageLock: true, // npm ci should never skip lock files
@@ -72,8 +80,8 @@ class CI extends ArboristWorkspaceCmd {
     await this.npm.time('npm-ci:rm', async () => {
       const path = `${where}/node_modules`
       // get the list of entries so we can skip the glob for performance
-      const entries = await readdir(path, null).catch(er => [])
-      return Promise.all(entries.map(f => rimraf(`${path}/${f}`, { glob: false })))
+      const entries = await fs.readdir(path, null).catch(er => [])
+      return Promise.all(entries.map(f => fs.rm(`${path}/${f}`, { force: true, recursive: true })))
     })
 
     await arb.reify(opts)
@@ -97,7 +105,6 @@ class CI extends ArboristWorkspaceCmd {
           args: [],
           scriptShell,
           stdio: 'inherit',
-          stdioString: true,
           banner: !this.npm.silent,
           event,
         })

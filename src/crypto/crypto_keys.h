@@ -112,17 +112,13 @@ class ManagedEVPPKey : public MemoryRetainer {
       unsigned int* offset,
       bool allow_key_object);
 
-  static v8::Maybe<bool> ToEncodedPublicKey(
-      Environment* env,
-      ManagedEVPPKey key,
-      const PublicKeyEncodingConfig& config,
-      v8::Local<v8::Value>* out);
+  v8::Maybe<bool> ToEncodedPublicKey(Environment* env,
+                                     const PublicKeyEncodingConfig& config,
+                                     v8::Local<v8::Value>* out);
 
-  static v8::Maybe<bool> ToEncodedPrivateKey(
-      Environment* env,
-      ManagedEVPPKey key,
-      const PrivateKeyEncodingConfig& config,
-      v8::Local<v8::Value>* out);
+  v8::Maybe<bool> ToEncodedPrivateKey(Environment* env,
+                                      const PrivateKeyEncodingConfig& config,
+                                      v8::Local<v8::Value>* out);
 
  private:
   size_t size_of_private_key() const;
@@ -162,12 +158,12 @@ class KeyObjectData : public MemoryRetainer {
 
   const KeyType key_type_;
   const ByteSource symmetric_key_;
-  const unsigned int symmetric_key_len_;
   const ManagedEVPPKey asymmetric_key_;
 };
 
 class KeyObjectHandle : public BaseObject {
  public:
+  static bool HasInstance(Environment* env, v8::Local<v8::Value> value);
   static v8::Local<v8::Function> Initialize(Environment* env);
   static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
 

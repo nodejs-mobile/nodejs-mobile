@@ -56,13 +56,16 @@ async function doReadAndCancel() {
   {
     const filePathForHandle = path.resolve(tmpDir, 'dogs-running.txt');
     const fileHandle = await open(filePathForHandle, 'w+');
-    const buffer = Buffer.from('Dogs running'.repeat(10000), 'utf8');
-    fs.writeFileSync(filePathForHandle, buffer);
-    const signal = AbortSignal.abort();
-    await assert.rejects(readFile(fileHandle, { signal }), {
-      name: 'AbortError'
-    });
-    await fileHandle.close();
+    try {
+      const buffer = Buffer.from('Dogs running'.repeat(10000), 'utf8');
+      fs.writeFileSync(filePathForHandle, buffer);
+      const signal = AbortSignal.abort();
+      await assert.rejects(readFile(fileHandle, common.mustNotMutateObjectDeep({ signal })), {
+        name: 'AbortError'
+      });
+    } finally {
+      await fileHandle.close();
+    }
   }
 
   // Signal aborted on first tick
@@ -74,7 +77,7 @@ async function doReadAndCancel() {
     const controller = new AbortController();
     const { signal } = controller;
     process.nextTick(() => controller.abort());
-    await assert.rejects(readFile(fileHandle, { signal }), {
+    await assert.rejects(readFile(fileHandle, common.mustNotMutateObjectDeep({ signal })), {
       name: 'AbortError'
     }, 'tick-0');
     await fileHandle.close();
@@ -91,7 +94,7 @@ async function doReadAndCancel() {
     const controller = new AbortController();
     const { signal } = controller;
     tick(1, () => controller.abort());
-    await assert.rejects(fileHandle.readFile({ signal, encoding: 'utf8' }), {
+    await assert.rejects(fileHandle.readFile(common.mustNotMutateObjectDeep({ signal, encoding: 'utf8' })), {
       name: 'AbortError'
     }, 'tick-1');
 
@@ -103,17 +106,22 @@ async function doReadAndCancel() {
     // Variable taken from https://github.com/nodejs/node/blob/1377163f3351/lib/internal/fs/promises.js#L5
     const kIoMaxLength = 2 ** 31 - 1;
 
-    const newFile = path.resolve(tmpDir, 'dogs-running3.txt');
-    await writeFile(newFile, Buffer.from('0'));
-    await truncate(newFile, kIoMaxLength + 1);
+    if (!tmpdir.hasEnoughSpace(kIoMaxLength)) {
+      // truncate() will fail with ENOSPC if there is not enough space.
+      common.printSkipMessage(`Not enough space in ${tmpDir}`);
+    } else {
+      const newFile = path.resolve(tmpDir, 'dogs-running3.txt');
+      await writeFile(newFile, Buffer.from('0'));
+      await truncate(newFile, kIoMaxLength + 1);
 
-    const fileHandle = await open(newFile, 'r');
+      const fileHandle = await open(newFile, 'r');
 
-    await assert.rejects(fileHandle.readFile(), {
-      name: 'RangeError',
-      code: 'ERR_FS_FILE_TOO_LARGE'
-    });
-    await fileHandle.close();
+      await assert.rejects(fileHandle.readFile(), {
+        name: 'RangeError',
+        code: 'ERR_FS_FILE_TOO_LARGE'
+      });
+      await fileHandle.close();
+    }
   }
 }
 

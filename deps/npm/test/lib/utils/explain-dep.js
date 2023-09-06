@@ -1,16 +1,14 @@
 const { resolve } = require('path')
 const t = require('tap')
+const Chalk = require('chalk')
 const { explainNode, printNode } = require('../../../lib/utils/explain-dep.js')
-const testdir = t.testdirName
+const { cleanCwd } = require('../../fixtures/clean-snapshot')
 
-const redactCwd = (path) => {
-  const normalizePath = p => p
-    .replace(/\\+/g, '/')
-    .replace(/\r\n/g, '\n')
-  return normalizePath(path)
-    .replace(new RegExp(normalizePath(process.cwd()), 'g'), '{CWD}')
-}
-t.cleanSnapshot = (str) => redactCwd(str)
+const testdir = t.testdirName
+const color = new Chalk.Instance({ level: Chalk.level })
+const noColor = new Chalk.Instance({ level: 0 })
+
+t.cleanSnapshot = (str) => cleanCwd(str)
 
 const cases = {
   prodDep: {
@@ -129,6 +127,23 @@ const cases = {
     dependents: [],
     extraneous: true,
   },
+
+  overridden: {
+    name: 'overridden-root',
+    version: '1.0.0',
+    location: 'node_modules/overridden-root',
+    overridden: true,
+    dependents: [{
+      type: 'prod',
+      name: 'overridden-dep',
+      spec: '1.0.0',
+      rawSpec: '^2.0.0',
+      overridden: true,
+      from: {
+        location: '/path/to/project',
+      },
+    }],
+  },
 }
 
 cases.manyDeps = {
@@ -238,10 +253,10 @@ cases.workspaces = {
 
 for (const [name, expl] of Object.entries(cases)) {
   t.test(name, t => {
-    t.matchSnapshot(printNode(expl, true), 'print color')
-    t.matchSnapshot(printNode(expl, false), 'print nocolor')
-    t.matchSnapshot(explainNode(expl, Infinity, true), 'explain color deep')
-    t.matchSnapshot(explainNode(expl, 2, false), 'explain nocolor shallow')
+    t.matchSnapshot(printNode(expl, color), 'print color')
+    t.matchSnapshot(printNode(expl, noColor), 'print nocolor')
+    t.matchSnapshot(explainNode(expl, Infinity, color), 'explain color deep')
+    t.matchSnapshot(explainNode(expl, 2, noColor), 'explain nocolor shallow')
     t.end()
   })
 }
@@ -249,6 +264,6 @@ for (const [name, expl] of Object.entries(cases)) {
 // make sure that we show the last one if it's the only one that would
 // hit the ...
 cases.manyDeps.dependents.pop()
-t.matchSnapshot(explainNode(cases.manyDeps, 2, false), 'ellipses test one')
+t.matchSnapshot(explainNode(cases.manyDeps, 2, noColor), 'ellipses test one')
 cases.manyDeps.dependents.pop()
-t.matchSnapshot(explainNode(cases.manyDeps, 2, false), 'ellipses test two')
+t.matchSnapshot(explainNode(cases.manyDeps, 2, noColor), 'ellipses test two')

@@ -19,8 +19,8 @@ const tmpPath = path.join(testRoot, tmpdirName);
 
 let firstRefresh = true;
 function refresh() {
-  rmSync(this.path);
-  fs.mkdirSync(this.path);
+  rmSync(tmpPath);
+  fs.mkdirSync(tmpPath);
 
   if (firstRefresh) {
     firstRefresh = false;
@@ -55,7 +55,13 @@ function onexit() {
   }
 }
 
+function hasEnoughSpace(size) {
+  const { bavail, bsize } = fs.statfsSync(tmpPath);
+  return bavail >= Math.ceil(size / bsize);
+}
+
 module.exports = {
   path: tmpPath,
-  refresh
+  refresh,
+  hasEnoughSpace,
 };

@@ -4,7 +4,7 @@
 
 const assert = require('assert')
 const { Readable } = require('stream')
-const { RequestAbortedError, NotSupportedError } = require('../core/errors')
+const { RequestAbortedError, NotSupportedError, InvalidArgumentError } = require('../core/errors')
 const util = require('../core/util')
 const { ReadableStreamFrom, toUSVString } = require('../core/util')
 
@@ -17,11 +17,16 @@ const kAbort = Symbol('abort')
 const kContentType = Symbol('kContentType')
 
 module.exports = class BodyReadable extends Readable {
-  constructor (resume, abort, contentType = '') {
+  constructor ({
+    resume,
+    abort,
+    contentType = '',
+    highWaterMark = 64 * 1024 // Same as nodejs fs streams.
+  }) {
     super({
       autoDestroy: true,
       read: resume,
-      highWaterMark: 64 * 1024 // Same as nodejs fs streams.
+      highWaterMark
     })
 
     this._readableState.dataEmitted = false
@@ -93,7 +98,7 @@ module.exports = class BodyReadable extends Readable {
   }
 
   push (chunk) {
-    if (this[kConsume] && chunk !== null) {
+    if (this[kConsume] && chunk !== null && this.readableLength === 0) {
       consumePush(this[kConsume], chunk)
       return this[kReading] ? super.push(chunk) : true
     }
@@ -146,15 +151,31 @@ module.exports = class BodyReadable extends Readable {
 
   async dump (opts) {
     let limit = opts && Number.isFinite(opts.limit) ? opts.limit : 262144
+    const signal = opts && opts.signal
+    const abortFn = () => {
+      this.destroy()
+    }
+    if (signal) {
+      if (typeof signal !== 'object' || !('aborted' in signal)) {
+        throw new InvalidArgumentError('signal must be an AbortSignal')
+      }
+      util.throwIfAborted(signal)
+      signal.addEventListener('abort', abortFn, { once: true })
+    }
     try {
       for await (const chunk of this) {
+        util.throwIfAborted(signal)
         limit -= Buffer.byteLength(chunk)
         if (limit < 0) {
           return
         }
       }
     } catch {
-      // Do nothing...
+      util.throwIfAborted(signal)
+    } finally {
+      if (signal) {
+        signal.removeEventListener('abort', abortFn)
+      }
     }
   }
 }

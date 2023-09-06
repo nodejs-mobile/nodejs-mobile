@@ -23,14 +23,14 @@ instances.
 
 ```js
 const {
-  Worker, isMainThread, parentPort, workerData
+  Worker, isMainThread, parentPort, workerData,
 } = require('node:worker_threads');
 
 if (isMainThread) {
   module.exports = function parseJSAsync(script) {
     return new Promise((resolve, reject) => {
       const worker = new Worker(__filename, {
-        workerData: script
+        workerData: script,
       });
       worker.on('message', resolve);
       worker.on('error', reject);
@@ -68,7 +68,7 @@ added:
   - v15.12.0
   - v14.18.0
 changes:
-  - version: v16.15.0
+  - version: v17.5.0
     pr-url: https://github.com/nodejs/node/pull/41272
     description: No longer experimental.
 -->
@@ -298,7 +298,7 @@ added:
   - v15.12.0
   - v14.18.0
 changes:
-  - version: v16.15.0
+  - version: v17.5.0
     pr-url: https://github.com/nodejs/node/pull/41272
     description: No longer experimental.
 -->
@@ -351,9 +351,11 @@ if (isMainThread) {
 
 <!-- YAML
 added: v15.4.0
+changes:
+  - version: v18.0.0
+    pr-url: https://github.com/nodejs/node/pull/41271
+    description: No longer experimental.
 -->
-
-> Stability: 1 - Experimental
 
 Instances of `BroadcastChannel` allow asynchronous one-to-many communication
 with all other `BroadcastChannel` instances bound to the same channel name.
@@ -364,7 +366,7 @@ with all other `BroadcastChannel` instances bound to the same channel name.
 const {
   isMainThread,
   BroadcastChannel,
-  Worker
+  Worker,
 } = require('node:worker_threads');
 
 const bc = new BroadcastChannel('hello');
@@ -562,10 +564,14 @@ are part of the channel.
 <!-- YAML
 added: v10.5.0
 changes:
-  - version: v15.14.0
+  - version:
+      - v15.14.0
+      - v14.18.0
     pr-url: https://github.com/nodejs/node/pull/37917
     description: Add 'BlockList' to the list of cloneable types.
-  - version: v15.9.0
+  - version:
+      - v15.9.0
+      - v14.18.0
     pr-url: https://github.com/nodejs/node/pull/37155
     description: Add 'Histogram' types to the list of cloneable types.
   - version: v15.6.0
@@ -760,7 +766,7 @@ port2.postMessage(new URL('https://example.org'));
 ### `port.hasRef()`
 
 <!-- YAML
-added: v16.17.0
+added: v18.1.0
 -->
 
 > Stability: 1 - Experimental
@@ -871,7 +877,7 @@ the thread barrier.
 ```js
 const assert = require('node:assert');
 const {
-  Worker, MessageChannel, MessagePort, isMainThread, parentPort
+  Worker, MessageChannel, MessagePort, isMainThread, parentPort,
 } = require('node:worker_threads');
 if (isMainThread) {
   const worker = new Worker(__filename);
@@ -894,6 +900,10 @@ if (isMainThread) {
 <!-- YAML
 added: v10.5.0
 changes:
+  - version: v18.16.0
+    pr-url: https://github.com/nodejs/node/pull/46832
+    description: Added support for a `name` option, which allows
+                 adding a name to worker title for debugging.
   - version: v14.9.0
     pr-url: https://github.com/nodejs/node/pull/34584
     description: The `filename` parameter can be a WHATWG `URL` object using
@@ -977,18 +987,24 @@ changes:
     are passed in `workerData`, a `transferList` is required for those
     items or [`ERR_MISSING_MESSAGE_PORT_IN_TRANSFER_LIST`][] is thrown.
     See [`port.postMessage()`][] for more information.
-  * `resourceLimits` {Object} An optional set of resource limits for the new
-    JS engine instance. Reaching these limits leads to termination of the
-    `Worker` instance. These limits only affect the JS engine, and no external
-    data, including no `ArrayBuffer`s. Even if these limits are set, the process
-    may still abort if it encounters a global out-of-memory situation.
-    * `maxOldGenerationSizeMb` {number} The maximum size of the main heap in MB.
+  * `resourceLimits` {Object} An optional set of resource limits for the new JS
+    engine instance. Reaching these limits leads to termination of the `Worker`
+    instance. These limits only affect the JS engine, and no external data,
+    including no `ArrayBuffer`s. Even if these limits are set, the process may
+    still abort if it encounters a global out-of-memory situation.
+    * `maxOldGenerationSizeMb` {number} The maximum size of the main heap in
+      MB. If the command-line argument [`--max-old-space-size`][] is set, it
+      overrides this setting.
     * `maxYoungGenerationSizeMb` {number} The maximum size of a heap space for
-      recently created objects.
+      recently created objects. If the command-line argument
+      [`--max-semi-space-size`][] is set, it overrides this setting.
     * `codeRangeSizeMb` {number} The size of a pre-allocated memory range
       used for generated code.
     * `stackSizeMb` {number} The default maximum stack size for the thread.
       Small values may lead to unusable Worker instances. **Default:** `4`.
+  * `name` {string} An optional `name` to be appended to the worker title
+    for debugging/identification purposes, making the final title as
+    `[worker ${id}] ${name}`. **Default:** `''`.
 
 ### Event: `'error'`
 
@@ -1075,6 +1091,7 @@ immediately with an [`ERR_WORKER_NOT_RUNNING`][] error.
 <!-- YAML
 added:
   - v15.1.0
+  - v14.17.0
   - v12.22.0
 -->
 
@@ -1086,6 +1103,7 @@ instance. Similar to [`perf_hooks.performance`][].
 <!-- YAML
 added:
   - v15.1.0
+  - v14.17.0
   - v12.22.0
 -->
 
@@ -1320,6 +1338,8 @@ thread spawned will spawn another until the application crashes.
 [`'close'` event]: #event-close
 [`'exit'` event]: #event-exit
 [`'online'` event]: #event-online
+[`--max-old-space-size`]: cli.md#--max-old-space-sizesize-in-megabytes
+[`--max-semi-space-size`]: cli.md#--max-semi-space-sizesize-in-megabytes
 [`ArrayBuffer`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer
 [`AsyncResource`]: async_hooks.md#class-asyncresource
 [`Buffer.allocUnsafe()`]: buffer.md#static-method-bufferallocunsafesize

@@ -43,9 +43,9 @@ the following tiers.
     organization or website;
   * The tool must be open source.
 
-* Tier 3 - If possible its test suite
-  will be run at least nightly in the Node.js CI and issues opened for
-  failures.  Does not block shipping a release.
+* Tier 3 - If possible its test suite will be run at least nightly
+  in the Node.js CI or in CITGM, and issues opened for failures.
+  Does not block shipping a release.
 
 * Tier 4 - Does not block shipping a release.
 
@@ -133,7 +133,6 @@ The tools are currently assigned to Tiers as follows:
 | Debugger  | [Command line Debug Client][]             | ?                             | Yes                     | 1           |
 | Tracing   | [trace\_events (API)][trace_events (API)] | No                            | Yes                     | 1           |
 | Tracing   | trace\_gc                                 | No                            | Yes                     | 1           |
-| M/T       | eBPF tracing tool                         | No                            | No                      | ?           |
 
 [0x]: https://github.com/davidmarkclements/0x
 [Async Hooks (API)]: https://nodejs.org/api/async_hooks.html

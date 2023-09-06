@@ -22,10 +22,19 @@ The available categories are:
 * `node.bootstrap`: Enables capture of Node.js bootstrap milestones.
 * `node.console`: Enables capture of `console.time()` and `console.count()`
   output.
+* `node.threadpoolwork.sync`: Enables capture of trace data for threadpool
+  synchronous operations, such as `blob`, `zlib`, `crypto` and `node_api`.
+* `node.threadpoolwork.async`: Enables capture of trace data for threadpool
+  asynchronous operations, such as `blob`, `zlib`, `crypto` and `node_api`.
 * `node.dns.native`: Enables capture of trace data for DNS queries.
 * `node.net.native`: Enables capture of trace data for network.
 * `node.environment`: Enables capture of Node.js Environment milestones.
 * `node.fs.sync`: Enables capture of trace data for file system sync methods.
+* `node.fs_dir.sync`: Enables capture of trace data for file system sync
+  directory methods.
+* `node.fs.async`: Enables capture of trace data for file system async methods.
+* `node.fs_dir.async`: Enables capture of trace data for file system async
+  directory methods.
 * `node.perf`: Enables capture of [Performance API][] measurements.
   * `node.perf.usertiming`: Enables capture of only Performance API User Timing
     measures and marks.
@@ -36,6 +45,7 @@ The available categories are:
 * `node.vm.script`: Enables capture of trace data for the `node:vm` module's
   `runInNewContext()`, `runInContext()`, and `runInThisContext()` methods.
 * `v8`: The [V8][] events are GC, compiling, and execution related.
+* `node.http`: Enables capture of trace data for http request / response.
 
 By default the `node`, `node.async_hooks`, and `v8` categories are enabled.
 
@@ -225,6 +235,48 @@ t1.enable();
 t2.enable();
 
 console.log(trace_events.getEnabledCategories());
+```
+
+## Examples
+
+### Collect trace events data by inspector
+
+```js
+'use strict';
+
+const { Session } = require('inspector');
+const session = new Session();
+session.connect();
+
+function post(message, data) {
+  return new Promise((resolve, reject) => {
+    session.post(message, data, (err, result) => {
+      if (err)
+        reject(new Error(JSON.stringify(err)));
+      else
+        resolve(result);
+    });
+  });
+}
+
+async function collect() {
+  const data = [];
+  session.on('NodeTracing.dataCollected', (chunk) => data.push(chunk));
+  session.on('NodeTracing.tracingComplete', () => {
+    // done
+  });
+  const traceConfig = { includedCategories: ['v8'] };
+  await post('NodeTracing.start', { traceConfig });
+  // do something
+  setTimeout(() => {
+    post('NodeTracing.stop').then(() => {
+      session.disconnect();
+      console.log(data);
+    });
+  }, 1000);
+}
+
+collect();
 ```
 
 [Performance API]: perf_hooks.md
