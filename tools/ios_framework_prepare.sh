@@ -61,7 +61,30 @@ for output_file in "${outputs[@]}"; do
     cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64/
 done
 
+
 # Compile Node.js for iOS simulators on x64 Macs
+ARCH=$(arch)
+if [ "$ARCH" = "arm64" ] then
+
+# Build with the command arch -x86_64 on arm64.
+
+make clean
+GYP_DEFINES="target_arch=x64 host_os=mac target_os=ios"
+export GYP_DEFINES
+arch -x86_64 ./configure \
+  --dest-os=ios \
+  --dest-cpu=x64 \
+  --with-intl=none \
+  --cross-compiling \
+  --enable-static \
+  --openssl-no-asm \
+  --v8-options=--jitless \
+  --without-node-code-cache \
+  --without-node-snapshot
+arch -x86_64 make -j$(getconf _NPROCESSORS_ONLN)
+
+else
+
 make clean
 GYP_DEFINES="target_arch=x64 host_os=mac target_os=ios"
 export GYP_DEFINES
@@ -76,6 +99,8 @@ export GYP_DEFINES
   --without-node-code-cache \
   --without-node-snapshot
 make -j$(getconf _NPROCESSORS_ONLN)
+
+fi
 
 # Move compilation outputs
 mkdir -p $TARGET_LIBRARY_PATH/x64
