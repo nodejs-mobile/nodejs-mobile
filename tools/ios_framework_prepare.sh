@@ -64,7 +64,7 @@ done
 
 # Compile Node.js for iOS simulators on x64 Macs
 ARCH=$(arch)
-if [ "$ARCH" = "arm64" ] then
+if [ "$ARCH" = "arm64" ]; then
 
 # Build with the command arch -x86_64 on arm64.
 
