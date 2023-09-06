@@ -1,16 +1,24 @@
 #include "node_metadata.h"
+#include "acorn_version.h"
+#include "ada.h"
 #include "ares.h"
 #include "brotli/encode.h"
 #include "llhttp.h"
 #include "nghttp2/nghttp2ver.h"
 #include "node.h"
+#include "simdutf.h"
+#include "undici_version.h"
 #include "util.h"
 #include "uv.h"
+#include "uvwasi.h"
 #include "v8.h"
 #include "zlib.h"
 
 #if HAVE_OPENSSL
 #include <openssl/opensslv.h>
+#if NODE_OPENSSL_HAS_QUIC
+#include <openssl/quic.h>
+#endif
 #endif  // HAVE_OPENSSL
 
 #ifdef OPENSSL_INFO_QUIC
@@ -36,21 +44,16 @@ Metadata metadata;
 }
 
 #if HAVE_OPENSSL
-constexpr int search(const char* s, int n, int c) {
-  return *s == c ? n : search(s + 1, n + 1, c);
+static constexpr size_t search(const char* s, char c, size_t n = 0) {
+  return *s == c ? n : search(s + 1, c, n + 1);
 }
 
-std::string GetOpenSSLVersion() {
+static inline std::string GetOpenSSLVersion() {
   // sample openssl version string format
   // for reference: "OpenSSL 1.1.0i 14 Aug 2018"
-  char buf[128];
-  const char* etext = OPENSSL_VERSION_TEXT;
-  const int start = search(etext, 0, ' ') + 1;
-  etext += start;
-  const int end = search(etext, start, ' ');
-  const int len = end - start;
-  snprintf(buf, sizeof(buf), "%.*s", len, &OPENSSL_VERSION_TEXT[start]);
-  return std::string(buf);
+  constexpr size_t start = search(OPENSSL_VERSION_TEXT, ' ') + 1;
+  constexpr size_t len = search(&OPENSSL_VERSION_TEXT[start], ' ');
+  return std::string(OPENSSL_VERSION_TEXT, start, len);
 }
 #endif  // HAVE_OPENSSL
 
@@ -98,6 +101,12 @@ Metadata::Versions::Versions() {
     std::to_string((BrotliEncoderVersion() & 0xFFF000) >> 12) +
     "." +
     std::to_string(BrotliEncoderVersion() & 0xFFF);
+#ifndef NODE_SHARED_BUILTIN_UNDICI_UNDICI_PATH
+  undici = UNDICI_VERSION;
+#endif
+  acorn = ACORN_VERSION;
+
+  uvwasi = UVWASI_VERSION_STRING;
 
 #if HAVE_OPENSSL
   openssl = GetOpenSSLVersion();
@@ -112,6 +121,9 @@ Metadata::Versions::Versions() {
   ngtcp2 = NGTCP2_VERSION;
   nghttp3 = NGHTTP3_VERSION;
 #endif
+
+  simdutf = SIMDUTF_VERSION;
+  ada = ADA_VERSION;
 }
 
 Metadata::Release::Release() : name(NODE_RELEASE) {

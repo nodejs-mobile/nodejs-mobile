@@ -13,7 +13,7 @@ const fixtures = require('../common/fixtures');
 const fs = require('fs');
 const env = {
   ...process.env,
-  NODE_DEBUG_NATIVE: 'diagnostics'
+  NODE_DEBUG_NATIVE: 'diagnostics',
 };
 
 {
@@ -71,7 +71,7 @@ const env = {
     .filter((file) => file.endsWith('.heapsnapshot'));
   const risky = [...stderr.matchAll(
     /Not generating snapshots because it's too risky/g)].length;
-  assert(list.length + risky > 0 && list.length <= 3,
+  assert(list.length + risky > 0 && list.length <= 1,
          `Generated ${list.length} snapshots ` +
                      `and ${risky} was too risky`);
 }

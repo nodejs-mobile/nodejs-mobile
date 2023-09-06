@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2008 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
@@ -29,6 +29,7 @@
 
 
 from __future__ import print_function
+from typing import Dict
 import logging
 import optparse
 import os
@@ -43,6 +44,7 @@ import utils
 import multiprocessing
 import errno
 import copy
+import io
 
 
 if sys.version_info >= (3, 5):
@@ -67,7 +69,7 @@ else:
 
 from io import open
 from os.path import join, dirname, abspath, basename, isdir, exists
-from datetime import datetime
+from datetime import datetime, timedelta
 try:
     from queue import Queue, Empty  # Python 3
 except ImportError:
@@ -147,7 +149,7 @@ class ProgressIndicator(object):
     })
     print("Path: %s" % "/".join(test.path))
 
-  def Run(self, tasks):
+  def Run(self, tasks) -> Dict:
     self.Starting()
     threads = []
     # Spawn N-1 threads and then use this thread as the last one.
@@ -172,7 +174,10 @@ class ProgressIndicator(object):
       # ...and then reraise the exception to bail out
       raise
     self.Done()
-    return not self.failed
+    return {
+      'allPassed': not self.failed,
+      'failed': self.failed,
+    }
 
   def RunSingle(self, parallel, thread_id):
     while not self.shutdown_event.is_set():
@@ -227,7 +232,7 @@ class ProgressIndicator(object):
           if self.measure_flakiness:
             outputs = [case.Run() for _ in range(self.measure_flakiness)]
             # +1s are there because the test already failed once at this point.
-            print(f" failed {len([i for i in outputs if i.UnexpectedOutput()]) + 1} out of {self.measure_flakiness + 1}")
+            print(" failed %d out of %d" % (len([i for i in outputs if i.UnexpectedOutput()]) + 1, self.measure_flakiness + 1))
       else:
         self.succeeded += 1
       self.remaining -= 1
@@ -395,16 +400,8 @@ class TapProgressIndicator(SimpleProgressIndicator):
 
 
     duration = output.test.duration
-
-    # total_seconds() was added in 2.7
-    total_seconds = (duration.microseconds +
-      (duration.seconds + duration.days * 24 * 3600) * 10**6) / 10**6
-
-    # duration_ms is measured in seconds and is read as such by TAP parsers.
-    # It should read as "duration including ms" rather than "duration in ms"
     logger.info('  ---')
-    logger.info('  duration_ms: %d.%d' %
-      (total_seconds, duration.microseconds / 1000))
+    logger.info('  duration_ms: %.5f' % (duration  / timedelta(milliseconds=1)))
     if self.severity != 'ok' or self.traceback != '':
       if output.HasTimedOut():
         self.traceback = 'timeout\n' + output.output.stdout + output.output.stderr
@@ -479,6 +476,7 @@ class CompactProgressIndicator(ProgressIndicator):
         print("--- %s ---" % PrintCrashed(output.output.exit_code))
       if output.HasTimedOut():
         print("--- TIMEOUT ---")
+      print("\n") # Two blank lines between failures, for visual separation
 
   def Truncate(self, str, length):
     if length and (len(str) > (length - 3)):
@@ -909,10 +907,11 @@ class LiteralTestSuite(TestSuite):
 
 
 TIMEOUT_SCALEFACTOR = {
-    'arm'   : { 'debug' :  8, 'release' : 3 }, # The ARM buildbots are slow.
-    'ia32'  : { 'debug' :  4, 'release' : 1 },
-    'ppc'   : { 'debug' :  4, 'release' : 1 },
-    's390'  : { 'debug' :  4, 'release' : 1 } }
+    'arm'       : { 'debug' :  8, 'release' : 3 }, # The ARM buildbots are slow.
+    'riscv64'   : { 'debug' :  8, 'release' : 3 }, # The riscv devices are slow.
+    'ia32'      : { 'debug' :  4, 'release' : 1 },
+    'ppc'       : { 'debug' :  4, 'release' : 1 },
+    's390'      : { 'debug' :  4, 'release' : 1 } }
 
 
 class Context(object):
@@ -959,6 +958,12 @@ class Context(object):
     timeout = self.timeout * TIMEOUT_SCALEFACTOR[ARCH_GUESS or 'ia32'][mode]
     if section == 'pummel' or section == 'benchmark':
       timeout = timeout * 6
+    # We run all WPT from one subset in the same process using workers.
+    # As the number of the tests grow, it can take longer to run some of the
+    # subsets, but it's still overall faster than running them in different
+    # processes.
+    elif section == 'wpt':
+      timeout = timeout * 12
     return timeout
 
 def RunTestCases(cases_to_run, progress, tasks, flaky_tests_mode, measure_flakiness):
@@ -1576,6 +1581,10 @@ def get_env_type(vm, options_type, context):
   return env_type
 
 
+def get_asan_state():
+  return "on" if os.environ.get('ASAN') is not None else "off"
+
+
 def Main():
   parser = BuildOptions()
   (options, args) = parser.parse_args()
@@ -1583,7 +1592,13 @@ def Main():
     parser.print_help()
     return 1
 
-  ch = logging.StreamHandler(sys.stdout)
+  stream = sys.stdout
+  try:
+    sys.stdout.reconfigure(encoding='utf8')
+  except AttributeError:
+    # Python < 3.7 does not have reconfigure
+    stream = io.TextIOWrapper(sys.stdout.buffer,encoding='utf8')
+  ch = logging.StreamHandler(stream)
   logger.addHandler(ch)
   logger.setLevel(logging.INFO)
   if options.logfile:
@@ -1662,6 +1677,7 @@ def Main():
           'system': utils.GuessOS(),
           'arch': vmArch,
           'type': get_env_type(vm, options.type, context),
+          'asan': get_asan_state(),
         }
         # If arch is android, system is android as well.
         if arch.lower() == "android":
@@ -1756,10 +1772,8 @@ def Main():
   else:
     try:
       start = time.time()
-      if RunTestCases(cases_to_run, options.progress, options.j, options.flaky_tests, options.measure_flakiness):
-        result = 0
-      else:
-        result = 1
+      result = RunTestCases(cases_to_run, options.progress, options.j, options.flaky_tests, options.measure_flakiness)
+      exitcode = 0 if result['allPassed'] else 1
       duration = time.time() - start
     except KeyboardInterrupt:
       print("Interrupted")
@@ -1776,7 +1790,14 @@ def Main():
       t = FormatTimedelta(entry.duration)
       sys.stderr.write("%4i (%s) %s\n" % (i, t, entry.GetLabel()))
 
-  return result
+  if result['allPassed']:
+    print("\nAll tests passed.")
+  else:
+    print("\nFailed tests:")
+    for failure in result['failed']:
+      print(EscapeCommand(failure.command))
+
+  return exitcode
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 const t = require('tap')
 const mockGlobals = require('../../fixtures/mock-globals.js')
 const EventEmitter = require('events')
+const tmock = require('../../fixtures/tmock')
 
 const OUTPUT = []
 const output = (...args) => OUTPUT.push(args)
@@ -21,13 +22,10 @@ const npm = {
 let openerUrl = null
 let openerOpts = null
 let openerResult = null
-const opener = (url, opts, cb) => {
-  openerUrl = url
-  openerOpts = opts
-  return cb(openerResult)
-}
 
 let questionShouldResolve = true
+let openUrlPromptInterrupted = false
+
 const readline = {
   createInterface: () => ({
     question: (_q, cb) => {
@@ -36,11 +34,24 @@ const readline = {
       }
     },
     close: () => {},
+    on: (_signal, cb) => {
+      if (openUrlPromptInterrupted && _signal === 'SIGINT') {
+        cb()
+      }
+    },
   }),
 }
 
-const openUrlPrompt = t.mock('../../../lib/utils/open-url-prompt.js', {
-  opener,
+const openUrlPrompt = tmock(t, '{LIB}/utils/open-url-prompt.js', {
+  '@npmcli/promise-spawn': {
+    open: async (url, options) => {
+      openerUrl = url
+      openerOpts = options
+      if (openerResult) {
+        throw openerResult
+      }
+    },
+  },
   readline,
 })
 
@@ -147,4 +158,26 @@ t.test('returns error when opener errors', async t => {
     'got the correct error'
   )
   t.equal(openerUrl, 'https://www.npmjs.com', 'did not open')
+})
+
+t.test('throws "canceled" error on SIGINT', async t => {
+  t.teardown(() => {
+    openerUrl = null
+    openerOpts = null
+    OUTPUT.length = 0
+    questionShouldResolve = true
+    openUrlPromptInterrupted = false
+  })
+
+  questionShouldResolve = false
+  openUrlPromptInterrupted = true
+  const emitter = new EventEmitter()
+
+  const open = openUrlPrompt(npm, 'https://www.npmjs.com', 'npm home', 'prompt', emitter)
+
+  try {
+    await open
+  } catch (err) {
+    t.equal(err.message, 'canceled')
+  }
 })

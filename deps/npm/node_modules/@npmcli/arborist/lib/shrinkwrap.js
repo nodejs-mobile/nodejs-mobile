@@ -10,7 +10,7 @@
 // definitely not before npm v8.
 
 const localeCompare = require('@isaacs/string-locale-compare')('en')
-const defaultLockfileVersion = 2
+const defaultLockfileVersion = 3
 
 // for comparing nodes to yarn.lock entries
 const mismatch = (a, b) => a && b && a !== b
@@ -35,32 +35,16 @@ const mismatch = (a, b) => a && b && a !== b
 
 const log = require('proc-log')
 const YarnLock = require('./yarn-lock.js')
-const { promisify } = require('util')
-const rimraf = promisify(require('rimraf'))
-const fs = require('fs')
-const readFile = promisify(fs.readFile)
-const writeFile = promisify(fs.writeFile)
-const stat = promisify(fs.stat)
-const readdir_ = promisify(fs.readdir)
-const readlink = promisify(fs.readlink)
+const {
+  readFile,
+  readdir,
+  readlink,
+  rm,
+  stat,
+  writeFile,
+} = require('fs/promises')
 
-// XXX remove when drop support for node v10
-const lstat = promisify(fs.lstat)
-/* istanbul ignore next - version specific polyfill */
-const readdir = async (path, opt) => {
-  if (!opt || !opt.withFileTypes) {
-    return readdir_(path, opt)
-  }
-  const ents = await readdir_(path, opt)
-  if (typeof ents[0] === 'string') {
-    return Promise.all(ents.map(async ent => {
-      return Object.assign(await lstat(path + '/' + ent), { name: ent })
-    }))
-  }
-  return ents
-}
-
-const { resolve, basename } = require('path')
+const { resolve, basename, relative } = require('path')
 const specFromLock = require('./spec-from-lock.js')
 const versionFromTgz = require('./version-from-tgz.js')
 const npa = require('npm-package-arg')
@@ -184,34 +168,32 @@ const assertNoNewer = async (path, data, lockTime, dir = path, seen = null) => {
     ? Promise.resolve([{ name: 'node_modules', isDirectory: () => true }])
     : readdir(parent, { withFileTypes: true })
 
-  return children.catch(() => [])
-    .then(ents => Promise.all(ents.map(async ent => {
-      const child = resolve(parent, ent.name)
-      if (ent.isDirectory() && !/^\./.test(ent.name)) {
-        await assertNoNewer(path, data, lockTime, child, seen)
-      } else if (ent.isSymbolicLink()) {
-        const target = resolve(parent, await readlink(child))
-        const tstat = await stat(target).catch(
-          /* istanbul ignore next - windows */ () => null)
-        seen.add(relpath(path, child))
-        /* istanbul ignore next - windows cannot do this */
-        if (tstat && tstat.isDirectory() && !seen.has(relpath(path, target))) {
-          await assertNoNewer(path, data, lockTime, target, seen)
-        }
+  const ents = await children.catch(() => [])
+  await Promise.all(ents.map(async ent => {
+    const child = resolve(parent, ent.name)
+    if (ent.isDirectory() && !/^\./.test(ent.name)) {
+      await assertNoNewer(path, data, lockTime, child, seen)
+    } else if (ent.isSymbolicLink()) {
+      const target = resolve(parent, await readlink(child))
+      const tstat = await stat(target).catch(
+        /* istanbul ignore next - windows */ () => null)
+      seen.add(relpath(path, child))
+      /* istanbul ignore next - windows cannot do this */
+      if (tstat && tstat.isDirectory() && !seen.has(relpath(path, target))) {
+        await assertNoNewer(path, data, lockTime, target, seen)
       }
-    })))
-    .then(() => {
-      if (dir !== path) {
-        return
-      }
+    }
+  }))
+  if (dir !== path) {
+    return
+  }
 
-      // assert that all the entries in the lockfile were seen
-      for (const loc of new Set(Object.keys(data.packages))) {
-        if (!seen.has(loc)) {
-          throw 'missing from node_modules: ' + loc
-        }
-      }
-    })
+  // assert that all the entries in the lockfile were seen
+  for (const loc of new Set(Object.keys(data.packages))) {
+    if (!seen.has(loc)) {
+      throw 'missing from node_modules: ' + loc
+    }
+  }
 }
 
 const _awaitingUpdate = Symbol('_awaitingUpdate')
@@ -226,6 +208,7 @@ const _buildLegacyLockfile = Symbol('_buildLegacyLockfile')
 const _filenameSet = Symbol('_filenameSet')
 const _maybeRead = Symbol('_maybeRead')
 const _maybeStat = Symbol('_maybeStat')
+
 class Shrinkwrap {
   static get defaultLockfileVersion () {
     return defaultLockfileVersion
@@ -253,15 +236,6 @@ class Shrinkwrap {
       : 'package-lock') + '.json')
     s.loadedFromDisk = !!(sw || lock)
     s.type = basename(s.filename)
-
-    try {
-      if (s.loadedFromDisk && !s.lockfileVersion) {
-        const json = parseJSON(await maybeReadFile(s.filename))
-        if (json.lockfileVersion > defaultLockfileVersion) {
-          s.lockfileVersion = json.lockfileVersion
-        }
-      }
-    } catch (e) {}
 
     return s
   }
@@ -342,6 +316,7 @@ class Shrinkwrap {
     this.lockfileVersion = hiddenLockfile ? 3
       : lockfileVersion ? parseInt(lockfileVersion, 10)
       : null
+
     this[_awaitingUpdate] = new Map()
     this.tree = null
     this.path = resolve(path || '.')
@@ -398,6 +373,7 @@ class Shrinkwrap {
     this[_awaitingUpdate] = new Map()
     const lockfileVersion = this.lockfileVersion || defaultLockfileVersion
     this.originalLockfileVersion = lockfileVersion
+
     this.data = {
       lockfileVersion,
       requires: true,
@@ -442,7 +418,7 @@ class Shrinkwrap {
     this.newline = newline !== undefined ? newline : this.newline
   }
 
-  load () {
+  async load () {
     // we don't need to load package-lock.json except for top of tree nodes,
     // only npm-shrinkwrap.json.
     return this[_maybeRead]().then(([sw, lock, yarn]) => {
@@ -464,7 +440,9 @@ class Shrinkwrap {
         // ignore invalid yarn data.  we'll likely clobber it later anyway.
         try {
           this.yarnLock.parse(yarn)
-        } catch (_) {}
+        } catch {
+          // ignore errors
+        }
       }
 
       return data ? parseJSON(data) : {}
@@ -494,8 +472,14 @@ class Shrinkwrap {
       this.ancientLockfile = false
       return {}
     }).then(lock => {
-      const lockfileVersion = this.lockfileVersion ? this.lockfileVersion
-        : Math.max(lock.lockfileVersion || 0, defaultLockfileVersion)
+      // auto convert v1 lockfiles to v3
+      // leave v2 in place unless configured
+      // v3 by default
+      const lockfileVersion =
+        this.lockfileVersion ? this.lockfileVersion
+        : lock.lockfileVersion === 1 ? defaultLockfileVersion
+        : lock.lockfileVersion || defaultLockfileVersion
+
       this.data = {
         ...lock,
         lockfileVersion: lockfileVersion,
@@ -505,6 +489,7 @@ class Shrinkwrap {
       }
 
       this.originalLockfileVersion = lock.lockfileVersion
+
       // use default if it wasn't explicitly set, and the current file is
       // less than our default.  otherwise, keep whatever is in the file,
       // unless we had an explicit setting already.
@@ -515,8 +500,10 @@ class Shrinkwrap {
         !(lock.lockfileVersion >= 2) && !lock.requires
 
       // load old lockfile deps into the packages listing
+      // eslint-disable-next-line promise/always-return
       if (lock.dependencies && !lock.packages) {
         return rpj(this.path + '/package.json').then(pkg => pkg, er => ({}))
+        // eslint-disable-next-line promise/always-return
           .then(pkg => {
             this[_loadAll]('', null, this.data)
             this[_fixDependencies](pkg)
@@ -815,7 +802,7 @@ class Shrinkwrap {
       const pathFixed = !resolved ? null
         : !/^file:/.test(resolved) ? resolved
         // resolve onto the metadata path
-        : `file:${resolve(this.path, resolved.slice(5))}`
+        : `file:${resolve(this.path, resolved.slice(5)).replace(/#/g, '%23')}`
 
       // if we have one, only set the other if it matches
       // otherwise it could be for a completely different thing.
@@ -996,7 +983,7 @@ class Shrinkwrap {
       : npa.resolve(node.name, edge.spec, edge.from.realpath)
 
     if (node.isLink) {
-      lock.version = `file:${relpath(this.path, node.realpath)}`
+      lock.version = `file:${relpath(this.path, node.realpath).replace(/#/g, '%23')}`
     } else if (spec && (spec.type === 'file' || spec.type === 'remote')) {
       lock.version = spec.saveSpec
     } else if (spec && spec.type === 'git' || rSpec.type === 'git') {
@@ -1074,7 +1061,7 @@ class Shrinkwrap {
             // this especially shows up with workspace edges when the root
             // node is also a workspace in the set.
             const p = resolve(node.realpath, spec.slice('file:'.length))
-            set[k] = `file:${relpath(node.realpath, p)}`
+            set[k] = `file:${relpath(node.realpath, p).replace(/#/g, '%23')}`
           } else {
             set[k] = spec
           }
@@ -1131,7 +1118,17 @@ class Shrinkwrap {
     if (!this.data) {
       throw new Error('run load() before saving data')
     }
+
     const json = this.toString(options)
+    if (
+      !this.hiddenLockfile
+      && this.originalLockfileVersion !== undefined
+      && this.originalLockfileVersion !== this.lockfileVersion
+    ) {
+      log.warn(
+      `Converting lock file (${relative(process.cwd(), this.filename)}) from v${this.originalLockfileVersion} -> v${this.lockfileVersion}`
+      )
+    }
     return Promise.all([
       writeFile(this.filename, json).catch(er => {
         if (this.hiddenLockfile) {
@@ -1140,7 +1137,7 @@ class Shrinkwrap {
           // a node_modules folder, but then the lockfile is not important.
           // Remove the file, so that in case there WERE deps, but we just
           // failed to update the file for some reason, it's not out of sync.
-          return rimraf(this.filename)
+          return rm(this.filename, { recursive: true, force: true })
         }
         throw er
       }),

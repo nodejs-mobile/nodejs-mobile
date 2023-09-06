@@ -4,7 +4,7 @@
   --black1: #090c15;
   --black2: #2c3437;
   --black3: #0d111d;
-  --blue1: #00f;
+  --blue1: #0a56b2;
   --white: #ffffff;
   --white-smoke: #f2f2f2;
   --grey-smoke: #e9edf0;
@@ -40,15 +40,11 @@
   --color-text-secondary: var(--green2);
 }
 
+h2 :target,
+h3 :target,
 h4 :target,
 h5 :target {
   scroll-margin-top: 55px;
-}
-
-@supports not (content-visibility: auto) {
-  h3 :target {
-    scroll-margin-top: 55px;
-  }
 }
 
 .dark-mode {
@@ -440,7 +436,7 @@ dd + dt.pre {
 
 #apicontent section {
   content-visibility: auto;
-  contain-intrinsic-size: 1px 5000px;
+  contain-intrinsic-size: 1px auto 5000px;
 }
 
 #apicontent .line {
@@ -602,7 +598,8 @@ hr {
   padding-left: 5rem;
 }
 
-#toc .stability_0::after {
+#toc .stability_0::after,
+.deprecated-inline::after {
   background-color: var(--red2);
   color: var(--white);
   content: "deprecated";
@@ -614,6 +611,15 @@ hr {
   background-color: var(--blue1);
   color: var(--white);
   content: "legacy";
+  margin-left: .25rem;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+
+.experimental-inline::after {
+  background-color: var(--red3);
+  color: var(--white);
+  content: "experimental";
   margin-left: .25rem;
   padding: 1px 3px;
   border-radius: 3px;
@@ -967,6 +973,33 @@ kbd {
 .dark-mode .js-flavor-selector {
   filter: invert(1);
 }
+
+.copy-button {
+  float: right;
+  
+  outline: none;
+  font-size: 10px;
+  color: #fff;
+  background-color: var(--green1);
+  line-height: 1;
+  border-radius: 500px;
+  border: 1px solid transparent;
+  letter-spacing: 2px;
+  min-width: 7.5rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 0 .5rem;
+  margin-right: .2rem;
+  height: 1.5rem;
+  transition-property: background-color,border-color,color,box-shadow,filter;
+  transition-duration: .3s;
+  cursor: pointer;
+}
+
+.copy-button:hover {
+  background-color: var(--green2);
+}
+
 @supports (aspect-ratio: 1 / 1) {
   .js-flavor-selector {
     height: 1.5em;

@@ -37,7 +37,9 @@
 #include <array>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
@@ -295,6 +297,9 @@ class KVStore {
   virtual std::shared_ptr<KVStore> Clone(v8::Isolate* isolate) const;
   virtual v8::Maybe<bool> AssignFromObject(v8::Local<v8::Context> context,
                                            v8::Local<v8::Object> entries);
+  v8::Maybe<bool> AssignToObject(v8::Isolate* isolate,
+                                 v8::Local<v8::Context> context,
+                                 v8::Local<v8::Object> object);
 
   static std::shared_ptr<KVStore> CreateMapKVStore();
 };
@@ -406,19 +411,7 @@ class MaybeStackBuffer {
   // This method can be called multiple times throughout the lifetime of the
   // buffer, but once this has been called Invalidate() cannot be used.
   // Content of the buffer in the range [0, length()) is preserved.
-  void AllocateSufficientStorage(size_t storage) {
-    CHECK(!IsInvalidated());
-    if (storage > capacity()) {
-      bool was_allocated = IsAllocated();
-      T* allocated_ptr = was_allocated ? buf_ : nullptr;
-      buf_ = Realloc(allocated_ptr, storage);
-      capacity_ = storage;
-      if (!was_allocated && length_ > 0)
-        memcpy(buf_, buf_st_, length_ * sizeof(buf_[0]));
-    }
-
-    length_ = storage;
-  }
+  void AllocateSufficientStorage(size_t storage);
 
   void SetLength(size_t length) {
     // capacity() returns how much memory is actually available.
@@ -480,6 +473,11 @@ class MaybeStackBuffer {
       free(buf_);
   }
 
+  inline std::basic_string<T> ToString() const { return {out(), length()}; }
+  inline std::basic_string_view<T> ToStringView() const {
+    return {out(), length()};
+  }
+
  private:
   size_t length_;
   // capacity of the malloc'ed buf_
@@ -496,29 +494,39 @@ class ArrayBufferViewContents {
  public:
   ArrayBufferViewContents() = default;
 
+  ArrayBufferViewContents(const ArrayBufferViewContents&) = delete;
+  void operator=(const ArrayBufferViewContents&) = delete;
+
   explicit inline ArrayBufferViewContents(v8::Local<v8::Value> value);
   explicit inline ArrayBufferViewContents(v8::Local<v8::Object> value);
   explicit inline ArrayBufferViewContents(v8::Local<v8::ArrayBufferView> abv);
   inline void Read(v8::Local<v8::ArrayBufferView> abv);
+  inline void ReadValue(v8::Local<v8::Value> buf);
 
+  inline bool WasDetached() const { return was_detached_; }
   inline const T* data() const { return data_; }
   inline size_t length() const { return length_; }
 
  private:
+  // Declaring operator new and delete as deleted is not spec compliant.
+  // Therefore, declare them private instead to disable dynamic alloc.
+  void* operator new(size_t size);
+  void* operator new[](size_t size);
+  void operator delete(void*, size_t);
+  void operator delete[](void*, size_t);
+
   T stack_storage_[kStackStorageSize];
   T* data_ = nullptr;
   size_t length_ = 0;
+  bool was_detached_ = false;
 };
 
 class Utf8Value : public MaybeStackBuffer<char> {
  public:
   explicit Utf8Value(v8::Isolate* isolate, v8::Local<v8::Value> value);
 
-  inline std::string ToString() const { return std::string(out(), length()); }
-
-  inline bool operator==(const char* a) const {
-    return strcmp(out(), a) == 0;
-  }
+  inline bool operator==(const char* a) const { return strcmp(out(), a) == 0; }
+  inline bool operator!=(const char* a) const { return !(*this == a); }
 };
 
 class TwoByteValue : public MaybeStackBuffer<uint16_t> {
@@ -533,17 +541,14 @@ class BufferValue : public MaybeStackBuffer<char> {
   inline std::string ToString() const { return std::string(out(), length()); }
 };
 
-#define SPREAD_BUFFER_ARG(val, name)                                          \
-  CHECK((val)->IsArrayBufferView());                                          \
-  v8::Local<v8::ArrayBufferView> name = (val).As<v8::ArrayBufferView>();      \
-  std::shared_ptr<v8::BackingStore> name##_bs =                               \
-      name->Buffer()->GetBackingStore();                                      \
-  const size_t name##_offset = name->ByteOffset();                            \
-  const size_t name##_length = name->ByteLength();                            \
-  char* const name##_data =                                                   \
-      static_cast<char*>(name##_bs->Data()) + name##_offset;                  \
-  if (name##_length > 0)                                                      \
-    CHECK_NE(name##_data, nullptr);
+#define SPREAD_BUFFER_ARG(val, name)                                           \
+  CHECK((val)->IsArrayBufferView());                                           \
+  v8::Local<v8::ArrayBufferView> name = (val).As<v8::ArrayBufferView>();       \
+  const size_t name##_offset = name->ByteOffset();                             \
+  const size_t name##_length = name->ByteLength();                             \
+  char* const name##_data =                                                    \
+      static_cast<char*>(name->Buffer()->Data()) + name##_offset;              \
+  if (name##_length > 0) CHECK_NE(name##_data, nullptr);
 
 // Use this when a variable or parameter is unused in order to explicitly
 // silence a compiler warning about that.
@@ -593,7 +598,7 @@ struct MallocedBuffer {
   }
 
   void Truncate(size_t new_size) {
-    CHECK(new_size <= size);
+    CHECK_LE(new_size, size);
     size = new_size;
   }
 
@@ -602,7 +607,7 @@ struct MallocedBuffer {
     data = UncheckedRealloc(data, new_size);
   }
 
-  inline bool is_empty() const { return data == nullptr; }
+  bool is_empty() const { return data == nullptr; }
 
   MallocedBuffer() : data(nullptr), size(0) {}
   explicit MallocedBuffer(size_t size) : data(Malloc<T>(size)), size(size) {}
@@ -676,7 +681,7 @@ std::vector<std::string> SplitString(const std::string& in,
                                      bool skipEmpty = true);
 
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
-                                           const std::string& str,
+                                           std::string_view str,
                                            v8::Isolate* isolate = nullptr);
 template <typename T, typename test_for_number =
     typename std::enable_if<std::numeric_limits<T>::is_specialized, bool>::type>
@@ -686,6 +691,10 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
 template <typename T>
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
                                            const std::vector<T>& vec,
+                                           v8::Isolate* isolate = nullptr);
+template <typename T>
+inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
+                                           const std::set<T>& set,
                                            v8::Isolate* isolate = nullptr);
 template <typename T, typename U>
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
@@ -738,26 +747,23 @@ inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
         .Check();                                                              \
   } while (0)
 
-enum Endianness {
-  kLittleEndian,  // _Not_ LITTLE_ENDIAN, clashes with endian.h.
-  kBigEndian
-};
+enum class Endianness { LITTLE, BIG };
 
-inline enum Endianness GetEndianness() {
+inline Endianness GetEndianness() {
   // Constant-folded by the compiler.
   const union {
     uint8_t u8[2];
     uint16_t u16;
   } u = {{1, 0}};
-  return u.u16 == 1 ? kLittleEndian : kBigEndian;
+  return u.u16 == 1 ? Endianness::LITTLE : Endianness::BIG;
 }
 
 inline bool IsLittleEndian() {
-  return GetEndianness() == kLittleEndian;
+  return GetEndianness() == Endianness::LITTLE;
 }
 
 inline bool IsBigEndian() {
-  return GetEndianness() == kBigEndian;
+  return GetEndianness() == Endianness::BIG;
 }
 
 // Round up a to the next highest multiple of b.
@@ -823,20 +829,20 @@ class PersistentToLocal {
 // computations.
 class FastStringKey {
  public:
-  constexpr explicit FastStringKey(const char* name);
+  constexpr explicit FastStringKey(std::string_view name);
 
   struct Hash {
     constexpr size_t operator()(const FastStringKey& key) const;
   };
   constexpr bool operator==(const FastStringKey& other) const;
 
-  constexpr const char* c_str() const;
+  constexpr std::string_view as_string_view() const;
 
  private:
-  static constexpr size_t HashImpl(const char* str);
+  static constexpr size_t HashImpl(std::string_view str);
 
-  const char* name_;
-  size_t cached_hash_;
+  const std::string_view name_;
+  const size_t cached_hash_;
 };
 
 // Like std::static_pointer_cast but for unique_ptr with the default deleter.
@@ -850,6 +856,71 @@ std::unique_ptr<T> static_unique_pointer_cast(std::unique_ptr<U>&& ptr) {
 // Returns a non-zero code if it fails to open or read the file,
 // aborts if it fails to close the file.
 int ReadFileSync(std::string* result, const char* path);
+
+v8::Local<v8::FunctionTemplate> NewFunctionTemplate(
+    v8::Isolate* isolate,
+    v8::FunctionCallback callback,
+    v8::Local<v8::Signature> signature = v8::Local<v8::Signature>(),
+    v8::ConstructorBehavior behavior = v8::ConstructorBehavior::kAllow,
+    v8::SideEffectType side_effect = v8::SideEffectType::kHasSideEffect,
+    const v8::CFunction* c_function = nullptr);
+
+// Convenience methods for NewFunctionTemplate().
+void SetMethod(v8::Local<v8::Context> context,
+               v8::Local<v8::Object> that,
+               const char* name,
+               v8::FunctionCallback callback);
+
+void SetFastMethod(v8::Local<v8::Context> context,
+                   v8::Local<v8::Object> that,
+                   const char* name,
+                   v8::FunctionCallback slow_callback,
+                   const v8::CFunction* c_function);
+void SetFastMethodNoSideEffect(v8::Local<v8::Context> context,
+                               v8::Local<v8::Object> that,
+                               const char* name,
+                               v8::FunctionCallback slow_callback,
+                               const v8::CFunction* c_function);
+
+void SetProtoMethod(v8::Isolate* isolate,
+                    v8::Local<v8::FunctionTemplate> that,
+                    const char* name,
+                    v8::FunctionCallback callback);
+
+void SetInstanceMethod(v8::Isolate* isolate,
+                       v8::Local<v8::FunctionTemplate> that,
+                       const char* name,
+                       v8::FunctionCallback callback);
+
+// Safe variants denote the function has no side effects.
+void SetMethodNoSideEffect(v8::Local<v8::Context> context,
+                           v8::Local<v8::Object> that,
+                           const char* name,
+                           v8::FunctionCallback callback);
+void SetProtoMethodNoSideEffect(v8::Isolate* isolate,
+                                v8::Local<v8::FunctionTemplate> that,
+                                const char* name,
+                                v8::FunctionCallback callback);
+
+enum class SetConstructorFunctionFlag {
+  NONE,
+  SET_CLASS_NAME,
+};
+
+void SetConstructorFunction(v8::Local<v8::Context> context,
+                            v8::Local<v8::Object> that,
+                            const char* name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+void SetConstructorFunction(v8::Local<v8::Context> context,
+                            v8::Local<v8::Object> that,
+                            v8::Local<v8::String> name,
+                            v8::Local<v8::FunctionTemplate> tmpl,
+                            SetConstructorFunctionFlag flag =
+                                SetConstructorFunctionFlag::SET_CLASS_NAME);
+
 }  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

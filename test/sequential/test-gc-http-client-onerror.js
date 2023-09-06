@@ -8,10 +8,10 @@ const onGC = require('../common/ongc');
 
 let cpus;
 if (common.isAndroid) {
-  // Unable to get os.cpus() on Android.
-  cpus = 4;
+  // Unable to get os.availableParallelism() on Android.
+  cpus = 2;
 } else {
-  cpus = require('os').cpus().length;
+  cpus = require('os').availableParallelism();
 }
 
 function serverHandler(req, res) {
@@ -21,6 +21,7 @@ function serverHandler(req, res) {
 }
 
 const http = require('http');
+const numRequests = 36;
 let createClients = true;
 let done = 0;
 let count = 0;
@@ -29,22 +30,26 @@ let countGC = 0;
 const server = http.createServer(serverHandler);
 server.listen(0, common.mustCall(() => {
   for (let i = 0; i < cpus; i++)
-    getAll();
+    getAll(numRequests);
 }));
 
-function getAll() {
-  if (createClients) {
-    const req = http.get({
-      hostname: 'localhost',
-      pathname: '/',
-      port: server.address().port
-    }, cb).on('error', onerror);
+function getAll(requestsRemaining) {
+  if (!createClients)
+    return;
 
-    count++;
-    onGC(req, { ongc });
+  if (requestsRemaining <= 0)
+    return;
 
-    setImmediate(getAll);
-  }
+  const req = http.get({
+    hostname: 'localhost',
+    pathname: '/',
+    port: server.address().port
+  }, cb).on('error', onerror);
+
+  count++;
+  onGC(req, { ongc });
+
+  setImmediate(getAll, requestsRemaining - 1);
 }
 
 function cb(res) {

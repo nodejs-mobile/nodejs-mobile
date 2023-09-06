@@ -1122,7 +1122,7 @@ uvwasi_errno_t uvwasi_fd_prestat_get(uvwasi_t* uvwasi,
   }
 
   buf->pr_type = UVWASI_PREOPENTYPE_DIR;
-  buf->u.dir.pr_name_len = strlen(wrap->path) + 1;
+  buf->u.dir.pr_name_len = strlen(wrap->path);
   err = UVWASI_ESUCCESS;
 exit:
   uv_mutex_unlock(&wrap->mutex);
@@ -1156,7 +1156,7 @@ uvwasi_errno_t uvwasi_fd_prestat_dir_name(uvwasi_t* uvwasi,
     goto exit;
   }
 
-  size = strlen(wrap->path) + 1;
+  size = strlen(wrap->path);
   if (size > (size_t) path_len) {
     err = UVWASI_ENOBUFS;
     goto exit;
@@ -1392,8 +1392,14 @@ uvwasi_errno_t uvwasi_fd_readdir(uvwasi_t* uvwasi,
       }
 
       /* Write dirent to the buffer if it will fit. */
-      if (UVWASI_SERDES_SIZE_dirent_t + *bufused > buf_len)
+      if (UVWASI_SERDES_SIZE_dirent_t + *bufused > buf_len) {
+        /* If there are more entries to be written to the buffer we set
+         * bufused, which is the return value, to the length of the buffer
+         * which indicates that there are more entries to be read.
+         */
+        *bufused = buf_len;
         break;
+      }
 
       uvwasi_serdes_write_dirent_t(buf, *bufused, &dirent);
       *bufused += UVWASI_SERDES_SIZE_dirent_t;
@@ -2558,6 +2564,15 @@ uvwasi_errno_t uvwasi_sock_shutdown(uvwasi_t* uvwasi,
   UVWASI_DEBUG("uvwasi_sock_shutdown(uvwasi=%p, unimplemented)\n", uvwasi);
   return UVWASI_ENOTSUP;
 }
+
+uvwasi_errno_t uvwasi_sock_accept(uvwasi_t* uvwasi,
+                                  uvwasi_fd_t sock,
+                                  uvwasi_fdflags_t flags,
+                                  uvwasi_fd_t* fd) {
+  /* TODO(mhdawson): Needs implementation */
+  UVWASI_DEBUG("uvwasi_sock_accept(uvwasi=%p, unimplemented)\n", uvwasi);
+  return UVWASI_ENOTSUP;
+};
 
 
 const char* uvwasi_embedder_err_code_to_string(uvwasi_errno_t code) {

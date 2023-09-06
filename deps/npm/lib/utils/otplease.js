@@ -1,3 +1,4 @@
+const log = require('./log-shim')
 async function otplease (npm, opts, fn) {
   try {
     return await fn(opts)
@@ -7,6 +8,7 @@ async function otplease (npm, opts, fn) {
     }
 
     if (isWebOTP(err)) {
+      log.disableProgress()
       const webAuth = require('./web-auth')
       const openUrlPrompt = require('./open-url-prompt')
 
@@ -33,10 +35,10 @@ async function otplease (npm, opts, fn) {
 }
 
 function isWebOTP (err) {
-  if (!err.code === 'EOTP' || !err.body) {
-    return false
+  if (err.code === 'EOTP' && err.body) {
+    return err.body.authUrl && err.body.doneUrl
   }
-  return err.body.authUrl && err.body.doneUrl
+  return false
 }
 
 function isClassicOTP (err) {

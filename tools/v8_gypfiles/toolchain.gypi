@@ -280,6 +280,11 @@
           'CAN_USE_FPU_INSTRUCTIONS'
         ],
       }],
+      ['v8_target_arch=="loong64"', {
+        'defines': [
+          'V8_TARGET_ARCH_LOONG64',
+        ],
+      }],
       ['v8_target_arch=="s390x"', {
         'defines': [
           'V8_TARGET_ARCH_S390',
@@ -325,11 +330,11 @@
               'V8_TARGET_ARCH_PPC_BE',
             ],
             'conditions': [
-              ['OS=="aix"', {
+              ['OS=="aix" or OS=="os400"', {
                 # Work around AIX ceil, trunc and round oddities.
                 'cflags': [ '-mcpu=power5+ -mfprnd' ],
               }],
-              ['OS=="aix"', {
+              ['OS=="aix" or OS=="os400"', {
                 # Work around AIX assembler popcntb bug.
                 'cflags': [ '-mno-popcntb' ],
               }],
@@ -958,6 +963,7 @@
         'defines': [
           'WIN32',
           'NOMINMAX',  # Refs: https://chromium-review.googlesource.com/c/v8/v8/+/1456620
+          '_WIN32_WINNT=0x0602',  # Windows 8
         ],
         # 4351: VS 2005 and later are warning us that they've fixed a bug
         #       present in VS 2003 and earlier.
@@ -1002,7 +1008,7 @@
       ['OS=="mac"', {
         'defines': [
           'V8_HAVE_TARGET_OS',
-          'V8_TARGET_OS_MACOSX',
+          'V8_TARGET_OS_MACOS',
         ]
       }],
       ['OS=="win"', {
@@ -1092,7 +1098,7 @@
         ],
       }],
       ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" \
-         or OS=="netbsd" or OS=="qnx" or OS=="aix"', {
+         or OS=="netbsd" or OS=="qnx" or OS=="aix" or OS=="os400"', {
         'conditions': [
           [ 'v8_no_strict_aliasing==1', {
             'cflags': [ '-fno-strict-aliasing' ],
@@ -1108,7 +1114,7 @@
       ['OS=="netbsd"', {
         'cflags': [ '-I/usr/pkg/include' ],
       }],
-      ['OS=="aix"', {
+      ['OS=="aix" or OS=="os400"', {
         'defines': [
           # Support for malloc(0)
           '_LINUX_SOURCE_COMPAT=1',
@@ -1119,7 +1125,7 @@
             'ldflags': [ '-Wl,-bmaxdata:0x60000000/dsa' ],
           }],
           [ 'v8_target_arch=="ppc64"', {
-            'cflags': [ '-maix64', '-fdollars-in-identifiers' ],
+            'cflags': [ '-maix64', '-fdollars-in-identifiers', '-fno-extern-tls-init' ],
             'ldflags': [ '-maix64 -Wl,-bbigtoc' ],
           }],
         ],
@@ -1160,7 +1166,7 @@
             # Support for backtrace_symbols.
             'ldflags': [ '-rdynamic' ],
           }],
-          ['OS=="aix"', {
+          ['OS=="aix" or OS=="os400"', {
             'ldflags': [ '-Wl,-bbigtoc' ],
             'conditions': [
               ['v8_target_arch=="ppc64"', {
@@ -1204,7 +1210,7 @@
             },
             'conditions': [
               ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="netbsd" or \
-            OS=="qnx" or OS=="aix"', {
+            OS=="qnx" or OS=="aix" or OS=="os400"', {
                 'cflags!': [
                   '-O3',
                   '-O2',
@@ -1255,7 +1261,7 @@
             },
             'conditions': [
               ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="netbsd" or \
-            OS=="qnx" or OS=="aix"', {
+            OS=="qnx" or OS=="aix" or OS=="os400"', {
                 'cflags!': [
                   '-O0',
                   '-O1',
@@ -1305,7 +1311,7 @@
         'defines!': ['ENABLE_HANDLE_ZAPPING',],
         'conditions': [
           ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="netbsd" \
-            or OS=="aix"', {
+            or OS=="aix" or OS=="os400"', {
             'cflags!': [
               '-Os',
             ],
