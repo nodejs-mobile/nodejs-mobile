@@ -113,6 +113,10 @@
     },
 
     'conditions': [
+      # nodejs-mobile patch: from https://github.com/nodejs/node/pull/45756
+      ['target_arch=="arm64"', {
+        'cflags': ['-msign-return-address=all'],  # Pointer authentication.
+      }],
       ['OS in "aix os400"', {
         'ldflags': [
           '-Wl,-bnoerrmsg',
