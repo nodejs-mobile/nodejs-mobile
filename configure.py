@@ -812,6 +812,11 @@ parser.add_argument('-C',
     default=None,
     help=argparse.SUPPRESS)
 
+parser.add_argument('--ios-simulator',
+    action='store_true',
+    dest='ios_simulator',
+    help=argparse.SUPPRESS)
+
 (options, args) = parser.parse_known_args()
 
 # Expand ~ in the install prefix now, it gets written to multiple files.
@@ -1203,6 +1208,7 @@ def configure_node_lib_files(o):
 def configure_node(o):
   if options.dest_os == 'ios':
     o['variables']['OS'] = 'ios'
+    o['variables']['simulator'] = b(options.ios_simulator)
   if options.dest_os == 'android':
     o['variables']['OS'] = 'android'
   o['variables']['node_prefix'] = options.prefix
