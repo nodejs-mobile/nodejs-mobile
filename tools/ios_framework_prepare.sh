@@ -61,6 +61,28 @@ for output_file in "${outputs[@]}"; do
     cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64/
 done
 
+# Compile Node.js for iOS arm64 simulator devices
+make clean
+GYP_DEFINES="target_arch=arm64 host_os=mac target_os=ios"
+export GYP_DEFINES
+./configure \
+  --dest-os=ios \
+  --dest-cpu=arm64 \
+  --with-intl=none \
+  --cross-compiling \
+  --enable-static \
+  --openssl-no-asm \
+  --v8-options=--jitless \
+  --without-node-code-cache \
+  --without-node-snapshot \
+  --ios-simulator
+make -j$(getconf _NPROCESSORS_ONLN)
+
+# Move compilation outputs
+mkdir -p $TARGET_LIBRARY_PATH/arm64-simulator
+for output_file in "${outputs[@]}"; do
+    cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64-simulator/
+done
 
 # Compile Node.js for iOS simulators on x64 Macs
 ARCH=$(arch)
@@ -113,39 +135,56 @@ cd ../
 # Compile the Framework Xcode project for arm64 device
 for output_file in "${outputs[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
-  mv $TARGET_LIBRARY_PATH/arm64/$output_file $TARGET_LIBRARY_PATH/$output_file
+  cp $TARGET_LIBRARY_PATH/arm64/$output_file $TARGET_LIBRARY_PATH/$output_file
 done
+
 xcodebuild build \
   -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
   -target "NodeMobile" \
   -configuration Release \
   -arch arm64 \
   -sdk "iphoneos" \
-  SYMROOT=$FRAMEWORK_TARGET_DIR
+  SYMROOT=$FRAMEWORK_TARGET_DIR/iphoneos-arm64
 
-# Compile the Framework Xcode project for iOS simulators on x64 Macs
+# Compile the Framework Xcode project for arm64 simulator device
 for output_file in "${outputs[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
-  mv $TARGET_LIBRARY_PATH/x64/$output_file $TARGET_LIBRARY_PATH/$output_file
+  cp $TARGET_LIBRARY_PATH/arm64-simulator/$output_file $TARGET_LIBRARY_PATH/$output_file
 done
+
+xcodebuild build \
+  -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
+  -target "NodeMobile" \
+  -configuration Release \
+  -arch arm64 \
+  -sdk "iphonesimulator" \
+  SYMROOT=$FRAMEWORK_TARGET_DIR/iphonesimulator-arm64
+
+# # Compile the Framework Xcode project for iOS simulators on x64 Macs
+for output_file in "${outputs[@]}"; do
+  rm -f $TARGET_LIBRARY_PATH/$output_file
+  cp $TARGET_LIBRARY_PATH/x64/$output_file $TARGET_LIBRARY_PATH/$output_file
+done
+
 xcodebuild build \
   -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
   -target "NodeMobile" \
   -configuration Release \
   -arch x86_64 \
   -sdk "iphonesimulator" \
-  SYMROOT=$FRAMEWORK_TARGET_DIR
+  SYMROOT=$FRAMEWORK_TARGET_DIR/iphonesimulator-x64
 
-cp -RL $FRAMEWORK_TARGET_DIR/Release-iphoneos $FRAMEWORK_TARGET_DIR/Release-universal
+cp -RL $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator $FRAMEWORK_TARGET_DIR/iphonesimulator-universal
+
 lipo -create \
-  $FRAMEWORK_TARGET_DIR/Release-iphoneos/NodeMobile.framework/NodeMobile \
-  $FRAMEWORK_TARGET_DIR/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
-  -output $FRAMEWORK_TARGET_DIR/Release-universal/NodeMobile.framework/NodeMobile
+  $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
+  $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
+  -output $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/NodeMobile
 
 # Create a .xcframework
 xcodebuild -create-xcframework \
-  -framework $FRAMEWORK_TARGET_DIR/Release-iphoneos/NodeMobile.framework \
-  -framework $FRAMEWORK_TARGET_DIR/Release-iphonesimulator/NodeMobile.framework \
+  -framework $FRAMEWORK_TARGET_DIR/iphoneos-arm64/Release-iphoneos/NodeMobile.framework \
+  -framework $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework \
   -output $FRAMEWORK_TARGET_DIR/NodeMobile.xcframework
 
 echo "Frameworks built to $FRAMEWORK_TARGET_DIR"
