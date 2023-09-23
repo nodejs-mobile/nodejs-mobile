@@ -135,7 +135,7 @@ cd ../
 # Compile the Framework Xcode project for arm64 device
 for output_file in "${outputs[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
-  cp $TARGET_LIBRARY_PATH/arm64/$output_file $TARGET_LIBRARY_PATH/$output_file
+  mv $TARGET_LIBRARY_PATH/arm64/$output_file $TARGET_LIBRARY_PATH/$output_file
 done
 
 xcodebuild build \
@@ -149,7 +149,7 @@ xcodebuild build \
 # Compile the Framework Xcode project for arm64 simulator device
 for output_file in "${outputs[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
-  cp $TARGET_LIBRARY_PATH/arm64-simulator/$output_file $TARGET_LIBRARY_PATH/$output_file
+  mv $TARGET_LIBRARY_PATH/arm64-simulator/$output_file $TARGET_LIBRARY_PATH/$output_file
 done
 
 xcodebuild build \
