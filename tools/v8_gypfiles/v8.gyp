@@ -1952,6 +1952,46 @@
       },
     },  # postmortem-metadata
 
+    # nodejs-mobile patch: this whole target
+    {
+      'target_name': 'ndk_sources',
+      'type': 'none',
+      'conditions': [
+        ['OS=="android"', {
+          'copies': [{
+            'files': [
+              '<(ANDROID_NDK_ROOT)/sources/android/cpufeatures/cpu-features.c',
+            ],
+            'destination': '<(SHARED_INTERMEDIATE_DIR)/ndk-sources/',
+          }],
+        }]
+      ]
+    },
+
+    # nodejs-mobile patch: this whole target
+    {
+      'target_name': 'ndk_cpufeatures',
+      'type': 'static_library',
+      'toolsets': ['target'],
+      'conditions': [
+        ['OS=="android" and _toolset=="target"', {
+          'dependencies': ['ndk_sources'],
+          'include_dirs': [
+            '<(ANDROID_NDK_ROOT)/sources/android/cpufeatures',
+            '<(ANDROID_NDK_SYSROOT)/usr/include', # cpu-features.c needs sys/system_properties.h
+          ],
+          'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/ndk-sources/cpu-features.c',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '<(ANDROID_NDK_ROOT)/sources/android/cpufeatures',
+            ],
+          },
+        }],
+      ],
+    },
+
     {
       'target_name': 'v8_zlib',
       'type': 'static_library',
@@ -1965,6 +2005,10 @@
               'defines': ['X86_WINDOWS']
             }]
           ]
+        }],
+        # nodejs-mobile patch:
+        ['OS=="android" and _toolset=="target"', {
+          'dependencies': ['ndk_cpufeatures'],
         }],
       ],
       'direct_dependent_settings': {
