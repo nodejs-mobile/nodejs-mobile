@@ -16,6 +16,9 @@ TARGET_LIBRARY_PATH='tools/ios-framework/bin'
 NODELIB_PROJECT_PATH='tools/ios-framework'
 
 declare -a outputs=(
+    "libada.a"
+    "libbase64_neon64.a"
+    "libbase64.a"
     "libbrotli.a"
     "libcares.a"
     "libgtest_main.a"
@@ -27,15 +30,18 @@ declare -a outputs=(
     "libngtcp2.a"
     "libnode.a"
     "libopenssl.a"
+    "libsimdutf.a"
     "libuv.a"
     "libuvwasi.a"
     "libv8_base_without_compiler.a"
     "libv8_compiler.a"
+    "libv8_init.a"
     "libv8_initializers.a"
     "libv8_libbase.a"
     "libv8_libplatform.a"
     "libv8_snapshot.a"
     "libv8_zlib.a"
+    "libzlib_inflate_chunk_simd.a"
     "libzlib.a"
 )
 

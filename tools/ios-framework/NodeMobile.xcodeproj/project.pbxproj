@@ -29,6 +29,12 @@
 		F63BCE7B29756D9B0049F595 /* libnghttp3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7A29756D920049F595 /* libnghttp3.a */; };
 		F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7C29756DAA0049F595 /* libngtcp2.a */; };
 		F63BCE7F29756DCF0049F595 /* libv8_zlib.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7E29756DCD0049F595 /* libv8_zlib.a */; };
+		F6860EE12ACD491900070ED3 /* libada.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE02ACD491900070ED3 /* libada.a */; };
+		F6860EE32ACD492E00070ED3 /* libbase64_neon64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */; };
+		F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE42ACD493400070ED3 /* libbase64.a */; };
+		F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE62ACD493C00070ED3 /* libsimdutf.a */; };
+		F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */; };
+		F6860EEB2ACD77BC00070ED3 /* libv8_init.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EEA2ACD77BC00070ED3 /* libv8_init.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +62,12 @@
 		F63BCE7A29756D920049F595 /* libnghttp3.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libnghttp3.a; path = bin/libnghttp3.a; sourceTree = "<group>"; };
 		F63BCE7C29756DAA0049F595 /* libngtcp2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libngtcp2.a; path = bin/libngtcp2.a; sourceTree = "<group>"; };
 		F63BCE7E29756DCD0049F595 /* libv8_zlib.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libv8_zlib.a; path = bin/libv8_zlib.a; sourceTree = "<group>"; };
+		F6860EE02ACD491900070ED3 /* libada.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libada.a; path = bin/libada.a; sourceTree = "<group>"; };
+		F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_neon64.a; path = bin/libbase64_neon64.a; sourceTree = "<group>"; };
+		F6860EE42ACD493400070ED3 /* libbase64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64.a; path = bin/libbase64.a; sourceTree = "<group>"; };
+		F6860EE62ACD493C00070ED3 /* libsimdutf.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsimdutf.a; path = bin/libsimdutf.a; sourceTree = "<group>"; };
+		F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib_inflate_chunk_simd.a; path = bin/libzlib_inflate_chunk_simd.a; sourceTree = "<group>"; };
+		F6860EEA2ACD77BC00070ED3 /* libv8_init.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libv8_init.a; path = bin/libv8_init.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -66,6 +78,7 @@
 				33300EC2240437AB0019E302 /* libv8_compiler.a in Frameworks */,
 				33300EC3240437AB0019E302 /* libv8_snapshot.a in Frameworks */,
 				F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */,
+				F6860EEB2ACD77BC00070ED3 /* libv8_init.a in Frameworks */,
 				33300EB6240437620019E302 /* libhistogram.a in Frameworks */,
 				33300EB7240437620019E302 /* libllhttp.a in Frameworks */,
 				33300EB8240437620019E302 /* libv8_initializers.a in Frameworks */,
@@ -77,11 +90,16 @@
 				33300EBE240437620019E302 /* libv8_base_without_compiler.a in Frameworks */,
 				F63BCE7B29756D9B0049F595 /* libnghttp3.a in Frameworks */,
 				D9A7619D1F7C63A8006AFE86 /* CoreFoundation.framework in Frameworks */,
+				F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */,
 				D9A7619E1F7C63A8006AFE86 /* libcares.a in Frameworks */,
 				D9A761A21F7C63A8006AFE86 /* libnghttp2.a in Frameworks */,
+				F6860EE32ACD492E00070ED3 /* libbase64_neon64.a in Frameworks */,
+				F6860EE12ACD491900070ED3 /* libada.a in Frameworks */,
 				D9A761A31F7C63A8006AFE86 /* libnode.a in Frameworks */,
 				D9A761A41F7C63A8006AFE86 /* libopenssl.a in Frameworks */,
+				F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */,
 				D9A761A51F7C63A8006AFE86 /* libuv.a in Frameworks */,
+				F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */,
 				D9A761A61F7C63A8006AFE86 /* libzlib.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -109,6 +127,9 @@
 		3376C9181EC3922E0007AD59 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				F6860EE02ACD491900070ED3 /* libada.a */,
+				F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */,
+				F6860EE42ACD493400070ED3 /* libbase64.a */,
 				33300EAF240437620019E302 /* libbrotli.a */,
 				3376C9191EC3922F0007AD59 /* libcares.a */,
 				33300EAB240437620019E302 /* libhistogram.a */,
@@ -118,15 +139,18 @@
 				F63BCE7C29756DAA0049F595 /* libngtcp2.a */,
 				3376C91D1EC3922F0007AD59 /* libnode.a */,
 				3376C91E1EC3922F0007AD59 /* libopenssl.a */,
+				F6860EE62ACD493C00070ED3 /* libsimdutf.a */,
 				3376C91F1EC3922F0007AD59 /* libuv.a */,
 				33300EB0240437620019E302 /* libuvwasi.a */,
 				33300EB3240437620019E302 /* libv8_base_without_compiler.a */,
 				33300EC0240437AB0019E302 /* libv8_compiler.a */,
+				F6860EEA2ACD77BC00070ED3 /* libv8_init.a */,
 				33300EAD240437620019E302 /* libv8_initializers.a */,
 				33300EB1240437620019E302 /* libv8_libbase.a */,
 				33300EAE240437620019E302 /* libv8_libplatform.a */,
 				33300EC1240437AB0019E302 /* libv8_snapshot.a */,
 				F63BCE7E29756DCD0049F595 /* libv8_zlib.a */,
+				F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */,
 				3376C9201EC3922F0007AD59 /* libzlib.a */,
 				331917C21EC4702A00F93D52 /* CoreFoundation.framework */,
 			);
