@@ -35,7 +35,6 @@ declare -a outputs=(
     "libuvwasi.a"
     "libv8_base_without_compiler.a"
     "libv8_compiler.a"
-    "libv8_init.a"
     "libv8_initializers.a"
     "libv8_libbase.a"
     "libv8_libplatform.a"

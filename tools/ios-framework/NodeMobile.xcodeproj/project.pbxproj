@@ -34,7 +34,6 @@
 		F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE42ACD493400070ED3 /* libbase64.a */; };
 		F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE62ACD493C00070ED3 /* libsimdutf.a */; };
 		F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */; };
-		F6860EEB2ACD77BC00070ED3 /* libv8_init.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EEA2ACD77BC00070ED3 /* libv8_init.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,7 +66,6 @@
 		F6860EE42ACD493400070ED3 /* libbase64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64.a; path = bin/libbase64.a; sourceTree = "<group>"; };
 		F6860EE62ACD493C00070ED3 /* libsimdutf.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsimdutf.a; path = bin/libsimdutf.a; sourceTree = "<group>"; };
 		F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib_inflate_chunk_simd.a; path = bin/libzlib_inflate_chunk_simd.a; sourceTree = "<group>"; };
-		F6860EEA2ACD77BC00070ED3 /* libv8_init.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libv8_init.a; path = bin/libv8_init.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -78,7 +76,6 @@
 				33300EC2240437AB0019E302 /* libv8_compiler.a in Frameworks */,
 				33300EC3240437AB0019E302 /* libv8_snapshot.a in Frameworks */,
 				F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */,
-				F6860EEB2ACD77BC00070ED3 /* libv8_init.a in Frameworks */,
 				33300EB6240437620019E302 /* libhistogram.a in Frameworks */,
 				33300EB7240437620019E302 /* libllhttp.a in Frameworks */,
 				33300EB8240437620019E302 /* libv8_initializers.a in Frameworks */,
@@ -144,7 +141,6 @@
 				33300EB0240437620019E302 /* libuvwasi.a */,
 				33300EB3240437620019E302 /* libv8_base_without_compiler.a */,
 				33300EC0240437AB0019E302 /* libv8_compiler.a */,
-				F6860EEA2ACD77BC00070ED3 /* libv8_init.a */,
 				33300EAD240437620019E302 /* libv8_initializers.a */,
 				33300EB1240437620019E302 /* libv8_libbase.a */,
 				33300EAE240437620019E302 /* libv8_libplatform.a */,
