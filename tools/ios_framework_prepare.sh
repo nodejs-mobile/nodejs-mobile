@@ -15,9 +15,8 @@ LIBRARY_PATH='out/Release'
 TARGET_LIBRARY_PATH='tools/ios-framework/bin'
 NODELIB_PROJECT_PATH='tools/ios-framework'
 
-declare -a outputs=(
+declare -a outputs_common=(
     "libada.a"
-    "libbase64_neon64.a"
     "libbase64.a"
     "libbrotli.a"
     "libcares.a"
@@ -40,9 +39,22 @@ declare -a outputs=(
     "libv8_libplatform.a"
     "libv8_snapshot.a"
     "libv8_zlib.a"
-    "libzlib_inflate_chunk_simd.a"
     "libzlib.a"
 )
+declare -a outputs_x64_only=(
+    "libbase64_avx.a"
+    "libbase64_avx2.a"
+    "libbase64_sse41.a"
+    "libbase64_sse42.a"
+    "libbase64_ssse3.a"
+)
+declare -a outputs_arm64_only=(
+    "libbase64_neon64.a"
+    "libzlib_inflate_chunk_simd.a"
+)
+
+declare -a outputs_x64=("${outputs_common[@]}" "${outputs_x64_only[@]}")
+declare -a outputs_arm64=("${outputs_common[@]}" "${outputs_arm64_only[@]}")
 
 # Compile Node.js for iOS arm64 devices
 make clean
@@ -62,7 +74,7 @@ make -j$(getconf _NPROCESSORS_ONLN)
 
 # Move compilation outputs
 mkdir -p $TARGET_LIBRARY_PATH/arm64
-for output_file in "${outputs[@]}"; do
+for output_file in "${outputs_arm64[@]}"; do
     cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64/
 done
 
@@ -104,7 +116,7 @@ fi
 
 # Move compilation outputs
 mkdir -p $TARGET_LIBRARY_PATH/x64
-for output_file in "${outputs[@]}"; do
+for output_file in "${outputs_x64[@]}"; do
   cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/x64/
 done
 
@@ -116,7 +128,7 @@ FRAMEWORK_TARGET_DIR=${PWD}
 cd ../
 
 # Compile the Framework Xcode project for arm64 device
-for output_file in "${outputs[@]}"; do
+for output_file in "${outputs_arm64[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
   mv $TARGET_LIBRARY_PATH/arm64/$output_file $TARGET_LIBRARY_PATH/$output_file
 done
@@ -129,7 +141,7 @@ xcodebuild build \
   SYMROOT=$FRAMEWORK_TARGET_DIR
 
 # Compile the Framework Xcode project for iOS simulators on x64 Macs
-for output_file in "${outputs[@]}"; do
+for output_file in "${outputs_x64[@]}"; do
   rm -f $TARGET_LIBRARY_PATH/$output_file
   mv $TARGET_LIBRARY_PATH/x64/$output_file $TARGET_LIBRARY_PATH/$output_file
 done

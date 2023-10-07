@@ -34,6 +34,11 @@
 		F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE42ACD493400070ED3 /* libbase64.a */; };
 		F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE62ACD493C00070ED3 /* libsimdutf.a */; };
 		F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */; };
+		F6D008C32AD14FAE00FB3D3D /* libbase64_sse41.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */; };
+		F6D008C42AD14FAE00FB3D3D /* libbase64_avx.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */; };
+		F6D008C52AD14FAE00FB3D3D /* libbase64_ssse3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */; };
+		F6D008C62AD14FAE00FB3D3D /* libbase64_sse42.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */; };
+		F6D008C72AD14FAE00FB3D3D /* libbase64_avx2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +71,11 @@
 		F6860EE42ACD493400070ED3 /* libbase64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64.a; path = bin/libbase64.a; sourceTree = "<group>"; };
 		F6860EE62ACD493C00070ED3 /* libsimdutf.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsimdutf.a; path = bin/libsimdutf.a; sourceTree = "<group>"; };
 		F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib_inflate_chunk_simd.a; path = bin/libzlib_inflate_chunk_simd.a; sourceTree = "<group>"; };
+		F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_sse41.a; path = bin/libbase64_sse41.a; sourceTree = "<group>"; };
+		F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_avx.a; path = bin/libbase64_avx.a; sourceTree = "<group>"; };
+		F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_ssse3.a; path = bin/libbase64_ssse3.a; sourceTree = "<group>"; };
+		F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_sse42.a; path = bin/libbase64_sse42.a; sourceTree = "<group>"; };
+		F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_avx2.a; path = bin/libbase64_avx2.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,10 +83,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F6D008C62AD14FAE00FB3D3D /* libbase64_sse42.a in Frameworks */,
+				F6D008C42AD14FAE00FB3D3D /* libbase64_avx.a in Frameworks */,
 				33300EC2240437AB0019E302 /* libv8_compiler.a in Frameworks */,
 				33300EC3240437AB0019E302 /* libv8_snapshot.a in Frameworks */,
 				F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */,
 				33300EB6240437620019E302 /* libhistogram.a in Frameworks */,
+				F6D008C52AD14FAE00FB3D3D /* libbase64_ssse3.a in Frameworks */,
 				33300EB7240437620019E302 /* libllhttp.a in Frameworks */,
 				33300EB8240437620019E302 /* libv8_initializers.a in Frameworks */,
 				33300EB9240437620019E302 /* libv8_libplatform.a in Frameworks */,
@@ -93,8 +106,10 @@
 				F6860EE32ACD492E00070ED3 /* libbase64_neon64.a in Frameworks */,
 				F6860EE12ACD491900070ED3 /* libada.a in Frameworks */,
 				D9A761A31F7C63A8006AFE86 /* libnode.a in Frameworks */,
+				F6D008C32AD14FAE00FB3D3D /* libbase64_sse41.a in Frameworks */,
 				D9A761A41F7C63A8006AFE86 /* libopenssl.a in Frameworks */,
 				F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */,
+				F6D008C72AD14FAE00FB3D3D /* libbase64_avx2.a in Frameworks */,
 				D9A761A51F7C63A8006AFE86 /* libuv.a in Frameworks */,
 				F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */,
 				D9A761A61F7C63A8006AFE86 /* libzlib.a in Frameworks */,
@@ -125,7 +140,12 @@
 			isa = PBXGroup;
 			children = (
 				F6860EE02ACD491900070ED3 /* libada.a */,
+				F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */,
+				F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */,
 				F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */,
+				F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */,
+				F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */,
+				F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */,
 				F6860EE42ACD493400070ED3 /* libbase64.a */,
 				33300EAF240437620019E302 /* libbrotli.a */,
 				3376C9191EC3922F0007AD59 /* libcares.a */,
