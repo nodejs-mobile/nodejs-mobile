@@ -55,7 +55,7 @@ elif [ $1 == "android" ]; then
     -f '- solaris*' \
     -f '- VC-WIN*' \
     deps/openssl/config/* $HEADERS/openssl
-else
+fi
 
 # node headers
 cp src/js_native_api.h $HEADERS/
