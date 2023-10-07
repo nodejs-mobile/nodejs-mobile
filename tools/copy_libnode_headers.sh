@@ -31,7 +31,31 @@ cp config.gypi $HEADERS/config.gypi
 # openssl headers
 mkdir -p $HEADERS/openssl/archs
 cp deps/openssl/openssl/include/openssl/*.h $HEADERS/openssl/
-rsync -am --include='*.h' -f 'hide,! */' deps/openssl/config/* $HEADERS/openssl
+if [ $1 == "ios" ]; then
+  rsync -am --include='*.h' -f 'hide,! */' \
+    -f '- aix64*' \
+    -f '- BSD*' \
+    -f '- darwin-i386*' \
+    -f '- linux*' \
+    -f '- solaris*' \
+    -f '- VC-WIN*' \
+    deps/openssl/config/* $HEADERS/openssl
+elif [ $1 == "android" ]; then
+  rsync -am --include='*.h' -f 'hide,! */' \
+    -f '- aix64*' \
+    -f '- BSD*' \
+    -f '- darwin*' \
+    -f '- linux-armv4*' \
+    -f '- linux-ppc*' \
+    -f '- linux32-s390x*' \
+    -f '- linux64-loongarch*' \
+    -f '- linux64-mips64*' \
+    -f '- linux64-riscv64*' \
+    -f '- linux64-s390x*' \
+    -f '- solaris*' \
+    -f '- VC-WIN*' \
+    deps/openssl/config/* $HEADERS/openssl
+else
 
 # node headers
 cp src/js_native_api.h $HEADERS/
