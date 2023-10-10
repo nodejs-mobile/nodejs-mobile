@@ -5,7 +5,7 @@ const common = require('../common');
 const { aborted } = require('util');
 const assert = require('assert');
 const { getEventListeners } = require('events');
-const { spawn } = require('child_process');
+// const { spawn } = require('child_process'); // nodejs-mobile patch
 
 {
   // Test aborted works when provided a resource
@@ -47,13 +47,14 @@ const { spawn } = require('child_process');
   )).then(common.mustCall());
 }
 
-{
-  const childProcess = spawn(process.execPath, ['--input-type=module']);
-  childProcess.on('exit', common.mustCall((code) => {
-    assert.strictEqual(code, 13);
-  }));
-  childProcess.stdin.end(`
-    import { aborted } from 'node:util';
-    await aborted(new AbortController().signal, {});
-  `);
-}
+// nodejs-mobile patch: child_process not supported
+// {
+//   const childProcess = spawn(process.execPath, ['--input-type=module']);
+//   childProcess.on('exit', common.mustCall((code) => {
+//     assert.strictEqual(code, 13);
+//   }));
+//   childProcess.stdin.end(`
+//     import { aborted } from 'node:util';
+//     await aborted(new AbortController().signal, {});
+//   `);
+// }
