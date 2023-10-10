@@ -70,9 +70,9 @@ DEVICE_ID=1234567890abcdef123456789abcdef987654321 JOBS=0 ./tools/test.py --repo
 
 ### Android prerequisites
 
-You'll need a macOS or Linux development machine, and a physical Android device.
+You'll need a macOS or Linux development machine, and a physical Android device. This test suite unfortunately only supports devices with Android version up to 9.0 (maybe 10.0 too?), because our scripts need to be able to execute `kill` which seems restricted or removed in recent versions of Android.
 
-You'll need [Android Studio](https://developer.android.com/studio/install.html) installed on your development Machine, alongside `Java`, `Gradle`, the `Android 8.0 (Android SDK Platform 26)`, `Android SDK Build Tools v29.0.2`, `Android SDK Tools`, `Android SDK Platform-Tools`, `NDK version >=20b` and `CMake 3.6.4111459`.
+You'll need [Android Studio](https://developer.android.com/studio/install.html) installed on your development Machine, alongside `Java`, `Gradle`, the `Android 8.0 (Android SDK Platform 26)`, `Android SDK Build Tools v29.0.2`, `Android SDK Tools`, `Android SDK Platform-Tools`, `NDK version >=24` and `CMake 3.6.4111459`.
 
 You should set the Environment variables required to build Android Applications from the command line: the `ANDROID_HOME` variable pointing to your `android-sdk` path and the `ANDROID_NDK_HOME` variable pointing to the installed NDK path (it usually is `$ANDROID_HOME/ndk-bundle`) . You should also add `$ANDROID_HOME/platform-tools`, `$ANDROID_HOME/tools` and `$ANDROID_HOME/tools/bin` to the `PATH` environment variable.
 
