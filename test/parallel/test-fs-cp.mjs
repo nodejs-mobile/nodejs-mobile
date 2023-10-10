@@ -42,7 +42,7 @@ function nextdir() {
 // It copies a nested folder structure with mode flags.
 // This test is based on fs.promises.copyFile() with `COPYFILE_FICLONE_FORCE`.
 (() => {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   try {
     cpSync(src, dest, mustNotMutateObjectDeep({
@@ -461,7 +461,7 @@ if (!isWindows && !isIOS && !isAndroid) {
 // It copies a nested folder structure with mode flags.
 // This test is based on fs.promises.copyFile() with `COPYFILE_FICLONE_FORCE`.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   cp(src, dest, mustNotMutateObjectDeep({
     recursive: true,
@@ -879,7 +879,7 @@ if (!isWindows && !isIOS && !isAndroid) {
 // It copies a nested folder structure with mode flags.
 // This test is based on fs.promises.copyFile() with `COPYFILE_FICLONE_FORCE`.
 {
-  const src = './test/fixtures/copy/kitchen-sink';
+  const src = fixturesPath('copy/kitchen-sink'); // nodejs-mobile patch
   const dest = nextdir();
   let p = null;
   let successFiClone = false;
