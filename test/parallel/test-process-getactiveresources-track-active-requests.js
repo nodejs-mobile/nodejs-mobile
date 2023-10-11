@@ -8,4 +8,5 @@ for (let i = 0; i < 12; i++) {
   fs.open(__filename, 'r', common.mustCall());
 }
 
-assert.strictEqual(process.getActiveResourcesInfo().length, 12);
+// nodejs-mobile patch to add +1 representing PipeWrap
+assert.strictEqual(process.getActiveResourcesInfo().length, 12+1);

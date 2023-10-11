@@ -87,6 +87,8 @@ describe('concurrency: true implies Infinity', { concurrency: true }, () => {
   });
 }
 
+// nodejs-mobile patch: spawnPromisified is not available
+/*
 test('--test multiple files', { skip: os.availableParallelism() < 3 }, async () => {
   await fs.writeFile(path.resolve(tmpdir.path, 'test-runner-concurrency'), '');
   const { code, stderr } = await common.spawnPromisified(process.execPath, [
@@ -97,3 +99,4 @@ test('--test multiple files', { skip: os.availableParallelism() < 3 }, async () 
   assert.strictEqual(stderr, '');
   assert.strictEqual(code, 0);
 });
+*/
