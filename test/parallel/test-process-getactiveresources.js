@@ -6,4 +6,5 @@ const assert = require('assert');
 
 setTimeout(() => {}, 0);
 
-assert.deepStrictEqual(process.getActiveResourcesInfo(), ['Timeout']);
+// nodejs-mobile patch to add PipeWrap
+assert.deepStrictEqual(process.getActiveResourcesInfo(), ['PipeWrap', 'Timeout']);
