@@ -114,6 +114,7 @@ test-crypto-fips: SKIP
 test-crypto-secure-heap: SKIP
 test-cwd-enoent*: SKIP
 test-debug-usage: SKIP
+test-debugger-address: SKIP
 test-debugger-auto-resume: SKIP
 test-debugger-break: SKIP
 test-debugger-breakpoint-exists: SKIP
