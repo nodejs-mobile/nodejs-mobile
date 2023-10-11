@@ -10,6 +10,7 @@ tmpdir.refresh();
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path'); // nodejs-mobile patch
 
 // This error message should not be passed to a printf-like function.
 assert.throws(() => {
@@ -23,7 +24,8 @@ assert.throws(() => {
   return true;
 });
 
-const notBindingDir = 'test/addons/not-a-binding';
+// nodejs-mobile patch of notBindingDir:
+const notBindingDir = path.join(__dirname, '..', 'addons', 'not-a-binding');
 const notBindingPath = `${notBindingDir}/build/Release/binding.node`;
 const strangeBindingPath = `${tmpdir.path}/binding-%s.node`;
 // Ensure that the addon directory exists, but skip the remainder of the test if
