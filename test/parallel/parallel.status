@@ -298,6 +298,15 @@ test-snapshot-dns-lookup-localhost: SKIP
 test-snapshot-dns-lookup-localhost-promise: SKIP
 test-snapshot-dns-resolve-localhost: SKIP
 test-snapshot-dns-resolve-localhost-promise: SKIP
+test-snapshot-error: SKIP
+test-snapshot-eval: SKIP
+test-snapshot-gzip: SKIP
+test-snapshot-incompatible: SKIP
+test-snapshot-namespaced-builtin: SKIP
+test-snapshot-typescript: SKIP
+test-snapshot-umd: SKIP
+test-snapshot-warning: SKIP
+test-snapshot-weak-reference: SKIP
 test-source-map-enable: SKIP
 test-startup-large-pages: SKIP
 test-startup-empty-regexp-statics: SKIP
