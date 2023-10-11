@@ -294,6 +294,7 @@ test-snapshot-api: SKIP
 test-snapshot-argv1: SKIP
 test-snapshot-basic: SKIP
 test-snapshot-cjs-main: SKIP
+test-snapshot-console: SKIP
 test-snapshot-dns-lookup-localhost: SKIP
 test-snapshot-dns-lookup-localhost-promise: SKIP
 test-snapshot-dns-resolve-localhost: SKIP
