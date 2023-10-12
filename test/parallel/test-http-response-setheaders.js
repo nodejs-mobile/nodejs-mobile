@@ -6,12 +6,15 @@ const assert = require('assert');
 {
   const server = http.createServer({ requireHostHeader: false }, common.mustCall((req, res) => {
     res.writeHead(200); // Headers already sent
+    // nodejs-mobile patch: globalThis.Headers uses undici uses Wasm, bad on iOS
+    /*
     const headers = new globalThis.Headers({ foo: '1' });
     assert.throws(() => {
       res.setHeaders(headers);
     }, {
       code: 'ERR_HTTP_HEADERS_SENT'
     });
+    */
     res.end();
   }));
 
@@ -70,6 +73,8 @@ const assert = require('assert');
   }));
 }
 
+// nodejs-mobile patch: globalThis.Headers uses undici uses Wasm, bad on iOS
+/*
 {
   const server = http.createServer({ requireHostHeader: false }, common.mustCall((req, res) => {
     const headers = new globalThis.Headers({ foo: '1', bar: '2' });
@@ -109,6 +114,7 @@ const assert = require('assert');
     });
   }));
 }
+*/
 
 {
   const server = http.createServer({ requireHostHeader: false }, common.mustCall((req, res) => {
