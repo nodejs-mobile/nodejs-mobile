@@ -3,6 +3,8 @@ import assert from 'node:assert';
 import { test } from 'node:test';
 import { parseArgs } from 'node:util';
 
+// nodejs-mobile patch: note that on iOS this test passes, but doesn't close/die
+
 test('when short option used as flag then stored as flag', () => {
   const args = ['-f'];
   const expected = { values: { __proto__: null, f: true }, positionals: [] };
