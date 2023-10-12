@@ -87,6 +87,8 @@ test-cli-syntax-*: SKIP
 test-cluster-*: SKIP
 test-deprecation-flags: SKIP
 test-dgram-bind-shared-ports: SKIP
+test-diagnostic-dir-cpu-prof: SKIP
+test-diagnostic-dir-heap-prof: SKIP
 test-fs-stat-sync-overflow: SKIP
 test-heapdump-flag: SKIP
 test-init: SKIP
@@ -97,6 +99,7 @@ test-next-tick-error-spin: SKIP
 test-process-title: SKIP
 test-process-warnings: SKIP
 test-repl-timeout-throw: SKIP
+test-runner-run-inspect: SKIP
 test-set-http-max-http-headers: SKIP
 test-stream2-stderr-sync: SKIP
 test-util-debug: SKIP

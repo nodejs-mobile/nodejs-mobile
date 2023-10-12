@@ -552,26 +552,33 @@ test-common-countdown: SKIP
 test-common-expect-warning: SKIP
 test-coverage-with-inspector-disabled: SKIP
 test-crypto-fips: SKIP
+test-crypto-no-algorithm: SKIP
 test-crypto-secure-heap: SKIP
 test-cwd-enoent*: SKIP
 test-debug-usage: SKIP
 test-debugger-address: SKIP
 test-debugger-auto-resume: SKIP
+test-debugger-backtrace: SKIP
 test-debugger-break: SKIP
 test-debugger-breakpoint-exists: SKIP
 test-debugger-clear-breakpoints: SKIP
 test-debugger-exceptions: SKIP
+test-debugger-exec: SKIP
 test-debugger-exec-scope: SKIP
 test-debugger-extract-function-name: SKIP
 test-debugger-heap-profiler: SKIP
 test-debugger-help: SKIP
 test-debugger-invalid-json: SKIP
 test-debugger-list: SKIP
+test-debugger-low-level: SKIP
 test-debugger-object-type-remote-object: SKIP
+test-debugger-preserve-breaks: SKIP
 test-debugger-profile: SKIP
 test-debugger-profile-command: SKIP
 test-debugger-random-port: SKIP
 test-debugger-random-port-with-inspect-port: SKIP
+test-debugger-repeat-last: SKIP
+test-debugger-restart-message: SKIP
 test-debugger-run-after-quit-restart: SKIP
 test-debugger-sb-before-load: SKIP
 test-debugger-scripts: SKIP
@@ -584,6 +591,7 @@ test-debugger-websocket-secret-mismatch: SKIP
 test-dgram-cluster-*: SKIP
 test-dgram-deprecation-error: SKIP
 test-dgram-exclusive-implicit-bind: SKIP
+test-dgram-unref-in-cluster: SKIP
 test-domain-abort-on-uncaught: SKIP
 test-domain-nested-throw: SKIP
 test-domain-no-error-handler-abort-on-uncaught-*: SKIP
@@ -888,9 +896,11 @@ test-eslint-*: SKIP
 test-freeze-intrinsics: SKIP
 test-errors-systemerror-frozen-intrinsics: SKIP
 test-fetch: SKIP
+test-fetch-disabled: SKIP
 test-whatwg-webstreams-transfer: SKIP
 test-vm-codegen: SKIP
 test-wasm-simple: SKIP
+test-wasm-web-api: SKIP
 test-worker-message-port-wasm-module: SKIP
 test-worker-message-port-wasm-threads: SKIP
 #
@@ -995,6 +1005,11 @@ test-trace-events-api: SKIP
 test-trace-events-async-hooks: SKIP
 test-trace-events-async-hooks-dynamic: SKIP
 test-trace-events-async-hooks-worker: SKIP
+#
+# Tests that are less relevant on mobile, although they could be supported
+#
+test-release-changelog: SKIP # header files not available from mobile apps
+test-runner-run: SKIP # some paths were not correct
 
 [$asan==on]
 # https://github.com/nodejs/node/issues/39655
