@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#18.17.1">18.17.1</a><br/>
 <a href="#16.17.1">16.17.1</a><br/>
 <a href="#16.17.0">16.17.0</a><br/>
 <a href="#0.3.3">0.3.3</a><br/>
@@ -29,8 +30,26 @@
 </tr>
 </table>
 
+<a id="18.17.1"></a>
+## 2023-10-13, Version 18.17.1 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 18.17.1
+* Supports iOS Simulator for both architectures (arm64 and x86_64)
+
+Breaking changes:
+
+- Android: dropped support for Android 6.0 and below
+  - That is, we now only support versions >=7.0 (i.e. SDK >=24)
+  - Because of a [change in libuv](https://github.com/libuv/libuv/commit/c8cbdbd2c47863fcb081415b5cade536bd4f7250)
+  - [Just 3.7% of Android users](https://www.businessofapps.com/data/android-statistics
+) (<=6.0) now left behind
+- iOS: now requires compilation flag `-std=gnu++17` and minimum iOS version >=13.0
+
+
 <a id="16.17.1"></a>
-## 2023-02-21, Version 16.17.1 (Current)
+## 2023-02-21, Version 16.17.1
 
 ### Notable Changes
 
