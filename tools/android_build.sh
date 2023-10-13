@@ -56,8 +56,8 @@ BUILD_ARCH() {
 if [ $# -eq 2 ]; then
   TARGET_ARCH="arm"
   BUILD_ARCH
-  TARGET_ARCH="x86"
-  BUILD_ARCH
+  # TARGET_ARCH="x86"
+  # BUILD_ARCH
   TARGET_ARCH="arm64"
   BUILD_ARCH
   TARGET_ARCH="x86_64"
