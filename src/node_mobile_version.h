@@ -3,7 +3,7 @@
 
 #include "node_version.h"
 
-#define NODE_MOBILE_MAJOR_VERSION 16
+#define NODE_MOBILE_MAJOR_VERSION 18
 #define NODE_MOBILE_MINOR_VERSION 17
 #define NODE_MOBILE_PATCH_VERSION 1
 
