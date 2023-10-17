@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#18.17.2">18.17.2</a><br/>
 <a href="#18.17.1">18.17.1</a><br/>
 <a href="#16.17.1">16.17.1</a><br/>
 <a href="#16.17.0">16.17.0</a><br/>
@@ -30,8 +31,17 @@
 </tr>
 </table>
 
+<a id="18.17.2"></a>
+## 2023-10-17, Version 18.17.2 (Current)
+
+### Notable Changes
+
+* Added missing headers and Info.plist for iOS Simulator build of nodejs-mobile
+* Binaries for nodejs-mobile remained unchanged (i.e. same as 18.17.1)
+
+
 <a id="18.17.1"></a>
-## 2023-10-13, Version 18.17.1 (Current)
+## 2023-10-13, Version 18.17.1
 
 ### Notable Changes
 
