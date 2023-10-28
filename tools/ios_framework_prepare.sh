@@ -14,6 +14,7 @@ cd ../
 LIBRARY_PATH='out/Release'
 TARGET_LIBRARY_PATH='tools/ios-framework/bin'
 NODELIB_PROJECT_PATH='tools/ios-framework'
+XCODE_PROJECT_PATH='tools/ios-framework/NodeMobile.xcodeproj/project.pbxproj'
 
 declare -a outputs_common=(
     "libada.a"
@@ -154,6 +155,11 @@ build_framework_for_arm64_device() {
     rm -f $TARGET_LIBRARY_PATH/$output_file
     mv $TARGET_LIBRARY_PATH/arm64-device/$output_file $TARGET_LIBRARY_PATH/$output_file
   done
+  # Remove libraries that do not exist for this target
+  cp $XCODE_PROJECT_PATH $XCODE_PROJECT_PATH.bak
+  for output_file in "${outputs_x64_only[@]}"; do
+    grep -vF "$output_file" $XCODE_PROJECT_PATH > temp && mv temp $XCODE_PROJECT_PATH
+  done
   xcodebuild build \
     -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
     -target "NodeMobile" \
@@ -161,6 +167,7 @@ build_framework_for_arm64_device() {
     -arch arm64 \
     -sdk "iphoneos" \
     SYMROOT=$FRAMEWORK_TARGET_DIR/iphoneos-arm64
+  mv $XCODE_PROJECT_PATH.bak $XCODE_PROJECT_PATH
 }
 
 build_framework_for_arm64_simulator() {
@@ -169,6 +176,11 @@ build_framework_for_arm64_simulator() {
     rm -f $TARGET_LIBRARY_PATH/$output_file
     mv $TARGET_LIBRARY_PATH/arm64-simulator/$output_file $TARGET_LIBRARY_PATH/$output_file
   done
+  # Remove libraries that do not exist for this target
+  cp $XCODE_PROJECT_PATH $XCODE_PROJECT_PATH.bak
+  for output_file in "${outputs_x64_only[@]}"; do
+    grep -vF "$output_file" $XCODE_PROJECT_PATH > temp && mv temp $XCODE_PROJECT_PATH
+  done
   xcodebuild build \
     -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
     -target "NodeMobile" \
@@ -176,11 +188,19 @@ build_framework_for_arm64_simulator() {
     -arch arm64 \
     -sdk "iphonesimulator" \
     SYMROOT=$FRAMEWORK_TARGET_DIR/iphonesimulator-arm64
+  mv $XCODE_PROJECT_PATH.bak $XCODE_PROJECT_PATH
+}
 
+build_framework_for_x64_simulator() {
   # Compile the Framework Xcode project for iOS simulators on x64 Macs
   for output_file in "${outputs_x64[@]}"; do
     rm -f $TARGET_LIBRARY_PATH/$output_file
     mv $TARGET_LIBRARY_PATH/x64-simulator/$output_file $TARGET_LIBRARY_PATH/$output_file
+  done
+  # Remove libraries that do not exist for this target
+  cp $XCODE_PROJECT_PATH $XCODE_PROJECT_PATH.bak
+  for output_file in "${outputs_arm64_only[@]}"; do
+    grep -vF "$output_file" $XCODE_PROJECT_PATH > temp && mv temp $XCODE_PROJECT_PATH
   done
   xcodebuild build \
     -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
@@ -189,6 +209,7 @@ build_framework_for_arm64_simulator() {
     -arch x86_64 \
     -sdk "iphonesimulator" \
     SYMROOT=$FRAMEWORK_TARGET_DIR/iphonesimulator-x64
+  mv $XCODE_PROJECT_PATH.bak $XCODE_PROJECT_PATH
 }
 
 build_universal_framework() {
@@ -200,16 +221,6 @@ build_universal_framework() {
 }
 
 build_frameworks() {
-  # Create a path to build the frameworks into
-  rm -rf out_ios
-  mkdir -p out_ios
-  cd out_ios
-  FRAMEWORK_TARGET_DIR=${PWD}
-  cd ../
-
-  build_framework_for_arm64_device;
-  build_framework_for_arm64_simulator;
-
   # Join both simulator outputs into one
   mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
   lipo -create \
@@ -222,11 +233,35 @@ build_frameworks() {
   echo "Frameworks built to $FRAMEWORK_TARGET_DIR"
 }
 
-build_for_arm64_device
-build_for_arm64_simulator
-build_for_x64_simulator
-build_frameworks
+# Create a path to build the frameworks into
+rm -rf out_ios
+mkdir -p out_ios
+cd out_ios
+FRAMEWORK_TARGET_DIR=${PWD}
+cd ../
 
-source $SCRIPT_DIR/copy_libnode_headers.sh ios
+if [ $1 == "arm64" ]; then
+  build_for_arm64_device
+  build_framework_for_arm64_device
+elif [ $1 == "arm64-simulator" ]; then
+  build_for_arm64_simulator
+  build_framework_for_arm64_simulator
+elif [ $1 == "x64-simulator" ]; then
+  build_for_x64_simulator
+  build_framework_for_x64_simulator
+elif [ $1 == "build_frameworks" ]; then
+  build_frameworks
+else
+  build_for_arm64_device
+  build_for_arm64_simulator
+  build_for_x64_simulator
+
+  build_framework_for_arm64_device
+  build_framework_for_arm64_simulator
+  build_framework_for_x64_simulator
+  build_frameworks
+
+  source $SCRIPT_DIR/copy_libnode_headers.sh ios
+fi
 
 cd "$ROOT"
