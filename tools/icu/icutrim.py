@@ -214,7 +214,7 @@ def queueForRemoval(tree):
     mytree = trees[tree]
     if options.verbose > 0:
         print("* %s: %d items" % (tree, len(mytree["locs"])))
-    # do varible substitution for this tree here
+    # do variable substitution for this tree here
     if isinstance(config["trees"][tree], basestring):
         treeStr = config["trees"][tree]
         if options.verbose > 5:
