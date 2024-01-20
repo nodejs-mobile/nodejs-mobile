@@ -182,17 +182,21 @@ for output_file in "${outputs_x64[@]}"; do
 done
 xcodebuild build \
   -project $NODELIB_PROJECT_PATH/NodeMobile.xcodeproj \
-  -target "NodeMobile" \
+  -target "NodeMobile-x64" \
   -configuration Release \
   -arch x86_64 \
   -sdk "iphonesimulator" \
   SYMROOT=$FRAMEWORK_TARGET_DIR/iphonesimulator-x64
 
 # Join both simulator outputs into one
-mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
+mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal
+cp -R \
+  $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework \
+  $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
+rm -f $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/NodeMobile
 lipo -create \
   $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
-  $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
+  $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile-x64.framework/NodeMobile-x64 \
   -output $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/NodeMobile
 
 # Create a .xcframework combining both iphoneos and iphonesimulator
