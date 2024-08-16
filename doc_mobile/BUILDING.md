@@ -4,7 +4,7 @@
 
 ### Basic build tools:
 ```sh
-sudo apt-get install -y build-essential git python
+sudo apt-get install -y build-essential git python gcc-multilib g++-multilib
 ```
 
 ### Install curl and unzip (needed to download the Android NDK):
