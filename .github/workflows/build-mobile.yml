@@ -1,0 +1,137 @@
+name: Build
+
+on: [push, pull_request]
+
+env:
+  SCCACHE_GHA_ENABLED: 'true'
+  ANDROID_NDK_VERSION: r26b
+  ANDROID_TARGET_SDK_VERSION: 24
+  XCODE_VERSION: 15.4
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-22.04, target_arch: arm }
+          - { os: ubuntu-22.04, target_arch: arm64 }
+          - { os: ubuntu-22.04, target_arch: x86_64 }
+
+    runs-on: ${{ matrix.config.os }}
+    env:
+      TARGET_ARCH: ${{ matrix.config.target_arch }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
+
+      - name: Install build utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      - name: Setup Android NDK
+        if: ${{ false }}
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Build
+        run: |
+          ./tools/android_build.sh $ANDROID_NDK_HOME $ANDROID_TARGET_SDK_VERSION $TARGET_ARCH
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: node-android-${{ env.TARGET_ARCH }}
+          path: out_android
+
+  build-ios:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: macos-14, target_arch: arm64 }
+          - { os: macos-14, target_arch: arm64-simulator }
+          - { os: macos-13, target_arch: x64-simulator }
+
+    runs-on: ${{ matrix.config.os }}
+    env:
+      TARGET_ARCH: ${{ matrix.config.target_arch }}
+
+    steps:
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /Library/Frameworks/Mono.framework
+          sudo rm -rf /Library/Frameworks/Xamarin.iOS.framework
+          sudo rm -rf /Library/Frameworks/Xamarin.Android.framework
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
+
+      - name: Xcode Select Version
+        uses: mobiledevops/xcode-select-version-action@v1
+        with:
+          xcode-select-version: ${{ env.XCODE_VERSION }}
+
+      - name: Build
+        run: |
+          ./tools/ios_framework_prepare.sh $TARGET_ARCH
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: node-ios-${{ env.TARGET_ARCH }}
+          path: out_ios
+
+  build-ios-unified-framework:
+    runs-on: macos-14
+    needs: build-ios
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Xcode Select Version
+        uses: mobiledevops/xcode-select-version-action@v1
+        with:
+          xcode-select-version: ${{ env.XCODE_VERSION }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-ios-arm64
+          path: out_ios
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-ios-arm64-simulator
+          path: out_ios
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-ios-x64-simulator
+          path: out_ios
+
+      - name: Build
+        run: |
+          ls -R out_ios
+          ./tools/ios_framework_prepare.sh combine_frameworks
+          mkdir -p artifacts/include
+          cp -R out_ios/NodeMobile.xcframework artifacts/
+          ./tools/copy_libnode_headers.sh ios
+          cp -R out_ios/libnode/include/* artifacts/include
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: node-ios
+          path: artifacts
