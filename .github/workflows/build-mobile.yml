@@ -22,6 +22,14 @@ jobs:
         run: xcrun --show-sdk-path
       - name: Users runner Library
         run: du -d 1 -h /Users/runner/Library
+      - name: Users runner Library Developer
+        run: du -d 2 -h /Users/runner/Library/Developer
+      - name: Applications
+        run: du -d 1 -h /Applications
+      - name: Xcode Platforms
+        run: du -d 1 -h /Applications/Xcode_15.4.app/Contents/Developer/Platforms/
+      - name: Xcode MacOS SDKs
+        run: du -d 1 -h /Applications/Xcode_15.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
       - name: usr local share
         run: du -d 1 -h /usr/local/share
       - name: usr local opt
