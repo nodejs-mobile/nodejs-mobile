@@ -15,37 +15,6 @@ permissions:
   contents: read
 
 jobs:
-  size-macos:
-    runs-on: macos-14
-    steps:
-      - name: BEFORE
-        run: sudo du -d 1 -h /
-      - name: Show xcode SDK PATH
-        run: xcrun --show-sdk-path
-      - name: Users runner Library
-        run: du -d 1 -h /Users/runner/Library
-      - name: Users runner Library Developer
-        run: du -d 2 -h /Users/runner/Library/Developer
-      - name: Simulators
-        run: du -d 2 -h /Users/runner/Library/Developer/CoreSimulator
-      - name: Applications
-        run: du -d 1 -h /Applications
-      - name: Xcode Platforms
-        run: du -d 1 -h /Applications/Xcode_15.4.app/Contents/Developer/Platforms/
-      - name: Xcode MacOS SDKs
-        run: du -d 1 -h /Applications/Xcode_15.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
-      - name: usr local share
-        run: du -d 1 -h /usr/local/share
-      - name: usr local opt
-        run: du -d 1 -h /usr/local/opt
-      - name: DELETE
-        run: |
-          sudo rm -rf /Users/runner/Library/Android
-          sudo rm -rf /usr/local/share/powershell
-          sudo find /Applications -type d -name "Xcode_*.app" ! -name "Xcode_15.4.app" -prune -exec rm -rf "{}" \;
-      - name: AFTER
-        run: sudo du -d 1 -h /
-
   build-android:
     strategy:
       fail-fast: false
@@ -98,6 +67,7 @@ jobs:
     runs-on: ${{ matrix.config.os }}
     env:
       TARGET_ARCH: ${{ matrix.config.target_arch }}
+      XCODE_VERSION: ${{ matrix.config.xcode }}
 
     steps:
       - name: Free Disk Space
@@ -105,6 +75,9 @@ jobs:
           sudo rm -rf /Library/Frameworks/Mono.framework
           sudo rm -rf /Library/Frameworks/Xamarin.iOS.framework
           sudo rm -rf /Library/Frameworks/Xamarin.Android.framework
+          sudo rm -rf /Users/runner/Library/Android
+          sudo rm -rf /usr/local/share/powershell
+          sudo find /Applications -type d -name "Xcode_*.app" ! -name "Xcode_$XCODE_VERSION.app" -prune -exec rm -rf "{}" \;
 
       - uses: actions/checkout@v4
         with:
