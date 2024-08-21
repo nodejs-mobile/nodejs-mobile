@@ -10,7 +10,6 @@ env:
   SCCACHE_GHA_ENABLED: 'true'
   ANDROID_NDK_VERSION: r26b
   ANDROID_TARGET_SDK_VERSION: 24
-  XCODE_VERSION: 15.4
 
 permissions:
   contents: read
@@ -61,9 +60,9 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - { os: macos-14, target_arch: arm64 }
-          - { os: macos-14, target_arch: arm64-simulator }
-          - { os: macos-13, target_arch: x64-simulator }
+          - { os: macos-14, target_arch: arm64, xcode: 15.4 }
+          - { os: macos-14, target_arch: arm64-simulator, xcode: 15.4 }
+          - { os: macos-13, target_arch: x64-simulator, xcode: 15.2 }
 
     runs-on: ${{ matrix.config.os }}
     env:
@@ -86,7 +85,7 @@ jobs:
       - name: Xcode Select Version
         uses: mobiledevops/xcode-select-version-action@v1
         with:
-          xcode-select-version: ${{ env.XCODE_VERSION }}
+          xcode-select-version: ${{ matrix.config.xcode }}
 
       - name: Build
         run: |
@@ -98,7 +97,11 @@ jobs:
           path: out_ios
 
   build-ios-unified-framework:
-    runs-on: macos-14
+    strategy:
+      matrix:
+        config:
+          - { os: macos-14, xcode: 15.4 }
+    runs-on: ${{ matrix.config.os }}
     needs: build-ios
     steps:
       - uses: actions/checkout@v4
@@ -108,7 +111,7 @@ jobs:
       - name: Xcode Select Version
         uses: mobiledevops/xcode-select-version-action@v1
         with:
-          xcode-select-version: ${{ env.XCODE_VERSION }}
+          xcode-select-version: ${{ matrix.config.xcode }}
 
       - uses: actions/download-artifact@v3
         with:
