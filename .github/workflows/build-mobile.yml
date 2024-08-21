@@ -15,6 +15,18 @@ permissions:
   contents: read
 
 jobs:
+  size-macos:
+    runs-on: macos-14
+    steps:
+      - name: Show xcode SDK PATH
+        run: xcrun --show-sdk-path
+      - name: Users runner Library
+        run: du -d 1 -h /Users/runner/Library
+      - name: usr local share
+        run: du -d 1 -h /usr/local/share
+      - name: usr local opt
+        run: du -d 1 -h /usr/local/opt
+
   build-android:
     strategy:
       fail-fast: false
