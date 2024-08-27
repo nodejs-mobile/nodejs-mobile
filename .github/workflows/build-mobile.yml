@@ -132,6 +132,9 @@ jobs:
           name: node-ios-x64-simulator
           path: out_ios
 
+      - name: Generate config.gypi
+        run: ./configure
+
       - name: Build
         run: |
           ./tools/ios_framework_prepare.sh combine_frameworks
