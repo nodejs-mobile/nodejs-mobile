@@ -50,7 +50,7 @@ jobs:
         run: |
           ./tools/android_build.sh $ANDROID_NDK_HOME $ANDROID_TARGET_SDK_VERSION $TARGET_ARCH
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: node-android-${{ env.TARGET_ARCH }}
           path: out_android
@@ -95,7 +95,7 @@ jobs:
         run: |
           ./tools/ios_framework_prepare.sh $TARGET_ARCH
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: node-ios-${{ env.TARGET_ARCH }}
           path: out_ios
@@ -123,21 +123,21 @@ jobs:
         with:
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-android-arm
           path: out_android
 
       - run: rm -rf out_android/libnode
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-android-arm64
           path: out_android
 
       - run: rm -rf out_android/libnode
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-android-x86_64
           path: out_android
@@ -157,7 +157,7 @@ jobs:
           ./tools/copy_libnode_headers.sh android
           cp -R out_android/libnode/include/* artifacts/include
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: nodejs-mobile-android
           path: artifacts
@@ -186,17 +186,17 @@ jobs:
         with:
           xcode-select-version: ${{ matrix.config.xcode }}
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-ios-arm64
           path: out_ios
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-ios-arm64-simulator
           path: out_ios
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: node-ios-x64-simulator
           path: out_ios
@@ -212,7 +212,7 @@ jobs:
           ./tools/copy_libnode_headers.sh ios
           cp -R out_ios/libnode/include/* artifacts/include
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: nodejs-mobile-ios
           path: artifacts
