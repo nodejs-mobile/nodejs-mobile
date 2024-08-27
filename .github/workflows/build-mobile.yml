@@ -49,6 +49,7 @@ jobs:
       - name: Build
         run: |
           ./tools/android_build.sh $ANDROID_NDK_HOME $ANDROID_TARGET_SDK_VERSION $TARGET_ARCH
+          rm -rf ./out_android/libnode
 
       - uses: actions/upload-artifact@v4
         with:
@@ -125,21 +126,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: node-android-arm
-          path: out_android
-
-      - run: rm -rf out_android/libnode
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-android-arm64
-          path: out_android
-
-      - run: rm -rf out_android/libnode
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-android-x86_64
+          pattern: node-android-*
+          merge-multiple: true
           path: out_android
 
       - run: rm -rf out_android/libnode
@@ -151,9 +139,7 @@ jobs:
         run: |
           mkdir -p artifacts/bin
           mkdir -p artifacts/include
-          cp -R out_android/arm64-v8a/* artifacts/bin
-          cp -R out_android/armeabi-v7a/* artifacts/bin
-          cp -R out_android/x86_64/* artifacts/bin
+          cp -R out_android/* artifacts/bin
           ./tools/copy_libnode_headers.sh android
           cp -R out_android/libnode/include/* artifacts/include
 
@@ -164,10 +150,7 @@ jobs:
 
       - uses: geekyeggo/delete-artifact@v5
         with:
-          name: |
-            node-android-arm
-            node-android-arm64
-            node-android-x86_64
+          name: node-android-*
 
   combine-ios:
     strategy:
@@ -188,17 +171,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: node-ios-arm64
-          path: out_ios
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-ios-arm64-simulator
-          path: out_ios
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: node-ios-x64-simulator
+          pattern: node-ios-*
+          merge-multiple: true
           path: out_ios
 
       - name: Generate config.gypi
@@ -219,7 +193,4 @@ jobs:
 
       - uses: geekyeggo/delete-artifact@v5
         with:
-          name: |
-            node-ios-arm64
-            node-ios-arm64-simulator
-            node-ios-x64-simulator
+          name: node-ios-*
