@@ -147,3 +147,10 @@ jobs:
         with:
           name: node-ios
           path: artifacts
+
+      - uses: geekyeggo/delete-artifact@v5
+        with:
+            name: |
+                node-ios-arm64
+                node-ios-arm64-simulator
+                node-ios-x64-simulator
