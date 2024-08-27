@@ -100,7 +100,76 @@ jobs:
           name: node-ios-${{ env.TARGET_ARCH }}
           path: out_ios
 
-  build-ios-unified-framework:
+  combine-android:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-22.04 }
+    runs-on: ${{ matrix.config.os }}
+    needs: build-android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Install build utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-android-arm
+          path: out_android
+
+      - run: rm -rf out_android/libnode
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-android-arm64
+          path: out_android
+
+      - run: rm -rf out_android/libnode
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: node-android-x86_64
+          path: out_android
+
+      - run: rm -rf out_android/libnode
+
+      - name: Generate config.gypi
+        run: ./configure
+
+      - name: Combine
+        run: |
+          mkdir -p artifacts/bin
+          mkdir -p artifacts/include
+          cp -R out_android/arm64-v8a/* artifacts/bin
+          cp -R out_android/armeabi-v7a/* artifacts/bin
+          cp -R out_android/x86_64/* artifacts/bin
+          ./tools/copy_libnode_headers.sh android
+          cp -R out_android/libnode/include/* artifacts/include
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: nodejs-mobile-android
+          path: artifacts
+
+      - uses: geekyeggo/delete-artifact@v5
+        with:
+          name: |
+            node-android-arm
+            node-android-arm64
+            node-android-x86_64
+
+  combine-ios:
     strategy:
       matrix:
         config:
@@ -135,7 +204,7 @@ jobs:
       - name: Generate config.gypi
         run: ./configure
 
-      - name: Build
+      - name: Combine
         run: |
           ./tools/ios_framework_prepare.sh combine_frameworks
           mkdir -p artifacts/include
@@ -145,12 +214,12 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: node-ios
+          name: nodejs-mobile-ios
           path: artifacts
 
       - uses: geekyeggo/delete-artifact@v5
         with:
-            name: |
-                node-ios-arm64
-                node-ios-arm64-simulator
-                node-ios-x64-simulator
+          name: |
+            node-ios-arm64
+            node-ios-arm64-simulator
+            node-ios-x64-simulator
