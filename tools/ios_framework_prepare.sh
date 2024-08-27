@@ -202,12 +202,19 @@ combine_frameworks() {
     -output $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/NodeMobile
 
   # Create a .xcframework combining both iphoneos and iphonesimulator
+  XCFRAMEWORK=$FRAMEWORK_TARGET_DIR/NodeMobile.xcframework
   xcodebuild -create-xcframework \
     -framework $FRAMEWORK_TARGET_DIR/iphoneos-arm64/Release-iphoneos/NodeMobile.framework \
     -framework $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework \
-    -output $FRAMEWORK_TARGET_DIR/NodeMobile.xcframework
+    -output $XCFRAMEWORK
 
-  echo "Frameworks built to $FRAMEWORK_TARGET_DIR"
+  # Copy missing headers from arm64 to arm64_x86_64-simulator
+  cp -r $XCFRAMEWORK/ios-arm64/NodeMobile.framework/Headers \
+    $XCFRAMEWORK/ios-arm64_x86_64-simulator/NodeMobile.framework/
+  cp -r $XCFRAMEWORK/ios-arm64/NodeMobile.framework/Modules \
+    $XCFRAMEWORK/ios-arm64_x86_64-simulator/NodeMobile.framework/
+
+  echo "Framework built: $XCFRAMEWORK"
 }
 
 set_framework_target_dir() {
