@@ -12,13 +12,13 @@ sudo apt-get install -y build-essential git python gcc-multilib g++-multilib
 sudo apt-get install -y curl unzip
 ```
 
-### Install Android NDK r21b for Linux:
-Choose a location where you want to install the Android NDK and run:
+### Install Android NDK r24 for Linux:
+
+Use the Android SDK Manager or Android Studio to install NDK version 24:
+
 ```sh
-curl https://dl.google.com/android/repository/android-ndk-r21b-linux-x86_64.zip -o ndk.zip
-unzip ndk.zip
+sdkmanager "ndk;24.0.8215888"
 ```
-It will create a `android-ndk-r21b` folder. Save that path for later.
 
 ## Prerequisites to build the Android library on macOS:
 
@@ -30,32 +30,32 @@ As an alternative, installing one of these will install `git`:
 * [Homebrew](https://brew.sh/)
 * [Git-SCM](https://git-scm.com/download/mac)
 
-### Install Android NDK r21b for macOS:
-Choose a location where you want to install the Android NDK and run:
+### Install Android NDK r24 for macOS:
+
+Use the Android SDK Manager or Android Studio to install NDK version 24:
+
 ```sh
-curl https://dl.google.com/android/repository/android-ndk-r21b-darwin-x86_64.zip -o ndk.zip
-unzip ndk.zip
+sdkmanager "ndk;24.0.8215888"
 ```
-It will create a `android-ndk-r21b` folder. Save that path for later.
 
 ## Building the Android library on Linux or macOS:
 
 ### 1) Clone this repo and check out the `mobile-master` branch:
 
 ```sh
-git clone https://github.com/janeasystems/nodejs-mobile
+git clone https://github.com/nodejs-mobile/nodejs-mobile
 cd nodejs-mobile
 git checkout mobile-master
 ```
 
 ### 2a) Using the Android helper script:
 
-The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/android-ndk-r21b`). The second argument must be the Android SDK version as a two-digit number. The third argument is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. You can omit the third argument, and it will build all available architectures.
+The `tools/android_build.sh` script takes as first argument the Android NDK path (in our case is `~/AndroidSDK/ndk/24.0.8215888`). The second argument must be the Android SDK version as a two-digit number. The third argument is the target architecture, which can be one of the following: `arm`, `x86`, `arm64` or `x86_64`. You can omit the third argument, and it will build all available architectures.
 
 Run (example arguments):
 
 ```sh
-./tools/android_build.sh ~/android-ndk-r21b 23
+./tools/android_build.sh ~/AndroidSDK/ndk/24.0.8215888 23
 ```
 
 When done, each built shared library will be placed in `out_android/$(ARCHITECTURE)/libnode.so`.
@@ -64,7 +64,7 @@ When done, each built shared library will be placed in `out_android/$(ARCHITECTU
 Run the `android-configure` script to configure the build with the path to the downloaded NDK and the desired target architecture.
 
 ```sh
-source ./android-configure ../android-ndk-r21b arm
+source ./android-configure ../AndroidSDK/ndk/24.0.8215888 arm
 ```
 
 Start the build phase:
