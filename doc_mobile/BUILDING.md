@@ -7,11 +7,6 @@
 sudo apt-get install -y build-essential git python gcc-multilib g++-multilib
 ```
 
-### Install curl and unzip (needed to download the Android NDK):
-```sh
-sudo apt-get install -y curl unzip
-```
-
 ### Install Android NDK r24 for Linux:
 
 Use the Android SDK Manager or Android Studio to install NDK version 24:
