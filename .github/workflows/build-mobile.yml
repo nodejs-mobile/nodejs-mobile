@@ -45,8 +45,16 @@ jobs:
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+          add-to-path: false
 
       - name: Build
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           ./tools/android_build.sh $ANDROID_NDK_HOME $ANDROID_TARGET_SDK_VERSION $TARGET_ARCH
           rm -rf ./out_android/libnode
