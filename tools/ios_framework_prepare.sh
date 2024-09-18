@@ -196,6 +196,10 @@ build_framework_for_x64_simulator() {
 combine_frameworks() {
   # Join both simulator outputs into one
   mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
+  cp -r $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/* \
+    $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/
+  echo "Check internals of the universal framework before lipo"
+  ls -lR $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
   lipo -create \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
@@ -207,12 +211,6 @@ combine_frameworks() {
     -framework $FRAMEWORK_TARGET_DIR/iphoneos-arm64/Release-iphoneos/NodeMobile.framework \
     -framework $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework \
     -output $XCFRAMEWORK
-
-  # Copy missing headers from arm64 to arm64_x86_64-simulator
-  cp -r $XCFRAMEWORK/ios-arm64/NodeMobile.framework/Headers \
-    $XCFRAMEWORK/ios-arm64_x86_64-simulator/NodeMobile.framework/
-  cp -r $XCFRAMEWORK/ios-arm64/NodeMobile.framework/Modules \
-    $XCFRAMEWORK/ios-arm64_x86_64-simulator/NodeMobile.framework/
 
   echo "Framework built: $XCFRAMEWORK"
 }
