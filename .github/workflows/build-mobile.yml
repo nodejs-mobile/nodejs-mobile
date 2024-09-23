@@ -98,7 +98,7 @@ jobs:
 
       # https://github.com/nodejs/node-gyp/issues/2869 workaround
       - name: Install extra Python dependencies
-        run: brew install python-setuptools
+        run: pip install setuptools
 
       - name: Build
         run: |
