@@ -96,6 +96,10 @@ jobs:
         with:
           xcode-select-version: ${{ matrix.config.xcode }}
 
+      # https://github.com/nodejs/node-gyp/issues/2869 workaround
+      - name: Install extra Python dependencies
+        run: python -m pip install --upgrade packaging pip setuptools
+
       - name: Build
         run: |
           ./tools/ios_framework_prepare.sh $TARGET_ARCH
