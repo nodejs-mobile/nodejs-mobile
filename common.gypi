@@ -583,6 +583,7 @@
             '-Wendif-labels',
             '-W',
             '-Wno-unused-parameter',
+            '-Wno-enum-constexpr-conversion',
           ],
         },
         'target_conditions': [
