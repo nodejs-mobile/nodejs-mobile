@@ -96,9 +96,11 @@ jobs:
         with:
           xcode-select-version: ${{ matrix.config.xcode }}
 
+      # Default Python (3.12) doesn't have support for distutils
       # https://github.com/nodejs/node-gyp/issues/2869 workaround
-      - name: Install extra Python dependencies
-        run: pip install setuptools
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
       - name: Build
         run: |
