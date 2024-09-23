@@ -98,8 +98,8 @@ jobs:
 
       # Default Python (3.12) doesn't have support for distutils
       # https://github.com/nodejs/node-gyp/issues/2869 workaround
-      - name: Remove Python 3.12
-        run: sudo rm -rf $(which python3.12)
+      - name: Equip Python 3.12 with distutils
+        run: python3.12 -m pip install setuptools
 
       - name: Build
         run: |
