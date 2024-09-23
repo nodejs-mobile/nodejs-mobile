@@ -457,7 +457,7 @@ parser.add_argument_group(shared_builtin_optgroup)
 static_optgroup.add_argument('--static-zoslib-gyp',
     action='store',
     dest='static_zoslib_gyp',
-    help='path to zoslib.gyp file for includes and to link to static zoslib libray')
+    help='path to zoslib.gyp file for includes and to link to static zoslib library')
 
 parser.add_argument_group(static_optgroup)
 
@@ -1062,7 +1062,7 @@ def check_compiler(o):
   if not ok:
     warn(f'failed to autodetect C++ compiler version (CXX={CXX})')
   elif clang_version < (8, 0, 0) if is_clang else gcc_version < (8, 3, 0):
-    warn(f'C++ compiler (CXX={CXX}, {version_str}) too old, need g++ 10.1.0 or clang++ 8.0.0')
+    warn(f'C++ compiler (CXX={CXX}, {version_str}) too old, need g++ 8.3.0 or clang++ 8.0.0')
 
   ok, is_clang, clang_version, gcc_version = try_check_compiler(CC, 'c')
   version_str = ".".join(map(str, clang_version if is_clang else gcc_version))
@@ -1473,7 +1473,7 @@ def configure_node(o):
   o['variables']['shlib_suffix'] = shlib_suffix
 
   if options.linked_module:
-    o['variables']['library_files'] = options.linked_module
+    o['variables']['linked_module_files'] = options.linked_module
 
   o['variables']['asan'] = int(options.enable_asan or 0)
 
@@ -2178,6 +2178,8 @@ else:
 
 if options.compile_commands_json:
   gyp_args += ['-f', 'compile_commands_json']
+  os.path.islink('./compile_commands.json') and os.unlink('./compile_commands.json')
+  os.symlink('./out/' + config['BUILDTYPE'] + '/compile_commands.json', './compile_commands.json')
 
 # override the variable `python` defined in common.gypi
 if bin_override is not None:

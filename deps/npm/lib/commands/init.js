@@ -1,22 +1,25 @@
-const fs = require('fs')
+const { statSync } = require('fs')
 const { relative, resolve } = require('path')
 const { mkdir } = require('fs/promises')
 const initJson = require('init-package-json')
 const npa = require('npm-package-arg')
-const rpj = require('read-package-json-fast')
 const libexec = require('libnpmexec')
 const mapWorkspaces = require('@npmcli/map-workspaces')
 const PackageJson = require('@npmcli/package-json')
-const log = require('../utils/log-shim.js')
-const updateWorkspaces = require('../workspaces/update-workspaces.js')
+const { log, output, input } = require('proc-log')
+const updateWorkspaces = require('../utils/update-workspaces.js')
+const BaseCommand = require('../base-cmd.js')
 
 const posixPath = p => p.split('\\').join('/')
-
-const BaseCommand = require('../base-command.js')
 
 class Init extends BaseCommand {
   static description = 'Create a package.json file'
   static params = [
+    'init-author-name',
+    'init-author-url',
+    'init-license',
+    'init-module',
+    'init-version',
     'yes',
     'force',
     'scope',
@@ -54,9 +57,9 @@ class Init extends BaseCommand {
     // reads package.json for the top-level folder first, by doing this we
     // ensure the command throw if no package.json is found before trying
     // to create a workspace package.json file or its folders
-    const pkg = await rpj(resolve(this.npm.localPrefix, 'package.json')).catch((err) => {
+    const { content: pkg } = await PackageJson.normalize(this.npm.localPrefix).catch(err => {
       if (err.code === 'ENOENT') {
-        log.warn('Missing package.json. Try with `--include-workspace-root`.')
+        log.warn('init', 'Missing package.json. Try with `--include-workspace-root`.')
       }
       throw err
     })
@@ -120,13 +123,12 @@ class Init extends BaseCommand {
     }
 
     const newArgs = [packageName, ...otherArgs]
-    const { color } = this.npm.flatOptions
     const {
       flatOptions,
       localBin,
       globalBin,
+      chalk,
     } = this.npm
-    const output = this.npm.output.bind(this.npm)
     const runPath = path
     const scriptShell = this.npm.config.get('script-shell') || undefined
     const yes = this.npm.config.get('yes')
@@ -134,10 +136,10 @@ class Init extends BaseCommand {
     await libexec({
       ...flatOptions,
       args: newArgs,
-      color,
       localBin,
       globalBin,
       output,
+      chalk,
       path,
       runPath,
       scriptShell,
@@ -146,12 +148,9 @@ class Init extends BaseCommand {
   }
 
   async template (path = process.cwd()) {
-    log.pause()
-    log.disableProgress()
-
     const initFile = this.npm.config.get('init-module')
     if (!this.npm.config.get('yes') && !this.npm.config.get('force')) {
-      this.npm.output([
+      output.standard([
         'This utility will walk you through creating a package.json file.',
         'It only covers the most common items, and tries to guess sensible defaults.',
         '',
@@ -166,7 +165,7 @@ class Init extends BaseCommand {
     }
 
     try {
-      const data = await initJson(path, initFile, this.npm.config)
+      const data = await input.read(() => initJson(path, initFile, this.npm.config))
       log.silly('package data', data)
       return data
     } catch (er) {
@@ -175,9 +174,6 @@ class Init extends BaseCommand {
       } else {
         throw er
       }
-    } finally {
-      log.resume()
-      log.enableProgress()
     }
   }
 
@@ -196,7 +192,7 @@ class Init extends BaseCommand {
     // mapWorkspaces, so we're just going to avoid touching the
     // top-level package.json
     try {
-      fs.statSync(resolve(workspacePath, 'package.json'))
+      statSync(resolve(workspacePath, 'package.json'))
     } catch (err) {
       return
     }
@@ -217,7 +213,7 @@ class Init extends BaseCommand {
     // translate workspaces paths into an array containing workspaces names
     const workspaces = []
     for (const path of workspacesPaths) {
-      const { name } = await rpj(resolve(path, 'package.json')).catch(() => ({}))
+      const { content: { name } } = await PackageJson.normalize(path).catch(() => ({ content: {} }))
 
       if (name) {
         workspaces.push(name)

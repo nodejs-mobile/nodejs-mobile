@@ -12,10 +12,10 @@ This a list of all the dependencies:
 * [ada][]
 * [base64][]
 * [brotli][]
-* [c-ares][]
+* [c-ares 1.20.1][]
 * [cjs-module-lexer][]
 * [corepack][]
-* [googletest][]
+* [googletest 2dd1c13][]
 * [histogram][]
 * [icu-small][]
 * [llhttp][]
@@ -25,10 +25,10 @@ This a list of all the dependencies:
 * [npm][]
 * [openssl][]
 * [postject][]
-* [simdutf][]
-* [undici][]
+* [simdutf 4.0.4][]
+* [undici 5.26.4][]
 * [uv][]
-* [uvwasi][]
+* [uvwasi 0.0.19][]
 * [V8][]
 * [zlib][]
 
@@ -165,7 +165,7 @@ length-delimited strings.
 The [brotli](https://github.com/google/brotli) dependency is
 used for the homonym generic-purpose lossless compression algorithm.
 
-### c-ares
+### c-ares 1.20.1
 
 The [c-ares](https://github.com/c-ares/c-ares) is a C library
 for asynchronous DNS requests.
@@ -187,7 +187,7 @@ In practical terms, Corepack will let you use Yarn and pnpm without having to
 install them - just like what currently happens with npm, which is shipped
 by Node.js by default.
 
-### googletest
+### googletest 2dd1c13
 
 The [googletest](https://github.com/google/googletest) dependency is Google’s
 C++ testing and mocking framework.
@@ -273,12 +273,12 @@ See [maintaining-openssl][] for more informations.
 The [postject](https://github.com/nodejs/postject) dependency is used for the
 [Single Executable strategic initiative](https://github.com/nodejs/single-executable).
 
-### simdutf
+### simdutf 4.0.4
 
 The [simdutf](https://github.com/simdutf/simdutf) dependency is
 a C++ library for fast UTF-8 decoding and encoding.
 
-### undici
+### undici 5.26.4
 
 The [undici](https://github.com/nodejs/undici) dependency is an HTTP/1.1 client,
 written from scratch for Node.js..
@@ -290,7 +290,7 @@ The [libuv](https://github.com/libuv/libuv) dependency is a
 multi-platform support library with a focus on asynchronous I/O.
 It was primarily developed for use by Node.js.
 
-### uvwasi
+### uvwasi 0.0.19
 
 The [uvwasi](https://github.com/nodejs/uvwasi) dependency implements
 the WASI system call API, so that WebAssembly runtimes can easily
@@ -315,11 +315,11 @@ performance improvements not currently available in standard zlib.
 [ada]: #ada
 [base64]: #base64
 [brotli]: #brotli
-[c-ares]: #c-ares
+[c-ares 1.20.1]: #c-ares-1200
 [cjs-module-lexer]: #cjs-module-lexer
 [corepack]: #corepack
 [dependency-update-action]: ../../../.github/workflows/tools.yml
-[googletest]: #googletest
+[googletest 2dd1c13]: #googletest-2dd1c13
 [histogram]: #histogram
 [icu-small]: #icu-small
 [llhttp]: #llhttp
@@ -335,10 +335,10 @@ performance improvements not currently available in standard zlib.
 [npm]: #npm
 [openssl]: #openssl
 [postject]: #postject
-[simdutf]: #simdutf
-[undici]: #undici
+[simdutf 4.0.4]: #simdutf-404
+[undici 5.26.4]: #undici-5264
 [update-openssl-action]: ../../../.github/workflows/update-openssl.yml
 [uv]: #uv
-[uvwasi]: #uvwasi
+[uvwasi 0.0.19]: #uvwasi-0019
 [v8]: #v8
 [zlib]: #zlib

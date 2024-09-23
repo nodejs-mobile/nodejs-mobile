@@ -6,13 +6,12 @@ const { cleanTime } = require('../../fixtures/clean-snapshot')
 
 t.cleanSnapshot = cleanTime
 
-const mockNpm = async (t, { noLog, libnpmexec, initPackageJson, packageJson, ...opts } = {}) => {
+const mockNpm = async (t, { noLog, libnpmexec, initPackageJson, ...opts } = {}) => {
   const res = await _mockNpm(t, {
     ...opts,
     mocks: {
       ...(libnpmexec ? { libnpmexec } : {}),
       ...(initPackageJson ? { 'init-package-json': initPackageJson } : {}),
-      ...(packageJson ? { '@npmcli/package-json': packageJson } : {}),
     },
     globals: {
       // init-package-json prints directly to console.log
@@ -239,8 +238,7 @@ t.test('npm init cancel', async t => {
 
   await npm.exec('init', [])
 
-  t.equal(logs.warn[0][0], 'init', 'should have init title')
-  t.equal(logs.warn[0][1], 'canceled', 'should log canceled')
+  t.equal(logs.warn[0], 'init canceled', 'should have init title and canceled')
 })
 
 t.test('npm init error', async t => {
@@ -313,14 +311,7 @@ t.test('workspaces', async t => {
   await t.test('fail parsing top-level package.json to set workspace', async t => {
     const { npm } = await mockNpm(t, {
       prefixDir: {
-        'package.json': JSON.stringify({
-          name: 'top-level',
-        }),
-      },
-      packageJson: {
-        async load () {
-          throw new Error('ERR')
-        },
+        'package.json': 'not json[',
       },
       config: { workspace: 'a', yes: true },
       noLog: true,
@@ -328,8 +319,7 @@ t.test('workspaces', async t => {
 
     await t.rejects(
       npm.exec('init', []),
-      /ERR/,
-      'should exit with error'
+      { code: 'EJSONPARSE' }
     )
   })
 
@@ -344,7 +334,7 @@ t.test('workspaces', async t => {
       'should exit with missing package.json file error'
     )
 
-    t.equal(logs.warn[0][0], 'Missing package.json. Try with `--include-workspace-root`.')
+    t.equal(logs.warn[0], 'init Missing package.json. Try with `--include-workspace-root`.')
   })
 
   await t.test('bad package.json when settting workspace', async t => {

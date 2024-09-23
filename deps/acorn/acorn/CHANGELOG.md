@@ -1,3 +1,57 @@
+## 8.11.3 (2023-12-29)
+
+### Bug fixes
+
+Add `Function` and `Class` to the `AggregateType` type, so that they can be used in walkers without raising a type error.
+
+Make sure `onToken` get an `import` keyword token when parsing `import.meta`.
+
+Fix a bug where `.loc.start` could be undefined for `new.target` `meta` nodes.
+
+## 8.11.2 (2023-10-27)
+
+### Bug fixes
+
+Fix a bug that caused regular expressions after colon tokens to not be properly tokenized in some circumstances.
+
+## 8.11.1 (2023-10-26)
+
+### Bug fixes
+
+Fix a regression where `onToken` would receive 'name' tokens for 'new' keyword tokens.
+
+## 8.11.0 (2023-10-26)
+
+### Bug fixes
+
+Fix an issue where tokenizing (without parsing) an object literal with a property named `class` or `function` could, in some circumstance, put the tokenizer into an invalid state.
+
+Fix an issue where a slash after a call to a propery named the same as some keywords would be tokenized as a regular expression.
+
+### New features
+
+Upgrade to Unicode 15.1.
+
+Use a set of new, much more precise, TypeScript types.
+
+## 8.10.0 (2023-07-05)
+
+### New features
+
+Add a `checkPrivateFields` option that disables strict checking of private property use.
+
+## 8.9.0 (2023-06-16)
+
+### Bug fixes
+
+Forbid dynamic import after `new`, even when part of a member expression.
+
+### New features
+
+Add Unicode properties for ES2023.
+
+Add support for the `v` flag to regular expressions.
+
 ## 8.8.2 (2023-01-23)
 
 ### Bug fixes

@@ -223,7 +223,45 @@ int SelectALPNCallback(
     const unsigned char* in,
     unsigned int inlen,
     void* arg) {
-  TLSWrap* w = static_cast<TLSWrap*>(arg);
+  TLSWrap* w = static_cast<TLSWrap*>(SSL_get_app_data(s));
+  if (w->alpn_callback_enabled_) {
+    Environment* env = w->env();
+    HandleScope handle_scope(env->isolate());
+
+    Local<Value> callback_arg =
+        Buffer::Copy(env, reinterpret_cast<const char*>(in), inlen)
+            .ToLocalChecked();
+
+    MaybeLocal<Value> maybe_callback_result =
+        w->MakeCallback(env->alpn_callback_string(), 1, &callback_arg);
+
+    if (UNLIKELY(maybe_callback_result.IsEmpty())) {
+      // Implies the callback didn't return, because some exception was thrown
+      // during processing, e.g. if callback returned an invalid ALPN value.
+      return SSL_TLSEXT_ERR_ALERT_FATAL;
+    }
+
+    Local<Value> callback_result = maybe_callback_result.ToLocalChecked();
+
+    if (callback_result->IsUndefined()) {
+      // If you set an ALPN callback, but you return undefined for an ALPN
+      // request, you're rejecting all proposed ALPN protocols, and so we send
+      // a fatal alert:
+      return SSL_TLSEXT_ERR_ALERT_FATAL;
+    }
+
+    CHECK(callback_result->IsNumber());
+    unsigned int result_int = callback_result.As<v8::Number>()->Value();
+
+    // The callback returns an offset into the given buffer, for the selected
+    // protocol that should be returned. We then set outlen & out to point
+    // to the selected input length & value directly:
+    *outlen = *(in + result_int);
+    *out = (in + result_int + 1);
+
+    return SSL_TLSEXT_ERR_OK;
+  }
+
   const std::vector<unsigned char>& alpn_protos = w->alpn_protos_;
 
   if (alpn_protos.empty()) return SSL_TLSEXT_ERR_NOACK;
@@ -319,12 +357,15 @@ TLSWrap::TLSWrap(Environment* env,
                  Local<Object> obj,
                  Kind kind,
                  StreamBase* stream,
-                 SecureContext* sc)
+                 SecureContext* sc,
+                 UnderlyingStreamWriteStatus under_stream_ws)
     : AsyncWrap(env, obj, AsyncWrap::PROVIDER_TLSWRAP),
       StreamBase(env),
       env_(env),
       kind_(kind),
-      sc_(sc) {
+      sc_(sc),
+      has_active_write_issued_by_prev_listener_(
+          under_stream_ws == UnderlyingStreamWriteStatus::kHasActive) {
   MakeWeak();
   CHECK(sc_);
   ssl_ = sc_->CreateSSL();
@@ -434,13 +475,18 @@ void TLSWrap::InitSSL() {
 void TLSWrap::Wrap(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
-  CHECK_EQ(args.Length(), 3);
+  CHECK_EQ(args.Length(), 4);
   CHECK(args[0]->IsObject());
   CHECK(args[1]->IsObject());
   CHECK(args[2]->IsBoolean());
+  CHECK(args[3]->IsBoolean());
 
   Local<Object> sc = args[1].As<Object>();
   Kind kind = args[2]->IsTrue() ? Kind::kServer : Kind::kClient;
+
+  UnderlyingStreamWriteStatus under_stream_ws =
+      args[3]->IsTrue() ? UnderlyingStreamWriteStatus::kHasActive
+                        : UnderlyingStreamWriteStatus::kVacancy;
 
   StreamBase* stream = StreamBase::FromObject(args[0].As<Object>());
   CHECK_NOT_NULL(stream);
@@ -452,7 +498,8 @@ void TLSWrap::Wrap(const FunctionCallbackInfo<Value>& args) {
     return;
   }
 
-  TLSWrap* res = new TLSWrap(env, obj, kind, stream, Unwrap<SecureContext>(sc));
+  TLSWrap* res = new TLSWrap(
+      env, obj, kind, stream, Unwrap<SecureContext>(sc), under_stream_ws);
 
   args.GetReturnValue().Set(res->object());
 }
@@ -558,6 +605,13 @@ void TLSWrap::EncOut() {
     return;
   }
 
+  if (UNLIKELY(has_active_write_issued_by_prev_listener_)) {
+    Debug(this,
+          "Returning from EncOut(), "
+          "has_active_write_issued_by_prev_listener_ is true");
+    return;
+  }
+
   // Split-off queue
   if (established_ && current_write_) {
     Debug(this, "EncOut() write is scheduled");
@@ -628,6 +682,15 @@ void TLSWrap::EncOut() {
 
 void TLSWrap::OnStreamAfterWrite(WriteWrap* req_wrap, int status) {
   Debug(this, "OnStreamAfterWrite(status = %d)", status);
+
+  if (UNLIKELY(has_active_write_issued_by_prev_listener_)) {
+    Debug(this, "Notify write finish to the previous_listener_");
+    CHECK_EQ(write_size_, 0);  // we must have restrained writes
+
+    previous_listener_->OnStreamAfterWrite(req_wrap, status);
+    return;
+  }
+
   if (current_empty_write_) {
     Debug(this, "Had empty write");
     BaseObjectPtr<AsyncWrap> current_empty_write =
@@ -1224,6 +1287,16 @@ void TLSWrap::OnClientHelloParseEnd(void* arg) {
   c->Cycle();
 }
 
+void TLSWrap::EnableALPNCb(const FunctionCallbackInfo<Value>& args) {
+  TLSWrap* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+  wrap->alpn_callback_enabled_ = true;
+
+  SSL* ssl = wrap->ssl_.get();
+  SSL_CTX* ssl_ctx = SSL_get_SSL_CTX(ssl);
+  SSL_CTX_set_alpn_select_cb(ssl_ctx, SelectALPNCallback, nullptr);
+}
+
 void TLSWrap::GetServername(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
@@ -1517,7 +1590,8 @@ void TLSWrap::SetALPNProtocols(const FunctionCallbackInfo<Value>& args) {
   } else {
     w->alpn_protos_ = std::vector<unsigned char>(
         protos.data(), protos.data() + protos.length());
-    SSL_CTX_set_alpn_select_cb(SSL_get_SSL_CTX(ssl), SelectALPNCallback, w);
+    SSL_CTX* ssl_ctx = SSL_get_SSL_CTX(ssl);
+    SSL_CTX_set_alpn_select_cb(ssl_ctx, SelectALPNCallback, nullptr);
   }
 }
 
@@ -1974,6 +2048,16 @@ void TLSWrap::GetALPNNegotiatedProto(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(result);
 }
 
+void TLSWrap::WritesIssuedByPrevListenerDone(
+    const FunctionCallbackInfo<Value>& args) {
+  TLSWrap* w;
+  ASSIGN_OR_RETURN_UNWRAP(&w, args.Holder());
+
+  Debug(w, "WritesIssuedByPrevListenerDone is called");
+  w->has_active_write_issued_by_prev_listener_ = false;
+  w->EncOut();  // resume all of our restrained writes
+}
+
 void TLSWrap::Cycle() {
   // Prevent recursion
   if (++cycle_depth_ > 1)
@@ -2034,6 +2118,7 @@ void TLSWrap::Initialize(
   SetProtoMethod(isolate, t, "certCbDone", CertCbDone);
   SetProtoMethod(isolate, t, "destroySSL", DestroySSL);
   SetProtoMethod(isolate, t, "enableCertCb", EnableCertCb);
+  SetProtoMethod(isolate, t, "enableALPNCb", EnableALPNCb);
   SetProtoMethod(isolate, t, "endParser", EndParser);
   SetProtoMethod(isolate, t, "enableKeylogCallback", EnableKeylogCallback);
   SetProtoMethod(isolate, t, "enableSessionCallbacks", EnableSessionCallbacks);
@@ -2050,6 +2135,10 @@ void TLSWrap::Initialize(
   SetProtoMethod(isolate, t, "setSession", SetSession);
   SetProtoMethod(isolate, t, "setVerifyMode", SetVerifyMode);
   SetProtoMethod(isolate, t, "start", Start);
+  SetProtoMethod(isolate,
+                 t,
+                 "writesIssuedByPrevListenerDone",
+                 WritesIssuedByPrevListenerDone);
 
   SetProtoMethodNoSideEffect(
       isolate, t, "exportKeyingMaterial", ExportKeyingMaterial);
@@ -2099,6 +2188,7 @@ void TLSWrap::RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(CertCbDone);
   registry->Register(DestroySSL);
   registry->Register(EnableCertCb);
+  registry->Register(EnableALPNCb);
   registry->Register(EndParser);
   registry->Register(EnableKeylogCallback);
   registry->Register(EnableSessionCallbacks);
@@ -2131,6 +2221,7 @@ void TLSWrap::RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(GetSharedSigalgs);
   registry->Register(GetTLSTicket);
   registry->Register(VerifyError);
+  registry->Register(WritesIssuedByPrevListenerDone);
 
 #ifdef SSL_set_max_send_fragment
   registry->Register(SetMaxSendFragment);

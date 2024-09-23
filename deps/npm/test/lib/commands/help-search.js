@@ -1,6 +1,5 @@
 const t = require('tap')
 const { load: loadMockNpm } = require('../../fixtures/mock-npm.js')
-const chalk = require('chalk')
 
 /* eslint-disable max-len */
 const docsFixtures = {
@@ -70,7 +69,9 @@ t.test('npm help-search long output with color', async t => {
     },
   })
 
-  const highlightedText = chalk.bgBlack.red('help-search')
+  const chalk = await import('chalk').then(v => v.default)
+
+  const highlightedText = chalk.blue('help-search')
   t.equal(
     output.split('\n').some(line => line.includes(highlightedText)),
     true,

@@ -4937,6 +4937,37 @@ TEST(CachedCompileFunction) {
   }
 }
 
+TEST(CachedCompileFunctionRespectsEager) {
+  DisableAlwaysOpt();
+  LocalContext env;
+  Isolate* isolate = CcTest::i_isolate();
+  isolate->compilation_cache()
+      ->DisableScriptAndEval();  // Disable same-isolate code cache.
+
+  v8::HandleScope scope(CcTest::isolate());
+
+  v8::Local<v8::String> source = v8_str("return function() { return 42; }");
+  v8::ScriptCompiler::Source script_source(source);
+
+  for (bool eager_compile : {false, true}) {
+    v8::ScriptCompiler::CompileOptions options =
+        eager_compile ? v8::ScriptCompiler::kEagerCompile
+                      : v8::ScriptCompiler::kNoCompileOptions;
+    v8::Local<v8::Value> fun =
+        v8::ScriptCompiler::CompileFunction(env.local(), &script_source, 0,
+                                            nullptr, 0, nullptr, options)
+            .ToLocalChecked()
+            .As<v8::Function>()
+            ->Call(env.local(), v8::Undefined(CcTest::isolate()), 0, nullptr)
+            .ToLocalChecked();
+
+    auto i_fun = i::Handle<i::JSFunction>::cast(Utils::OpenHandle(*fun));
+
+    // Function should be compiled iff kEagerCompile was used.
+    CHECK_EQ(i_fun->shared().is_compiled(), eager_compile);
+  }
+}
+
 UNINITIALIZED_TEST(SnapshotCreatorAnonClassWithKeep) {
   DisableAlwaysOpt();
   v8::SnapshotCreator creator;
@@ -4956,6 +4987,46 @@ UNINITIALIZED_TEST(SnapshotCreatorAnonClassWithKeep) {
   v8::StartupData blob =
       creator.CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kKeep);
 
+  delete[] blob.data;
+}
+
+UNINITIALIZED_TEST(SnapshotCreatorDontDeferByteArrayForTypedArray) {
+  DisableAlwaysOpt();
+  v8::StartupData blob;
+  {
+    v8::SnapshotCreator creator;
+    v8::Isolate* isolate = creator.GetIsolate();
+    {
+      v8::HandleScope handle_scope(isolate);
+
+      v8::Local<v8::Context> context = v8::Context::New(isolate);
+      v8::Context::Scope context_scope(context);
+      CompileRun(
+          "const z = new Uint8Array(1);\n"
+          "class A { \n"
+          "  static x() { \n"
+          "  } \n"
+          "} \n"
+          "class B extends A {} \n"
+          "B.foo = ''; \n"
+          "class C extends B {} \n"
+          "class D extends C {} \n"
+          "class E extends B {} \n"
+          "function F() {} \n"
+          "Object.setPrototypeOf(F, D); \n");
+      creator.SetDefaultContext(context);
+    }
+
+    blob =
+        creator.CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+    CHECK(blob.raw_size > 0 && blob.data != nullptr);
+  }
+  {
+    SnapshotCreator creator(nullptr, &blob);
+    v8::Isolate* isolate = creator.GetIsolate();
+    v8::HandleScope scope(isolate);
+    USE(v8::Context::New(isolate));
+  }
   delete[] blob.data;
 }
 

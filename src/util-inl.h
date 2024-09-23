@@ -27,6 +27,8 @@
 #include <cmath>
 #include <cstring>
 #include <locale>
+#include <regex>  // NOLINT(build/c++11)
+#include "node_revert.h"
 #include "util.h"
 
 // These are defined by <sys/byteorder.h> or <netinet/in.h> on some systems.
@@ -614,6 +616,30 @@ constexpr FastStringKey::FastStringKey(std::string_view name)
 
 constexpr std::string_view FastStringKey::as_string_view() const {
   return name_;
+}
+
+// Inline so the compiler can fully optimize it away on Unix platforms.
+bool IsWindowsBatchFile(const char* filename) {
+#ifdef _WIN32
+  static constexpr bool kIsWindows = true;
+#else
+  static constexpr bool kIsWindows = false;
+#endif  // _WIN32
+  if (kIsWindows && !IsReverted(SECURITY_REVERT_CVE_2024_27980)) {
+    std::string file_with_extension = filename;
+    // Regex to match the last extension part after the last dot, ignoring
+    // trailing spaces and dots
+    std::regex extension_regex(R"(\.([a-zA-Z0-9]+)\s*[\.\s]*$)");
+    std::smatch match;
+    std::string extension;
+
+    if (std::regex_search(file_with_extension, match, extension_regex)) {
+      extension = ToLower(match[1].str());
+    }
+
+    return !extension.empty() && (extension == "cmd" || extension == "bat");
+  }
+  return false;
 }
 
 }  // namespace node

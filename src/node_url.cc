@@ -95,6 +95,11 @@ void BindingData::DomainToUnicode(const FunctionCallbackInfo<Value>& args) {
   CHECK(args[0]->IsString());
 
   std::string input = Utf8Value(env->isolate(), args[0]).ToString();
+  if (input.empty()) {
+    return args.GetReturnValue().Set(
+        String::NewFromUtf8(env->isolate(), "").ToLocalChecked());
+  }
+
   // It is important to have an initial value that contains a special scheme.
   // Since it will change the implementation of `set_hostname` according to URL
   // spec.
@@ -163,7 +168,7 @@ void BindingData::Format(const FunctionCallbackInfo<Value>& args) {
     out->hash = std::nullopt;
   }
 
-  if (unicode) {
+  if (unicode && out->has_hostname()) {
     out->host = ada::idna::to_unicode(out->get_hostname());
   }
 
@@ -294,6 +299,28 @@ void BindingData::Update(const FunctionCallbackInfo<Value>& args) {
           .ToLocalChecked());
 }
 
+void BindingData::ToASCII(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK_GE(args.Length(), 1);
+  CHECK(args[0]->IsString());
+
+  Utf8Value input(env->isolate(), args[0]);
+  auto out = ada::idna::to_ascii(input.ToStringView());
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), out.c_str()).ToLocalChecked());
+}
+
+void BindingData::ToUnicode(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK_GE(args.Length(), 1);
+  CHECK(args[0]->IsString());
+
+  Utf8Value input(env->isolate(), args[0]);
+  auto out = ada::idna::to_unicode(input.ToStringView());
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), out.c_str()).ToLocalChecked());
+}
+
 void BindingData::UpdateComponents(const ada::url_components& components,
                                    const ada::scheme::type type) {
   url_components_buffer_[0] = components.protocol_end;
@@ -318,6 +345,8 @@ void BindingData::Initialize(Local<Object> target,
       realm->AddBindingData<BindingData>(context, target);
   if (binding_data == nullptr) return;
 
+  SetMethodNoSideEffect(context, target, "toASCII", ToASCII);
+  SetMethodNoSideEffect(context, target, "toUnicode", ToUnicode);
   SetMethodNoSideEffect(context, target, "domainToASCII", DomainToASCII);
   SetMethodNoSideEffect(context, target, "domainToUnicode", DomainToUnicode);
   SetMethodNoSideEffect(context, target, "canParse", CanParse);
@@ -328,6 +357,8 @@ void BindingData::Initialize(Local<Object> target,
 
 void BindingData::RegisterExternalReferences(
     ExternalReferenceRegistry* registry) {
+  registry->Register(ToASCII);
+  registry->Register(ToUnicode);
   registry->Register(DomainToASCII);
   registry->Register(DomainToUnicode);
   registry->Register(CanParse);

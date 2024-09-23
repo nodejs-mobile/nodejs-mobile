@@ -103,8 +103,24 @@ NodeMainInstance::~NodeMainInstance() {
   if (isolate_params_ == nullptr) {
     return;
   }
-  // This should only be done on a main instance that owns its isolate.
-  platform_->UnregisterIsolate(isolate_);
+
+  {
+#ifdef DEBUG
+    // node::Environment has been disposed and no JavaScript Execution is
+    // allowed at this point.
+    // Create a scope to check that no JavaScript is executed in debug build
+    // and proactively crash the process in the case JavaScript is being
+    // executed.
+    // Isolate::Dispose() must be invoked outside of this scope to avoid
+    // use-after-free.
+    Isolate::DisallowJavascriptExecutionScope disallow_js(
+        isolate_, Isolate::DisallowJavascriptExecutionScope::CRASH_ON_FAILURE);
+#endif
+    // This should only be done on a main instance that owns its isolate.
+    // IsolateData must be freed before UnregisterIsolate() is called.
+    isolate_data_.reset();
+    platform_->UnregisterIsolate(isolate_);
+  }
   isolate_->Dispose();
 }
 
@@ -158,6 +174,11 @@ NodeMainInstance::CreateMainEnvironment(int* exit_code) {
                               &(snapshot_data_->env_info),
                               EnvironmentFlags::kDefaultFlags,
                               {}));
+#ifdef NODE_V8_SHARED_RO_HEAP
+    // TODO(addaleax): Do this as part of creating the Environment
+    // once we store the SnapshotData* itself on IsolateData.
+    env->builtin_loader()->RefreshCodeCache(snapshot_data_->code_cache);
+#endif
     context = Context::FromSnapshot(isolate_,
                                     SnapshotData::kNodeMainContextIndex,
                                     {DeserializeNodeInternalFields, env.get()})

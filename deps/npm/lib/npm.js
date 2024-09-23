@@ -1,57 +1,46 @@
-const EventEmitter = require('events')
-const { resolve, dirname, join } = require('path')
+const { resolve, dirname, join } = require('node:path')
 const Config = require('@npmcli/config')
-const chalk = require('chalk')
 const which = require('which')
-const fs = require('fs/promises')
-const abbrev = require('abbrev')
-
-// Patch the global fs module here at the app level
-require('graceful-fs').gracefulify(require('fs'))
-
-const { definitions, flatten, shorthands } = require('./utils/config/index.js')
+const fs = require('node:fs/promises')
+const { definitions, flatten, shorthands } = require('@npmcli/config/lib/definitions')
 const usage = require('./utils/npm-usage.js')
 const LogFile = require('./utils/log-file.js')
 const Timers = require('./utils/timers.js')
 const Display = require('./utils/display.js')
-const log = require('./utils/log-shim')
-const replaceInfo = require('./utils/replace-info.js')
-const updateNotifier = require('./utils/update-notifier.js')
+const { log, time, output } = require('proc-log')
+const { redactLog: replaceInfo } = require('@npmcli/redact')
 const pkg = require('../package.json')
-const { commands, aliases } = require('./utils/cmd-list.js')
+const { deref } = require('./utils/cmd-list.js')
 
-class Npm extends EventEmitter {
+class Npm {
   static get version () {
     return pkg.version
   }
 
+  static cmd (c) {
+    const command = deref(c)
+    if (!command) {
+      throw Object.assign(new Error(`Unknown command ${c}`), {
+        code: 'EUNKNOWNCOMMAND',
+        command: c,
+      })
+    }
+    return require(`./commands/${command}.js`)
+  }
+
+  unrefPromises = []
   updateNotification = null
-  loadErr = null
   argv = []
 
   #command = null
   #runId = new Date().toISOString().replace(/[.:]/g, '_')
-  #loadPromise = null
-  #tmpFolder = null
   #title = 'npm'
   #argvClean = []
-  #chalk = null
-  #logChalk = null
-  #noColorChalk = new chalk.Instance({ level: 0 })
   #npmRoot = null
-  #warnedNonDashArg = false
 
-  #outputBuffer = []
+  #display = null
   #logFile = new LogFile()
-  #display = new Display()
-  #timers = new Timers({
-    start: 'npm',
-    listener: (name, ms) => {
-      const args = ['timing', name, `Completed in ${ms}ms`]
-      this.#logFile.log(...args)
-      this.#display.log(...args)
-    },
-  })
+  #timers = new Timers()
 
   // all these options are only used by tests in order to make testing more
   // closely resemble real world usage. for now, npm has no programmatic API so
@@ -65,8 +54,14 @@ class Npm extends EventEmitter {
   //     allows tests created by tap inside this repo to not set the local
   //     prefix to `npmRoot` since that is the first dir it would encounter when
   //     doing implicit detection
-  constructor ({ npmRoot = dirname(__dirname), argv = [], excludeNpmCwd = false } = {}) {
-    super()
+  constructor ({
+    stdout = process.stdout,
+    stderr = process.stderr,
+    npmRoot = dirname(__dirname),
+    argv = [],
+    excludeNpmCwd = false,
+  } = {}) {
+    this.#display = new Display({ stdout, stderr })
     this.#npmRoot = npmRoot
     this.config = new Config({
       npmPath: this.#npmRoot,
@@ -82,53 +77,10 @@ class Npm extends EventEmitter {
     return this.constructor.version
   }
 
-  deref (c) {
-    if (!c) {
-      return
-    }
-
-    // Translate camelCase to snake-case (i.e. installTest to install-test)
-    if (c.match(/[A-Z]/)) {
-      c = c.replace(/([A-Z])/g, m => '-' + m.toLowerCase())
-    }
-
-    // if they asked for something exactly we are done
-    if (commands.includes(c)) {
-      return c
-    }
-
-    // if they asked for a direct alias
-    if (aliases[c]) {
-      return aliases[c]
-    }
-
-    const abbrevs = abbrev(commands.concat(Object.keys(aliases)))
-
-    // first deref the abbrev, if there is one
-    // then resolve any aliases
-    // so `npm install-cl` will resolve to `install-clean` then to `ci`
-    let a = abbrevs[c]
-    while (aliases[a]) {
-      a = aliases[a]
-    }
-    return a
-  }
-
-  // Get an instantiated npm command
-  // npm.command is already taken as the currently running command, a refactor
-  // would be needed to change this
-  async cmd (cmd) {
-    await this.load()
-
-    const cmdId = this.deref(cmd)
-    if (!cmdId) {
-      throw Object.assign(new Error(`Unknown command ${cmd}`), {
-        code: 'EUNKNOWNCOMMAND',
-      })
-    }
-
-    const Impl = require(`./commands/${cmdId}.js`)
-    const command = new Impl(this)
+  // Call an npm command
+  async exec (cmd, args = this.argv) {
+    const Command = Npm.cmd(cmd)
+    const command = new Command(this)
 
     // since 'test', 'start', 'stop', etc. commands re-enter this function
     // to call the run-script command, we need to only set it one time.
@@ -137,45 +89,11 @@ class Npm extends EventEmitter {
       process.env.npm_command = this.command
     }
 
-    return command
-  }
-
-  // Call an npm command
-  async exec (cmd, args = this.argv) {
-    const command = await this.cmd(cmd)
-    const timeEnd = this.time(`command:${cmd}`)
-
-    // this is async but we dont await it, since its ok if it doesnt
-    // finish before the command finishes running. it uses command and argv
-    // so it must be initiated here, after the command name is set
-    // eslint-disable-next-line promise/catch-or-return
-    updateNotifier(this).then((msg) => (this.updateNotification = msg))
-
-    // Options are prefixed by a hyphen-minus (-, \u2d).
-    // Other dash-type chars look similar but are invalid.
-    if (!this.#warnedNonDashArg) {
-      const nonDashArgs = args.filter(a => /^[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/.test(a))
-      if (nonDashArgs.length) {
-        this.#warnedNonDashArg = true
-        log.error(
-          'arg',
-          'Argument starts with non-ascii dash, this is probably invalid:',
-          nonDashArgs.join(', ')
-        )
-      }
-    }
-
-    return command.cmdExec(args).finally(timeEnd)
+    return time.start(`command:${cmd}`, () => command.cmdExec(args))
   }
 
   async load () {
-    if (!this.#loadPromise) {
-      this.#loadPromise = this.time('npm:load', () => this.#load().catch((er) => {
-        this.loadErr = er
-        throw er
-      }))
-    }
-    return this.#loadPromise
+    return time.start('npm:load', () => this.#load())
   }
 
   get loaded () {
@@ -191,30 +109,44 @@ class Npm extends EventEmitter {
     this.#logFile.off()
   }
 
-  time (name, fn) {
-    return this.#timers.time(name, fn)
-  }
-
-  writeTimingFile () {
-    this.#timers.writeFile({
+  finish ({ showLogFileError } = {}) {
+    this.#timers.finish({
       id: this.#runId,
       command: this.#argvClean,
       logfiles: this.logFiles,
       version: this.version,
     })
+
+    if (showLogFileError) {
+      if (!this.silent) {
+        // just a line break if not in silent mode
+        output.error('')
+      }
+
+      if (this.logFiles.length) {
+        return log.error('', `A complete log of this run can be found in: ${this.logFiles}`)
+      }
+
+      const logsMax = this.config.get('logs-max')
+      if (logsMax <= 0) {
+        // user specified no log file
+        log.error('', `Log files were not written due to the config logs-max=${logsMax}`)
+      } else {
+        // could be an error writing to the directory
+        log.error('',
+          `Log files were not written due to an error writing to the directory: ${this.#logsDir}` +
+          '\nYou can rerun the command with `--loglevel=verbose` to see the logs in your terminal'
+        )
+      }
+    }
   }
 
   get title () {
     return this.#title
   }
 
-  set title (t) {
-    process.title = t
-    this.#title = t
-  }
-
   async #load () {
-    await this.time('npm:load:whichnode', async () => {
+    await time.start('npm:load:whichnode', async () => {
       // TODO should we throw here?
       const node = await which(process.argv[0]).catch(() => {})
       if (node && node.toUpperCase() !== process.execPath.toUpperCase()) {
@@ -224,30 +156,72 @@ class Npm extends EventEmitter {
       }
     })
 
-    await this.time('npm:load:configload', () => this.config.load())
+    await time.start('npm:load:configload', () => this.config.load())
+
+    // npm --versions
+    if (this.config.get('versions', 'cli')) {
+      this.argv = ['version']
+      this.config.set('usage', false, 'cli')
+    } else {
+      this.argv = [...this.config.parsedArgv.remain]
+    }
+
+    // Remove first argv since that is our command as typed
+    // Note that this might not be the actual name of the command
+    // due to aliases, etc. But we use the raw form of it later
+    // in user output so it must be preserved as is.
+    const commandArg = this.argv.shift()
+
+    // This is the actual name of the command that will be run or
+    // undefined if deref could not find a match
+    const command = deref(commandArg)
+
+    await this.#display.load({
+      command,
+      loglevel: this.config.get('loglevel'),
+      stdoutColor: this.color,
+      stderrColor: this.logColor,
+      timing: this.config.get('timing'),
+      unicode: this.config.get('unicode'),
+      progress: this.flatOptions.progress,
+      json: this.config.get('json'),
+      heading: this.config.get('heading'),
+    })
+    process.env.COLOR = this.color ? '1' : '0'
+
+    // npm -v
+    // return from here early so we dont create any caches/logfiles/timers etc
+    if (this.config.get('version', 'cli')) {
+      output.standard(this.version)
+      return { exec: false }
+    }
 
     // mkdir this separately since the logs dir can be set to
     // a different location. if this fails, then we don't have
     // a cache dir, but we don't want to fail immediately since
     // the command might not need a cache dir (like `npm --version`)
-    await this.time('npm:load:mkdirpcache', () =>
+    await time.start('npm:load:mkdirpcache', () =>
       fs.mkdir(this.cache, { recursive: true })
         .catch((e) => log.verbose('cache', `could not create cache: ${e}`)))
 
-    // its ok if this fails. user might have specified an invalid dir
+    // it's ok if this fails. user might have specified an invalid dir
     // which we will tell them about at the end
-    await this.time('npm:load:mkdirplogs', () =>
-      fs.mkdir(this.logsDir, { recursive: true })
-        .catch((e) => log.verbose('logfile', `could not create logs-dir: ${e}`)))
+    if (this.config.get('logs-max') > 0) {
+      await time.start('npm:load:mkdirplogs', () =>
+        fs.mkdir(this.#logsDir, { recursive: true })
+          .catch((e) => log.verbose('logfile', `could not create logs-dir: ${e}`)))
+    }
 
     // note: this MUST be shorter than the actual argv length, because it
     // uses the same memory, so node will truncate it if it's too long.
-    this.time('npm:load:setTitle', () => {
+    // We time this because setting process.title is slow sometimes but we
+    // have to do it for security reasons. But still helpful to know how slow it is.
+    time.start('npm:load:setTitle', () => {
       const { parsedArgv: { cooked, remain } } = this.config
-      this.argv = remain
       // Secrets are mostly in configs, so title is set using only the positional args
-      // to keep those from being leaked.
-      this.title = ['npm'].concat(replaceInfo(remain)).join(' ').trim()
+      // to keep those from being leaked.  We still do a best effort replaceInfo.
+      this.#title = ['npm'].concat(replaceInfo(remain)).join(' ').trim()
+      process.title = this.#title
       // The cooked argv is also logged separately for debugging purposes. It is
       // cleaned as a best effort by replacing known secrets like basic auth
       // password and strings that look like npm tokens. XXX: for this to be
@@ -258,45 +232,32 @@ class Npm extends EventEmitter {
       log.verbose('argv', this.#argvClean.map(JSON.stringify).join(' '))
     })
 
-    this.time('npm:load:display', () => {
-      this.#display.load({
-        // Use logColor since that is based on stderr
-        color: this.logColor,
-        chalk: this.logChalk,
-        progress: this.flatOptions.progress,
-        silent: this.silent,
-        timing: this.config.get('timing'),
-        loglevel: this.config.get('loglevel'),
-        unicode: this.config.get('unicode'),
-        heading: this.config.get('heading'),
-      })
-      process.env.COLOR = this.color ? '1' : '0'
+    // logFile.load returns a promise that resolves when old logs are done being cleaned.
+    // We save this promise to an array so that we can await it in tests to ensure more
+    // deterministic logging behavior. The process will also hang open if this were to
+    // take a long time to resolve, but that is why process.exit is called explicitly
+    // in the exit-handler.
+    this.unrefPromises.push(this.#logFile.load({
+      path: this.logPath,
+      logsMax: this.config.get('logs-max'),
+      timing: this.config.get('timing'),
+    }))
+
+    this.#timers.load({
+      path: this.logPath,
+      timing: this.config.get('timing'),
     })
 
-    this.time('npm:load:logFile', () => {
-      this.#logFile.load({
-        path: this.logPath,
-        logsMax: this.config.get('logs-max'),
-      })
-      log.verbose('logfile', this.#logFile.files[0] || 'no logfile created')
-    })
-
-    this.time('npm:load:timers', () =>
-      this.#timers.load({
-        path: this.config.get('timing') ? this.logPath : null,
-      })
-    )
-
-    this.time('npm:load:configScope', () => {
-      const configScope = this.config.get('scope')
-      if (configScope && !/^@/.test(configScope)) {
-        this.config.set('scope', `@${configScope}`, this.config.find('scope'))
-      }
-    })
+    const configScope = this.config.get('scope')
+    if (configScope && !/^@/.test(configScope)) {
+      this.config.set('scope', `@${configScope}`, this.config.find('scope'))
+    }
 
     if (this.config.get('force')) {
       log.warn('using --force', 'Recommended protections disabled.')
     }
+
+    return { exec: true, command: commandArg, args: this.argv }
   }
 
   get isShellout () {
@@ -329,25 +290,15 @@ class Npm extends EventEmitter {
   }
 
   get noColorChalk () {
-    return this.#noColorChalk
+    return this.#display.chalk.noColor
   }
 
   get chalk () {
-    if (!this.#chalk) {
-      this.#chalk = new chalk.Instance({
-        level: this.color ? chalk.level : 0,
-      })
-    }
-    return this.#chalk
+    return this.#display.chalk.stdout
   }
 
   get logChalk () {
-    if (!this.#logChalk) {
-      this.#logChalk = new chalk.Instance({
-        level: this.logColor ? chalk.stderr.level : 0,
-      })
-    }
-    return this.#logChalk
+    return this.#display.chalk.stderr
   }
 
   get global () {
@@ -362,14 +313,6 @@ class Npm extends EventEmitter {
     return 2
   }
 
-  get unfinishedTimers () {
-    return this.#timers.unfinished
-  }
-
-  get finishedTimers () {
-    return this.#timers.finished
-  }
-
   get started () {
     return this.#timers.started
   }
@@ -378,16 +321,12 @@ class Npm extends EventEmitter {
     return this.#logFile.files
   }
 
-  get logsDir () {
+  get #logsDir () {
     return this.config.get('logs-dir') || join(this.cache, '_logs')
   }
 
   get logPath () {
-    return resolve(this.logsDir, `${this.#runId}-`)
-  }
-
-  get timingFile () {
-    return this.#timers.file
+    return resolve(this.#logsDir, `${this.#runId}-`)
   }
 
   get npmRoot () {
@@ -398,24 +337,12 @@ class Npm extends EventEmitter {
     return this.config.get('cache')
   }
 
-  set cache (r) {
-    this.config.set('cache', r)
-  }
-
   get globalPrefix () {
     return this.config.globalPrefix
   }
 
-  set globalPrefix (r) {
-    this.config.globalPrefix = r
-  }
-
   get localPrefix () {
     return this.config.localPrefix
-  }
-
-  set localPrefix (r) {
-    this.config.localPrefix = r
   }
 
   get localPackage () {
@@ -453,68 +380,9 @@ class Npm extends EventEmitter {
     return this.global ? this.globalPrefix : this.localPrefix
   }
 
-  set prefix (r) {
-    const k = this.global ? 'globalPrefix' : 'localPrefix'
-    this[k] = r
-  }
-
   get usage () {
     return usage(this)
   }
-
-  // XXX add logging to see if we actually use this
-  get tmp () {
-    if (!this.#tmpFolder) {
-      const rand = require('crypto').randomBytes(4).toString('hex')
-      this.#tmpFolder = `npm-${process.pid}-${rand}`
-    }
-    return resolve(this.config.get('tmp'), this.#tmpFolder)
-  }
-
-  // output to stdout in a progress bar compatible way
-  output (...msg) {
-    log.clearProgress()
-    // eslint-disable-next-line no-console
-    console.log(...msg)
-    log.showProgress()
-  }
-
-  outputBuffer (item) {
-    this.#outputBuffer.push(item)
-  }
-
-  flushOutput (jsonError) {
-    if (!jsonError && !this.#outputBuffer.length) {
-      return
-    }
-
-    if (this.config.get('json')) {
-      const jsonOutput = this.#outputBuffer.reduce((acc, item) => {
-        if (typeof item === 'string') {
-          // try to parse it as json in case its a string
-          try {
-            item = JSON.parse(item)
-          } catch {
-            return acc
-          }
-        }
-        return { ...acc, ...item }
-      }, {})
-      this.output(JSON.stringify({ ...jsonOutput, ...jsonError }, null, 2))
-    } else {
-      for (const item of this.#outputBuffer) {
-        this.output(item)
-      }
-    }
-
-    this.#outputBuffer.length = 0
-  }
-
-  outputError (...msg) {
-    log.clearProgress()
-    // eslint-disable-next-line no-console
-    console.error(...msg)
-    log.showProgress()
-  }
 }
+
 module.exports = Npm

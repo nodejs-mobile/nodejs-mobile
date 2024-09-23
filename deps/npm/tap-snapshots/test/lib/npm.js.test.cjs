@@ -5,6 +5,16 @@
  * Make sure to inspect the output below.  Do not ignore changes!
  */
 'use strict'
+exports[`test/lib/npm.js TAP npm.load workspace-aware configs and commands > should exec workspaces version of commands 1`] = `
+Lifecycle scripts included in a@1.0.0:
+  test
+    echo test a
+
+Lifecycle scripts included in b@1.0.0:
+  test
+    echo test b
+`
+
 exports[`test/lib/npm.js TAP usage set process.stdout.columns column width 0 > must match snapshot 1`] = `
 npm <command>
 
@@ -27,10 +37,10 @@ All commands:
     help-search, hook, init, install, install-ci-test,
     install-test, link, ll, login, logout, ls, org, outdated,
     owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, search,
-    set, shrinkwrap, star, stars, start, stop, team, test,
-    token, uninstall, unpublish, unstar, update, version, view,
-    whoami
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -76,13 +86,13 @@ All commands:
     profile, prune, publish,
     query, rebuild, repo,
     restart, root,
-    run-script, search, set,
-    shrinkwrap, star, stars,
-    start, stop, team, test,
-    token, uninstall,
-    unpublish, unstar,
-    update, version, view,
-    whoami
+    run-script, sbom,
+    search, set, shrinkwrap,
+    star, stars, start,
+    stop, team, test, token,
+    uninstall, unpublish,
+    unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -128,13 +138,13 @@ All commands:
     profile, prune, publish,
     query, rebuild, repo,
     restart, root,
-    run-script, search, set,
-    shrinkwrap, star, stars,
-    start, stop, team, test,
-    token, uninstall,
-    unpublish, unstar,
-    update, version, view,
-    whoami
+    run-script, sbom,
+    search, set, shrinkwrap,
+    star, stars, start,
+    stop, team, test, token,
+    uninstall, unpublish,
+    unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -168,10 +178,10 @@ All commands:
     help-search, hook, init, install, install-ci-test,
     install-test, link, ll, login, logout, ls, org, outdated,
     owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, search,
-    set, shrinkwrap, star, stars, start, stop, team, test,
-    token, uninstall, unpublish, unstar, update, version, view,
-    whoami
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -217,13 +227,13 @@ All commands:
     profile, prune, publish,
     query, rebuild, repo,
     restart, root,
-    run-script, search, set,
-    shrinkwrap, star, stars,
-    start, stop, team, test,
-    token, uninstall,
-    unpublish, unstar,
-    update, version, view,
-    whoami
+    run-script, sbom,
+    search, set, shrinkwrap,
+    star, stars, start,
+    stop, team, test, token,
+    uninstall, unpublish,
+    unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -269,13 +279,13 @@ All commands:
     profile, prune, publish,
     query, rebuild, repo,
     restart, root,
-    run-script, search, set,
-    shrinkwrap, star, stars,
-    start, stop, team, test,
-    token, uninstall,
-    unpublish, unstar,
-    update, version, view,
-    whoami
+    run-script, sbom,
+    search, set, shrinkwrap,
+    star, stars, start,
+    stop, team, test, token,
+    uninstall, unpublish,
+    unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -320,10 +330,10 @@ All commands:
     profile, prune, publish,
     query, rebuild, repo,
     restart, root,
-    run-script, search, set,
-    shrinkwrap, star, stars,
-    start, stop, team, test,
-    token, uninstall,
+    run-script, sbom, search,
+    set, shrinkwrap, star,
+    stars, start, stop, team,
+    test, token, uninstall,
     unpublish, unstar,
     update, version, view,
     whoami
@@ -360,10 +370,10 @@ All commands:
     help-search, hook, init, install, install-ci-test,
     install-test, link, ll, login, logout, ls, org, outdated,
     owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, search,
-    set, shrinkwrap, star, stars, start, stop, team, test,
-    token, uninstall, unpublish, unstar, update, version, view,
-    whoami
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -397,10 +407,10 @@ All commands:
     help-search, hook, init, install, install-ci-test,
     install-test, link, ll, login, logout, ls, org, outdated,
     owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, search,
-    set, shrinkwrap, star, stars, start, stop, team, test,
-    token, uninstall, unpublish, unstar, update, version, view,
-    whoami
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}
@@ -434,10 +444,10 @@ All commands:
     help-search, hook, init, install, install-ci-test,
     install-test, link, ll, login, logout, ls, org, outdated,
     owner, pack, ping, pkg, prefix, profile, prune, publish,
-    query, rebuild, repo, restart, root, run-script, search,
-    set, shrinkwrap, star, stars, start, stop, team, test,
-    token, uninstall, unpublish, unstar, update, version, view,
-    whoami
+    query, rebuild, repo, restart, root, run-script, sbom,
+    search, set, shrinkwrap, star, stars, start, stop, team,
+    test, token, uninstall, unpublish, unstar, update, version,
+    view, whoami
 
 Specify configs in the ini-formatted file:
     {USERCONFIG}

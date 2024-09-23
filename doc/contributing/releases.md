@@ -264,6 +264,17 @@ You can integrate the PRs into the proposal without running full CI.
 
 ### 2. Create a new branch for the release
 
+⚠️ At this point, you can either run `git node release --prepare`:
+
+```console
+$ git node release --prepare x.y.z
+```
+
+to automate the remaining steps until step 6 or you can perform it manually
+following the below steps.
+
+***
+
 Create a new branch named `vx.y.z-proposal`, off the corresponding staging
 branch.
 
@@ -802,7 +813,9 @@ $ git commit --amend
 </details>
 
 Even if there are no conflicts, ensure that you revert all the changes that were
-made to `src/node_version.h`.
+made to `src/node_version.h`. `NODE_VERSION_IS_RELEASE` must be `0`.
+
+<sup>Edit `src/node_version.h`, revert `NODE_VERSION_IS_RELEASE` back to `0`, and `git commit --amend`</sup>
 
 If there are conflicts in `doc` due to updated `REPLACEME`
 placeholders (that happens when a change previously landed on another release
