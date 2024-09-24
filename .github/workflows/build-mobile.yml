@@ -99,7 +99,7 @@ jobs:
       # Default Python (3.12) doesn't have support for distutils
       # https://github.com/nodejs/node-gyp/issues/2869 workaround
       - name: Equip Python 3.12 with distutils
-        run: python3.12 -m pip install setuptools
+        run: brew install python-setuptools
 
       - name: Build
         run: |
