@@ -179,6 +179,12 @@
             'HAVE_UNISTD_H',
           ],
         }],
+        # nodejs-mobile patch: flag requires for nghttp3_unreachable.c
+        ['OS=="ios"', {
+          'defines': [
+            'HAVE_UNISTD_H',
+          ],
+        }],
       ],
       'direct_dependent_settings': {
         'defines': [
