@@ -5,10 +5,10 @@
 #define CARES_RANDOM_FILE "/dev/urandom"
 
 /* Set to 1 if non-pubilc shared library symbols are hidden */
-#define CARES_SYMBOL_HIDING 1 
+#define CARES_SYMBOL_HIDING 1
 
 /* Threading enabled */
-#define CARES_THREADS 1 
+#define CARES_THREADS 1
 
 /* the signed version of size_t */
 #define CARES_TYPEOF_ARES_SSIZE_T ssize_t
@@ -20,19 +20,19 @@
 /* #undef ETC_INET */
 
 /* gethostname() arg2 type */
-#define GETHOSTNAME_TYPE_ARG2 size_t 
+#define GETHOSTNAME_TYPE_ARG2 size_t
 
 /* getnameinfo() arg1 type */
-#define GETNAMEINFO_TYPE_ARG1 struct sockaddr * 
+#define GETNAMEINFO_TYPE_ARG1 struct sockaddr *
 
 /* getnameinfo() arg2 type */
-#define GETNAMEINFO_TYPE_ARG2 socklen_t 
+#define GETNAMEINFO_TYPE_ARG2 socklen_t
 
 /* getnameinfo() arg4 and 6 type */
-#define GETNAMEINFO_TYPE_ARG46 socklen_t 
+#define GETNAMEINFO_TYPE_ARG46 socklen_t
 
 /* getnameinfo() arg7 type */
-#define GETNAMEINFO_TYPE_ARG7 int 
+#define GETNAMEINFO_TYPE_ARG7 int
 
 /* number of arguments for getservbyname_r() */
 /* #undef GETSERVBYNAME_R_ARGS */
@@ -65,7 +65,7 @@
 #define HAVE_CLOCK_GETTIME 1
 
 /* clock_gettime() with CLOCK_MONOTONIC support */
-#define HAVE_CLOCK_GETTIME_MONOTONIC 1 
+#define HAVE_CLOCK_GETTIME_MONOTONIC 1
 
 /* Define to 1 if you have `closesocket` */
 /* #undef HAVE_CLOSESOCKET */
@@ -101,7 +101,7 @@
 #define HAVE_FCNTL_H 1
 
 /* fcntl() with O_NONBLOCK support */
-#define HAVE_FCNTL_O_NONBLOCK 1 
+#define HAVE_FCNTL_O_NONBLOCK 1
 
 /* Define to 1 if you have `getenv` */
 #define HAVE_GETENV 1
@@ -158,7 +158,7 @@
 /* #undef HAVE_IOCTLSOCKET_FIONBIO */
 
 /* ioctl() with FIONBIO support */
-#define HAVE_IOCTL_FIONBIO 1 
+#define HAVE_IOCTL_FIONBIO 1
 
 /* Define to 1 if you have the <iphlpapi.h> header file. */
 /* #undef HAVE_IPHLPAPI_H */
@@ -329,7 +329,7 @@
 #define HAVE_SYS_PARAM_H 1
 
 /* Define to 1 if you have the <sys/random.h> header file. */
-#define HAVE_SYS_RANDOM_H 1
+/* #undef HAVE_SYS_RANDOM_H */
 
 /* Define to 1 if you have the <sys/select.h> header file. */
 #define HAVE_SYS_SELECT_H 1
@@ -414,58 +414,58 @@
 /* #undef PTHREAD_CREATE_JOINABLE */
 
 /* recvfrom() arg5 qualifier */
-#define RECVFROM_QUAL_ARG5 
+#define RECVFROM_QUAL_ARG5
 
 /* recvfrom() arg1 type */
-#define RECVFROM_TYPE_ARG1 int 
+#define RECVFROM_TYPE_ARG1 int
 
 /* recvfrom() arg2 type */
-#define RECVFROM_TYPE_ARG2 void * 
+#define RECVFROM_TYPE_ARG2 void *
 
 /* recvfrom() arg3 type */
-#define RECVFROM_TYPE_ARG3 size_t 
+#define RECVFROM_TYPE_ARG3 size_t
 
 /* recvfrom() arg4 type */
-#define RECVFROM_TYPE_ARG4 int 
+#define RECVFROM_TYPE_ARG4 int
 
 /* recvfrom() arg5 type */
-#define RECVFROM_TYPE_ARG5 struct sockaddr * 
+#define RECVFROM_TYPE_ARG5 struct sockaddr *
 
 /* recvfrom() return value */
-#define RECVFROM_TYPE_RETV ssize_t 
+#define RECVFROM_TYPE_RETV ssize_t
 
 /* recv() arg1 type */
-#define RECV_TYPE_ARG1 int 
+#define RECV_TYPE_ARG1 int
 
 /* recv() arg2 type */
-#define RECV_TYPE_ARG2 void * 
+#define RECV_TYPE_ARG2 void *
 
 /* recv() arg3 type */
-#define RECV_TYPE_ARG3 size_t 
+#define RECV_TYPE_ARG3 size_t
 
 /* recv() arg4 type */
-#define RECV_TYPE_ARG4 int 
+#define RECV_TYPE_ARG4 int
 
 /* recv() return value */
-#define RECV_TYPE_RETV ssize_t 
+#define RECV_TYPE_RETV ssize_t
 
 /* send() arg2 qualifier */
-#define SEND_QUAL_ARG2 
+#define SEND_QUAL_ARG2
 
 /* send() arg1 type */
-#define SEND_TYPE_ARG1 int 
+#define SEND_TYPE_ARG1 int
 
 /* send() arg2 type */
-#define SEND_TYPE_ARG2 void * 
+#define SEND_TYPE_ARG2 void *
 
 /* send() arg3 type */
-#define SEND_TYPE_ARG3 size_t 
+#define SEND_TYPE_ARG3 size_t
 
 /* send() arg4 type */
-#define SEND_TYPE_ARG4 int 
+#define SEND_TYPE_ARG4 int
 
 /* send() return value */
-#define SEND_TYPE_RETV ssize_t 
+#define SEND_TYPE_RETV ssize_t
 
 /* Define to 1 if all of the C90 standard headers exist (not just the ones
    required in a freestanding environment). This macro is provided for
