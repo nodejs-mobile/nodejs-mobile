@@ -184,6 +184,7 @@ jobs:
 
       - name: Combine
         run: |
+          ls -lR out_ios
           ./tools/ios_framework_prepare.sh combine_frameworks
           mkdir -p artifacts/include
           cp -R out_ios/NodeMobile.xcframework artifacts/
