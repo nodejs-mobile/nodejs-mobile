@@ -76,7 +76,7 @@ build_for_arm64_device() {
   # Move compilation outputs
   mkdir -p $TARGET_LIBRARY_PATH/arm64-device
   for output_file in "${outputs_arm64[@]}"; do
-      cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64-device/
+    cp $LIBRARY_PATH/$output_file $TARGET_LIBRARY_PATH/arm64-device/
   done
 }
 
@@ -216,10 +216,10 @@ combine_frameworks() {
 }
 
 set_framework_target_dir() {
-  # Create a path to build the frameworks into
-  rm -rf out_ios
-  mkdir -p out_ios
-  cd out_ios
+  # Create a path to build the framework into
+  rm -rf out_ios_$1
+  mkdir -p out_ios_$1
+  cd out_ios_$1
   FRAMEWORK_TARGET_DIR=${PWD}
   cd ../
 }
@@ -238,6 +238,8 @@ elif [ $1 == "x64-simulator" ]; then
   build_for_x64_simulator
   build_framework_for_x64_simulator
 elif [ $1 == "combine_frameworks" ]; then
+  rm -rf out_ios
+  mkdir -p out_ios
   cd out_ios
   FRAMEWORK_TARGET_DIR=${PWD}
   cd ../
