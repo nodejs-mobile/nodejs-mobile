@@ -196,10 +196,11 @@ build_framework_for_x64_simulator() {
 combine_frameworks() {
   # Join both simulator outputs into one
   mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
+  echo "CHECK INSIDE"
+  ls -lR $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework
   cp -r $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/* \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/
   echo "Check internals of the universal framework before lipo"
-  ls -lR $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
   lipo -create \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
@@ -218,7 +219,6 @@ combine_frameworks() {
 # Create a path to build the framework into
 set_framework_target_dir() {
   if [ -z "$1" ]; then
-    rm -rf out_ios
     mkdir -p out_ios
     cd out_ios
     FRAMEWORK_TARGET_DIR=${PWD}
@@ -233,26 +233,22 @@ set_framework_target_dir() {
 }
 
 # Interpret the command line arguments
-if [ $1 == "arm64" ]; then
+if [[ $1 == "arm64" ]]; then
   set_framework_target_dir $1
   build_for_arm64_device
   build_framework_for_arm64_device
-elif [ $1 == "arm64-simulator" ]; then
+elif [[ $1 == "arm64-simulator" ]]; then
   set_framework_target_dir $1
   build_for_arm64_simulator
   build_framework_for_arm64_simulator
-elif [ $1 == "x64-simulator" ]; then
+elif [[ $1 == "x64-simulator" ]]; then
   set_framework_target_dir $1
   build_for_x64_simulator
   build_framework_for_x64_simulator
-elif [ $1 == "combine_frameworks" ]; then
-  rm -rf out_ios
-  mkdir -p out_ios
-  cd out_ios
-  FRAMEWORK_TARGET_DIR=${PWD}
-  cd ../
+elif [[ $1 == "combine_frameworks" ]]; then
+  set_framework_target_dir
   combine_frameworks
-elif [ $1 == "--help" ]; then
+elif [[ $1 == "--help" ]]; then
   echo "Usage: ios_framework_prepare.sh arm64|arm64-simulator|x64-simulator|combine_frameworks"
   exit 1
 else
