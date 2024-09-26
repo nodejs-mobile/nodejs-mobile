@@ -215,26 +215,34 @@ combine_frameworks() {
   echo "Framework built: $XCFRAMEWORK"
 }
 
+# Create a path to build the framework into
 set_framework_target_dir() {
-  # Create a path to build the framework into
-  rm -rf out_ios_$1
-  mkdir -p out_ios_$1
-  cd out_ios_$1
-  FRAMEWORK_TARGET_DIR=${PWD}
-  cd ../
+  if [ -z "$1" ]; then
+    rm -rf out_ios
+    mkdir -p out_ios
+    cd out_ios
+    FRAMEWORK_TARGET_DIR=${PWD}
+    cd ../
+  else
+    rm -rf out_ios_$1
+    mkdir -p out_ios_$1
+    cd out_ios_$1
+    FRAMEWORK_TARGET_DIR=${PWD}
+    cd ../
+  fi
 }
 
 # Interpret the command line arguments
 if [ $1 == "arm64" ]; then
-  set_framework_target_dir
+  set_framework_target_dir $1
   build_for_arm64_device
   build_framework_for_arm64_device
 elif [ $1 == "arm64-simulator" ]; then
-  set_framework_target_dir
+  set_framework_target_dir $1
   build_for_arm64_simulator
   build_framework_for_arm64_simulator
 elif [ $1 == "x64-simulator" ]; then
-  set_framework_target_dir
+  set_framework_target_dir $1
   build_for_x64_simulator
   build_framework_for_x64_simulator
 elif [ $1 == "combine_frameworks" ]; then
@@ -248,14 +256,17 @@ elif [ $1 == "--help" ]; then
   echo "Usage: ios_framework_prepare.sh arm64|arm64-simulator|x64-simulator|combine_frameworks"
   exit 1
 else
-  set_framework_target_dir
   build_for_arm64_device
   build_for_arm64_simulator
   build_for_x64_simulator
 
+  set_framework_target_dir "arm64"
   build_framework_for_arm64_device
+  set_framework_target_dir "arm64-simulator"
   build_framework_for_arm64_simulator
+  set_framework_target_dir "x64-simulator"
   build_framework_for_x64_simulator
+  set_framework_target_dir
   combine_frameworks
 
   source $SCRIPT_DIR/copy_libnode_headers.sh ios
