@@ -196,11 +196,8 @@ build_framework_for_x64_simulator() {
 combine_frameworks() {
   # Join both simulator outputs into one
   mkdir -p $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework
-  echo "CHECK INSIDE"
-  ls -lR $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework
   cp -r $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/* \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-universal/NodeMobile.framework/
-  echo "Check internals of the universal framework before lipo"
   lipo -create \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-arm64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
     $FRAMEWORK_TARGET_DIR/iphonesimulator-x64/Release-iphonesimulator/NodeMobile.framework/NodeMobile \
