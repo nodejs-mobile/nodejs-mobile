@@ -56,6 +56,20 @@
             'base64_avx2',
             'base64_avx512',
           ],
+          # nodejs-mobile patch: iOS Simulator on x86_64 doesn't have AVX512
+          'conditions': [
+            [ 'OS=="ios"', {
+              'defines!': [
+                'HAVE_AVX512=1',
+              ],
+              'dependencies!': [
+                'base64_avx512',
+              ],
+              'sources': [
+                'base64/lib/arch/avx512/codec.c',
+              ],
+            }]
+          ],
         }, {
           'sources': [
             'base64/lib/arch/ssse3/codec.c',
