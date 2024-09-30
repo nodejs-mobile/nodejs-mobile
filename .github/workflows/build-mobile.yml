@@ -184,11 +184,15 @@ jobs:
           merge-multiple: true
           path: out_ios
 
-      - name: Generate config.gypi
-        run: ./configure
-
       # Python 3.12 (chosen by configure.py) doesn't have support for distutils
       # https://github.com/nodejs/node-gyp/issues/2869 workaround
+      - name: Generate config.gypi
+        run: |
+          python3.12 -m venv .
+          source bin/activate
+          python3.12 -m pip install setuptools
+          ./configure
+
       - name: Combine
         run: |
           python3.12 -m venv .
