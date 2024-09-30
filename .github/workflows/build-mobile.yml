@@ -187,8 +187,13 @@ jobs:
       - name: Generate config.gypi
         run: ./configure
 
+      # Python 3.12 (chosen by configure.py) doesn't have support for distutils
+      # https://github.com/nodejs/node-gyp/issues/2869 workaround
       - name: Combine
         run: |
+          python3.12 -m venv .
+          source bin/activate
+          python3.12 -m pip install setuptools
           ./tools/ios_framework_prepare.sh combine_frameworks
           mkdir -p artifacts/include
           cp -R out_ios/NodeMobile.xcframework artifacts/
