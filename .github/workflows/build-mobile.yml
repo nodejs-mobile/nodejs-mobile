@@ -34,7 +34,7 @@ jobs:
           fetch-depth: '0'
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.3
+        uses: mozilla-actions/sccache-action@v0.0.6
 
       - name: Install build utils
         run: |
@@ -89,7 +89,7 @@ jobs:
           fetch-depth: '0'
 
       - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.3
+        uses: mozilla-actions/sccache-action@v0.0.6
 
       - name: Xcode Select Version
         uses: mobiledevops/xcode-select-version-action@v1
