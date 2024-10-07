@@ -1,7 +1,6 @@
-'use strict'
-
-const { resolve } = require('path')
-const BaseCommand = require('../base-command.js')
+const { resolve } = require('node:path')
+const BaseCommand = require('../base-cmd.js')
+const { log, output } = require('proc-log')
 
 class QuerySelectorItem {
   constructor (node) {
@@ -48,6 +47,8 @@ class Query extends BaseCommand {
     'workspace',
     'workspaces',
     'include-workspace-root',
+    'package-lock-only',
+    'expect-results',
   ]
 
   get parsedResponse () {
@@ -64,11 +65,23 @@ class Query extends BaseCommand {
       forceActual: true,
     }
     const arb = new Arborist(opts)
-    const tree = await arb.loadActual(opts)
+    let tree
+    if (this.npm.config.get('package-lock-only')) {
+      try {
+        tree = await arb.loadVirtual()
+      } catch (err) {
+        log.verbose('loadVirtual', err.stack)
+        /* eslint-disable-next-line max-len */
+        throw this.usageError('A package lock or shrinkwrap file is required in package-lock-only mode')
+      }
+    } else {
+      tree = await arb.loadActual(opts)
+    }
     const items = await tree.querySelectorAll(args[0], this.npm.flatOptions)
     this.buildResponse(items)
 
-    this.npm.output(this.parsedResponse)
+    this.checkExpected(this.#response.length)
+    output.standard(this.parsedResponse)
   }
 
   async execWorkspaces (args) {
@@ -91,16 +104,19 @@ class Query extends BaseCommand {
       }
       this.buildResponse(items)
     }
-    this.npm.output(this.parsedResponse)
+    this.checkExpected(this.#response.length)
+    output.standard(this.parsedResponse)
   }
 
   // builds a normalized inventory
   buildResponse (items) {
     for (const node of items) {
-      if (!this.#seen.has(node.target.location)) {
+      if (!node.target.location || !this.#seen.has(node.target.location)) {
         const item = new QuerySelectorItem(node)
         this.#response.push(item)
-        this.#seen.add(item.location)
+        if (node.target.location) {
+          this.#seen.add(item.location)
+        }
       }
     }
   }

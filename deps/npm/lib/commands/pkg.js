@@ -1,5 +1,6 @@
+const { output } = require('proc-log')
 const PackageJson = require('@npmcli/package-json')
-const BaseCommand = require('../base-command.js')
+const BaseCommand = require('../base-cmd.js')
 const Queryable = require('../utils/queryable.js')
 
 class Pkg extends BaseCommand {
@@ -11,6 +12,7 @@ class Pkg extends BaseCommand {
     'delete <key> [<key> ...]',
     'set [<array>[<index>].<key>=<value> ...]',
     'set [<array>[].<key>=<value> ...]',
+    'fix',
   ]
 
   static params = [
@@ -45,6 +47,8 @@ class Pkg extends BaseCommand {
         return this.set(_args)
       case 'delete':
         return this.delete(_args)
+      case 'fix':
+        return this.fix(_args)
       default:
         throw this.usageError()
     }
@@ -59,7 +63,7 @@ class Pkg extends BaseCommand {
     }
     // when running in workspaces names, make sure to key by workspace
     // name the results of each value retrieved in each ws
-    this.npm.output(JSON.stringify(result, null, 2))
+    output.standard(JSON.stringify(result, null, 2))
   }
 
   async get (args) {
@@ -79,11 +83,10 @@ class Pkg extends BaseCommand {
       }
     }
 
-    // only outputs if not running with workspaces config,
-    // in case you're retrieving info for workspaces the pkgWorkspaces
-    // will handle the output to make sure it get keyed by ws name
-    if (!this.npm.config.get('workspaces')) {
-      this.npm.output(JSON.stringify(result, null, 2))
+    // only outputs if not running with workspaces config
+    // execWorkspaces will handle the output otherwise
+    if (!this.workspaces) {
+      output.standard(JSON.stringify(result, null, 2))
     }
 
     return result
@@ -134,6 +137,11 @@ class Pkg extends BaseCommand {
     }
 
     pkgJson.update(q.toJSON())
+    await pkgJson.save()
+  }
+
+  async fix () {
+    const pkgJson = await PackageJson.fix(this.prefix)
     await pkgJson.save()
   }
 }

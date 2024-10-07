@@ -36,7 +36,7 @@ NEW_VERSION_TGZ="icu4c-${LOW_DASHED_NEW_VERSION}-src.tgz"
 
 NEW_VERSION_TGZ_URL="https://github.com/unicode-org/icu/releases/download/release-${DASHED_NEW_VERSION}/$NEW_VERSION_TGZ"
 
-NEW_VERSION_MD5="https://github.com/unicode-org/icu/releases/download/release-${DASHED_NEW_VERSION}/icu4c-${LOW_DASHED_NEW_VERSION}-src.md5"
+NEW_VERSION_MD5="https://github.com/unicode-org/icu/releases/download/release-${DASHED_NEW_VERSION}/icu4c-${LOW_DASHED_NEW_VERSION}-sources.md5"
 
 ./configure --with-intl=full-icu --with-icu-source="$NEW_VERSION_TGZ_URL"
 
@@ -55,9 +55,9 @@ if [ "$CHECKSUM" != "$GENERATED_CHECKSUM" ]; then
   exit 0
 fi
 
-sed -i '' -e "s|\"url\": \"\(.*\)\".*|\"url\": \"$NEW_VERSION_TGZ_URL\",|" "$TOOLS_DIR/icu/current_ver.dep"
+perl -i -pe "s|\"url\": .*|\"url\": \"$NEW_VERSION_TGZ_URL\",|" "$TOOLS_DIR/icu/current_ver.dep"
 
-sed -i '' -e "s|\"md5\": \"\(.*\)\".*|\"md5\": \"$CHECKSUM\"|" "$TOOLS_DIR/icu/current_ver.dep" 
+perl -i -pe "s|\"md5\": .*|\"md5\": \"$CHECKSUM\"|" "$TOOLS_DIR/icu/current_ver.dep"
 
 rm -rf out "$DEPS_DIR/icu" "$DEPS_DIR/icu4c*"
 

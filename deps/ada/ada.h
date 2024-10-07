@@ -1,4 +1,4 @@
-/* auto-generated on 2023-05-25 16:09:25 -0400. Do not edit! */
+/* auto-generated on 2024-04-11 16:39:11 -0400. Do not edit! */
 /* begin file include/ada.h */
 /**
  * @file ada.h
@@ -8,7 +8,7 @@
 #define ADA_H
 
 /* begin file include/ada/ada_idna.h */
-/* auto-generated on 2023-05-07 19:12:14 -0400. Do not edit! */
+/* auto-generated on 2023-09-19 15:58:51 -0400. Do not edit! */
 /* begin file include/idna.h */
 #ifndef ADA_IDNA_H
 #define ADA_IDNA_H
@@ -98,7 +98,7 @@ namespace ada::idna {
 /**
  * @see https://www.unicode.org/reports/tr46/#Validity_Criteria
  */
-bool is_label_valid(const std::u32string_view label);
+bool is_label_valid(std::u32string_view label);
 
 }  // namespace ada::idna
 
@@ -120,7 +120,6 @@ namespace ada::idna {
 // this function. We also do not trim control characters. We also assume that
 // the input is not empty. We return "" on error.
 //
-// Example: "www.öbb.at" -> "www.xn--bb-eka.at"
 //
 // This function may accept or even produce invalid domains.
 std::string to_ascii(std::string_view ut8_string);
@@ -130,9 +129,8 @@ std::string to_ascii(std::string_view ut8_string);
 // https://url.spec.whatwg.org/#forbidden-domain-code-point
 bool contains_forbidden_domain_code_point(std::string_view ascii_string);
 
-bool constexpr begins_with(std::u32string_view view,
-                           std::u32string_view prefix);
-bool constexpr begins_with(std::string_view view, std::string_view prefix);
+bool begins_with(std::u32string_view view, std::u32string_view prefix);
+bool begins_with(std::string_view view, std::string_view prefix);
 
 bool constexpr is_ascii(std::u32string_view view);
 bool constexpr is_ascii(std::string_view view);
@@ -463,9 +461,11 @@ namespace ada {
 #ifdef ADA_VISUAL_STUDIO
 #define ADA_ASSUME(COND) __assume(COND)
 #else
-#define ADA_ASSUME(COND)                  \
-  do {                                    \
-    if (!(COND)) __builtin_unreachable(); \
+#define ADA_ASSUME(COND)       \
+  do {                         \
+    if (!(COND)) {             \
+      __builtin_unreachable(); \
+    }                          \
   } while (0)
 #endif
 
@@ -481,19 +481,27 @@ namespace ada {
 
 #endif  // ADA_COMMON_DEFS_H
 /* end file include/ada/common_defs.h */
-#include <stdint.h>
+#include <cstdint>
 
 /**
+ * These functions are not part of our public API and may
+ * change at any time.
+ * @private
  * @namespace ada::character_sets
  * @brief Includes the definitions for unicode character sets.
  */
 namespace ada::character_sets {
-ada_really_inline bool bit_at(const uint8_t a[], const uint8_t i);
+ada_really_inline bool bit_at(const uint8_t a[], uint8_t i);
 }  // namespace ada::character_sets
 
 #endif  // ADA_CHARACTER_SETS_H
 /* end file include/ada/character_sets.h */
 
+/**
+ * These functions are not part of our public API and may
+ * change at any time.
+ * @private
+ */
 namespace ada::character_sets {
 
 constexpr char hex[1024] =
@@ -926,13 +934,79 @@ constexpr uint8_t PATH_PERCENT_ENCODE[32] = {
     // F8     F9     FA     FB     FC     FD     FE     FF
     0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80};
 
+constexpr uint8_t WWW_FORM_URLENCODED_PERCENT_ENCODE[32] = {
+    // 00     01     02     03     04     05     06     07
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 08     09     0A     0B     0C     0D     0E     0F
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 10     11     12     13     14     15     16     17
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 18     19     1A     1B     1C     1D     1E     1F
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 20     21     22     23     24     25     26     27
+    0x00 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 28     29     2A     2B     2C     2D     2E     2F
+    0x01 | 0x02 | 0x00 | 0x08 | 0x10 | 0x00 | 0x00 | 0x80,
+    // 30     31     32     33     34     35     36     37
+    0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 38     39     3A     3B     3C     3D     3E     3F
+    0x00 | 0x00 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 40     41     42     43     44     45     46     47
+    0x01 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 48     49     4A     4B     4C     4D     4E     4F
+    0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 50     51     52     53     54     55     56     57
+    0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 58     59     5A     5B     5C     5D     5E     5F
+    0x00 | 0x00 | 0x00 | 0x08 | 0x00 | 0x20 | 0x40 | 0x00,
+    // 60     61     62     63     64     65     66     67
+    0x01 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 68     69     6A     6B     6C     6D     6E     6F
+    0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 70     71     72     73     74     75     76     77
+    0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00 | 0x00,
+    // 78     79     7A     7B     7C     7D     7E     7F
+    0x00 | 0x00 | 0x00 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 80     81     82     83     84     85     86     87
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 88     89     8A     8B     8C     8D     8E     8F
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 90     91     92     93     94     95     96     97
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // 98     99     9A     9B     9C     9D     9E     9F
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // A0     A1     A2     A3     A4     A5     A6     A7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // A8     A9     AA     AB     AC     AD     AE     AF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // B0     B1     B2     B3     B4     B5     B6     B7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // B8     B9     BA     BB     BC     BD     BE     BF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // C0     C1     C2     C3     C4     C5     C6     C7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // C8     C9     CA     CB     CC     CD     CE     CF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // D0     D1     D2     D3     D4     D5     D6     D7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // D8     D9     DA     DB     DC     DD     DE     DF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // E0     E1     E2     E3     E4     E5     E6     E7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // E8     E9     EA     EB     EC     ED     EE     EF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // F0     F1     F2     F3     F4     F5     F6     F7
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80,
+    // F8     F9     FA     FB     FC     FD     FE     FF
+    0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x20 | 0x40 | 0x80};
+
 ada_really_inline bool bit_at(const uint8_t a[], const uint8_t i) {
   return !!(a[i >> 3] & (1 << (i & 7)));
 }
 
 }  // namespace ada::character_sets
 
-#endif  // ADA_CHARACTER_SETS_H
+#endif  // ADA_CHARACTER_SETS_INL_H
 /* end file include/ada/character_sets-inl.h */
 /* begin file include/ada/checkers-inl.h */
 /**
@@ -943,6 +1017,7 @@ ada_really_inline bool bit_at(const uint8_t a[], const uint8_t i) {
 #define ADA_CHECKERS_INL_H
 
 
+#include <algorithm>
 #include <string_view>
 #include <cstring>
 
@@ -989,16 +1064,17 @@ inline constexpr bool is_normalized_windows_drive_letter(
   return input.size() >= 2 && (is_alpha(input[0]) && (input[1] == ':'));
 }
 
-ada_really_inline constexpr bool begins_with(std::string_view view,
-                                             std::string_view prefix) {
+ada_really_inline bool begins_with(std::string_view view,
+                                   std::string_view prefix) {
   // in C++20, you have view.begins_with(prefix)
+  // std::equal is constexpr in C++20
   return view.size() >= prefix.size() &&
-         (view.substr(0, prefix.size()) == prefix);
+         std::equal(prefix.begin(), prefix.end(), view.begin());
 }
 
 }  // namespace ada::checkers
 
-#endif  // ADA_CHECKERS_H
+#endif  // ADA_CHECKERS_INL_H
 /* end file include/ada/checkers-inl.h */
 /* begin file include/ada/log.h */
 /**
@@ -1246,12 +1322,12 @@ struct url_components {
    * @return true if the offset values are
    *  consistent with a possible URL string
    */
-  bool check_offset_consistency() const noexcept;
+  [[nodiscard]] bool check_offset_consistency() const noexcept;
 
   /**
    * Converts a url_components to JSON stringified version.
    */
-  std::string to_string() const;
+  [[nodiscard]] std::string to_string() const;
 
 };  // struct url_components
 
@@ -1342,6 +1418,25 @@ constexpr ada::scheme::type get_scheme_type(std::string_view scheme) noexcept;
 namespace ada {
 
 /**
+ * Type of URL host as an enum.
+ */
+enum url_host_type : uint8_t {
+  /**
+   * Represents common URLs such as "https://www.google.com"
+   */
+  DEFAULT = 0,
+  /**
+   * Represents ipv4 addresses such as "http://127.0.0.1"
+   */
+  IPV4 = 1,
+  /**
+   * Represents ipv6 addresses such as
+   * "http://[2001:db8:3333:4444:5555:6666:7777:8888]"
+   */
+  IPV6 = 2,
+};
+
+/**
  * @brief Base class of URL implementations
  *
  * @details A url_base contains a few attributes: is_valid, has_opaque_path and
@@ -1364,6 +1459,11 @@ struct url_base {
   bool has_opaque_path{false};
 
   /**
+   * URL hosts type
+   */
+  url_host_type host_type = url_host_type::DEFAULT;
+
+  /**
    * @private
    */
   ada::scheme::type type{ada::scheme::type::NOT_SPECIAL};
@@ -1375,7 +1475,7 @@ struct url_base {
   [[nodiscard]] ada_really_inline bool is_special() const noexcept;
 
   /**
-   * The origin getter steps are to return the serialization of this’s URL’s
+   * The origin getter steps are to return the serialization of this's URL's
    * origin. [HTML]
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#concept-url-origin
@@ -1415,13 +1515,17 @@ struct url_base {
    * @return On failure, it returns zero.
    * @see https://url.spec.whatwg.org/#host-parsing
    */
-  virtual ada_really_inline size_t parse_port(
-      std::string_view view, bool check_trailing_content = false) noexcept = 0;
+  virtual size_t parse_port(std::string_view view,
+                            bool check_trailing_content) noexcept = 0;
+
+  virtual ada_really_inline size_t parse_port(std::string_view view) noexcept {
+    return this->parse_port(view, false);
+  }
 
   /**
    * Returns a JSON string representation of this URL.
    */
-  virtual std::string to_string() const = 0;
+  [[nodiscard]] virtual std::string to_string() const = 0;
 
   /** @private */
   virtual inline void clear_pathname() = 0;
@@ -1430,10 +1534,10 @@ struct url_base {
   virtual inline void clear_search() = 0;
 
   /** @private */
-  virtual inline bool has_hash() const noexcept = 0;
+  [[nodiscard]] virtual inline bool has_hash() const noexcept = 0;
 
   /** @private */
-  virtual inline bool has_search() const noexcept = 0;
+  [[nodiscard]] virtual inline bool has_search() const noexcept = 0;
 
 };  // url_base
 
@@ -1446,6 +1550,9 @@ struct url_base {
 #include <optional>
 
 /**
+ * These functions are not part of our public API and may
+ * change at any time.
+ *
  * @private
  * @namespace ada::helpers
  * @brief Includes the definitions for helper functions
@@ -1503,7 +1610,7 @@ ada_really_inline bool shorten_path(std::string_view& path,
  *
  * @see https://url.spec.whatwg.org/
  */
-ada_really_inline void parse_prepared_path(const std::string_view input,
+ada_really_inline void parse_prepared_path(std::string_view input,
                                            ada::scheme::type type,
                                            std::string& path);
 
@@ -1578,18 +1685,6 @@ ada_really_inline void strip_trailing_spaces_from_opaque_path(
 
 /**
  * @private
- * Reverse the order of the bytes.
- */
-ada_really_inline uint64_t swap_bytes(uint64_t val) noexcept;
-
-/**
- * @private
- * Reverse the order of the bytes but only if the system is big endian
- */
-ada_really_inline uint64_t swap_bytes_if_big_endian(uint64_t val) noexcept;
-
-/**
- * @private
  * Finds the delimiter of a view in authority state.
  */
 ada_really_inline size_t
@@ -1620,6 +1715,7 @@ inline void inner_concat(std::string& buffer, T t, Args... args) {
 }
 
 /**
+ * @private
  * Concatenate the arguments and return a string.
  * @returns a string
  */
@@ -1631,6 +1727,7 @@ std::string concat(Args... args) {
 }
 
 /**
+ * @private
  * @return Number of leading zeroes.
  */
 inline int leading_zeroes(uint32_t input_num) noexcept {
@@ -1644,6 +1741,7 @@ inline int leading_zeroes(uint32_t input_num) noexcept {
 }
 
 /**
+ * @private
  * Counts the number of decimal digits necessary to represent x.
  * faster than std::to_string(x).size().
  * @return digit count
@@ -1703,8 +1801,8 @@ inline int fast_digit_count(uint32_t x) noexcept {
 #define TL_EXPECTED_HPP
 
 #define TL_EXPECTED_VERSION_MAJOR 1
-#define TL_EXPECTED_VERSION_MINOR 0
-#define TL_EXPECTED_VERSION_PATCH 1
+#define TL_EXPECTED_VERSION_MINOR 1
+#define TL_EXPECTED_VERSION_PATCH 0
 
 #include <exception>
 #include <functional>
@@ -1735,6 +1833,16 @@ inline int fast_digit_count(uint32_t x) noexcept {
 #if (defined(__GNUC__) && __GNUC__ == 5 && __GNUC_MINOR__ <= 5 && \
      !defined(__clang__))
 #define TL_EXPECTED_GCC55
+#endif
+
+#if !defined(TL_ASSERT)
+// can't have assert in constexpr in C++11 and GCC 4.9 has a compiler bug
+#if (__cplusplus > 201103L) && !defined(TL_EXPECTED_GCC49)
+#include <cassert>
+#define TL_ASSERT(x) assert(x)
+#else
+#define TL_ASSERT(x)
+#endif
 #endif
 
 #if (defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ <= 9 && \
@@ -1892,6 +2000,7 @@ template <typename E>
 #ifdef TL_EXPECTED_EXCEPTIONS_ENABLED
   throw std::forward<E>(e);
 #else
+  (void)e;
 #ifdef _MSC_VER
   __assume(0);
 #else
@@ -2532,7 +2641,7 @@ struct expected_operations_base : expected_storage_base<T, E> {
       geterr().~unexpected<E>();
       construct(std::move(rhs).get());
     } else {
-      assign_common(rhs);
+      assign_common(std::move(rhs));
     }
   }
 
@@ -2895,7 +3004,7 @@ struct default_constructor_tag {
 };
 
 // expected_default_ctor_base will ensure that expected has a deleted default
-// constructor if T is not default constructible.
+// consturctor if T is not default constructible.
 // This specialization is for when T is default constructible
 template <class T, class E,
           bool Enable =
@@ -3187,6 +3296,53 @@ class expected : private detail::expected_move_assign_base<T, E>,
   constexpr decltype(map_error_impl(std::declval<const expected &&>(),
                                     std::declval<F &&>()))
   map_error(F &&f) const && {
+    return map_error_impl(std::move(*this), std::forward<F>(f));
+  }
+#endif
+#endif
+#if defined(TL_EXPECTED_CXX14) && !defined(TL_EXPECTED_GCC49) && \
+    !defined(TL_EXPECTED_GCC54) && !defined(TL_EXPECTED_GCC55)
+  template <class F>
+  TL_EXPECTED_11_CONSTEXPR auto transform_error(F &&f) & {
+    return map_error_impl(*this, std::forward<F>(f));
+  }
+  template <class F>
+  TL_EXPECTED_11_CONSTEXPR auto transform_error(F &&f) && {
+    return map_error_impl(std::move(*this), std::forward<F>(f));
+  }
+  template <class F>
+  constexpr auto transform_error(F &&f) const & {
+    return map_error_impl(*this, std::forward<F>(f));
+  }
+  template <class F>
+  constexpr auto transform_error(F &&f) const && {
+    return map_error_impl(std::move(*this), std::forward<F>(f));
+  }
+#else
+  template <class F>
+  TL_EXPECTED_11_CONSTEXPR decltype(map_error_impl(std::declval<expected &>(),
+                                                   std::declval<F &&>()))
+  transform_error(F &&f) & {
+    return map_error_impl(*this, std::forward<F>(f));
+  }
+  template <class F>
+  TL_EXPECTED_11_CONSTEXPR decltype(map_error_impl(std::declval<expected &&>(),
+                                                   std::declval<F &&>()))
+  transform_error(F &&f) && {
+    return map_error_impl(std::move(*this), std::forward<F>(f));
+  }
+  template <class F>
+  constexpr decltype(map_error_impl(std::declval<const expected &>(),
+                                    std::declval<F &&>()))
+  transform_error(F &&f) const & {
+    return map_error_impl(*this, std::forward<F>(f));
+  }
+
+#ifndef TL_EXPECTED_NO_CONSTRR
+  template <class F>
+  constexpr decltype(map_error_impl(std::declval<const expected &&>(),
+                                    std::declval<F &&>()))
+  transform_error(F &&f) const && {
     return map_error_impl(std::move(*this), std::forward<F>(f));
   }
 #endif
@@ -3632,27 +3788,37 @@ class expected : private detail::expected_move_assign_base<T, E>,
     }
   }
 
-  constexpr const T *operator->() const { return valptr(); }
-  TL_EXPECTED_11_CONSTEXPR T *operator->() { return valptr(); }
+  constexpr const T *operator->() const {
+    TL_ASSERT(has_value());
+    return valptr();
+  }
+  TL_EXPECTED_11_CONSTEXPR T *operator->() {
+    TL_ASSERT(has_value());
+    return valptr();
+  }
 
   template <class U = T,
             detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
   constexpr const U &operator*() const & {
+    TL_ASSERT(has_value());
     return val();
   }
   template <class U = T,
             detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
   TL_EXPECTED_11_CONSTEXPR U &operator*() & {
+    TL_ASSERT(has_value());
     return val();
   }
   template <class U = T,
             detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
   constexpr const U &&operator*() const && {
+    TL_ASSERT(has_value());
     return std::move(val());
   }
   template <class U = T,
             detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
   TL_EXPECTED_11_CONSTEXPR U &&operator*() && {
+    TL_ASSERT(has_value());
     return std::move(val());
   }
 
@@ -3688,10 +3854,22 @@ class expected : private detail::expected_move_assign_base<T, E>,
     return std::move(val());
   }
 
-  constexpr const E &error() const & { return err().value(); }
-  TL_EXPECTED_11_CONSTEXPR E &error() & { return err().value(); }
-  constexpr const E &&error() const && { return std::move(err().value()); }
-  TL_EXPECTED_11_CONSTEXPR E &&error() && { return std::move(err().value()); }
+  constexpr const E &error() const & {
+    TL_ASSERT(!has_value());
+    return err().value();
+  }
+  TL_EXPECTED_11_CONSTEXPR E &error() & {
+    TL_ASSERT(!has_value());
+    return err().value();
+  }
+  constexpr const E &&error() const && {
+    TL_ASSERT(!has_value());
+    return std::move(err().value());
+  }
+  TL_EXPECTED_11_CONSTEXPR E &&error() && {
+    TL_ASSERT(!has_value());
+    return std::move(err().value());
+  }
 
   template <class U>
   constexpr T value_or(U &&v) const & {
@@ -4173,6 +4351,30 @@ constexpr std::string_view is_special_list[] = {"http", " ",   "https", "ws",
 constexpr uint16_t special_ports[] = {80, 0, 443, 80, 21, 443, 0, 0};
 }  // namespace details
 
+/****
+ * @private
+ * In is_special, get_scheme_type, and get_special_port, we
+ * use a standard hashing technique to find the index of the scheme in
+ * the is_special_list. The hashing technique is based on the size of
+ * the scheme and the first character of the scheme. It ensures that we
+ * do at most one string comparison per call. If the protocol is
+ * predictible (e.g., it is always "http"), we can get a better average
+ * performance by using a simpler approach where we loop and compare
+ * scheme with all possible protocols starting with the most likely
+ * protocol. Doing multiple comparisons may have a poor worst case
+ * performance, however. In this instance, we choose a potentially
+ * slightly lower best-case performance for a better worst-case
+ * performance. We can revisit this choice at any time.
+ *
+ * Reference:
+ * Schmidt, Douglas C. "Gperf: A perfect hash function generator."
+ * More C++ gems 17 (2000).
+ *
+ * Reference: https://en.wikipedia.org/wiki/Perfect_hash_function
+ *
+ * Reference: https://github.com/ada-url/ada/issues/617
+ ****/
+
 ada_really_inline constexpr bool is_special(std::string_view scheme) {
   if (scheme.empty()) {
     return false;
@@ -4211,7 +4413,7 @@ constexpr ada::scheme::type get_scheme_type(std::string_view scheme) noexcept {
 
 }  // namespace ada::scheme
 
-#endif  // ADA_SCHEME_H
+#endif  // ADA_SCHEME_INL_H
 /* end file include/ada/scheme-inl.h */
 /* begin file include/ada/serializers.h */
 /**
@@ -4253,7 +4455,7 @@ std::string ipv6(const std::array<uint16_t, 8>& address) noexcept;
  * network address.
  * @see https://url.spec.whatwg.org/#concept-ipv4-serializer
  */
-std::string ipv4(const uint64_t address) noexcept;
+std::string ipv4(uint64_t address) noexcept;
 
 }  // namespace ada::serializers
 
@@ -4272,22 +4474,27 @@ std::string ipv4(const uint64_t address) noexcept;
 #include <optional>
 
 /**
+ * Unicode operations. These functions are not part of our public API and may
+ * change at any time.
+ *
+ * @private
  * @namespace ada::unicode
  * @brief Includes the definitions for unicode operations
  */
 namespace ada::unicode {
 
 /**
+ * @private
  * We receive a UTF-8 string representing a domain name.
  * If the string is percent encoded, we apply percent decoding.
  *
  * Given a domain, we need to identify its labels.
  * They are separated by label-separators:
  *
- * U+002E ( . ) FULL STOP
- * U+FF0E ( ． ) FULLWIDTH FULL STOP
- * U+3002 ( 。 ) IDEOGRAPHIC FULL STOP
- * U+FF61 ( ｡ ) HALFWIDTH IDEOGRAPHIC FULL STOP
+ * U+002E (.) FULL STOP
+ * U+FF0E FULLWIDTH FULL STOP
+ * U+3002 IDEOGRAPHIC FULL STOP
+ * U+FF61 HALFWIDTH IDEOGRAPHIC FULL STOP
  *
  * They are all mapped to U+002E.
  *
@@ -4321,11 +4528,13 @@ bool to_ascii(std::optional<std::string>& out, std::string_view plain,
               size_t first_percent);
 
 /**
+ * @private
  * @see https://www.unicode.org/reports/tr46/#ToUnicode
  */
 std::string to_unicode(std::string_view input);
 
 /**
+ * @private
  * Checks if the input has tab or newline characters.
  *
  * @attention The has_tabs_or_newline function is a bottleneck and it is simple
@@ -4335,13 +4544,14 @@ ada_really_inline bool has_tabs_or_newline(
     std::string_view user_input) noexcept;
 
 /**
+ * @private
  * Checks if the input is a forbidden host code point.
  * @see https://url.spec.whatwg.org/#forbidden-host-code-point
  */
-ada_really_inline constexpr bool is_forbidden_host_code_point(
-    const char c) noexcept;
+ada_really_inline constexpr bool is_forbidden_host_code_point(char c) noexcept;
 
 /**
+ * @private
  * Checks if the input contains a forbidden domain code point.
  * @see https://url.spec.whatwg.org/#forbidden-domain-code-point
  */
@@ -4349,6 +4559,7 @@ ada_really_inline constexpr bool contains_forbidden_domain_code_point(
     const char* input, size_t length) noexcept;
 
 /**
+ * @private
  * Checks if the input contains a forbidden domain code point in which case
  * the first bit is set to 1. If the input contains an upper case ASCII letter,
  * then the second bit is set to 1.
@@ -4359,66 +4570,77 @@ contains_forbidden_domain_code_point_or_upper(const char* input,
                                               size_t length) noexcept;
 
 /**
+ * @private
  * Checks if the input is a forbidden domain code point.
  * @see https://url.spec.whatwg.org/#forbidden-domain-code-point
  */
 ada_really_inline constexpr bool is_forbidden_domain_code_point(
-    const char c) noexcept;
+    char c) noexcept;
 
 /**
+ * @private
  * Checks if the input is alphanumeric, '+', '-' or '.'
  */
-ada_really_inline constexpr bool is_alnum_plus(const char c) noexcept;
+ada_really_inline constexpr bool is_alnum_plus(char c) noexcept;
 
 /**
+ * @private
  * @details An ASCII hex digit is an ASCII upper hex digit or ASCII lower hex
  * digit. An ASCII upper hex digit is an ASCII digit or a code point in the
  * range U+0041 (A) to U+0046 (F), inclusive. An ASCII lower hex digit is an
  * ASCII digit or a code point in the range U+0061 (a) to U+0066 (f), inclusive.
  */
-ada_really_inline constexpr bool is_ascii_hex_digit(const char c) noexcept;
+ada_really_inline constexpr bool is_ascii_hex_digit(char c) noexcept;
 
 /**
+ * @private
  * Checks if the input is a C0 control or space character.
  *
  * @details A C0 control or space is a C0 control or U+0020 SPACE.
  * A C0 control is a code point in the range U+0000 NULL to U+001F INFORMATION
  * SEPARATOR ONE, inclusive.
  */
-ada_really_inline constexpr bool is_c0_control_or_space(const char c) noexcept;
+ada_really_inline constexpr bool is_c0_control_or_space(char c) noexcept;
 
 /**
+ * @private
  * Checks if the input is a ASCII tab or newline character.
  *
  * @details An ASCII tab or newline is U+0009 TAB, U+000A LF, or U+000D CR.
  */
-ada_really_inline constexpr bool is_ascii_tab_or_newline(const char c) noexcept;
+ada_really_inline constexpr bool is_ascii_tab_or_newline(char c) noexcept;
 
 /**
+ * @private
  * @details A double-dot path segment must be ".." or an ASCII case-insensitive
  * match for ".%2e", "%2e.", or "%2e%2e".
  */
 ada_really_inline ada_constexpr bool is_double_dot_path_segment(
-    const std::string_view input) noexcept;
+    std::string_view input) noexcept;
 
 /**
+ * @private
  * @details A single-dot path segment must be "." or an ASCII case-insensitive
  * match for "%2e".
  */
 ada_really_inline constexpr bool is_single_dot_path_segment(
-    const std::string_view input) noexcept;
+    std::string_view input) noexcept;
 
 /**
+ * @private
  * @details ipv4 character might contain 0-9 or a-f character ranges.
  */
-ada_really_inline constexpr bool is_lowercase_hex(const char c) noexcept;
+ada_really_inline constexpr bool is_lowercase_hex(char c) noexcept;
 
 /**
- * @details Convert hex to binary.
+ * @private
+ * @details Convert hex to binary. Caller is responsible to ensure that
+ * the parameter is an hexadecimal digit (0-9, A-F, a-f).
  */
-unsigned constexpr convert_hex_to_binary(char c) noexcept;
+ada_really_inline unsigned constexpr convert_hex_to_binary(char c) noexcept;
 
 /**
+ * @private
  * first_percent should be  = input.find('%')
  *
  * @todo It would be faster as noexcept maybe, but it could be unsafe since.
@@ -4426,22 +4648,25 @@ unsigned constexpr convert_hex_to_binary(char c) noexcept;
  * @see https://github.com/nodejs/node/blob/main/src/node_url.cc#L245
  * @see https://encoding.spec.whatwg.org/#utf-8-decode-without-bom
  */
-std::string percent_decode(const std::string_view input, size_t first_percent);
+std::string percent_decode(std::string_view input, size_t first_percent);
 
 /**
+ * @private
  * Returns a percent-encoding string whether percent encoding was needed or not.
  * @see https://github.com/nodejs/node/blob/main/src/node_url.cc#L226
  */
-std::string percent_encode(const std::string_view input,
+std::string percent_encode(std::string_view input,
                            const uint8_t character_set[]);
 /**
+ * @private
  * Returns a percent-encoded string version of input, while starting the percent
  * encoding at the provided index.
  * @see https://github.com/nodejs/node/blob/main/src/node_url.cc#L226
  */
-std::string percent_encode(const std::string_view input,
+std::string percent_encode(std::string_view input,
                            const uint8_t character_set[], size_t index);
 /**
+ * @private
  * Returns true if percent encoding was needed, in which case, we store
  * the percent-encoded content in 'out'. If the boolean 'append' is set to
  * true, the content is appended to 'out'.
@@ -4449,15 +4674,17 @@ std::string percent_encode(const std::string_view input,
  * @see https://github.com/nodejs/node/blob/main/src/node_url.cc#L226
  */
 template <bool append>
-bool percent_encode(const std::string_view input, const uint8_t character_set[],
+bool percent_encode(std::string_view input, const uint8_t character_set[],
                     std::string& out);
 /**
+ * @private
  * Returns the index at which percent encoding should start, or (equivalently),
  * the length of the prefix that does not require percent encoding.
  */
-ada_really_inline size_t percent_encode_index(const std::string_view input,
+ada_really_inline size_t percent_encode_index(std::string_view input,
                                               const uint8_t character_set[]);
 /**
+ * @private
  * Lowers the string in-place, assuming that the content is ASCII.
  * Return true if the content was ASCII.
  */
@@ -4502,22 +4729,22 @@ struct url_aggregator : url_base {
   url_aggregator(url_aggregator &&u) noexcept = default;
   url_aggregator &operator=(url_aggregator &&u) noexcept = default;
   url_aggregator &operator=(const url_aggregator &u) = default;
-  ~url_aggregator() = default;
+  ~url_aggregator() override = default;
 
-  bool set_href(const std::string_view input);
-  bool set_host(const std::string_view input);
-  bool set_hostname(const std::string_view input);
-  bool set_protocol(const std::string_view input);
-  bool set_username(const std::string_view input);
-  bool set_password(const std::string_view input);
-  bool set_port(const std::string_view input);
-  bool set_pathname(const std::string_view input);
-  void set_search(const std::string_view input);
-  void set_hash(const std::string_view input);
+  bool set_href(std::string_view input);
+  bool set_host(std::string_view input);
+  bool set_hostname(std::string_view input);
+  bool set_protocol(std::string_view input);
+  bool set_username(std::string_view input);
+  bool set_password(std::string_view input);
+  bool set_port(std::string_view input);
+  bool set_pathname(std::string_view input);
+  void set_search(std::string_view input);
+  void set_hash(std::string_view input);
 
   [[nodiscard]] bool has_valid_domain() const noexcept override;
   /**
-   * The origin getter steps are to return the serialization of this’s URL’s
+   * The origin getter steps are to return the serialization of this's URL's
    * origin. [HTML]
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#concept-url-origin
@@ -4531,37 +4758,37 @@ struct url_aggregator : url_base {
    * @see https://url.spec.whatwg.org/#dom-url-href
    * @see https://url.spec.whatwg.org/#concept-url-serializer
    */
-  inline std::string_view get_href() const noexcept;
+  [[nodiscard]] inline std::string_view get_href() const noexcept;
   /**
-   * The username getter steps are to return this’s URL’s username.
+   * The username getter steps are to return this's URL's username.
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
    * @see https://url.spec.whatwg.org/#dom-url-username
    */
   [[nodiscard]] std::string_view get_username() const noexcept;
   /**
-   * The password getter steps are to return this’s URL’s password.
+   * The password getter steps are to return this's URL's password.
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
    * @see https://url.spec.whatwg.org/#dom-url-password
    */
   [[nodiscard]] std::string_view get_password() const noexcept;
   /**
-   * Return this’s URL’s port, serialized.
+   * Return this's URL's port, serialized.
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
    * @see https://url.spec.whatwg.org/#dom-url-port
    */
   [[nodiscard]] std::string_view get_port() const noexcept;
   /**
-   * Return U+0023 (#), followed by this’s URL’s fragment.
+   * Return U+0023 (#), followed by this's URL's fragment.
    * This function does not allocate memory.
    * @return a lightweight std::string_view..
    * @see https://url.spec.whatwg.org/#dom-url-hash
    */
   [[nodiscard]] std::string_view get_hash() const noexcept;
   /**
-   * Return url’s host, serialized, followed by U+003A (:) and url’s port,
+   * Return url's host, serialized, followed by U+003A (:) and url's port,
    * serialized.
    * This function does not allocate memory.
    * When there is no host, this function returns the empty view.
@@ -4570,7 +4797,7 @@ struct url_aggregator : url_base {
    */
   [[nodiscard]] std::string_view get_host() const noexcept;
   /**
-   * Return this’s URL’s host, serialized.
+   * Return this's URL's host, serialized.
    * This function does not allocate memory.
    * When there is no host, this function returns the empty view.
    * @return a lightweight std::string_view.
@@ -4579,7 +4806,7 @@ struct url_aggregator : url_base {
   [[nodiscard]] std::string_view get_hostname() const noexcept;
   /**
    * The pathname getter steps are to return the result of URL path serializing
-   * this’s URL.
+   * this's URL.
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
    * @see https://url.spec.whatwg.org/#dom-url-pathname
@@ -4591,16 +4818,16 @@ struct url_aggregator : url_base {
    * @return size of the pathname in bytes
    * @see https://url.spec.whatwg.org/#dom-url-pathname
    */
-  ada_really_inline uint32_t get_pathname_length() const noexcept;
+  [[nodiscard]] ada_really_inline uint32_t get_pathname_length() const noexcept;
   /**
-   * Return U+003F (?), followed by this’s URL’s query.
+   * Return U+003F (?), followed by this's URL's query.
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
    * @see https://url.spec.whatwg.org/#dom-url-search
    */
   [[nodiscard]] std::string_view get_search() const noexcept;
   /**
-   * The protocol getter steps are to return this’s URL’s scheme, followed by
+   * The protocol getter steps are to return this's URL's scheme, followed by
    * U+003A (:).
    * This function does not allocate memory.
    * @return a lightweight std::string_view.
@@ -4640,18 +4867,18 @@ struct url_aggregator : url_base {
   /**
    * Returns a string representation of this URL.
    */
-  std::string to_string() const override;
+  [[nodiscard]] std::string to_string() const override;
   /**
    * Returns a string diagram of this URL.
    */
-  std::string to_diagram() const;
+  [[nodiscard]] std::string to_diagram() const;
 
   /**
    * Verifies that the parsed URL could be valid. Useful for debugging purposes.
    * @return true if the URL is valid, otherwise return true of the offsets are
    * possible.
    */
-  bool validate() const noexcept;
+  [[nodiscard]] bool validate() const noexcept;
 
   /** @return true if it has an host but it is the empty string */
   [[nodiscard]] inline bool has_empty_hostname() const noexcept;
@@ -4669,6 +4896,10 @@ struct url_aggregator : url_base {
   [[nodiscard]] inline bool has_hash() const noexcept override;
   /** @return true if the URL has a search component */
   [[nodiscard]] inline bool has_search() const noexcept override;
+
+  inline void clear_port();
+  inline void clear_hash();
+  inline void clear_search() override;
 
  private:
   friend ada::url_aggregator ada::parser::parse_url<ada::url_aggregator>(
@@ -4694,15 +4925,20 @@ struct url_aggregator : url_base {
    */
   inline void reserve(uint32_t capacity);
 
-  ada_really_inline size_t
-  parse_port(std::string_view view,
-             bool check_trailing_content = false) noexcept override;
+  ada_really_inline size_t parse_port(
+      std::string_view view, bool check_trailing_content) noexcept override;
+
+  ada_really_inline size_t parse_port(std::string_view view) noexcept override {
+    return this->parse_port(view, false);
+  }
 
   /**
-   * Return true on success.
+   * Return true on success. The 'in_place' parameter indicates whether the
+   * the string_view input is pointing in the buffer. When in_place is false,
+   * we must nearly always update the buffer.
    * @see https://url.spec.whatwg.org/#concept-ipv4-parser
    */
-  [[nodiscard]] bool parse_ipv4(std::string_view input);
+  [[nodiscard]] bool parse_ipv4(std::string_view input, bool in_place);
 
   /**
    * Return true on success.
@@ -4725,7 +4961,7 @@ struct url_aggregator : url_base {
   [[nodiscard]] inline bool cannot_have_credentials_or_port() const;
 
   template <bool override_hostname = false>
-  bool set_host_or_hostname(const std::string_view input);
+  bool set_host_or_hostname(std::string_view input);
 
   ada_really_inline bool parse_host(std::string_view input);
 
@@ -4736,29 +4972,26 @@ struct url_aggregator : url_base {
   inline void update_base_search(std::string_view input);
   inline void update_base_search(std::string_view input,
                                  const uint8_t *query_percent_encode_set);
-  inline void update_base_pathname(const std::string_view input);
-  inline void update_base_username(const std::string_view input);
-  inline void append_base_username(const std::string_view input);
-  inline void update_base_password(const std::string_view input);
-  inline void append_base_password(const std::string_view input);
+  inline void update_base_pathname(std::string_view input);
+  inline void update_base_username(std::string_view input);
+  inline void append_base_username(std::string_view input);
+  inline void update_base_password(std::string_view input);
+  inline void append_base_password(std::string_view input);
   inline void update_base_port(uint32_t input);
-  inline void append_base_pathname(const std::string_view input);
-  inline uint32_t retrieve_base_port() const;
-  inline void clear_port();
+  inline void append_base_pathname(std::string_view input);
+  [[nodiscard]] inline uint32_t retrieve_base_port() const;
   inline void clear_hostname();
-  inline void clear_hash();
-  inline void clear_pathname() override;
-  inline void clear_search() override;
   inline void clear_password();
-  inline bool has_dash_dot() const noexcept;
+  inline void clear_pathname() override;
+  [[nodiscard]] inline bool has_dash_dot() const noexcept;
   void delete_dash_dot();
   inline void consume_prepared_path(std::string_view input);
   template <bool has_state_override = false>
   [[nodiscard]] ada_really_inline bool parse_scheme_with_colon(
-      const std::string_view input);
+      std::string_view input);
   ada_really_inline uint32_t replace_and_resize(uint32_t start, uint32_t end,
                                                 std::string_view input);
-  inline bool has_authority() const noexcept;
+  [[nodiscard]] inline bool has_authority() const noexcept;
   inline void set_protocol_as_file();
   inline void set_scheme(std::string_view new_scheme) noexcept;
   /**
@@ -4789,12 +5022,16 @@ inline std::ostream &operator<<(std::ostream &out, const ada::url &u);
 #include <cstring>
 
 /**
+ * These functions are not part of our public API and may
+ * change at any time.
+ * @private
  * @namespace ada::checkers
  * @brief Includes the definitions for validation functions
  */
 namespace ada::checkers {
 
 /**
+ * @private
  * Assuming that x is an ASCII letter, this function returns the lower case
  * equivalent.
  * @details More likely to be inlined by the compiler and constexpr.
@@ -4802,6 +5039,7 @@ namespace ada::checkers {
 constexpr char to_lower(char x) noexcept;
 
 /**
+ * @private
  * Returns true if the character is an ASCII letter. Equivalent to std::isalpha
  * but more likely to be inlined by the compiler.
  *
@@ -4810,6 +5048,7 @@ constexpr char to_lower(char x) noexcept;
 constexpr bool is_alpha(char x) noexcept;
 
 /**
+ * @private
  * Check whether a string starts with 0x or 0X. The function is only
  * safe if input.size() >=2.
  *
@@ -4817,17 +5056,20 @@ constexpr bool is_alpha(char x) noexcept;
  */
 inline bool has_hex_prefix_unsafe(std::string_view input);
 /**
+ * @private
  * Check whether a string starts with 0x or 0X.
  */
 inline bool has_hex_prefix(std::string_view input);
 
 /**
+ * @private
  * Check whether x is an ASCII digit. More likely to be inlined than
  * std::isdigit.
  */
 constexpr bool is_digit(char x) noexcept;
 
 /**
+ * @private
  * @details A string starts with a Windows drive letter if all of the following
  * are true:
  *
@@ -4841,6 +5083,7 @@ constexpr bool is_digit(char x) noexcept;
 inline constexpr bool is_windows_drive_letter(std::string_view input) noexcept;
 
 /**
+ * @private
  * @details A normalized Windows drive letter is a Windows drive letter of which
  * the second code point is U+003A (:).
  */
@@ -4848,17 +5091,22 @@ inline constexpr bool is_normalized_windows_drive_letter(
     std::string_view input) noexcept;
 
 /**
- * @warning Will be removed when Ada supports C++20.
+ * @private
+ * @warning Will be removed when Ada requires C++20.
  */
-ada_really_inline constexpr bool begins_with(std::string_view view,
-                                             std::string_view prefix);
+ada_really_inline bool begins_with(std::string_view view,
+                                   std::string_view prefix);
 
 /**
- * Returns true if an input is an ipv4 address.
+ * @private
+ * Returns true if an input is an ipv4 address. It is assumed that the string
+ * does not contain uppercase ASCII characters (the input should have been
+ * lowered cased before calling this function) and is not empty.
  */
 ada_really_inline ada_constexpr bool is_ipv4(std::string_view view) noexcept;
 
 /**
+ * @private
  * Returns a bitset. If the first bit is set, then at least one character needs
  * percent encoding. If the second bit is set, a \\ is found. If the third bit
  * is set then we have a dot. If the fourth bit is set, then we have a percent
@@ -4868,6 +5116,7 @@ ada_really_inline constexpr uint8_t path_signature(
     std::string_view input) noexcept;
 
 /**
+ * @private
  * Returns true if the length of the domain name and its labels are according to
  * the specifications. The length of the domain must be 255 octets (253
  * characters not including the last 2 which are the empty label reserved at the
@@ -4920,52 +5169,52 @@ struct url : url_base {
   url(url &&u) noexcept = default;
   url &operator=(url &&u) noexcept = default;
   url &operator=(const url &u) = default;
-  ~url() = default;
+  ~url() override = default;
 
   /**
    * @private
-   * A URL’s username is an ASCII string identifying a username. It is initially
+   * A URL's username is an ASCII string identifying a username. It is initially
    * the empty string.
    */
   std::string username{};
 
   /**
    * @private
-   * A URL’s password is an ASCII string identifying a password. It is initially
+   * A URL's password is an ASCII string identifying a password. It is initially
    * the empty string.
    */
   std::string password{};
 
   /**
    * @private
-   * A URL’s host is null or a host. It is initially null.
+   * A URL's host is null or a host. It is initially null.
    */
   std::optional<std::string> host{};
 
   /**
    * @private
-   * A URL’s port is either null or a 16-bit unsigned integer that identifies a
+   * A URL's port is either null or a 16-bit unsigned integer that identifies a
    * networking port. It is initially null.
    */
   std::optional<uint16_t> port{};
 
   /**
    * @private
-   * A URL’s path is either an ASCII string or a list of zero or more ASCII
+   * A URL's path is either an ASCII string or a list of zero or more ASCII
    * strings, usually identifying a location.
    */
   std::string path{};
 
   /**
    * @private
-   * A URL’s query is either null or an ASCII string. It is initially null.
+   * A URL's query is either null or an ASCII string. It is initially null.
    */
   std::optional<std::string> query{};
 
   /**
    * @private
-   * A URL’s fragment is either null or an ASCII string that can be used for
-   * further processing on the resource the URL’s other components identify. It
+   * A URL's fragment is either null or an ASCII string that can be used for
+   * further processing on the resource the URL's other components identify. It
    * is initially null.
    */
   std::optional<std::string> hash{};
@@ -4981,7 +5230,7 @@ struct url : url_base {
   /**
    * Returns a JSON string representation of this URL.
    */
-  std::string to_string() const override;
+  [[nodiscard]] std::string to_string() const override;
 
   /**
    * @see https://url.spec.whatwg.org/#dom-url-href
@@ -4990,7 +5239,7 @@ struct url : url_base {
   [[nodiscard]] ada_really_inline std::string get_href() const noexcept;
 
   /**
-   * The origin getter steps are to return the serialization of this’s URL’s
+   * The origin getter steps are to return the serialization of this's URL's
    * origin. [HTML]
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#concept-url-origin
@@ -4998,7 +5247,7 @@ struct url : url_base {
   [[nodiscard]] std::string get_origin() const noexcept override;
 
   /**
-   * The protocol getter steps are to return this’s URL’s scheme, followed by
+   * The protocol getter steps are to return this's URL's scheme, followed by
    * U+003A (:).
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#dom-url-protocol
@@ -5006,7 +5255,7 @@ struct url : url_base {
   [[nodiscard]] std::string get_protocol() const noexcept;
 
   /**
-   * Return url’s host, serialized, followed by U+003A (:) and url’s port,
+   * Return url's host, serialized, followed by U+003A (:) and url's port,
    * serialized.
    * When there is no host, this function returns the empty string.
    * @return a newly allocated string.
@@ -5015,7 +5264,7 @@ struct url : url_base {
   [[nodiscard]] std::string get_host() const noexcept;
 
   /**
-   * Return this’s URL’s host, serialized.
+   * Return this's URL's host, serialized.
    * When there is no host, this function returns the empty string.
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#dom-url-hostname
@@ -5024,11 +5273,11 @@ struct url : url_base {
 
   /**
    * The pathname getter steps are to return the result of URL path serializing
-   * this’s URL.
+   * this's URL.
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#dom-url-pathname
    */
-  [[nodiscard]] const std::string_view get_pathname() const noexcept;
+  [[nodiscard]] std::string_view get_pathname() const noexcept;
 
   /**
    * Compute the pathname length in bytes without instantiating a view or a
@@ -5036,17 +5285,17 @@ struct url : url_base {
    * @return size of the pathname in bytes
    * @see https://url.spec.whatwg.org/#dom-url-pathname
    */
-  ada_really_inline size_t get_pathname_length() const noexcept;
+  [[nodiscard]] ada_really_inline size_t get_pathname_length() const noexcept;
 
   /**
-   * Return U+003F (?), followed by this’s URL’s query.
+   * Return U+003F (?), followed by this's URL's query.
    * @return a newly allocated string.
    * @see https://url.spec.whatwg.org/#dom-url-search
    */
   [[nodiscard]] std::string get_search() const noexcept;
 
   /**
-   * The username getter steps are to return this’s URL’s username.
+   * The username getter steps are to return this's URL's username.
    * @return a constant reference to the underlying string.
    * @see https://url.spec.whatwg.org/#dom-url-username
    */
@@ -5056,77 +5305,77 @@ struct url : url_base {
    * @return Returns true on successful operation.
    * @see https://url.spec.whatwg.org/#dom-url-username
    */
-  bool set_username(const std::string_view input);
+  bool set_username(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-password
    */
-  bool set_password(const std::string_view input);
+  bool set_password(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-port
    */
-  bool set_port(const std::string_view input);
+  bool set_port(std::string_view input);
 
   /**
    * This function always succeeds.
    * @see https://url.spec.whatwg.org/#dom-url-hash
    */
-  void set_hash(const std::string_view input);
+  void set_hash(std::string_view input);
 
   /**
    * This function always succeeds.
    * @see https://url.spec.whatwg.org/#dom-url-search
    */
-  void set_search(const std::string_view input);
+  void set_search(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-search
    */
-  bool set_pathname(const std::string_view input);
+  bool set_pathname(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-host
    */
-  bool set_host(const std::string_view input);
+  bool set_host(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-hostname
    */
-  bool set_hostname(const std::string_view input);
+  bool set_hostname(std::string_view input);
 
   /**
    * @return Returns true on success.
    * @see https://url.spec.whatwg.org/#dom-url-protocol
    */
-  bool set_protocol(const std::string_view input);
+  bool set_protocol(std::string_view input);
 
   /**
    * @see https://url.spec.whatwg.org/#dom-url-href
    */
-  bool set_href(const std::string_view input);
+  bool set_href(std::string_view input);
 
   /**
-   * The password getter steps are to return this’s URL’s password.
+   * The password getter steps are to return this's URL's password.
    * @return a constant reference to the underlying string.
    * @see https://url.spec.whatwg.org/#dom-url-password
    */
   [[nodiscard]] const std::string &get_password() const noexcept;
 
   /**
-   * Return this’s URL’s port, serialized.
+   * Return this's URL's port, serialized.
    * @return a newly constructed string representing the port.
    * @see https://url.spec.whatwg.org/#dom-url-port
    */
   [[nodiscard]] std::string get_port() const noexcept;
 
   /**
-   * Return U+0023 (#), followed by this’s URL’s fragment.
+   * Return U+0023 (#), followed by this's URL's fragment.
    * @return a newly constructed string representing the hash.
    * @see https://url.spec.whatwg.org/#dom-url-hash
    */
@@ -5180,9 +5429,9 @@ struct url : url_base {
   inline void update_base_search(std::string_view input,
                                  const uint8_t query_percent_encode_set[]);
   inline void update_base_search(std::optional<std::string> input);
-  inline void update_base_pathname(const std::string_view input);
-  inline void update_base_username(const std::string_view input);
-  inline void update_base_password(const std::string_view input);
+  inline void update_base_pathname(std::string_view input);
+  inline void update_base_username(std::string_view input);
+  inline void update_base_password(std::string_view input);
   inline void update_base_port(std::optional<uint16_t> input);
 
   /**
@@ -5212,7 +5461,7 @@ struct url : url_base {
   [[nodiscard]] bool parse_opaque_host(std::string_view input);
 
   /**
-   * A URL’s scheme is an ASCII string that identifies the type of URL and can
+   * A URL's scheme is an ASCII string that identifies the type of URL and can
    * be used to dispatch a URL for further processing after parsing. It is
    * initially the empty string. We only set non_special_scheme when the scheme
    * is non-special, otherwise we avoid constructing string.
@@ -5228,9 +5477,12 @@ struct url : url_base {
    */
   [[nodiscard]] inline bool cannot_have_credentials_or_port() const;
 
-  ada_really_inline size_t
-  parse_port(std::string_view view,
-             bool check_trailing_content = false) noexcept override;
+  ada_really_inline size_t parse_port(
+      std::string_view view, bool check_trailing_content) noexcept override;
+
+  ada_really_inline size_t parse_port(std::string_view view) noexcept override {
+    return this->parse_port(view, false);
+  }
 
   /**
    * Take the scheme from another URL. The scheme string is copied from the
@@ -5249,8 +5501,7 @@ struct url : url_base {
   [[nodiscard]] ada_really_inline bool parse_host(std::string_view input);
 
   template <bool has_state_override = false>
-  [[nodiscard]] ada_really_inline bool parse_scheme(
-      const std::string_view input);
+  [[nodiscard]] ada_really_inline bool parse_scheme(std::string_view input);
 
   inline void clear_pathname() override;
   inline void clear_search() override;
@@ -5266,7 +5517,7 @@ struct url : url_base {
    *
    * @see https://url.spec.whatwg.org/
    */
-  ada_really_inline void parse_path(const std::string_view input);
+  ada_really_inline void parse_path(std::string_view input);
 
   /**
    * Set the scheme for this URL. The provided scheme should be a valid
@@ -5353,7 +5604,9 @@ inline std::ostream &operator<<(std::ostream &out, const ada::url &u) {
   return out << u.to_string();
 }
 
-size_t url::get_pathname_length() const noexcept { return path.size(); }
+[[nodiscard]] size_t url::get_pathname_length() const noexcept {
+  return path.size();
+}
 
 [[nodiscard]] ada_really_inline ada::url_components url::get_components()
     const noexcept {
@@ -5394,8 +5647,8 @@ size_t url::get_pathname_length() const noexcept { return path.size(); }
     out.host_end = out.host_start;
 
     if (!has_opaque_path && checkers::begins_with(path, "//")) {
-      // If url’s host is null, url does not have an opaque path, url’s path’s
-      // size is greater than 1, and url’s path[0] is the empty string, then
+      // If url's host is null, url does not have an opaque path, url's path's
+      // size is greater than 1, and url's path[0] is the empty string, then
       // append U+002F (/) followed by U+002E (.) to output.
       running_index = out.protocol_end + 2;
     } else {
@@ -5415,7 +5668,7 @@ size_t url::get_pathname_length() const noexcept { return path.size(); }
   if (query.has_value()) {
     out.search_start = uint32_t(running_index);
     running_index += get_search().size();
-    if (get_search().size() == 0) {
+    if (get_search().empty()) {
       running_index++;
     }
   }
@@ -5509,8 +5762,8 @@ inline void url::copy_scheme(const ada::url &u) {
       output += ":" + get_port();
     }
   } else if (!has_opaque_path && checkers::begins_with(path, "//")) {
-    // If url’s host is null, url does not have an opaque path, url’s path’s
-    // size is greater than 1, and url’s path[0] is the empty string, then
+    // If url's host is null, url does not have an opaque path, url's path's
+    // size is greater than 1, and url's path[0] is the empty string, then
     // append U+002F (/) followed by U+002E (.) to output.
     output += "/.";
   }
@@ -5544,7 +5797,11 @@ ada_really_inline size_t url::parse_port(std::string_view view,
   }
   ada_log("parse_port: is_valid = ", is_valid);
   if (is_valid) {
-    port = (r.ec == std::errc() && scheme_default_port() != parsed_port)
+    // scheme_default_port can return 0, and we should allow 0 as a base port.
+    auto default_port = scheme_default_port();
+    bool is_port_valid = (default_port == 0 && parsed_port == 0) ||
+                         (default_port != parsed_port);
+    port = (r.ec == std::errc() && is_port_valid)
                ? std::optional<uint16_t>(parsed_port)
                : std::nullopt;
   }
@@ -5573,6 +5830,10 @@ ada_really_inline size_t url::parse_port(std::string_view view,
 #include <algorithm>
 
 /**
+ * Unicode operations. These functions are not part of our public API and may
+ * change at any time.
+ *
+ * private
  * @namespace ada::unicode
  * @brief Includes the declarations for unicode operations
  */
@@ -5726,7 +5987,7 @@ inline void url_aggregator::update_base_hostname(const std::string_view input) {
   ADA_ASSERT_TRUE(validate());
 }
 
-ada_really_inline uint32_t
+[[nodiscard]] ada_really_inline uint32_t
 url_aggregator::get_pathname_length() const noexcept {
   ada_log("url_aggregator::get_pathname_length");
   uint32_t ending_index = uint32_t(buffer.size());
@@ -5850,7 +6111,7 @@ inline void url_aggregator::update_base_pathname(const std::string_view input) {
 
   if (begins_with_dashdash && !has_opaque_path && !has_authority() &&
       !has_dash_dot()) {
-    // If url’s host is null, url does not have an opaque path, url’s path’s
+    // If url's host is null, url does not have an opaque path, url's path's
     // size is greater than 1, then append U+002F (/) followed by U+002E (.) to
     // output.
     buffer.insert(components.pathname_start, "/.");
@@ -5878,7 +6139,7 @@ inline void url_aggregator::append_base_pathname(const std::string_view input) {
   ADA_ASSERT_TRUE(!helpers::overlaps(input, buffer));
 #if ADA_DEVELOPMENT_CHECKS
   // computing the expected password.
-  std::string path_expected = std::string(get_pathname());
+  std::string path_expected(get_pathname());
   path_expected.append(input);
 #endif  // ADA_DEVELOPMENT_CHECKS
   uint32_t ending_index = uint32_t(buffer.size());
@@ -5948,7 +6209,7 @@ inline void url_aggregator::append_base_username(const std::string_view input) {
   ADA_ASSERT_TRUE(!helpers::overlaps(input, buffer));
 #if ADA_DEVELOPMENT_CHECKS
   // computing the expected password.
-  std::string username_expected = std::string(get_username());
+  std::string username_expected(get_username());
   username_expected.append(input);
 #endif  // ADA_DEVELOPMENT_CHECKS
   add_authority_slashes_if_needed();
@@ -5978,7 +6239,7 @@ inline void url_aggregator::append_base_username(const std::string_view input) {
     components.hash_start += difference;
   }
 #if ADA_DEVELOPMENT_CHECKS
-  std::string username_after = std::string(get_username());
+  std::string username_after(get_username());
   ADA_ASSERT_EQUAL(
       username_expected, username_after,
       "append_base_username problem after inserting " + std::string(input));
@@ -6104,7 +6365,7 @@ inline void url_aggregator::append_base_password(const std::string_view input) {
     components.hash_start += difference;
   }
 #if ADA_DEVELOPMENT_CHECKS
-  std::string password_after = std::string(get_password());
+  std::string password_after(get_password());
   ADA_ASSERT_EQUAL(
       password_expected, password_after,
       "append_base_password problem after inserting " + std::string(input));
@@ -6161,7 +6422,7 @@ inline void url_aggregator::clear_port() {
   ADA_ASSERT_TRUE(validate());
 }
 
-inline uint32_t url_aggregator::retrieve_base_port() const {
+[[nodiscard]] inline uint32_t url_aggregator::retrieve_base_port() const {
   ada_log("url_aggregator::retrieve_base_port");
   return components.port;
 }
@@ -6274,7 +6535,9 @@ inline void url_aggregator::clear_hostname() {
                        " with " + components.to_string() + "\n" + to_diagram());
 #endif
   ADA_ASSERT_TRUE(has_authority());
-  ADA_ASSERT_TRUE(has_empty_hostname());
+  ADA_ASSERT_EQUAL(has_empty_hostname(), true,
+                   "hostname should have been cleared on buffer=" + buffer +
+                       " with " + components.to_string() + "\n" + to_diagram());
   ADA_ASSERT_TRUE(validate());
 }
 
@@ -6379,31 +6642,45 @@ inline bool url_aggregator::has_hostname() const noexcept {
 
 inline bool url_aggregator::has_port() const noexcept {
   ada_log("url_aggregator::has_port");
-  return components.pathname_start != components.host_end;
+  // A URL cannot have a username/password/port if its host is null or the empty
+  // string, or its scheme is "file".
+  return has_hostname() && components.pathname_start != components.host_end;
 }
 
-inline bool url_aggregator::has_dash_dot() const noexcept {
-  // If url’s host is null, url does not have an opaque path, url’s path’s size
-  // is greater than 1, and url’s path[0] is the empty string, then append
+[[nodiscard]] inline bool url_aggregator::has_dash_dot() const noexcept {
+  // If url's host is null, url does not have an opaque path, url's path's size
+  // is greater than 1, and url's path[0] is the empty string, then append
   // U+002F (/) followed by U+002E (.) to output.
   ada_log("url_aggregator::has_dash_dot");
-  // Performance: instead of doing this potentially expensive check, we could
-  // just have a boolean value in the structure.
 #if ADA_DEVELOPMENT_CHECKS
-  if (components.pathname_start + 1 < buffer.size() &&
-      components.pathname_start == components.host_end + 2) {
-    ADA_ASSERT_TRUE(buffer[components.host_end] == '/');
-    ADA_ASSERT_TRUE(buffer[components.host_end + 1] == '.');
+  // If pathname_start and host_end are exactly two characters apart, then we
+  // either have a one-digit port such as http://test.com:5?param=1 or else we
+  // have a /.: sequence such as "non-spec:/.//". We test that this is the case.
+  if (components.pathname_start == components.host_end + 2) {
+    ADA_ASSERT_TRUE((buffer[components.host_end] == '/' &&
+                     buffer[components.host_end + 1] == '.') ||
+                    (buffer[components.host_end] == ':' &&
+                     checkers::is_digit(buffer[components.host_end + 1])));
+  }
+  if (components.pathname_start == components.host_end + 2 &&
+      buffer[components.host_end] == '/' &&
+      buffer[components.host_end + 1] == '.') {
+    ADA_ASSERT_TRUE(components.pathname_start + 1 < buffer.size());
     ADA_ASSERT_TRUE(buffer[components.pathname_start] == '/');
     ADA_ASSERT_TRUE(buffer[components.pathname_start + 1] == '/');
   }
 #endif
-  return !has_opaque_path &&
-         components.pathname_start == components.host_end + 2 &&
-         components.pathname_start + 1 < buffer.size();
+  // Performance: it should be uncommon for components.pathname_start ==
+  // components.host_end + 2 to be true. So we put this check first in the
+  // sequence. Most times, we do not have an opaque path. Checking for '/.' is
+  // more expensive, but should be uncommon.
+  return components.pathname_start == components.host_end + 2 &&
+         !has_opaque_path && buffer[components.host_end] == '/' &&
+         buffer[components.host_end + 1] == '.';
 }
 
-inline std::string_view url_aggregator::get_href() const noexcept {
+[[nodiscard]] inline std::string_view url_aggregator::get_href()
+    const noexcept {
   ada_log("url_aggregator::get_href");
   return buffer;
 }
@@ -6428,7 +6705,12 @@ ada_really_inline size_t url_aggregator::parse_port(
   }
   ada_log("parse_port: is_valid = ", is_valid);
   if (is_valid) {
-    if (r.ec == std::errc() && scheme_default_port() != parsed_port) {
+    ada_log("parse_port", r.ec == std::errc());
+    // scheme_default_port can return 0, and we should allow 0 as a base port.
+    auto default_port = scheme_default_port();
+    bool is_port_valid = (default_port == 0 && parsed_port == 0) ||
+                         (default_port != parsed_port);
+    if (r.ec == std::errc() && is_port_valid) {
       update_base_port(parsed_port);
     } else {
       clear_port();
@@ -6475,6 +6757,408 @@ inline std::ostream &operator<<(std::ostream &out,
 
 #endif  // ADA_URL_AGGREGATOR_INL_H
 /* end file include/ada/url_aggregator-inl.h */
+/* begin file include/ada/url_search_params.h */
+/**
+ * @file url_search_params.h
+ * @brief Declaration for the URL Search Params
+ */
+#ifndef ADA_URL_SEARCH_PARAMS_H
+#define ADA_URL_SEARCH_PARAMS_H
+
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace ada {
+
+enum class url_search_params_iter_type {
+  KEYS,
+  VALUES,
+  ENTRIES,
+};
+
+template <typename T, url_search_params_iter_type Type>
+struct url_search_params_iter;
+
+typedef std::pair<std::string_view, std::string_view> key_value_view_pair;
+
+using url_search_params_keys_iter =
+    url_search_params_iter<std::string_view, url_search_params_iter_type::KEYS>;
+using url_search_params_values_iter =
+    url_search_params_iter<std::string_view,
+                           url_search_params_iter_type::VALUES>;
+using url_search_params_entries_iter =
+    url_search_params_iter<key_value_view_pair,
+                           url_search_params_iter_type::ENTRIES>;
+
+/**
+ * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+ */
+struct url_search_params {
+  url_search_params() = default;
+
+  /**
+   * @see
+   * https://github.com/web-platform-tests/wpt/blob/master/url/urlsearchparams-constructor.any.js
+   */
+  url_search_params(const std::string_view input) { initialize(input); }
+
+  url_search_params(const url_search_params &u) = default;
+  url_search_params(url_search_params &&u) noexcept = default;
+  url_search_params &operator=(url_search_params &&u) noexcept = default;
+  url_search_params &operator=(const url_search_params &u) = default;
+  ~url_search_params() = default;
+
+  [[nodiscard]] inline size_t size() const noexcept;
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-append
+   */
+  inline void append(std::string_view key, std::string_view value);
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-delete
+   */
+  inline void remove(std::string_view key);
+  inline void remove(std::string_view key, std::string_view value);
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-get
+   */
+  inline std::optional<std::string_view> get(std::string_view key);
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-getall
+   */
+  inline std::vector<std::string> get_all(std::string_view key);
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-has
+   */
+  inline bool has(std::string_view key) noexcept;
+  inline bool has(std::string_view key, std::string_view value) noexcept;
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-set
+   */
+  inline void set(std::string_view key, std::string_view value);
+
+  /**
+   * @see https://url.spec.whatwg.org/#dom-urlsearchparams-sort
+   */
+  inline void sort();
+
+  /**
+   * @see https://url.spec.whatwg.org/#urlsearchparams-stringification-behavior
+   */
+  inline std::string to_string() const;
+
+  /**
+   * Returns a simple JS-style iterator over all of the keys in this
+   * url_search_params. The keys in the iterator are not unique. The valid
+   * lifespan of the iterator is tied to the url_search_params. The iterator
+   * must be freed when you're done with it.
+   * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+   */
+  inline url_search_params_keys_iter get_keys();
+
+  /**
+   * Returns a simple JS-style iterator over all of the values in this
+   * url_search_params. The valid lifespan of the iterator is tied to the
+   * url_search_params. The iterator must be freed when you're done with it.
+   * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+   */
+  inline url_search_params_values_iter get_values();
+
+  /**
+   * Returns a simple JS-style iterator over all of the entries in this
+   * url_search_params. The entries are pairs of keys and corresponding values.
+   * The valid lifespan of the iterator is tied to the url_search_params. The
+   * iterator must be freed when you're done with it.
+   * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+   */
+  inline url_search_params_entries_iter get_entries();
+
+  /**
+   * C++ style conventional iterator support. const only because we
+   * do not really want the params to be modified via the iterator.
+   */
+  inline auto begin() const { return params.begin(); }
+  inline auto end() const { return params.end(); }
+  inline auto front() const { return params.front(); }
+  inline auto back() const { return params.back(); }
+  inline auto operator[](size_t index) const { return params[index]; }
+
+ private:
+  typedef std::pair<std::string, std::string> key_value_pair;
+  std::vector<key_value_pair> params{};
+
+  /**
+   * @see https://url.spec.whatwg.org/#concept-urlencoded-parser
+   */
+  void initialize(std::string_view init);
+
+  template <typename T, url_search_params_iter_type Type>
+  friend struct url_search_params_iter;
+};  // url_search_params
+
+/**
+ * Implements a non-conventional iterator pattern that is closer in style to
+ * JavaScript's definition of an iterator.
+ *
+ * @see https://webidl.spec.whatwg.org/#idl-iterable
+ */
+template <typename T, url_search_params_iter_type Type>
+struct url_search_params_iter {
+  inline url_search_params_iter() : params(EMPTY) {}
+  url_search_params_iter(const url_search_params_iter &u) = default;
+  url_search_params_iter(url_search_params_iter &&u) noexcept = default;
+  url_search_params_iter &operator=(url_search_params_iter &&u) noexcept =
+      default;
+  url_search_params_iter &operator=(const url_search_params_iter &u) = default;
+  ~url_search_params_iter() = default;
+
+  /**
+   * Return the next item in the iterator or std::nullopt if done.
+   */
+  inline std::optional<T> next();
+
+  inline bool has_next();
+
+ private:
+  static url_search_params EMPTY;
+  inline url_search_params_iter(url_search_params &params_) : params(params_) {}
+
+  url_search_params &params;
+  size_t pos = 0;
+
+  friend struct url_search_params;
+};
+
+}  // namespace ada
+#endif
+/* end file include/ada/url_search_params.h */
+/* begin file include/ada/url_search_params-inl.h */
+/**
+ * @file url_search_params-inl.h
+ * @brief Inline declarations for the URL Search Params
+ */
+#ifndef ADA_URL_SEARCH_PARAMS_INL_H
+#define ADA_URL_SEARCH_PARAMS_INL_H
+
+
+#include <algorithm>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace ada {
+
+// A default, empty url_search_params for use with empty iterators.
+template <typename T, ada::url_search_params_iter_type Type>
+url_search_params url_search_params_iter<T, Type>::EMPTY;
+
+inline void url_search_params::initialize(std::string_view input) {
+  if (!input.empty() && input.front() == '?') {
+    input.remove_prefix(1);
+  }
+
+  auto process_key_value = [&](const std::string_view current) {
+    auto equal = current.find('=');
+
+    if (equal == std::string_view::npos) {
+      std::string name(current);
+      std::replace(name.begin(), name.end(), '+', ' ');
+      params.emplace_back(unicode::percent_decode(name, name.find('%')), "");
+    } else {
+      std::string name(current.substr(0, equal));
+      std::string value(current.substr(equal + 1));
+
+      std::replace(name.begin(), name.end(), '+', ' ');
+      std::replace(value.begin(), value.end(), '+', ' ');
+
+      params.emplace_back(unicode::percent_decode(name, name.find('%')),
+                          unicode::percent_decode(value, value.find('%')));
+    }
+  };
+
+  while (!input.empty()) {
+    auto ampersand_index = input.find('&');
+
+    if (ampersand_index == std::string_view::npos) {
+      if (!input.empty()) {
+        process_key_value(input);
+      }
+      break;
+    } else if (ampersand_index != 0) {
+      process_key_value(input.substr(0, ampersand_index));
+    }
+
+    input.remove_prefix(ampersand_index + 1);
+  }
+}
+
+inline void url_search_params::append(const std::string_view key,
+                                      const std::string_view value) {
+  params.emplace_back(key, value);
+}
+
+inline size_t url_search_params::size() const noexcept { return params.size(); }
+
+inline std::optional<std::string_view> url_search_params::get(
+    const std::string_view key) {
+  auto entry = std::find_if(params.begin(), params.end(),
+                            [&key](auto &param) { return param.first == key; });
+
+  if (entry == params.end()) {
+    return std::nullopt;
+  }
+
+  return entry->second;
+}
+
+inline std::vector<std::string> url_search_params::get_all(
+    const std::string_view key) {
+  std::vector<std::string> out{};
+
+  for (auto &param : params) {
+    if (param.first == key) {
+      out.emplace_back(param.second);
+    }
+  }
+
+  return out;
+}
+
+inline bool url_search_params::has(const std::string_view key) noexcept {
+  auto entry = std::find_if(params.begin(), params.end(),
+                            [&key](auto &param) { return param.first == key; });
+  return entry != params.end();
+}
+
+inline bool url_search_params::has(std::string_view key,
+                                   std::string_view value) noexcept {
+  auto entry =
+      std::find_if(params.begin(), params.end(), [&key, &value](auto &param) {
+        return param.first == key && param.second == value;
+      });
+  return entry != params.end();
+}
+
+inline std::string url_search_params::to_string() const {
+  auto character_set = ada::character_sets::WWW_FORM_URLENCODED_PERCENT_ENCODE;
+  std::string out{};
+  for (size_t i = 0; i < params.size(); i++) {
+    auto key = ada::unicode::percent_encode(params[i].first, character_set);
+    auto value = ada::unicode::percent_encode(params[i].second, character_set);
+
+    // Performance optimization: Move this inside percent_encode.
+    std::replace(key.begin(), key.end(), ' ', '+');
+    std::replace(value.begin(), value.end(), ' ', '+');
+
+    if (i != 0) {
+      out += "&";
+    }
+    out.append(key);
+    out += "=";
+    out.append(value);
+  }
+  return out;
+}
+
+inline void url_search_params::set(const std::string_view key,
+                                   const std::string_view value) {
+  const auto find = [&key](auto &param) { return param.first == key; };
+
+  auto it = std::find_if(params.begin(), params.end(), find);
+
+  if (it == params.end()) {
+    params.emplace_back(key, value);
+  } else {
+    it->second = value;
+    params.erase(std::remove_if(std::next(it), params.end(), find),
+                 params.end());
+  }
+}
+
+inline void url_search_params::remove(const std::string_view key) {
+  params.erase(
+      std::remove_if(params.begin(), params.end(),
+                     [&key](auto &param) { return param.first == key; }),
+      params.end());
+}
+
+inline void url_search_params::remove(const std::string_view key,
+                                      const std::string_view value) {
+  params.erase(std::remove_if(params.begin(), params.end(),
+                              [&key, &value](auto &param) {
+                                return param.first == key &&
+                                       param.second == value;
+                              }),
+               params.end());
+}
+
+inline void url_search_params::sort() {
+  std::stable_sort(params.begin(), params.end(),
+                   [](const key_value_pair &lhs, const key_value_pair &rhs) {
+                     return lhs.first < rhs.first;
+                   });
+}
+
+inline url_search_params_keys_iter url_search_params::get_keys() {
+  return url_search_params_keys_iter(*this);
+}
+
+/**
+ * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+ */
+inline url_search_params_values_iter url_search_params::get_values() {
+  return url_search_params_values_iter(*this);
+}
+
+/**
+ * @see https://url.spec.whatwg.org/#interface-urlsearchparams
+ */
+inline url_search_params_entries_iter url_search_params::get_entries() {
+  return url_search_params_entries_iter(*this);
+}
+
+template <typename T, url_search_params_iter_type Type>
+inline bool url_search_params_iter<T, Type>::has_next() {
+  return pos < params.params.size();
+}
+
+template <>
+inline std::optional<std::string_view> url_search_params_keys_iter::next() {
+  if (!has_next()) {
+    return std::nullopt;
+  }
+  return params.params[pos++].first;
+}
+
+template <>
+inline std::optional<std::string_view> url_search_params_values_iter::next() {
+  if (!has_next()) {
+    return std::nullopt;
+  }
+  return params.params[pos++].second;
+}
+
+template <>
+inline std::optional<key_value_view_pair>
+url_search_params_entries_iter::next() {
+  if (!has_next()) {
+    return std::nullopt;
+  }
+  return params.params[pos++];
+}
+
+}  // namespace ada
+
+#endif  // ADA_URL_SEARCH_PARAMS_INL_H
+/* end file include/ada/url_search_params-inl.h */
 
 // Public API
 /* begin file include/ada/ada_version.h */
@@ -6485,14 +7169,14 @@ inline std::ostream &operator<<(std::ostream &out,
 #ifndef ADA_ADA_VERSION_H
 #define ADA_ADA_VERSION_H
 
-#define ADA_VERSION "2.5.0"
+#define ADA_VERSION "2.7.8"
 
 namespace ada {
 
 enum {
   ADA_VERSION_MAJOR = 2,
-  ADA_VERSION_MINOR = 5,
-  ADA_VERSION_REVISION = 0,
+  ADA_VERSION_MINOR = 7,
+  ADA_VERSION_REVISION = 8,
 };
 
 }  // namespace ada

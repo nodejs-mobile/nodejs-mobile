@@ -859,11 +859,22 @@ new URLSearchParams([
 
 Append a new name-value pair to the query string.
 
-#### `urlSearchParams.delete(name)`
+#### `urlSearchParams.delete(name[, value])`
+
+<!-- YAML
+changes:
+  - version: v18.18.0
+    pr-url: https://github.com/nodejs/node/pull/47885
+    description: Add support for optional `value` argument.
+-->
 
 * `name` {string}
+* `value` {string}
 
-Remove all name-value pairs whose name is `name`.
+If `value` is provided, removes all name-value pairs
+where name is `name` and value is `value`..
+
+If `value` is not provided, removes all name-value pairs whose name is `name`.
 
 #### `urlSearchParams.entries()`
 
@@ -918,12 +929,27 @@ are no such pairs, `null` is returned.
 Returns the values of all name-value pairs whose name is `name`. If there are
 no such pairs, an empty array is returned.
 
-#### `urlSearchParams.has(name)`
+#### `urlSearchParams.has(name[, value])`
+
+<!-- YAML
+changes:
+  - version: v18.18.0
+    pr-url: https://github.com/nodejs/node/pull/47885
+    description: Add support for optional `value` argument.
+-->
 
 * `name` {string}
+* `value` {string}
 * Returns: {boolean}
 
-Returns `true` if there is at least one name-value pair whose name is `name`.
+Checks if the `URLSearchParams` object contains key-value pair(s) based on
+`name` and an optional `value` argument.
+
+If `value` is provided, returns `true` when name-value pair with
+same `name` and `value` exists.
+
+If `value` is not provided, returns `true` if there is at least one name-value
+pair whose name is `name`.
 
 #### `urlSearchParams.keys()`
 
@@ -1700,18 +1726,19 @@ The WHATWG algorithm defines four "percent-encode sets" that describe ranges
 of characters that must be percent-encoded:
 
 * The _C0 control percent-encode set_ includes code points in range U+0000 to
-  U+001F (inclusive) and all code points greater than U+007E.
+  U+001F (inclusive) and all code points greater than U+007E (\~).
 
 * The _fragment percent-encode set_ includes the _C0 control percent-encode set_
-  and code points U+0020, U+0022, U+003C, U+003E, and U+0060.
+  and code points U+0020 SPACE, U+0022 ("), U+003C (<), U+003E (>),
+  and U+0060 (\`).
 
 * The _path percent-encode set_ includes the _C0 control percent-encode set_
-  and code points U+0020, U+0022, U+0023, U+003C, U+003E, U+003F, U+0060,
-  U+007B, and U+007D.
+  and code points U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), U+003E (>),
+  U+003F (?), U+0060 (\`), U+007B ({), and U+007D (}).
 
 * The _userinfo encode set_ includes the _path percent-encode set_ and code
-  points U+002F, U+003A, U+003B, U+003D, U+0040, U+005B, U+005C, U+005D,
-  U+005E, and U+007C.
+  points U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@),
+  U+005B (\[) to U+005E(^), and U+007C (|).
 
 The _userinfo percent-encode set_ is used exclusively for username and
 passwords encoded within the URL. The _path percent-encode set_ is used for the

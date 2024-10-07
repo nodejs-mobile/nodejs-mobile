@@ -165,19 +165,21 @@ std::string GetHumanReadableProcessName() {
   return SPrintF("%s[%d]", GetProcessTitle("Node.js"), uv_os_getpid());
 }
 
-std::vector<std::string> SplitString(const std::string& in,
-                                     char delim,
-                                     bool skipEmpty) {
-  std::vector<std::string> out;
-  if (in.empty())
-    return out;
-  std::istringstream in_stream(in);
-  while (in_stream.good()) {
-    std::string item;
-    std::getline(in_stream, item, delim);
-    if (item.empty() && skipEmpty) continue;
-    out.emplace_back(std::move(item));
+std::vector<std::string_view> SplitString(const std::string_view in,
+                                          const std::string_view delim) {
+  std::vector<std::string_view> out;
+
+  for (auto first = in.data(), second = in.data(), last = first + in.size();
+       second != last && first != last;
+       first = second + 1) {
+    second =
+        std::find_first_of(first, last, std::cbegin(delim), std::cend(delim));
+
+    if (first != second) {
+      out.emplace_back(first, second - first);
+    }
   }
+
   return out;
 }
 
@@ -354,6 +356,23 @@ void SetMethod(Local<v8::Context> context,
       v8::String::NewFromUtf8(isolate, name, type).ToLocalChecked();
   that->Set(context, name_string, function).Check();
   function->SetName(name_string);  // NODE_SET_METHOD() compatibility.
+}
+
+void SetMethod(v8::Isolate* isolate,
+               v8::Local<v8::Template> that,
+               const char* name,
+               v8::FunctionCallback callback) {
+  Local<v8::FunctionTemplate> t =
+      NewFunctionTemplate(isolate,
+                          callback,
+                          Local<v8::Signature>(),
+                          v8::ConstructorBehavior::kThrow,
+                          v8::SideEffectType::kHasSideEffect);
+  // kInternalized strings are created in the old space.
+  const v8::NewStringType type = v8::NewStringType::kInternalized;
+  Local<v8::String> name_string =
+      v8::String::NewFromUtf8(isolate, name, type).ToLocalChecked();
+  that->Set(name_string, t);
 }
 
 void SetFastMethod(Local<v8::Context> context,

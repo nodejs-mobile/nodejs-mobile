@@ -117,7 +117,8 @@ class EnvironmentOptions : public Options {
   std::string experimental_specifier_resolution;
   bool experimental_wasm_modules = false;
   bool experimental_import_meta_resolve = false;
-  std::string module_type;
+  std::string input_type;  // Value of --input-type
+  std::string type;        // Value of --experimental-default-type
   std::string experimental_policy;
   std::string experimental_policy_integrity;
   bool has_policy_integrity_string = false;
@@ -128,6 +129,7 @@ class EnvironmentOptions : public Options {
   bool frozen_intrinsics = false;
   int64_t heap_snapshot_near_heap_limit = 0;
   std::string heap_snapshot_signal;
+  bool enable_network_family_autoselection = false;
   uint64_t max_http_header_size = 16 * 1024;
   bool deprecation = true;
   bool force_async_hooks_checks = true;
@@ -154,12 +156,14 @@ class EnvironmentOptions : public Options {
   std::string redirect_warnings;
   std::string diagnostic_dir;
   bool test_runner = false;
+  uint64_t test_runner_concurrency = 0;
   bool test_runner_coverage = false;
   std::vector<std::string> test_name_pattern;
   std::vector<std::string> test_reporter;
   std::vector<std::string> test_reporter_destination;
   bool test_only = false;
   bool test_udp_no_try_send = false;
+  std::string test_shard;
   bool throw_deprecation = false;
   bool trace_atomics_wait = false;
   bool trace_deprecation = false;
@@ -199,7 +203,9 @@ class EnvironmentOptions : public Options {
   bool tls_max_v1_3 = false;
   std::string tls_keylog;
 
-  std::vector<std::string> preload_modules;
+  std::vector<std::string> preload_cjs_modules;
+
+  std::vector<std::string> preload_esm_modules;
 
   std::vector<std::string> user_argv;
 

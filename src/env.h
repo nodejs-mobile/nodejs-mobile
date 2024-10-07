@@ -154,11 +154,14 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
 #undef VS
 #undef VP
 
+#define VM(PropertyName) V(PropertyName##_binding, v8::FunctionTemplate)
 #define V(PropertyName, TypeName)                                              \
   inline v8::Local<TypeName> PropertyName() const;                             \
   inline void set_##PropertyName(v8::Local<TypeName> value);
   PER_ISOLATE_TEMPLATE_PROPERTIES(V)
+  NODE_BINDINGS_WITH_PER_ISOLATE_INIT(VM)
 #undef V
+#undef VM
 
   inline v8::Local<v8::String> async_wrap_provider(int index) const;
 
@@ -178,6 +181,7 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VY(PropertyName, StringValue) V(v8::Symbol, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
+#define VM(PropertyName) V(v8::FunctionTemplate, PropertyName##_binding)
 #define VT(PropertyName, TypeName) V(TypeName, PropertyName)
 #define V(TypeName, PropertyName)                                             \
   v8::Eternal<TypeName> PropertyName ## _;
@@ -185,8 +189,9 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
   PER_ISOLATE_STRING_PROPERTIES(VS)
   PER_ISOLATE_TEMPLATE_PROPERTIES(VT)
+  NODE_BINDINGS_WITH_PER_ISOLATE_INIT(VM)
 #undef V
-#undef V
+#undef VM
 #undef VT
 #undef VS
 #undef VY
@@ -456,7 +461,6 @@ struct DeserializeRequest {
 };
 
 struct EnvSerializeInfo {
-  std::vector<std::string> builtins;
   AsyncHooks::SerializeInfo async_hooks;
   TickInfo::SerializeInfo tick_info;
   ImmediateInfo::SerializeInfo immediate_info;
@@ -691,22 +695,9 @@ class Environment : public MemoryRetainer {
   // List of id's that have been destroyed and need the destroy() cb called.
   inline std::vector<double>* destroy_async_id_list();
 
-  std::set<struct node_module*> internal_bindings;
-  std::set<std::string> builtins_with_cache;
-  std::set<std::string> builtins_without_cache;
-  // This is only filled during deserialization. We use a vector since
-  // it's only used for tests.
-  std::vector<std::string> builtins_in_snapshot;
+  builtins::BuiltinLoader* builtin_loader();
 
   std::unordered_multimap<int, loader::ModuleWrap*> hash_to_module_map;
-  std::unordered_map<uint32_t, loader::ModuleWrap*> id_to_module_map;
-  std::unordered_map<uint32_t, contextify::ContextifyScript*>
-      id_to_script_map;
-  std::unordered_map<uint32_t, contextify::CompiledFnEntry*> id_to_function_map;
-
-  inline uint32_t get_next_module_id();
-  inline uint32_t get_next_script_id();
-  inline uint32_t get_next_function_id();
 
   EnabledDebugList* enabled_debug_list() { return &enabled_debug_list_; }
 
@@ -969,6 +960,10 @@ class Environment : public MemoryRetainer {
   uv_async_t task_queues_async_;
   int64_t task_queues_async_refs_ = 0;
 
+  // These may be read by ctors and should be listed before complex fields.
+  std::atomic_bool is_stopping_{false};
+  std::atomic_bool can_call_into_js_{true};
+
   AsyncHooks async_hooks_;
   ImmediateInfo immediate_info_;
   AliasedInt32Array timeout_info_;
@@ -1034,7 +1029,6 @@ class Environment : public MemoryRetainer {
 
   bool has_serialized_options_ = false;
 
-  std::atomic_bool can_call_into_js_ { true };
   uint64_t flags_;
   uint64_t thread_id_;
   std::unordered_set<worker::Worker*> sub_worker_contexts_;
@@ -1092,14 +1086,14 @@ class Environment : public MemoryRetainer {
   CleanupQueue cleanup_queue_;
   bool started_cleanup_ = false;
 
-  std::atomic_bool is_stopping_ { false };
-
   std::unordered_set<int> unmanaged_fds_;
 
   std::function<void(Environment*, int)> process_exit_handler_ {
       DefaultProcessExitHandler };
 
   std::unique_ptr<Realm> principal_realm_ = nullptr;
+
+  builtins::BuiltinLoader builtin_loader_;
 
   // Used by allocate_managed_buffer() and release_managed_buffer() to keep
   // track of the BackingStore for a given pointer.

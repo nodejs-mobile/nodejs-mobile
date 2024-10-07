@@ -568,12 +568,6 @@ struct OnScopeLeaveImpl {
     : fn_(std::move(other.fn_)), active_(other.active_) {
     other.active_ = false;
   }
-  OnScopeLeaveImpl& operator=(OnScopeLeaveImpl&& other) {
-    if (this == &other) return *this;
-    this->~OnScopeLeave();
-    new (this)OnScopeLeaveImpl(std::move(other));
-    return *this;
-  }
 };
 
 // Run a function when exiting the current scope. Used like this:
@@ -676,9 +670,8 @@ struct FunctionDeleter {
 template <typename T, void (*function)(T*)>
 using DeleteFnPtr = typename FunctionDeleter<T, function>::Pointer;
 
-std::vector<std::string> SplitString(const std::string& in,
-                                     char delim,
-                                     bool skipEmpty = true);
+std::vector<std::string_view> SplitString(const std::string_view in,
+                                          const std::string_view delim);
 
 inline v8::MaybeLocal<v8::Value> ToV8Value(v8::Local<v8::Context> context,
                                            std::string_view str,
@@ -870,6 +863,11 @@ void SetMethod(v8::Local<v8::Context> context,
                v8::Local<v8::Object> that,
                const char* name,
                v8::FunctionCallback callback);
+// Similar to SetProtoMethod but without receiver signature checks.
+void SetMethod(v8::Isolate* isolate,
+               v8::Local<v8::Template> that,
+               const char* name,
+               v8::FunctionCallback callback);
 
 void SetFastMethod(v8::Local<v8::Context> context,
                    v8::Local<v8::Object> that,
@@ -920,6 +918,10 @@ void SetConstructorFunction(v8::Local<v8::Context> context,
                             v8::Local<v8::FunctionTemplate> tmpl,
                             SetConstructorFunctionFlag flag =
                                 SetConstructorFunctionFlag::SET_CLASS_NAME);
+
+// Returns true if OS==Windows and filename ends in .bat or .cmd,
+// case insensitive.
+inline bool IsWindowsBatchFile(const char* filename);
 
 }  // namespace node
 
