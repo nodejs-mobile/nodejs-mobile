@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#18.20.4">18.20.4</a><br/>
 <a href="#18.17.3">18.17.3</a><br/>
 <a href="#18.17.2">18.17.2</a><br/>
 <a href="#18.17.1">18.17.1</a><br/>
@@ -32,8 +33,15 @@
 </tr>
 </table>
 
+<a id="18.20.4"></a>
+## 2024-10-07, Version 18.20.4 (Current)
+
+### Notable Changes
+
+* Updates the node engine version to 18.20.4
+
 <a id="18.17.3"></a>
-## 2024-09-23, Version 18.17.3 (Current)
+## 2024-09-23, Version 18.17.3
 
 ### Notable Changes
 
