@@ -27,7 +27,7 @@ To update the version of node.js used in this project, carefully follow these st
     4.5. `git commit -m "Update node.js to vX.y.z"` to create a single commit with all changes
 5. `git format-patch -1 HEAD -o ../` which will create a patch file in the parent directory
 6. `cd` into the nodejs-mobile repository
-7. Apply the patch file with `git am --3way --ignore-space-change ../0001-Node.js-vA.b.c.patch`
+7. Apply the patch file with `git am --3way --ignore-space-change ../0001-Node.js-vA.b.c.patch` (sometimes it may be useful to use the flag `--reject`)
 8. Manually resolve git conflicts that may arise
 
 ## Developer's Certificate of Origin 1.1
