@@ -13,15 +13,12 @@
 
 #if defined(V8_USE_PERFETTO)
 #include "protos/perfetto/trace/track_event/debug_annotation.pbzero.h"
-#include "src/base/platform/wrappers.h"
 #endif
 
 namespace v8 {
 namespace internal {
 
 namespace {
-
-using v8::tracing::TracedValue;
 
 #define MAX_STACK_LENGTH 100
 
@@ -108,7 +105,7 @@ const uint8_t* GetCategoryGroupEnabled(Isolate* isolate,
 BUILTIN(IsTraceCategoryEnabled) {
   HandleScope scope(isolate);
   Handle<Object> category = args.atOrUndefined(isolate, 1);
-  if (!category->IsString()) {
+  if (!IsString(*category)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kTraceEventCategoryError));
   }
@@ -145,29 +142,29 @@ BUILTIN(Trace) {
   if (!*category_group_enabled) return ReadOnlyRoots(isolate).false_value();
 #endif
 
-  if (!phase_arg->IsNumber()) {
+  if (!IsNumber(*phase_arg)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kTraceEventPhaseError));
   }
-  char phase = static_cast<char>(DoubleToInt32(phase_arg->Number()));
-  if (!category->IsString()) {
+  char phase = static_cast<char>(DoubleToInt32(Object::Number(*phase_arg)));
+  if (!IsString(*category)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kTraceEventCategoryError));
   }
-  if (!name_arg->IsString()) {
+  if (!IsString(*name_arg)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kTraceEventNameError));
   }
 
   uint32_t flags = TRACE_EVENT_FLAG_COPY;
   int32_t id = 0;
-  if (!id_arg->IsNullOrUndefined(isolate)) {
-    if (!id_arg->IsNumber()) {
+  if (!IsNullOrUndefined(*id_arg, isolate)) {
+    if (!IsNumber(*id_arg)) {
       THROW_NEW_ERROR_RETURN_FAILURE(
           isolate, NewTypeError(MessageTemplate::kTraceEventIDError));
     }
     flags |= TRACE_EVENT_FLAG_HAS_ID;
-    id = DoubleToInt32(id_arg->Number());
+    id = DoubleToInt32(Object::Number(*id_arg));
   }
 
   Handle<String> name_str = Handle<String>::cast(name_arg);
@@ -182,7 +179,7 @@ BUILTIN(Trace) {
   static const char* arg_name = "data";
   Handle<Object> arg_json;
   int32_t num_args = 0;
-  if (!data_arg->IsUndefined(isolate)) {
+  if (!IsUndefined(*data_arg, isolate)) {
     // Serializes the data argument as a JSON string, which is then
     // copied into an object. This eliminates duplicated code but
     // could have perf costs. It is also subject to all the same
@@ -196,11 +193,8 @@ BUILTIN(Trace) {
   }
 
 #if defined(V8_USE_PERFETTO)
+  // TODO(skyostil): Use interned names to reduce trace size.
   auto trace_args = [&](perfetto::EventContext ctx) {
-    // TODO(skyostil): Use interned names to reduce trace size.
-    if (phase != TRACE_EVENT_PHASE_END) {
-      ctx.event()->set_name(*name);
-    }
     if (num_args) {
       MaybeUtf8 arg_contents(isolate, Handle<String>::cast(arg_json));
       auto annotation = ctx.event()->add_debug_annotations();
@@ -215,13 +209,15 @@ BUILTIN(Trace) {
 
   switch (phase) {
     case TRACE_EVENT_PHASE_BEGIN:
-      TRACE_EVENT_BEGIN(dynamic_category, nullptr, trace_args);
+      TRACE_EVENT_BEGIN(dynamic_category, perfetto::DynamicString(*name),
+                        trace_args);
       break;
     case TRACE_EVENT_PHASE_END:
       TRACE_EVENT_END(dynamic_category, trace_args);
       break;
     case TRACE_EVENT_PHASE_INSTANT:
-      TRACE_EVENT_INSTANT(dynamic_category, nullptr, trace_args);
+      TRACE_EVENT_INSTANT(dynamic_category, perfetto::DynamicString(*name),
+                          trace_args);
       break;
     default:
       THROW_NEW_ERROR_RETURN_FAILURE(

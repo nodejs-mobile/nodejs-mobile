@@ -5,7 +5,6 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 const exec = require('child_process').exec;
 const crypto = require('crypto');
 const fixtures = require('../common/fixtures');
@@ -617,9 +616,9 @@ assert.throws(
   const tmpdir = require('../common/tmpdir');
   tmpdir.refresh();
 
-  const sigfile = path.join(tmpdir.path, 's5.sig');
+  const sigfile = tmpdir.resolve('s5.sig');
   fs.writeFileSync(sigfile, s5);
-  const msgfile = path.join(tmpdir.path, 's5.msg');
+  const msgfile = tmpdir.resolve('s5.msg');
   fs.writeFileSync(msgfile, msg);
 
   const cmd =
@@ -772,5 +771,43 @@ assert.throws(
     assert.throws(() => {
       crypto.createSign('sha256').sign({ key, format: 'jwk' });
     }, { code: 'ERR_INVALID_ARG_TYPE', message: /The "key\.key" property must be of type object/ });
+  }
+}
+
+{
+  // Ed25519 and Ed448 must use the one-shot methods
+  const keys = [{ privateKey: fixtures.readKey('ed25519_private.pem', 'ascii'),
+                  publicKey: fixtures.readKey('ed25519_public.pem', 'ascii') },
+                { privateKey: fixtures.readKey('ed448_private.pem', 'ascii'),
+                  publicKey: fixtures.readKey('ed448_public.pem', 'ascii') }];
+
+  for (const { publicKey, privateKey } of keys) {
+    assert.throws(() => {
+      crypto.createSign('SHA256').update('Test123').sign(privateKey);
+    }, { code: 'ERR_CRYPTO_UNSUPPORTED_OPERATION', message: 'Unsupported crypto operation' });
+    assert.throws(() => {
+      crypto.createVerify('SHA256').update('Test123').verify(privateKey, 'sig');
+    }, { code: 'ERR_CRYPTO_UNSUPPORTED_OPERATION', message: 'Unsupported crypto operation' });
+    assert.throws(() => {
+      crypto.createVerify('SHA256').update('Test123').verify(publicKey, 'sig');
+    }, { code: 'ERR_CRYPTO_UNSUPPORTED_OPERATION', message: 'Unsupported crypto operation' });
+  }
+}
+
+{
+  // Dh, x25519 and x448 should not be used for signing/verifying
+  // https://github.com/nodejs/node/issues/53742
+  for (const algo of ['dh', 'x25519', 'x448']) {
+    const privateKey = fixtures.readKey(`${algo}_private.pem`, 'ascii');
+    const publicKey = fixtures.readKey(`${algo}_public.pem`, 'ascii');
+    assert.throws(() => {
+      crypto.createSign('SHA256').update('Test123').sign(privateKey);
+    }, { code: 'ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE', message: /operation not supported for this keytype/ });
+    assert.throws(() => {
+      crypto.createVerify('SHA256').update('Test123').verify(privateKey, 'sig');
+    }, { code: 'ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE', message: /operation not supported for this keytype/ });
+    assert.throws(() => {
+      crypto.createVerify('SHA256').update('Test123').verify(publicKey, 'sig');
+    }, { code: 'ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE', message: /operation not supported for this keytype/ });
   }
 }

@@ -194,7 +194,7 @@ void RunTests() {
   CHECK(SUCCEEDED(hr));
 
   ULONG type, proc_id, thread_id, desc_used;
-  byte desc[1024];
+  uint8_t desc[1024];
   hr = p_debug_control->GetLastEventInformation(
       &type, &proc_id, &thread_id, nullptr, 0, nullptr,
       reinterpret_cast<PSTR>(desc), 1024, &desc_used);
@@ -246,6 +246,21 @@ void RunTests() {
   RunAndCheckOutput("js stack", "dx @$jsstack()[2].function_name",
                     {"empty_string \"\"", "SeqOneByteString"}, &output,
                     p_debug_control.Get());
+
+  // Test for @$curisolate(). This should have the same output with
+  // `dx v8::internal::g_current_isolate_`.
+  output.ClearLog();
+  CHECK(SUCCEEDED(p_debug_control->Execute(
+      DEBUG_OUTCTL_ALL_CLIENTS, "dx v8::internal::g_current_isolate_",
+      DEBUG_EXECUTE_ECHO)));
+  size_t addr_pos = output.GetLog().find("0x");
+  CHECK(addr_pos != std::string::npos);
+  std::string expected_output = output.GetLog().substr(addr_pos);
+
+  output.ClearLog();
+  CHECK(SUCCEEDED(p_debug_control->Execute(
+      DEBUG_OUTCTL_ALL_CLIENTS, "dx @$curisolate()", DEBUG_EXECUTE_ECHO)));
+  CHECK_EQ(output.GetLog().substr(output.GetLog().find("0x")), expected_output);
 
   // Detach before exiting
   hr = p_client->DetachProcesses();

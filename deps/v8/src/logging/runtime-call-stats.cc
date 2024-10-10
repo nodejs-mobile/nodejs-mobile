@@ -8,6 +8,7 @@
 
 #include <iomanip>
 
+#include "src/flags/flags.h"
 #include "src/tracing/tracing-category-observer.h"
 #include "src/utils/ostreams.h"
 
@@ -156,7 +157,7 @@ RuntimeCallStats::RuntimeCallStats(ThreadType thread_type)
   for (int i = 0; i < kNumberOfCounters; i++) {
     this->counters_[i] = RuntimeCallCounter(kNames[i]);
   }
-  if (FLAG_rcs_cpu_time) {
+  if (v8_flags.rcs_cpu_time) {
     CHECK(base::ThreadTicks::IsSupported());
     base::ThreadTicks::WaitUntilInitialized();
     RuntimeCallTimer::Now = &RuntimeCallTimer::NowCPUTime;
@@ -293,13 +294,11 @@ WorkerThreadRuntimeCallStats::~WorkerThreadRuntimeCallStats() {
 
 base::Thread::LocalStorageKey WorkerThreadRuntimeCallStats::GetKey() {
   base::MutexGuard lock(&mutex_);
-  DCHECK(TracingFlags::is_runtime_stats_enabled());
   if (!tls_key_) tls_key_ = base::Thread::CreateThreadLocalKey();
   return *tls_key_;
 }
 
 RuntimeCallStats* WorkerThreadRuntimeCallStats::NewTable() {
-  DCHECK(TracingFlags::is_runtime_stats_enabled());
   // Never create a new worker table on the isolate's main thread.
   DCHECK_NE(ThreadId::Current(), isolate_thread_id_);
   std::unique_ptr<RuntimeCallStats> new_table =
@@ -328,6 +327,7 @@ WorkerThreadRuntimeCallStatsScope::WorkerThreadRuntimeCallStatsScope(
   table_ = reinterpret_cast<RuntimeCallStats*>(
       base::Thread::GetThreadLocal(worker_stats->GetKey()));
   if (table_ == nullptr) {
+    if (V8_UNLIKELY(!TracingFlags::is_runtime_stats_enabled())) return;
     table_ = worker_stats->NewTable();
     base::Thread::SetThreadLocal(worker_stats->GetKey(), table_);
   }

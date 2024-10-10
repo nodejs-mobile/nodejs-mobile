@@ -7,7 +7,6 @@
 #include "src/base/small-vector.h"
 #include "src/compiler/compiler-source-position-table.h"
 #include "src/compiler/node-properties.h"
-#include "src/compiler/pipeline.h"
 #include "src/compiler/scheduler.h"
 #include "src/heap/factory-inl.h"
 
@@ -78,18 +77,15 @@ Node* RawMachineAssembler::RelocatableIntPtrConstant(intptr_t value,
              : RelocatableInt32Constant(static_cast<int>(value), rmode);
 }
 
-Node* RawMachineAssembler::OptimizedAllocate(
-    Node* size, AllocationType allocation,
-    AllowLargeObjects allow_large_objects) {
-  return AddNode(
-      simplified()->AllocateRaw(Type::Any(), allocation, allow_large_objects),
-      size);
+Node* RawMachineAssembler::OptimizedAllocate(Node* size,
+                                             AllocationType allocation) {
+  return AddNode(simplified()->AllocateRaw(Type::Any(), allocation), size);
 }
 
 Schedule* RawMachineAssembler::ExportForTest() {
   // Compute the correct codegen order.
   DCHECK(schedule_->rpo_order()->empty());
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     PrintF("--- RAW SCHEDULE -------------------------------------------\n");
     StdoutStream{} << *schedule_;
   }
@@ -97,7 +93,7 @@ Schedule* RawMachineAssembler::ExportForTest() {
   Scheduler::ComputeSpecialRPO(zone(), schedule_);
   Scheduler::GenerateDominatorTree(schedule_);
   schedule_->PropagateDeferredMark();
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     PrintF("--- EDGE SPLIT AND PROPAGATED DEFERRED SCHEDULE ------------\n");
     StdoutStream{} << *schedule_;
   }
@@ -111,14 +107,14 @@ Schedule* RawMachineAssembler::ExportForTest() {
 Graph* RawMachineAssembler::ExportForOptimization() {
   // Compute the correct codegen order.
   DCHECK(schedule_->rpo_order()->empty());
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     PrintF("--- RAW SCHEDULE -------------------------------------------\n");
     StdoutStream{} << *schedule_;
   }
   schedule_->EnsureCFGWellFormedness();
   OptimizeControlFlow(schedule_, graph(), common());
   Scheduler::ComputeSpecialRPO(zone(), schedule_);
-  if (FLAG_trace_turbo_scheduler) {
+  if (v8_flags.trace_turbo_scheduler) {
     PrintF("--- SCHEDULE BEFORE GRAPH CREATION -------------------------\n");
     StdoutStream{} << *schedule_;
   }
@@ -571,7 +567,7 @@ void RawMachineAssembler::Switch(Node* index, RawMachineLabel* default_label,
   DCHECK_NE(schedule()->end(), current_block_);
   size_t succ_count = case_count + 1;
   Node* switch_node = MakeNode(common()->Switch(succ_count), 1, &index);
-  BasicBlock** succ_blocks = zone()->NewArray<BasicBlock*>(succ_count);
+  BasicBlock** succ_blocks = zone()->AllocateArray<BasicBlock*>(succ_count);
   for (size_t i = 0; i < case_count; ++i) {
     int32_t case_value = case_values[i];
     BasicBlock* case_block = schedule()->NewBasicBlock();
@@ -688,7 +684,7 @@ void RawMachineAssembler::Unreachable() {
 
 void RawMachineAssembler::Comment(const std::string& msg) {
   size_t length = msg.length() + 1;
-  char* zone_buffer = zone()->NewArray<char>(length);
+  char* zone_buffer = zone()->AllocateArray<char>(length);
   MemCopy(zone_buffer, msg.c_str(), length);
   AddNode(machine()->Comment(zone_buffer));
 }
@@ -839,7 +835,7 @@ BasicBlock* RawMachineAssembler::CurrentBlock() {
 
 Node* RawMachineAssembler::Phi(MachineRepresentation rep, int input_count,
                                Node* const* inputs) {
-  Node** buffer = zone()->NewArray<Node*>(input_count + 1);
+  Node** buffer = zone()->AllocateArray<Node*>(input_count + 1);
   std::copy(inputs, inputs + input_count, buffer);
   buffer[input_count] = graph()->start();
   return AddNode(common()->Phi(rep, input_count), input_count + 1, buffer);

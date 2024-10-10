@@ -7,15 +7,21 @@
 #include <cstddef>
 #include <iomanip>
 
+#include "src/base/iterator.h"
 #include "src/codegen/aligned-slot-allocator.h"
 #include "src/codegen/interface-descriptors.h"
 #include "src/codegen/machine-type.h"
 #include "src/codegen/register-configuration.h"
 #include "src/codegen/source-position.h"
+#include "src/compiler/backend/instruction-codes.h"
 #include "src/compiler/common-operator.h"
+#include "src/compiler/frame-states.h"
 #include "src/compiler/graph.h"
 #include "src/compiler/node.h"
 #include "src/compiler/schedule.h"
+#include "src/compiler/turboshaft/graph.h"
+#include "src/compiler/turboshaft/loop-finder.h"
+#include "src/compiler/turboshaft/operations.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/frames.h"
 #include "src/execution/isolate-utils-inl.h"
@@ -75,36 +81,46 @@ FlagsCondition CommuteFlagsCondition(FlagsCondition condition) {
     case kNotOverflow:
     case kUnorderedEqual:
     case kUnorderedNotEqual:
+    case kIsNaN:
+    case kIsNotNaN:
       return condition;
   }
   UNREACHABLE();
 }
 
 bool InstructionOperand::InterferesWith(const InstructionOperand& other) const {
-  const bool kCombineFPAliasing = kFPAliasing == AliasingKind::kCombine &&
-                                  this->IsFPLocationOperand() &&
-                                  other.IsFPLocationOperand();
-  const bool kComplexS128SlotAliasing =
-      (this->IsSimd128StackSlot() && other.IsAnyStackSlot()) ||
-      (other.IsSimd128StackSlot() && this->IsAnyStackSlot());
-  if (!kCombineFPAliasing && !kComplexS128SlotAliasing) {
+  const bool combine_fp_aliasing = kFPAliasing == AliasingKind::kCombine &&
+                                   this->IsFPLocationOperand() &&
+                                   other.IsFPLocationOperand();
+  const bool stack_slots = this->IsAnyStackSlot() && other.IsAnyStackSlot();
+  if (!combine_fp_aliasing && !stack_slots) {
     return EqualsCanonicalized(other);
   }
   const LocationOperand& loc = *LocationOperand::cast(this);
   const LocationOperand& other_loc = LocationOperand::cast(other);
+  MachineRepresentation rep = loc.representation();
+  MachineRepresentation other_rep = other_loc.representation();
   LocationOperand::LocationKind kind = loc.location_kind();
   LocationOperand::LocationKind other_kind = other_loc.location_kind();
   if (kind != other_kind) return false;
-  MachineRepresentation rep = loc.representation();
-  MachineRepresentation other_rep = other_loc.representation();
 
-  if (kCombineFPAliasing && !kComplexS128SlotAliasing) {
+  if (combine_fp_aliasing && !stack_slots) {
     if (rep == other_rep) return EqualsCanonicalized(other);
-    if (kind == LocationOperand::REGISTER) {
-      // FP register-register interference.
-      return GetRegConfig()->AreAliases(rep, loc.register_code(), other_rep,
-                                        other_loc.register_code());
-    }
+    DCHECK_EQ(kind, LocationOperand::REGISTER);
+    // FP register-register interference.
+    return GetRegConfig()->AreAliases(rep, loc.register_code(), other_rep,
+                                      other_loc.register_code());
+  }
+
+  DCHECK(stack_slots);
+  int num_slots =
+      AlignedSlotAllocator::NumSlotsForWidth(ElementSizeInBytes(rep));
+  int num_slots_other =
+      AlignedSlotAllocator::NumSlotsForWidth(ElementSizeInBytes(other_rep));
+  const bool complex_stack_slot_interference =
+      (num_slots > 1 || num_slots_other > 1);
+  if (!complex_stack_slot_interference) {
+    return EqualsCanonicalized(other);
   }
 
   // Complex multi-slot operand interference:
@@ -216,6 +232,11 @@ std::ostream& operator<<(std::ostream& os, const InstructionOperand& op) {
       } else if (op.IsFloatRegister()) {
         os << "[" << FloatRegister::from_code(allocated.register_code())
            << "|R";
+#if V8_TARGET_ARCH_X64
+      } else if (op.IsSimd256Register()) {
+        os << "[" << Simd256Register::from_code(allocated.register_code())
+           << "|R";
+#endif  // V8_TARGET_ARCH_X64
       } else {
         DCHECK(op.IsSimd128Register());
         os << "[" << Simd128Register::from_code(allocated.register_code())
@@ -249,6 +270,9 @@ std::ostream& operator<<(std::ostream& os, const InstructionOperand& op) {
         case MachineRepresentation::kSimd128:
           os << "|s128";
           break;
+        case MachineRepresentation::kSimd256:
+          os << "|s256";
+          break;
         case MachineRepresentation::kTaggedSigned:
           os << "|ts";
           break;
@@ -263,6 +287,9 @@ std::ostream& operator<<(std::ostream& os, const InstructionOperand& op) {
           break;
         case MachineRepresentation::kCompressed:
           os << "|c";
+          break;
+        case MachineRepresentation::kIndirectPointer:
+          os << "|ip";
           break;
         case MachineRepresentation::kSandboxedPointer:
           os << "|sb";
@@ -322,6 +349,20 @@ void ParallelMove::PrepareInsertAfter(
   if (replacement != nullptr) move->set_source(replacement->source());
 }
 
+bool ParallelMove::Equals(const ParallelMove& that) const {
+  if (this->size() != that.size()) return false;
+  for (size_t i = 0; i < this->size(); ++i) {
+    if (!(*this)[i]->Equals(*that[i])) return false;
+  }
+  return true;
+}
+
+void ParallelMove::Eliminate() {
+  for (MoveOperands* move : *this) {
+    move->Eliminate();
+  }
+}
+
 Instruction::Instruction(InstructionCode opcode)
     : opcode_(opcode),
       bit_field_(OutputCountField::encode(0) | InputCountField::encode(0) |
@@ -332,7 +373,7 @@ Instruction::Instruction(InstructionCode opcode)
   parallel_moves_[1] = nullptr;
 
   // PendingOperands are required to be 8 byte aligned.
-  STATIC_ASSERT(offsetof(Instruction, operands_) % 8 == 0);
+  static_assert(offsetof(Instruction, operands_) % 8 == 0);
 }
 
 Instruction::Instruction(InstructionCode opcode, size_t output_count,
@@ -494,6 +535,10 @@ std::ostream& operator<<(std::ostream& os, const FlagsCondition& fc) {
       return os << "positive or zero";
     case kNegative:
       return os << "negative";
+    case kIsNaN:
+      return os << "is nan";
+    case kIsNotNaN:
+      return os << "is not nan";
   }
   UNREACHABLE();
 }
@@ -556,18 +601,10 @@ Handle<HeapObject> Constant::ToHeapObject() const {
   return value;
 }
 
-Handle<CodeT> Constant::ToCode() const {
+Handle<Code> Constant::ToCode() const {
   DCHECK_EQ(kHeapObject, type());
-  Handle<CodeT> value(
-      reinterpret_cast<Address*>(static_cast<intptr_t>(value_)));
-  DCHECK(value->IsCodeT(GetPtrComprCageBaseSlow(*value)));
-  return value;
-}
-
-const StringConstantBase* Constant::ToDelayedStringConstant() const {
-  DCHECK_EQ(kDelayedStringConstant, type());
-  const StringConstantBase* value =
-      bit_cast<StringConstantBase*>(static_cast<intptr_t>(value_));
+  Handle<Code> value(reinterpret_cast<Address*>(static_cast<intptr_t>(value_)));
+  DCHECK(IsCode(*value));
   return value;
 }
 
@@ -588,9 +625,6 @@ std::ostream& operator<<(std::ostream& os, const Constant& constant) {
       return os << Brief(*constant.ToHeapObject());
     case Constant::kRpoNumber:
       return os << "RPO" << constant.ToRpoNumber().ToInt();
-    case Constant::kDelayedStringConstant:
-      return os << "DelayedStringConstant: "
-                << constant.ToDelayedStringConstant();
   }
   UNREACHABLE();
 }
@@ -631,7 +665,8 @@ InstructionBlock::InstructionBlock(Zone* zone, RpoNumber rpo_number,
       loop_header_alignment_(false),
       needs_frame_(false),
       must_construct_frame_(false),
-      must_deconstruct_frame_(false) {}
+      must_deconstruct_frame_(false),
+      omitted_by_jump_threading_(false) {}
 
 size_t InstructionBlock::PredecessorIndexOf(RpoNumber rpo_number) const {
   size_t j = 0;
@@ -647,9 +682,23 @@ static RpoNumber GetRpo(const BasicBlock* block) {
   return RpoNumber::FromInt(block->rpo_number());
 }
 
+static RpoNumber GetRpo(const turboshaft::Block* block) {
+  if (block == nullptr) return RpoNumber::Invalid();
+  return RpoNumber::FromInt(block->index().id());
+}
+
 static RpoNumber GetLoopEndRpo(const BasicBlock* block) {
   if (!block->IsLoopHeader()) return RpoNumber::Invalid();
   return RpoNumber::FromInt(block->loop_end()->rpo_number());
+}
+
+static RpoNumber GetLoopEndRpo(const turboshaft::Block* block) {
+  if (!block->IsLoop()) return RpoNumber::Invalid();
+  // In Turbofan, the `block->loop_end()` refers to the first after (outside)
+  // the loop. In the relevant use cases, we retrieve the backedge block by
+  // subtracting one from the rpo_number, so for Turboshaft we "fake" this by
+  // adding 1 to the backedge block's rpo_number.
+  return RpoNumber::FromInt(GetRpo(block->LastPredecessor()).ToInt() + 1);
 }
 
 static InstructionBlock* InstructionBlockFor(Zone* zone,
@@ -672,6 +721,40 @@ static InstructionBlock* InstructionBlockFor(Zone* zone,
       block->predecessors()[0]->control() == BasicBlock::Control::kSwitch) {
     instr_block->set_switch_target(true);
   }
+  return instr_block;
+}
+
+static InstructionBlock* InstructionBlockFor(
+    Zone* zone, const turboshaft::Graph& graph, const turboshaft::Block* block,
+    const turboshaft::Block* loop_header) {
+  bool is_handler =
+      block->FirstOperation(graph).Is<turboshaft::CatchBlockBeginOp>();
+  bool deferred = block->get_custom_data(
+      turboshaft::Block::CustomDataKind::kDeferredInSchedule);
+  InstructionBlock* instr_block = zone->New<InstructionBlock>(
+      zone, GetRpo(block), GetRpo(loop_header), GetLoopEndRpo(block),
+      GetRpo(block->GetDominator()), deferred, is_handler);
+  if (block->PredecessorCount() == 1) {
+    const turboshaft::Block* predecessor = block->LastPredecessor();
+    if (V8_UNLIKELY(
+            predecessor->LastOperation(graph).Is<turboshaft::SwitchOp>())) {
+      instr_block->set_switch_target(true);
+    }
+  }
+  // Map successors and predecessors.
+  base::SmallVector<turboshaft::Block*, 4> succs =
+      turboshaft::SuccessorBlocks(block->LastOperation(graph));
+  instr_block->successors().reserve(succs.size());
+  for (const turboshaft::Block* successor : succs) {
+    instr_block->successors().push_back(GetRpo(successor));
+  }
+  instr_block->predecessors().reserve(block->PredecessorCount());
+  for (const turboshaft::Block* predecessor = block->LastPredecessor();
+       predecessor; predecessor = predecessor->NeighboringPredecessor()) {
+    instr_block->predecessors().push_back(GetRpo(predecessor));
+  }
+  std::reverse(instr_block->predecessors().begin(),
+               instr_block->predecessors().end());
   return instr_block;
 }
 
@@ -727,15 +810,36 @@ std::ostream& operator<<(std::ostream& os,
 
 InstructionBlocks* InstructionSequence::InstructionBlocksFor(
     Zone* zone, const Schedule* schedule) {
-  InstructionBlocks* blocks = zone->NewArray<InstructionBlocks>(1);
+  InstructionBlocks* blocks = zone->AllocateArray<InstructionBlocks>(1);
   new (blocks) InstructionBlocks(
       static_cast<int>(schedule->rpo_order()->size()), nullptr, zone);
   size_t rpo_number = 0;
   for (BasicBlockVector::const_iterator it = schedule->rpo_order()->begin();
        it != schedule->rpo_order()->end(); ++it, ++rpo_number) {
     DCHECK(!(*blocks)[rpo_number]);
-    DCHECK(GetRpo(*it).ToSize() == rpo_number);
+    DCHECK_EQ(GetRpo(*it).ToSize(), rpo_number);
     (*blocks)[rpo_number] = InstructionBlockFor(zone, *it);
+  }
+  return blocks;
+}
+
+InstructionBlocks* InstructionSequence::InstructionBlocksFor(
+    Zone* zone, const turboshaft::Graph& graph) {
+  InstructionBlocks* blocks = zone->AllocateArray<InstructionBlocks>(1);
+  new (blocks)
+      InstructionBlocks(static_cast<int>(graph.block_count()), nullptr, zone);
+  size_t rpo_number = 0;
+  // TODO(dmercadier): currently, the LoopFinder is just used to compute loop
+  // headers. Since it's somewhat expensive to compute this, we should also use
+  // the LoopFinder to compute the special RPO (we would only need to run the
+  // LoopFinder once to compute both the special RPO and the loop headers).
+  turboshaft::LoopFinder loop_finder(zone, &graph);
+  for (const turboshaft::Block& block : graph.blocks()) {
+    DCHECK(!(*blocks)[rpo_number]);
+    DCHECK_EQ(RpoNumber::FromInt(block.index().id()).ToSize(), rpo_number);
+    (*blocks)[rpo_number] = InstructionBlockFor(
+        zone, graph, &block, loop_finder.GetLoopHeader(&block));
+    ++rpo_number;
   }
   return blocks;
 }
@@ -799,7 +903,7 @@ void InstructionSequence::ComputeAssemblyOrder() {
   int ao = 0;
   RpoNumber invalid = RpoNumber::Invalid();
 
-  ao_blocks_ = zone()->NewArray<InstructionBlocks>(1);
+  ao_blocks_ = zone()->AllocateArray<InstructionBlocks>(1);
   new (ao_blocks_) InstructionBlocks(zone());
   ao_blocks_->reserve(instruction_blocks_->size());
 
@@ -810,7 +914,7 @@ void InstructionSequence::ComputeAssemblyOrder() {
     if (block->ao_number() != invalid) continue;  // loop rotated.
     if (block->IsLoopHeader()) {
       bool header_align = true;
-      if (FLAG_turbo_loop_rotation) {
+      if (v8_flags.turbo_loop_rotation) {
         // Perform loop rotation for non-deferred loops.
         InstructionBlock* loop_end =
             instruction_blocks_->at(block->loop_end().ToSize() - 1);
@@ -860,9 +964,12 @@ InstructionSequence::InstructionSequence(Isolate* isolate,
       zone_(instruction_zone),
       instruction_blocks_(instruction_blocks),
       ao_blocks_(nullptr),
-      source_positions_(zone()),
-      constants_(ConstantMap::key_compare(),
-                 ConstantMap::allocator_type(zone())),
+      // Pre-allocate the hash map of source positions based on the block count.
+      // (The actual number of instructions is only known after instruction
+      // selection, but should at least correlate with the block count.)
+      source_positions_(zone(), instruction_blocks->size() * 2),
+      // Avoid collisions for functions with 256 or less constant vregs.
+      constants_(zone(), 256),
       immediates_(zone()),
       rpo_immediates_(instruction_blocks->size(), zone()),
       instructions_(zone()),
@@ -917,11 +1024,6 @@ int InstructionSequence::AddInstruction(Instruction* instr) {
   return index;
 }
 
-InstructionBlock* InstructionSequence::GetInstructionBlock(
-    int instruction_index) const {
-  return instructions()[instruction_index]->block();
-}
-
 static MachineRepresentation FilterRepresentation(MachineRepresentation rep) {
   switch (rep) {
     case MachineRepresentation::kBit:
@@ -936,12 +1038,14 @@ static MachineRepresentation FilterRepresentation(MachineRepresentation rep) {
     case MachineRepresentation::kFloat32:
     case MachineRepresentation::kFloat64:
     case MachineRepresentation::kSimd128:
+    case MachineRepresentation::kSimd256:
     case MachineRepresentation::kCompressedPointer:
     case MachineRepresentation::kCompressed:
     case MachineRepresentation::kSandboxedPointer:
       return rep;
     case MachineRepresentation::kNone:
     case MachineRepresentation::kMapWord:
+    case MachineRepresentation::kIndirectPointer:
       break;
   }
 
@@ -1046,19 +1150,25 @@ size_t GetConservativeFrameSizeInBytes(FrameStateType type,
           static_cast<int>(parameters_count), static_cast<int>(locals_count));
       return info.frame_size_in_bytes();
     }
-    case FrameStateType::kArgumentsAdaptor:
-      // The arguments adaptor frame state is only used in the deoptimizer and
-      // does not occupy any extra space in the stack. Check out the design doc:
+    case FrameStateType::kInlinedExtraArguments:
+      // The inlined extra arguments frame state is only used in the deoptimizer
+      // and does not occupy any extra space in the stack.
+      // Check out the design doc:
       // https://docs.google.com/document/d/150wGaUREaZI6YWqOQFD5l2mWQXaPbbZjcAIJLOFrzMs/edit
       // We just need to account for the additional parameters we might push
       // here.
       return UnoptimizedFrameInfo::GetStackSizeForAdditionalArguments(
           static_cast<int>(parameters_count));
-    case FrameStateType::kConstructStub: {
+#if V8_ENABLE_WEBASSEMBLY
+    case FrameStateType::kWasmInlinedIntoJS:
+#endif
+    case FrameStateType::kConstructCreateStub: {
       auto info = ConstructStubFrameInfo::Conservative(
           static_cast<int>(parameters_count));
       return info.frame_size_in_bytes();
     }
+    case FrameStateType::kConstructInvokeStub:
+      return FastConstructStubFrameInfo::Conservative().frame_size_in_bytes();
     case FrameStateType::kBuiltinContinuation:
 #if V8_ENABLE_WEBASSEMBLY
     case FrameStateType::kJSToWasmBuiltinContinuation:
@@ -1119,12 +1229,14 @@ size_t FrameStateDescriptor::GetHeight() const {
     case FrameStateType::kBuiltinContinuation:
 #if V8_ENABLE_WEBASSEMBLY
     case FrameStateType::kJSToWasmBuiltinContinuation:
+    case FrameStateType::kWasmInlinedIntoJS:
 #endif
       // Custom, non-JS calling convention (that does not have a notion of
       // a receiver or context).
       return parameters_count();
-    case FrameStateType::kArgumentsAdaptor:
-    case FrameStateType::kConstructStub:
+    case FrameStateType::kInlinedExtraArguments:
+    case FrameStateType::kConstructCreateStub:
+    case FrameStateType::kConstructInvokeStub:
     case FrameStateType::kJavaScriptBuiltinContinuation:
     case FrameStateType::kJavaScriptBuiltinContinuationWithCatch:
       // JS linkage. The parameters count
@@ -1138,8 +1250,8 @@ size_t FrameStateDescriptor::GetHeight() const {
 }
 
 size_t FrameStateDescriptor::GetSize() const {
-  return 1 + parameters_count() + locals_count() + stack_count() +
-         (HasContext() ? 1 : 0);
+  return (HasClosure() ? 1 : 0) + parameters_count() + locals_count() +
+         stack_count() + (HasContext() ? 1 : 0);
 }
 
 size_t FrameStateDescriptor::GetTotalSize() const {
@@ -1203,6 +1315,32 @@ std::ostream& operator<<(std::ostream& os, const InstructionSequence& code) {
     os << PrintableInstructionBlock{block, &code};
   }
   return os;
+}
+
+std::ostream& operator<<(std::ostream& os, StateValueKind kind) {
+  switch (kind) {
+    case StateValueKind::kArgumentsElements:
+      return os << "ArgumentsElements";
+    case StateValueKind::kArgumentsLength:
+      return os << "ArgumentsLength";
+    case StateValueKind::kPlain:
+      return os << "Plain";
+    case StateValueKind::kOptimizedOut:
+      return os << "OptimizedOut";
+    case StateValueKind::kNested:
+      return os << "Nested";
+    case StateValueKind::kDuplicate:
+      return os << "Duplicate";
+  }
+}
+
+void StateValueDescriptor::Print(std::ostream& os) const {
+  os << "kind=" << kind_ << ", type=" << type_;
+  if (kind_ == StateValueKind::kDuplicate || kind_ == StateValueKind::kNested) {
+    os << ", id=" << id_;
+  } else if (kind_ == StateValueKind::kArgumentsElements) {
+    os << ", args_type=" << args_type_;
+  }
 }
 
 }  // namespace compiler

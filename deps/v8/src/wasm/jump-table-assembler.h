@@ -9,6 +9,7 @@
 #ifndef V8_WASM_JUMP_TABLE_ASSEMBLER_H_
 #define V8_WASM_JUMP_TABLE_ASSEMBLER_H_
 
+#include "src/codegen/flush-instruction-cache.h"
 #include "src/codegen/macro-assembler.h"
 
 namespace v8 {
@@ -113,18 +114,12 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
 
   static void GenerateLazyCompileTable(Address base, uint32_t num_slots,
                                        uint32_t num_imported_functions,
-                                       Address wasm_compile_lazy_target) {
-    uint32_t lazy_compile_table_size = num_slots * kLazyCompileTableSlotSize;
-    // Assume enough space, so the Assembler does not try to grow the buffer.
-    JumpTableAssembler jtasm(base, lazy_compile_table_size + 256);
-    for (uint32_t slot_index = 0; slot_index < num_slots; ++slot_index) {
-      DCHECK_EQ(slot_index * kLazyCompileTableSlotSize, jtasm.pc_offset());
-      jtasm.EmitLazyCompileJumpSlot(slot_index + num_imported_functions,
-                                    wasm_compile_lazy_target);
-    }
-    DCHECK_EQ(lazy_compile_table_size, jtasm.pc_offset());
-    FlushInstructionCache(base, lazy_compile_table_size);
-  }
+                                       Address wasm_compile_lazy_target);
+
+  // Initializes the jump table starting at {base} with jumps to the lazy
+  // compile table starting at {lazy_compile_table_start}.
+  static void InitializeJumpsToLazyCompileTable(
+      Address base, uint32_t num_slots, Address lazy_compile_table_start);
 
   static void GenerateFarJumpTable(Address base, Address* stub_targets,
                                    int num_runtime_slots,
@@ -159,6 +154,9 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
       JumpTableAssembler::PatchFarJumpSlot(far_jump_table_slot, target);
       CHECK(jtasm.EmitJumpSlot(far_jump_table_slot));
     }
+    // We write nops here instead of skipping to avoid partial instructions in
+    // the jump table. Partial instructions can cause problems for the
+    // disassembler.
     jtasm.NopBytes(kJumpTableSlotSize - jtasm.pc_offset());
     FlushInstructionCache(jump_table_slot, kJumpTableSlotSize);
   }
@@ -175,8 +173,13 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
 // that the instruction containing the call target does not cross cache-line
 // boundaries. The jump table line size has been chosen to satisfy this.
 #if V8_TARGET_ARCH_X64
+#ifdef V8_ENABLE_CET_IBT
+  static constexpr int kEndbrSize = 4;
+#else  // V8_ENABLE_CET_IBT
+  static constexpr int kEndbrSize = 0;
+#endif
   static constexpr int kJumpTableLineSize = 64;
-  static constexpr int kJumpTableSlotSize = 5;
+  static constexpr int kJumpTableSlotSize = 5 + kEndbrSize;
   static constexpr int kFarJumpTableSlotSize = 16;
   static constexpr int kLazyCompileTableSlotSize = 10;
 #elif V8_TARGET_ARCH_IA32
@@ -219,23 +222,23 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
   static constexpr int kJumpTableSlotSize = 8 * kInstrSize;
   static constexpr int kFarJumpTableSlotSize = 6 * kInstrSize;
   static constexpr int kLazyCompileTableSlotSize = 8 * kInstrSize;
-#elif V8_TARGET_ARCH_RISCV64
+#elif V8_TARGET_ARCH_RISCV32 || V8_TARGET_ARCH_RISCV64
   static constexpr int kJumpTableLineSize = 6 * kInstrSize;
   static constexpr int kJumpTableSlotSize = 6 * kInstrSize;
   static constexpr int kFarJumpTableSlotSize = 6 * kInstrSize;
   static constexpr int kLazyCompileTableSlotSize = 10 * kInstrSize;
 #elif V8_TARGET_ARCH_LOONG64
-  static constexpr int kJumpTableLineSize = 8 * kInstrSize;
-  static constexpr int kJumpTableSlotSize = 8 * kInstrSize;
-  static constexpr int kFarJumpTableSlotSize = 4 * kInstrSize;
-  static constexpr int kLazyCompileTableSlotSize = 8 * kInstrSize;
+  static constexpr int kJumpTableLineSize = 1 * kInstrSize;
+  static constexpr int kJumpTableSlotSize = 1 * kInstrSize;
+  static constexpr int kFarJumpTableSlotSize = 6 * kInstrSize;
+  static constexpr int kLazyCompileTableSlotSize = 3 * kInstrSize;
 #else
 #error Unknown architecture.
 #endif
 
   static constexpr int kJumpTableSlotsPerLine =
       kJumpTableLineSize / kJumpTableSlotSize;
-  STATIC_ASSERT(kJumpTableSlotsPerLine >= 1);
+  static_assert(kJumpTableSlotsPerLine >= 1);
 
   // {JumpTableAssembler} is never used during snapshot generation, and its code
   // must be independent of the code range of any isolate anyway. Just ensure
@@ -261,6 +264,8 @@ class V8_EXPORT_PRIVATE JumpTableAssembler : public MacroAssembler {
   static void PatchFarJumpSlot(Address slot, Address target);
 
   void NopBytes(int bytes);
+
+  void SkipUntil(int offset);
 };
 
 }  // namespace wasm

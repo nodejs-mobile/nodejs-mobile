@@ -6,6 +6,7 @@
 #include "src/objects/backing-store.h"
 #include "src/wasm/wasm-objects.h"
 #include "test/cctest/cctest.h"
+#include "test/cctest/heap/heap-utils.h"
 #include "test/cctest/manually-externalized-buffer.h"
 
 namespace v8 {
@@ -28,7 +29,7 @@ TEST(Run_WasmModule_Buffer_Externalized_Detach) {
     // Embedder requests contents.
     ManuallyExternalizedBuffer external(buffer);
 
-    buffer->Detach();
+    JSArrayBuffer::Detach(buffer).Check();
     CHECK(buffer->was_detached());
 
     // Make sure we can write to the buffer without crashing
@@ -37,7 +38,7 @@ TEST(Run_WasmModule_Buffer_Externalized_Detach) {
     int_buffer[0] = 0;
     // Embedder frees contents.
   }
-  CcTest::CollectAllAvailableGarbage();
+  heap::InvokeMemoryReducingMajorGCs(CcTest::heap());
 }
 
 TEST(Run_WasmModule_Buffer_Externalized_Regression_UseAfterFree) {
@@ -45,8 +46,8 @@ TEST(Run_WasmModule_Buffer_Externalized_Regression_UseAfterFree) {
     // Regression test for https://crbug.com/813876
     Isolate* isolate = CcTest::InitIsolateOnce();
     HandleScope scope(isolate);
-    MaybeHandle<WasmMemoryObject> result =
-        WasmMemoryObject::New(isolate, 1, 1, SharedFlag::kNotShared);
+    MaybeHandle<WasmMemoryObject> result = WasmMemoryObject::New(
+        isolate, 1, 1, SharedFlag::kNotShared, WasmMemoryFlag::kWasmMemory32);
     Handle<WasmMemoryObject> memory_object = result.ToHandleChecked();
     Handle<JSArrayBuffer> buffer(memory_object->array_buffer(), isolate);
 
@@ -63,10 +64,10 @@ TEST(Run_WasmModule_Buffer_Externalized_Regression_UseAfterFree) {
 
     // Make sure the memory object has a new buffer that can be written to.
     uint32_t* int_buffer = reinterpret_cast<uint32_t*>(
-        memory_object->array_buffer().backing_store());
+        memory_object->array_buffer()->backing_store());
     int_buffer[0] = 0;
   }
-  CcTest::CollectAllAvailableGarbage();
+  heap::InvokeMemoryReducingMajorGCs(CcTest::heap());
 }
 
 #if V8_TARGET_ARCH_64_BIT
@@ -74,8 +75,8 @@ TEST(BackingStore_Reclaim) {
   // Make sure we can allocate memories without running out of address space.
   Isolate* isolate = CcTest::InitIsolateOnce();
   for (int i = 0; i < 256; ++i) {
-    auto backing_store =
-        BackingStore::AllocateWasmMemory(isolate, 1, 1, SharedFlag::kNotShared);
+    auto backing_store = BackingStore::AllocateWasmMemory(
+        isolate, 1, 1, WasmMemoryFlag::kWasmMemory32, SharedFlag::kNotShared);
     CHECK(backing_store);
   }
 }

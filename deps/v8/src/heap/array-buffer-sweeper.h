@@ -9,6 +9,7 @@
 
 #include "src/base/logging.h"
 #include "src/base/platform/mutex.h"
+#include "src/heap/sweeper.h"
 #include "src/objects/js-array-buffer.h"
 #include "src/tasks/cancelable-task.h"
 
@@ -46,18 +47,20 @@ struct ArrayBufferList final {
 class ArrayBufferSweeper final {
  public:
   enum class SweepingType { kYoung, kFull };
+  enum class TreatAllYoungAsPromoted { kNo, kYes };
 
   explicit ArrayBufferSweeper(Heap* heap);
   ~ArrayBufferSweeper();
 
-  void RequestSweep(SweepingType sweeping_type);
+  void RequestSweep(SweepingType sweeping_type,
+                    TreatAllYoungAsPromoted treat_all_young_as_promoted);
   void EnsureFinished();
 
   // Track the given ArrayBufferExtension for the given JSArrayBuffer.
-  void Append(JSArrayBuffer object, ArrayBufferExtension* extension);
+  void Append(Tagged<JSArrayBuffer> object, ArrayBufferExtension* extension);
 
   // Detaches an ArrayBufferExtension from a JSArrayBuffer.
-  void Detach(JSArrayBuffer object, ArrayBufferExtension* extension);
+  void Detach(Tagged<JSArrayBuffer> object, ArrayBufferExtension* extension);
 
   const ArrayBufferList& young() const { return young_; }
   const ArrayBufferList& old() const { return old_; }
@@ -67,12 +70,14 @@ class ArrayBufferSweeper final {
   // Bytes accounted in the old generation. Rebuilt during sweeping.
   size_t OldBytes() const { return old().ApproximateBytes(); }
 
+  bool sweeping_in_progress() const { return job_.get(); }
+
+  uint64_t GetTraceIdForFlowEvent(GCTracer::Scope::ScopeId scope_id) const;
+
  private:
   struct SweepingJob;
 
   enum class SweepingState { kInProgress, kDone };
-
-  bool sweeping_in_progress() const { return job_.get(); }
 
   // Finishes sweeping if it is already done.
   void FinishIfDone();
@@ -82,10 +87,14 @@ class ArrayBufferSweeper final {
   void IncrementExternalMemoryCounters(size_t bytes);
   void DecrementExternalMemoryCounters(size_t bytes);
 
-  void Prepare(SweepingType type);
+  void Prepare(SweepingType type,
+               TreatAllYoungAsPromoted treat_all_young_as_promoted,
+               uint64_t trace_id);
   void Finalize();
 
   void ReleaseAll(ArrayBufferList* extension);
+
+  void DoSweep(SweepingType type, ThreadKind thread_kind, uint64_t trace_id);
 
   Heap* const heap_;
   std::unique_ptr<SweepingJob> job_;
@@ -93,6 +102,7 @@ class ArrayBufferSweeper final {
   base::ConditionVariable job_finished_;
   ArrayBufferList young_;
   ArrayBufferList old_;
+  Sweeper::LocalSweeper local_sweeper_;
 };
 
 }  // namespace internal

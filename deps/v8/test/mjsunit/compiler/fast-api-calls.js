@@ -5,10 +5,10 @@
 // This file excercises basic fast API calls and enables fuzzing of this
 // functionality.
 
-// Flags: --turbo-fast-api-calls --expose-fast-api --allow-natives-syntax --opt
-// --always-opt is disabled because we rely on particular feedback for
+// Flags: --turbo-fast-api-calls --expose-fast-api --allow-natives-syntax --turbofan
+// --always-turbofan is disabled because we rely on particular feedback for
 // optimizing to the fastest path.
-// Flags: --no-always-opt
+// Flags: --no-always-turbofan
 // The test relies on optimizing/deoptimizing at predictable moments, so
 // it's not suitable for deoptimization fuzzing.
 // Flags: --deopt-every-n-times=0
@@ -237,4 +237,30 @@ const add_all_32bit_int_result_6args = add_all_32bit_int_result_5args +
   assertEquals(add_all_32bit_int_result_6args, result[2]);
   assertEquals(add_all_32bit_int_result_6args, result[3]);
   assertEquals(add_all_32bit_int_result_4args, result[4]);
+})();
+
+// Regression test for
+// https://bugs.chromium.org/p/chromium/issues/detail?id=1492786
+(function () {
+  function add_all_enforce_range() {
+    let result_5args = fast_c_api.add_all_5args_enforce_range(false,
+      1, 2, 3.22, 4, 5.33
+    );
+    return result_5args;
+  }
+
+  %PrepareFunctionForOptimization(add_all_enforce_range);
+  let result = add_all_enforce_range();
+  assertEquals(15, result);
+
+  fast_c_api.reset_counts();
+  %OptimizeFunctionOnNextCall(add_all_enforce_range);
+  result = add_all_enforce_range();
+  assertOptimized(add_all_enforce_range);
+
+  // {Flags::kEnforceRange} is currently supported on 64 bit architectures
+  // only. On 32 bit we fall back to slow call.
+  assertEquals(%Is64Bit() ? 1 : 0, fast_c_api.fast_call_count());
+  assertEquals(%Is64Bit() ? 0 : 1, fast_c_api.slow_call_count());
+  assertEquals(15, result);
 })();

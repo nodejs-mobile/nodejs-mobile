@@ -4,8 +4,7 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-factory.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/codegen/tnode.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/oddball.h"
@@ -19,6 +18,13 @@ TF_BUILTIN(ToNumber, CodeStubAssembler) {
   auto input = Parameter<Object>(Descriptor::kArgument);
 
   Return(ToNumber(context, input));
+}
+
+TF_BUILTIN(ToBigInt, CodeStubAssembler) {
+  auto context = Parameter<Context>(Descriptor::kContext);
+  auto input = Parameter<Object>(Descriptor::kArgument);
+
+  Return(ToBigInt(context, input));
 }
 
 TF_BUILTIN(ToNumber_Baseline, CodeStubAssembler) {
@@ -63,6 +69,13 @@ TF_BUILTIN(ToNumberConvertBigInt, CodeStubAssembler) {
   Return(ToNumber(context, input, BigIntHandling::kConvertToNumber));
 }
 
+TF_BUILTIN(ToBigIntConvertNumber, CodeStubAssembler) {
+  auto context = Parameter<Context>(Descriptor::kContext);
+  auto input = Parameter<Object>(Descriptor::kArgument);
+
+  Return(ToBigIntConvertNumber(context, input));
+}
+
 // ES6 section 7.1.2 ToBoolean ( argument )
 // Requires parameter on stack so that it can be used as a continuation from a
 // LAZY deopt.
@@ -77,6 +90,27 @@ TF_BUILTIN(ToBooleanLazyDeoptContinuation, CodeStubAssembler) {
 
   BIND(&return_false);
   Return(FalseConstant());
+}
+
+// Requires parameter on stack so that it can be used as a continuation from a
+// LAZY deopt.
+TF_BUILTIN(MathRoundContinuation, CodeStubAssembler) {
+  auto value = Parameter<Number>(Descriptor::kArgument);
+  Return(ChangeFloat64ToTagged(Float64Round(ChangeNumberToFloat64(value))));
+}
+
+// Requires parameter on stack so that it can be used as a continuation from a
+// LAZY deopt.
+TF_BUILTIN(MathFloorContinuation, CodeStubAssembler) {
+  auto value = Parameter<Number>(Descriptor::kArgument);
+  Return(ChangeFloat64ToTagged(Float64Floor(ChangeNumberToFloat64(value))));
+}
+
+// Requires parameter on stack so that it can be used as a continuation from a
+// LAZY deopt.
+TF_BUILTIN(MathCeilContinuation, CodeStubAssembler) {
+  auto value = Parameter<Number>(Descriptor::kArgument);
+  Return(ChangeFloat64ToTagged(Float64Ceil(ChangeNumberToFloat64(value))));
 }
 
 // ES6 section 12.5.5 typeof operator

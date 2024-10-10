@@ -20,10 +20,12 @@ const expected_keys = [
   'llhttp',
   'uvwasi',
   'acorn',
+  'simdjson',
   'simdutf',
+  'sqlite',
   'ada',
   'cjs_module_lexer',
-  'base64',
+  'nbytes',
 ];
 
 if (common.isAndroid || common.isIOS) {
@@ -31,6 +33,13 @@ if (common.isAndroid || common.isIOS) {
 }
 
 const hasUndici = process.config.variables.node_builtin_shareable_builtins.includes('deps/undici/undici.js');
+const hasAmaro = process.config.variables.node_builtin_shareable_builtins.includes('deps/amaro/dist/index.js');
+
+if (process.config.variables.node_use_amaro) {
+  if (hasAmaro) {
+    expected_keys.push('amaro');
+  }
+}
 
 if (hasUndici) {
   expected_keys.push('undici');
@@ -38,6 +47,7 @@ if (hasUndici) {
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');
+  expected_keys.push('ncrypto');
 }
 
 if (common.hasQuic) {
@@ -67,6 +77,7 @@ assert.match(process.versions.brotli, commonTemplate);
 assert.match(process.versions.llhttp, commonTemplate);
 assert.match(process.versions.node, commonTemplate);
 assert.match(process.versions.uv, commonTemplate);
+assert.match(process.versions.nbytes, commonTemplate);
 assert.match(process.versions.zlib, /^\d+(?:\.\d+){1,3}(?:-.*)?$/);
 
 if (hasUndici) {
@@ -81,6 +92,7 @@ assert.match(process.versions.modules, /^\d+$/);
 assert.match(process.versions.cjs_module_lexer, commonTemplate);
 
 if (common.hasCrypto) {
+  assert.match(process.versions.ncrypto, commonTemplate);
   if (process.config.variables.node_shared_openssl) {
     assert.ok(process.versions.openssl);
   } else {

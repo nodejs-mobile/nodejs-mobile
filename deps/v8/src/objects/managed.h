@@ -50,6 +50,13 @@ class Managed : public Foreign {
  public:
   Managed() : Foreign() {}
   explicit Managed(Address ptr) : Foreign(ptr) {}
+  explicit V8_INLINE constexpr Managed(Address ptr, SkipTypeCheckTag)
+      : Foreign(ptr, SkipTypeCheckTag{}) {}
+
+  // For every object, add a `->` operator which returns a pointer to this
+  // object. This will allow smoother transition between T and Tagged<T>.
+  Managed* operator->() { return this; }
+  const Managed* operator->() const { return this; }
 
   // Get a raw pointer to the C++ object.
   V8_INLINE CppType* raw() { return GetSharedPtrPtr()->get(); }
@@ -57,8 +64,12 @@ class Managed : public Foreign {
   // Get a reference to the shared pointer to the C++ object.
   V8_INLINE const std::shared_ptr<CppType>& get() { return *GetSharedPtrPtr(); }
 
-  static Managed cast(Object obj) { return Managed(obj.ptr()); }
-  static Managed unchecked_cast(Object obj) { return bit_cast<Managed>(obj); }
+  static Tagged<Managed> cast(Tagged<Object> obj) {
+    return Tagged<Managed>(Managed(obj.ptr()).ptr());
+  }
+  static constexpr Tagged<Managed> unchecked_cast(Tagged<Object> obj) {
+    return Tagged<Managed>(obj.ptr());
+  }
 
   // Allocate a new {CppType} and wrap it in a {Managed<CppType>}.
   template <typename... Args>
@@ -77,14 +88,18 @@ class Managed : public Foreign {
   // the unique pointer will be released.
   static Handle<Managed<CppType>> FromUniquePtr(
       Isolate* isolate, size_t estimated_size,
-      std::unique_ptr<CppType> unique_ptr);
+      std::unique_ptr<CppType> unique_ptr,
+      AllocationType allocation_type = AllocationType::kYoung);
 
   // Create a {Managed<CppType>} from an existing {std::shared_ptr<CppType>}.
   static Handle<Managed<CppType>> FromSharedPtr(
       Isolate* isolate, size_t estimated_size,
-      std::shared_ptr<CppType> shared_ptr);
+      std::shared_ptr<CppType> shared_ptr,
+      AllocationType allocation_type = AllocationType::kYoung);
 
  private:
+  friend class Tagged<Managed>;
+
   // Internally this {Foreign} object stores a pointer to a new
   // std::shared_ptr<CppType>.
   std::shared_ptr<CppType>* GetSharedPtrPtr() {

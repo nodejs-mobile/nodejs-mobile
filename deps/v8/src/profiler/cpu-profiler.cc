@@ -48,6 +48,9 @@ class CpuSampler : public sampler::Sampler {
           ProfilerStats::Reason::kIsolateNotLocked);
       return;
     }
+#if V8_HEAP_USE_PKU_JIT_WRITE_PROTECT
+    i::RwxMemoryWriteScope::SetDefaultPermissionsForSignalHandler();
+#endif
     TickSample* sample = processor_->StartTickSample();
     if (sample == nullptr) {
       ProfilerStats::Instance()->AddReason(
@@ -81,21 +84,21 @@ ProfilingScope::ProfilingScope(Isolate* isolate, ProfilerListener* listener)
   wasm::GetWasmEngine()->EnableCodeLogging(isolate_);
 #endif  // V8_ENABLE_WEBASSEMBLY
 
-  Logger* logger = isolate_->logger();
-  logger->AddCodeEventListener(listener_);
+  CHECK(isolate_->logger()->AddListener(listener_));
+  V8FileLogger* file_logger = isolate_->v8_file_logger();
   // Populate the ProfilerCodeObserver with the initial functions and
   // callbacks on the heap.
   DCHECK(isolate_->heap()->HasBeenSetUp());
 
-  if (!FLAG_prof_browser_mode) {
-    logger->LogCodeObjects();
+  if (!v8_flags.prof_browser_mode) {
+    file_logger->LogCodeObjects();
   }
-  logger->LogCompiledFunctions();
-  logger->LogAccessorCallbacks();
+  file_logger->LogCompiledFunctions();
+  file_logger->LogAccessorCallbacks();
 }
 
 ProfilingScope::~ProfilingScope() {
-  isolate_->logger()->RemoveCodeEventListener(listener_);
+  CHECK(isolate_->logger()->RemoveListener(listener_));
 
   size_t profiler_count = isolate_->num_cpu_profilers();
   DCHECK_GT(profiler_count, 0);
@@ -126,6 +129,10 @@ SamplingEventsProcessor::SamplingEventsProcessor(
       sampler_(new CpuSampler(isolate, this)),
       period_(period),
       use_precise_sampling_(use_precise_sampling) {
+#if V8_OS_WIN
+  precise_sleep_timer_.TryInit();
+#endif  // V8_OS_WIN
+
   sampler_->Start();
 }
 
@@ -287,9 +294,13 @@ void SamplingEventsProcessor::Run() {
 #if V8_OS_WIN
       if (use_precise_sampling_ &&
           nextSampleTime - now < base::TimeDelta::FromMilliseconds(100)) {
-        // Do not use Sleep on Windows as it is very imprecise, with up to 16ms
-        // jitter, which is unacceptable for short profile intervals.
-        while (base::TimeTicks::Now() < nextSampleTime) {
+        if (precise_sleep_timer_.IsInitialized()) {
+          precise_sleep_timer_.Sleep(nextSampleTime - now);
+        } else {
+          // Do not use Sleep on Windows as it is very imprecise, with up to
+          // 16ms jitter, which is unacceptable for short profile intervals.
+          while (base::TimeTicks::Now() < nextSampleTime) {
+          }
         }
       } else  // NOLINT
 #else
@@ -335,7 +346,7 @@ void SamplingEventsProcessor::SetSamplingInterval(base::TimeDelta period) {
 }
 
 void* SamplingEventsProcessor::operator new(size_t size) {
-  return AlignedAlloc(size, alignof(SamplingEventsProcessor));
+  return AlignedAllocWithRetry(size, alignof(SamplingEventsProcessor));
 }
 
 void SamplingEventsProcessor::operator delete(void* ptr) { AlignedFree(ptr); }
@@ -398,7 +409,7 @@ void ProfilerCodeObserver::CreateEntriesForRuntimeCallStats() {
   for (int i = 0; i < RuntimeCallStats::kNumberOfCounters; ++i) {
     RuntimeCallCounter* counter = rcs->GetCounter(i);
     DCHECK(counter->name());
-    auto entry = code_entries_.Create(CodeEventListener::FUNCTION_TAG,
+    auto entry = code_entries_.Create(LogEventListener::CodeTag::kFunction,
                                       counter->name(), "native V8Runtime");
     code_map_.AddCode(reinterpret_cast<Address>(counter), entry, 1);
   }
@@ -412,9 +423,9 @@ void ProfilerCodeObserver::LogBuiltins() {
        ++builtin) {
     CodeEventsContainer evt_rec(CodeEventRecord::Type::kReportBuiltin);
     ReportBuiltinEventRecord* rec = &evt_rec.ReportBuiltinEventRecord_;
-    Code code = FromCodeT(builtins->code(builtin));
-    rec->instruction_start = code.InstructionStart();
-    rec->instruction_size = code.InstructionSize();
+    Tagged<Code> code = builtins->code(builtin);
+    rec->instruction_start = code->instruction_start();
+    rec->instruction_size = code->instruction_size();
     rec->builtin = builtin;
     CodeEventHandlerInternal(evt_rec);
   }
@@ -508,7 +519,7 @@ CpuProfiler::CpuProfiler(Isolate* isolate, CpuProfilingNamingMode naming_mode,
       naming_mode_(naming_mode),
       logging_mode_(logging_mode),
       base_sampling_interval_(base::TimeDelta::FromMicroseconds(
-          FLAG_cpu_profiler_sampling_interval)),
+          v8_flags.cpu_profiler_sampling_interval)),
       code_observer_(test_code_observer),
       profiles_(test_profiles),
       symbolizer_(test_symbolizer),
@@ -568,7 +579,7 @@ void CpuProfiler::DisableLogging() {
   code_observer_->ClearCodeMap();
 }
 
-base::TimeDelta CpuProfiler::ComputeSamplingInterval() const {
+base::TimeDelta CpuProfiler::ComputeSamplingInterval() {
   return profiles_->GetCommonSamplingInterval();
 }
 
@@ -602,14 +613,14 @@ size_t CpuProfiler::GetEstimatedMemoryUsage() const {
 CpuProfilingResult CpuProfiler::StartProfiling(
     CpuProfilingOptions options,
     std::unique_ptr<DiscardedSamplesDelegate> delegate) {
-  return StartProfiling(nullptr, options, std::move(delegate));
+  return StartProfiling(nullptr, std::move(options), std::move(delegate));
 }
 
 CpuProfilingResult CpuProfiler::StartProfiling(
     const char* title, CpuProfilingOptions options,
     std::unique_ptr<DiscardedSamplesDelegate> delegate) {
   CpuProfilingResult result =
-      profiles_->StartProfiling(title, options, std::move(delegate));
+      profiles_->StartProfiling(title, std::move(options), std::move(delegate));
 
   // TODO(nicodubus): Revisit logic for if we want to do anything different for
   // kAlreadyStarted
@@ -624,9 +635,9 @@ CpuProfilingResult CpuProfiler::StartProfiling(
 }
 
 CpuProfilingResult CpuProfiler::StartProfiling(
-    String title, CpuProfilingOptions options,
+    Tagged<String> title, CpuProfilingOptions options,
     std::unique_ptr<DiscardedSamplesDelegate> delegate) {
-  return StartProfiling(profiles_->GetName(title), options,
+  return StartProfiling(profiles_->GetName(title), std::move(options),
                         std::move(delegate));
 }
 
@@ -642,7 +653,8 @@ void CpuProfiler::StartProcessorIfNotStarted() {
   }
 
   if (!symbolizer_) {
-    symbolizer_ = std::make_unique<Symbolizer>(code_observer_->code_map());
+    symbolizer_ =
+        std::make_unique<Symbolizer>(code_observer_->instruction_stream_map());
   }
 
   base::TimeDelta sampling_interval = ComputeSamplingInterval();
@@ -681,7 +693,7 @@ CpuProfile* CpuProfiler::StopProfiling(ProfilerId id) {
   return profile;
 }
 
-CpuProfile* CpuProfiler::StopProfiling(String title) {
+CpuProfile* CpuProfiler::StopProfiling(Tagged<String> title) {
   return StopProfiling(profiles_->GetName(title));
 }
 

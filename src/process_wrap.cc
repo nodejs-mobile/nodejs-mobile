@@ -20,6 +20,8 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "env-inl.h"
+#include "node_external_reference.h"
+#include "permission/permission.h"
 #include "stream_base-inl.h"
 #include "stream_wrap.h"
 #include "util-inl.h"
@@ -64,6 +66,12 @@ class ProcessWrap : public HandleWrap {
     SetProtoMethod(isolate, constructor, "kill", Kill);
 
     SetConstructorFunction(context, target, "Process", constructor);
+  }
+
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+    registry->Register(New);
+    registry->Register(Spawn);
+    registry->Register(Kill);
   }
 
   SET_NO_MEMORY_INFO()
@@ -146,7 +154,9 @@ class ProcessWrap : public HandleWrap {
     Environment* env = Environment::GetCurrent(args);
     Local<Context> context = env->context();
     ProcessWrap* wrap;
-    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.This());
+    THROW_IF_INSUFFICIENT_PERMISSIONS(
+        env, permission::PermissionScope::kChildProcess, "");
     int err = 0;
 
     Local<Object> js_options =
@@ -300,7 +310,7 @@ class ProcessWrap : public HandleWrap {
   static void Kill(const FunctionCallbackInfo<Value>& args) {
     Environment* env = Environment::GetCurrent(args);
     ProcessWrap* wrap;
-    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.This());
     int signal = args[0]->Int32Value(env->context()).FromJust();
     int err = uv_process_kill(&wrap->process_, signal);
     args.GetReturnValue().Set(err);
@@ -332,3 +342,5 @@ class ProcessWrap : public HandleWrap {
 }  // namespace node
 
 NODE_BINDING_CONTEXT_AWARE_INTERNAL(process_wrap, node::ProcessWrap::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(process_wrap,
+                                node::ProcessWrap::RegisterExternalReferences)

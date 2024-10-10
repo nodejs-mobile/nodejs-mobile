@@ -4,13 +4,12 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 const SyncWriteStream = require('internal/fs/sync_write_stream');
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-const filename = path.join(tmpdir.path, 'sync-write-stream.txt');
+const filename = tmpdir.resolve('sync-write-stream.txt');
 
 // Verify constructing the instance with default options.
 {
@@ -65,6 +64,18 @@ const filename = path.join(tmpdir.path, 'sync-write-stream.txt');
   stream.on('close', common.mustCall());
   assert.strictEqual(stream.destroySoon(), stream);
   assert.strictEqual(stream.fd, null);
+}
+
+// Verify that the file is not closed when autoClose=false
+{
+  const fd = fs.openSync(filename, 'w');
+  const stream = new SyncWriteStream(fd, { autoClose: false });
+
+  stream.on('close', common.mustCall());
+
+  assert.strictEqual(stream.destroy(), stream);
+  fs.fstatSync(fd); // Does not throw
+  fs.closeSync(fd);
 }
 
 // Verify that calling end() will also destroy the stream.

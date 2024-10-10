@@ -10,16 +10,18 @@
 #include "src/base/memory.h"
 #include "src/codegen/arm64/assembler-arm64.h"
 #include "src/codegen/assembler.h"
+#include "src/codegen/flush-instruction-cache.h"
 #include "src/debug/debug.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/smi.h"
+#include "src/objects/tagged.h"
 
 namespace v8 {
 namespace internal {
 
 bool CpuFeatures::SupportsOptimizer() { return true; }
 
-void RelocInfo::apply(intptr_t delta) {
+void WritableRelocInfo::apply(intptr_t delta) {
   // On arm64 only internal references and immediate branches need extra work.
   if (RelocInfo::IsInternalReference(rmode_)) {
     // Absolute code pointer inside code object moves with the code object.
@@ -32,7 +34,8 @@ void RelocInfo::apply(intptr_t delta) {
       Address old_target =
           reinterpret_cast<Address>(instr->ImmPCOffsetTarget());
       Address new_target = old_target - delta;
-      instr->SetBranchImmTarget(reinterpret_cast<Instruction*>(new_target));
+      instr->SetBranchImmTarget<UncondBranchType>(
+          reinterpret_cast<Instruction*>(new_target));
     }
   }
 }
@@ -194,16 +197,18 @@ template <typename T>
 struct ImmediateInitializer {
   static inline RelocInfo::Mode rmode_for(T) { return RelocInfo::NO_INFO; }
   static inline int64_t immediate_for(T t) {
-    STATIC_ASSERT(sizeof(T) <= 8);
-    STATIC_ASSERT(std::is_integral<T>::value || std::is_enum<T>::value);
+    static_assert(sizeof(T) <= 8);
+    static_assert(std::is_integral<T>::value || std::is_enum<T>::value);
     return t;
   }
 };
 
 template <>
-struct ImmediateInitializer<Smi> {
-  static inline RelocInfo::Mode rmode_for(Smi t) { return RelocInfo::NO_INFO; }
-  static inline int64_t immediate_for(Smi t) {
+struct ImmediateInitializer<Tagged<Smi>> {
+  static inline RelocInfo::Mode rmode_for(Tagged<Smi> t) {
+    return RelocInfo::NO_INFO;
+  }
+  static inline int64_t immediate_for(Tagged<Smi> t) {
     return static_cast<int64_t>(t.ptr());
   }
 };
@@ -232,7 +237,7 @@ Immediate::Immediate(T t)
 template <typename T>
 Immediate::Immediate(T t, RelocInfo::Mode rmode)
     : value_(ImmediateInitializer<T>::immediate_for(t)), rmode_(rmode) {
-  STATIC_ASSERT(std::is_integral<T>::value);
+  static_assert(std::is_integral<T>::value);
 }
 
 template <typename T>
@@ -267,21 +272,21 @@ Operand::Operand(Register reg, Extend extend, unsigned shift_amount)
   DCHECK(reg.Is64Bits() || ((extend != SXTX) && (extend != UXTX)));
 }
 
-bool Operand::IsHeapObjectRequest() const {
-  DCHECK_IMPLIES(heap_object_request_.has_value(), reg_ == NoReg);
-  DCHECK_IMPLIES(heap_object_request_.has_value(),
+bool Operand::IsHeapNumberRequest() const {
+  DCHECK_IMPLIES(heap_number_request_.has_value(), reg_ == NoReg);
+  DCHECK_IMPLIES(heap_number_request_.has_value(),
                  immediate_.rmode() == RelocInfo::FULL_EMBEDDED_OBJECT ||
                      immediate_.rmode() == RelocInfo::CODE_TARGET);
-  return heap_object_request_.has_value();
+  return heap_number_request_.has_value();
 }
 
-HeapObjectRequest Operand::heap_object_request() const {
-  DCHECK(IsHeapObjectRequest());
-  return *heap_object_request_;
+HeapNumberRequest Operand::heap_number_request() const {
+  DCHECK(IsHeapNumberRequest());
+  return *heap_number_request_;
 }
 
 bool Operand::IsImmediate() const {
-  return reg_ == NoReg && !IsHeapObjectRequest();
+  return reg_ == NoReg && !IsHeapNumberRequest();
 }
 
 bool Operand::IsShiftedRegister() const {
@@ -318,11 +323,8 @@ Operand Operand::ToW() const {
   return *this;
 }
 
-Immediate Operand::immediate_for_heap_object_request() const {
-  DCHECK((heap_object_request().kind() == HeapObjectRequest::kHeapNumber &&
-          immediate_.rmode() == RelocInfo::FULL_EMBEDDED_OBJECT) ||
-         (heap_object_request().kind() == HeapObjectRequest::kStringConstant &&
-          immediate_.rmode() == RelocInfo::FULL_EMBEDDED_OBJECT));
+Immediate Operand::immediate_for_heap_number_request() const {
+  DCHECK(immediate_.rmode() == RelocInfo::FULL_EMBEDDED_OBJECT);
   return immediate_;
 }
 
@@ -337,7 +339,7 @@ int64_t Operand::ImmediateValue() const {
 }
 
 RelocInfo::Mode Operand::ImmediateRMode() const {
-  DCHECK(IsImmediate() || IsHeapObjectRequest());
+  DCHECK(IsImmediate() || IsHeapNumberRequest());
   return immediate_.rmode();
 }
 
@@ -487,15 +489,15 @@ Tagged_t Assembler::target_compressed_address_at(Address pc,
   return Memory<Tagged_t>(target_pointer_address_at(pc));
 }
 
-Handle<CodeT> Assembler::code_target_object_handle_at(Address pc) {
+Handle<Code> Assembler::code_target_object_handle_at(Address pc) {
   Instruction* instr = reinterpret_cast<Instruction*>(pc);
   if (instr->IsLdrLiteralX()) {
-    return Handle<CodeT>(reinterpret_cast<Address*>(
+    return Handle<Code>(reinterpret_cast<Address*>(
         Assembler::target_address_at(pc, 0 /* unused */)));
   } else {
     DCHECK(instr->IsBranchAndLink() || instr->IsUnconditionalBranch());
     DCHECK_EQ(instr->ImmPCOffset() % kInstrSize, 0);
-    return Handle<CodeT>::cast(
+    return Handle<Code>::cast(
         GetEmbeddedObject(instr->ImmPCOffset() >> kInstrSizeLog2));
   }
 }
@@ -504,7 +506,7 @@ AssemblerBase::EmbeddedObjectIndex
 Assembler::embedded_object_index_referenced_from(Address pc) {
   Instruction* instr = reinterpret_cast<Instruction*>(pc);
   if (instr->IsLdrLiteralX()) {
-    STATIC_ASSERT(sizeof(EmbeddedObjectIndex) == sizeof(intptr_t));
+    static_assert(sizeof(EmbeddedObjectIndex) == sizeof(intptr_t));
     return Memory<EmbeddedObjectIndex>(target_pointer_address_at(pc));
   } else {
     DCHECK(instr->IsLdrLiteralW());
@@ -530,14 +532,13 @@ Handle<HeapObject> Assembler::target_object_handle_at(Address pc) {
       Assembler::embedded_object_index_referenced_from(pc));
 }
 
-Address Assembler::runtime_entry_at(Address pc) {
+Builtin Assembler::target_builtin_at(Address pc) {
   Instruction* instr = reinterpret_cast<Instruction*>(pc);
-  if (instr->IsLdrLiteralX()) {
-    return Assembler::target_address_at(pc, 0 /* unused */);
-  } else {
-    DCHECK(instr->IsBranchAndLink() || instr->IsUnconditionalBranch());
-    return instr->ImmPCOffset() + options().code_range_base;
-  }
+  DCHECK(instr->IsBranchAndLink() || instr->IsUnconditionalBranch());
+  DCHECK_EQ(instr->ImmPCOffset() % kInstrSize, 0);
+  int builtin_id = static_cast<int>(instr->ImmPCOffset() / kInstrSize);
+  DCHECK(Builtins::IsBuiltinId(builtin_id));
+  return static_cast<Builtin>(builtin_id);
 }
 
 int Assembler::deserialization_special_target_size(Address location) {
@@ -551,7 +552,7 @@ int Assembler::deserialization_special_target_size(Address location) {
 }
 
 void Assembler::deserialization_set_special_target_at(Address location,
-                                                      Code code,
+                                                      Tagged<Code> code,
                                                       Address target) {
   Instruction* instr = reinterpret_cast<Instruction*>(location);
   if (instr->IsBranchAndLink() || instr->IsUnconditionalBranch()) {
@@ -560,7 +561,8 @@ void Assembler::deserialization_set_special_target_at(Address location,
       // to zero instead.
       target = location;
     }
-    instr->SetBranchImmTarget(reinterpret_cast<Instruction*>(target));
+    instr->SetBranchImmTarget<UncondBranchType>(
+        reinterpret_cast<Instruction*>(target));
     FlushInstructionCache(location, kInstrSize);
   } else {
     DCHECK_EQ(instr->InstructionBits(), 0);
@@ -596,7 +598,8 @@ void Assembler::set_target_address_at(Address pc, Address constant_pool,
       // to zero instead.
       target = pc;
     }
-    instr->SetBranchImmTarget(reinterpret_cast<Instruction*>(target));
+    instr->SetBranchImmTarget<UncondBranchType>(
+        reinterpret_cast<Instruction*>(target));
     if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
       FlushInstructionCache(pc, kInstrSize);
     }
@@ -622,7 +625,8 @@ int RelocInfo::target_address_size() {
 }
 
 Address RelocInfo::target_address() {
-  DCHECK(IsCodeTarget(rmode_) || IsRuntimeEntry(rmode_) || IsWasmCall(rmode_));
+  DCHECK(IsCodeTarget(rmode_) || IsNearBuiltinEntry(rmode_) ||
+         IsWasmCall(rmode_) || IsWasmStubCall(rmode_));
   return Assembler::target_address_at(pc_, constant_pool_);
 }
 
@@ -655,30 +659,23 @@ Address RelocInfo::constant_pool_entry_address() {
   return Assembler::target_pointer_address_at(pc_);
 }
 
-HeapObject RelocInfo::target_object(PtrComprCageBase cage_base) {
+Tagged<HeapObject> RelocInfo::target_object(PtrComprCageBase cage_base) {
   DCHECK(IsCodeTarget(rmode_) || IsEmbeddedObjectMode(rmode_));
-  if (IsDataEmbeddedObject(rmode_)) {
-    return HeapObject::cast(Object(ReadUnalignedValue<Address>(pc_)));
-  } else if (IsCompressedEmbeddedObject(rmode_)) {
+  if (IsCompressedEmbeddedObject(rmode_)) {
     Tagged_t compressed =
         Assembler::target_compressed_address_at(pc_, constant_pool_);
     DCHECK(!HAS_SMI_TAG(compressed));
-    Object obj(DecompressTaggedPointer(cage_base, compressed));
-    // Embedding of compressed Code objects must not happen when external code
-    // space is enabled, because CodeDataContainers must be used instead.
-    DCHECK_IMPLIES(V8_EXTERNAL_CODE_SPACE_BOOL,
-                   !IsCodeSpaceObject(HeapObject::cast(obj)));
+    Tagged<Object> obj(
+        V8HeapCompressionScheme::DecompressTagged(cage_base, compressed));
     return HeapObject::cast(obj);
   } else {
     return HeapObject::cast(
-        Object(Assembler::target_address_at(pc_, constant_pool_)));
+        Tagged<Object>(Assembler::target_address_at(pc_, constant_pool_)));
   }
 }
 
 Handle<HeapObject> RelocInfo::target_object_handle(Assembler* origin) {
-  if (IsDataEmbeddedObject(rmode_)) {
-    return Handle<HeapObject>::cast(ReadUnalignedValue<Handle<Object>>(pc_));
-  } else if (IsEmbeddedObjectMode(rmode_)) {
+  if (IsEmbeddedObjectMode(rmode_)) {
     return origin->target_object_handle_at(pc_);
   } else {
     DCHECK(IsCodeTarget(rmode_));
@@ -686,24 +683,24 @@ Handle<HeapObject> RelocInfo::target_object_handle(Assembler* origin) {
   }
 }
 
-void RelocInfo::set_target_object(Heap* heap, HeapObject target,
-                                  WriteBarrierMode write_barrier_mode,
-                                  ICacheFlushMode icache_flush_mode) {
+void WritableRelocInfo::set_target_object(Tagged<HeapObject> target,
+                                          ICacheFlushMode icache_flush_mode) {
   DCHECK(IsCodeTarget(rmode_) || IsEmbeddedObjectMode(rmode_));
-  if (IsDataEmbeddedObject(rmode_)) {
-    WriteUnalignedValue(pc_, target.ptr());
-    // No need to flush icache since no instructions were changed.
-  } else if (IsCompressedEmbeddedObject(rmode_)) {
+  if (IsCompressedEmbeddedObject(rmode_)) {
+    DCHECK(COMPRESS_POINTERS_BOOL);
+    // We must not compress pointers to objects outside of the main pointer
+    // compression cage as we wouldn't be able to decompress them with the
+    // correct cage base.
+    DCHECK_IMPLIES(V8_ENABLE_SANDBOX_BOOL, !IsTrustedSpaceObject(target));
+    DCHECK_IMPLIES(V8_EXTERNAL_CODE_SPACE_BOOL, !IsCodeSpaceObject(target));
     Assembler::set_target_compressed_address_at(
-        pc_, constant_pool_, CompressTagged(target.ptr()), icache_flush_mode);
+        pc_, constant_pool_,
+        V8HeapCompressionScheme::CompressObject(target.ptr()),
+        icache_flush_mode);
   } else {
     DCHECK(IsFullEmbeddedObject(rmode_));
     Assembler::set_target_address_at(pc_, constant_pool_, target.ptr(),
                                      icache_flush_mode);
-  }
-  if (write_barrier_mode == UPDATE_WRITE_BARRIER && !host().is_null() &&
-      !FLAG_disable_write_barriers) {
-    WriteBarrierForCode(host(), this, target);
   }
 }
 
@@ -712,7 +709,7 @@ Address RelocInfo::target_external_reference() {
   return Assembler::target_address_at(pc_, constant_pool_);
 }
 
-void RelocInfo::set_target_external_reference(
+void WritableRelocInfo::set_target_external_reference(
     Address target, ICacheFlushMode icache_flush_mode) {
   DCHECK(rmode_ == RelocInfo::EXTERNAL_REFERENCE);
   Assembler::set_target_address_at(pc_, constant_pool_, target,
@@ -729,37 +726,14 @@ Address RelocInfo::target_internal_reference_address() {
   return pc_;
 }
 
-Address RelocInfo::target_runtime_entry(Assembler* origin) {
-  DCHECK(IsRuntimeEntry(rmode_));
-  return origin->runtime_entry_at(pc_);
-}
-
-void RelocInfo::set_target_runtime_entry(Address target,
-                                         WriteBarrierMode write_barrier_mode,
-                                         ICacheFlushMode icache_flush_mode) {
-  DCHECK(IsRuntimeEntry(rmode_));
-  if (target_address() != target) {
-    set_target_address(target, write_barrier_mode, icache_flush_mode);
-  }
+Builtin RelocInfo::target_builtin_at(Assembler* origin) {
+  DCHECK(IsNearBuiltinEntry(rmode_));
+  return Assembler::target_builtin_at(pc_);
 }
 
 Address RelocInfo::target_off_heap_target() {
   DCHECK(IsOffHeapTarget(rmode_));
   return Assembler::target_address_at(pc_, constant_pool_);
-}
-
-void RelocInfo::WipeOut() {
-  DCHECK(IsEmbeddedObjectMode(rmode_) || IsCodeTarget(rmode_) ||
-         IsRuntimeEntry(rmode_) || IsExternalReference(rmode_) ||
-         IsInternalReference(rmode_) || IsOffHeapTarget(rmode_));
-  if (IsInternalReference(rmode_)) {
-    WriteUnalignedValue<Address>(pc_, kNullAddress);
-  } else if (IsCompressedEmbeddedObject(rmode_)) {
-    Assembler::set_target_compressed_address_at(pc_, constant_pool_,
-                                                kNullAddress);
-  } else {
-    Assembler::set_target_address_at(pc_, constant_pool_, kNullAddress);
-  }
 }
 
 LoadStoreOp Assembler::LoadOpFor(const CPURegister& rt) {
@@ -842,6 +816,42 @@ LoadLiteralOp Assembler::LoadLiteralOpFor(const CPURegister& rt) {
   }
 }
 
+inline void Assembler::LoadStoreScaledImmOffset(Instr memop, int offset,
+                                                unsigned size) {
+  Emit(LoadStoreUnsignedOffsetFixed | memop | ImmLSUnsigned(offset >> size));
+}
+
+inline void Assembler::LoadStoreUnscaledImmOffset(Instr memop, int offset) {
+  Emit(LoadStoreUnscaledOffsetFixed | memop | ImmLS(offset));
+}
+
+inline void Assembler::LoadStoreWRegOffset(Instr memop,
+                                           const Register& regoffset) {
+  Emit(LoadStoreRegisterOffsetFixed | memop | Rm(regoffset) | ExtendMode(UXTW));
+}
+
+inline void Assembler::DataProcPlainRegister(const Register& rd,
+                                             const Register& rn,
+                                             const Register& rm, Instr op) {
+  DCHECK(AreSameSizeAndType(rd, rn, rm));
+  Emit(SF(rd) | AddSubShiftedFixed | op | Rm(rm) | Rn(rn) | Rd(rd));
+}
+
+inline void Assembler::CmpPlainRegister(const Register& rn,
+                                        const Register& rm) {
+  DCHECK(AreSameSizeAndType(rn, rm));
+  Emit(SF(rn) | AddSubShiftedFixed | SUB | Flags(SetFlags) | Rm(rm) | Rn(rn) |
+       Rd(xzr));
+}
+
+inline void Assembler::DataProcImmediate(const Register& rd, const Register& rn,
+                                         int immediate, Instr op) {
+  DCHECK(AreSameSizeAndType(rd, rn));
+  DCHECK(IsImmAddSub(immediate));
+  Emit(SF(rd) | AddSubImmediateFixed | op | ImmAddSub(immediate) | RdSP(rd) |
+       RnSP(rn));
+}
+
 int Assembler::LinkAndGetInstructionOffsetTo(Label* label) {
   DCHECK_EQ(kStartOfLabelLinkChain, 0);
   int offset = LinkAndGetByteOffsetTo(label);
@@ -861,31 +871,26 @@ Instr Assembler::Flags(FlagsUpdate S) {
 Instr Assembler::Cond(Condition cond) { return cond << Condition_offset; }
 
 Instr Assembler::ImmPCRelAddress(int imm21) {
-  CHECK(is_int21(imm21));
-  Instr imm = static_cast<Instr>(truncate_to_int21(imm21));
+  Instr imm = static_cast<Instr>(checked_truncate_to_int21(imm21));
   Instr immhi = (imm >> ImmPCRelLo_width) << ImmPCRelHi_offset;
   Instr immlo = imm << ImmPCRelLo_offset;
   return (immhi & ImmPCRelHi_mask) | (immlo & ImmPCRelLo_mask);
 }
 
 Instr Assembler::ImmUncondBranch(int imm26) {
-  CHECK(is_int26(imm26));
-  return truncate_to_int26(imm26) << ImmUncondBranch_offset;
+  return checked_truncate_to_int26(imm26) << ImmUncondBranch_offset;
 }
 
 Instr Assembler::ImmCondBranch(int imm19) {
-  CHECK(is_int19(imm19));
-  return truncate_to_int19(imm19) << ImmCondBranch_offset;
+  return checked_truncate_to_int19(imm19) << ImmCondBranch_offset;
 }
 
 Instr Assembler::ImmCmpBranch(int imm19) {
-  CHECK(is_int19(imm19));
-  return truncate_to_int19(imm19) << ImmCmpBranch_offset;
+  return checked_truncate_to_int19(imm19) << ImmCmpBranch_offset;
 }
 
 Instr Assembler::ImmTestBranch(int imm14) {
-  CHECK(is_int14(imm14));
-  return truncate_to_int14(imm14) << ImmTestBranch_offset;
+  return checked_truncate_to_int14(imm14) << ImmTestBranch_offset;
 }
 
 Instr Assembler::ImmTestBranchBit(unsigned bit_pos) {
@@ -944,8 +949,7 @@ Instr Assembler::ImmRotate(unsigned immr, unsigned reg_size) {
 }
 
 Instr Assembler::ImmLLiteral(int imm19) {
-  CHECK(is_int19(imm19));
-  return truncate_to_int19(imm19) << ImmLLiteral_offset;
+  return checked_truncate_to_int19(imm19) << ImmLLiteral_offset;
 }
 
 Instr Assembler::BitN(unsigned bitn, unsigned reg_size) {
@@ -989,16 +993,14 @@ Instr Assembler::ImmLSUnsigned(int imm12) {
 }
 
 Instr Assembler::ImmLS(int imm9) {
-  DCHECK(is_int9(imm9));
-  return truncate_to_int9(imm9) << ImmLS_offset;
+  return checked_truncate_to_int9(imm9) << ImmLS_offset;
 }
 
 Instr Assembler::ImmLSPair(int imm7, unsigned size) {
   DCHECK_EQ(imm7,
             static_cast<int>(static_cast<uint32_t>(imm7 >> size) << size));
   int scaled_imm7 = imm7 >> size;
-  DCHECK(is_int7(scaled_imm7));
-  return truncate_to_int7(scaled_imm7) << ImmLSPair_offset;
+  return checked_truncate_to_int7(scaled_imm7) << ImmLSPair_offset;
 }
 
 Instr Assembler::ImmShiftLS(unsigned shift_amount) {
@@ -1031,17 +1033,17 @@ Instr Assembler::ImmBarrierType(int imm2) {
   return imm2 << ImmBarrierType_offset;
 }
 
-unsigned Assembler::CalcLSDataSize(LoadStoreOp op) {
+unsigned Assembler::CalcLSDataSizeLog2(LoadStoreOp op) {
   DCHECK((LSSize_offset + LSSize_width) == (kInstrSize * 8));
-  unsigned size = static_cast<Instr>(op >> LSSize_offset);
+  unsigned size_log2 = static_cast<Instr>(op >> LSSize_offset);
   if ((op & LSVector_mask) != 0) {
     // Vector register memory operations encode the access size in the "size"
     // and "opc" fields.
-    if ((size == 0) && ((op & LSOpc_mask) >> LSOpc_offset) >= 2) {
-      size = kQRegSizeLog2;
+    if (size_log2 == 0 && ((op & LSOpc_mask) >> LSOpc_offset) >= 2) {
+      size_log2 = kQRegSizeLog2;
     }
   }
-  return size;
+  return size_log2;
 }
 
 Instr Assembler::ImmMoveWide(int imm) {
@@ -1063,21 +1065,6 @@ Instr Assembler::FPScale(unsigned scale) {
 
 const Register& Assembler::AppropriateZeroRegFor(const CPURegister& reg) const {
   return reg.Is64Bits() ? xzr : wzr;
-}
-
-inline void Assembler::CheckBufferSpace() {
-  DCHECK_LT(pc_, buffer_start_ + buffer_->size());
-  if (V8_UNLIKELY(buffer_space() < kGap)) {
-    GrowBuffer();
-  }
-}
-
-V8_INLINE void Assembler::CheckBuffer() {
-  CheckBufferSpace();
-  if (pc_offset() >= next_veneer_pool_check_) {
-    CheckVeneerPool(false, true);
-  }
-  constpool_.MaybeCheck();
 }
 
 EnsureSpace::EnsureSpace(Assembler* assembler) : block_pools_scope_(assembler) {

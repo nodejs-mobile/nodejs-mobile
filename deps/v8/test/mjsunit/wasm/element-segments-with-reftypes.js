@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-gc
-
 d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
 (function TestGlobalGetElement() {
@@ -17,23 +15,17 @@ d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
     kExprLocalGet, 0, kExprI32Const, 1, kExprI32Add
   ]);
   let global0 =
-      builder.addGlobal(kWasmFuncRef, false, WasmInitExpr.RefFunc(f0.index));
+      builder.addGlobal(kWasmFuncRef, false, false, [kExprRefFunc, f0.index]);
   let global1 =
-      builder.addGlobal(kWasmFuncRef, false, WasmInitExpr.RefFunc(f1.index));
+      builder.addGlobal(kWasmFuncRef, false, false, [kExprRefFunc, f1.index]);
   // At instantiation, table[0] = global0, table[1] = global1.
   builder.addActiveElementSegment(
-      table.index, WasmInitExpr.I32Const(0),
-      [
-        WasmInitExpr.GlobalGet(global0.index),
-        WasmInitExpr.GlobalGet(global1.index)
-      ],
+      table.index, wasmI32Const(0),
+      [[kExprGlobalGet, global0.index], [kExprGlobalGet, global1.index]],
       kWasmFuncRef);
 
   let passive = builder.addPassiveElementSegment(
-      [
-        WasmInitExpr.GlobalGet(global0.index),
-        WasmInitExpr.GlobalGet(global1.index)
-      ],
+      [[kExprGlobalGet, global0.index], [kExprGlobalGet, global1.index]],
       kWasmFuncRef);
 
   // table[2] = global0, table[3] = global1.
@@ -42,8 +34,7 @@ d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
         kExprI32Const, 2,  // table index
         kExprI32Const, 0,  // element index
         kExprI32Const, 2,  // length
-        kNumericPrefix, kExprTableInit, passive, table.index
-      ])
+        kNumericPrefix, kExprTableInit, passive, table.index])
       .exportFunc();
 
   let instance = builder.instantiate({});
@@ -68,16 +59,16 @@ d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
   ]);
 
   let table =
-      builder.addTable(wasmRefType(sig), 10, 10, WasmInitExpr.RefFunc(f0.index))
+      builder.addTable(wasmRefType(sig), 10, 10, [kExprRefFunc, f0.index])
           .exportAs('table');
 
   builder.addActiveElementSegment(
-      table.index, WasmInitExpr.I32Const(0),
-      [WasmInitExpr.RefFunc(f0.index), WasmInitExpr.RefFunc(f1.index)],
+      table.index, wasmI32Const(0),
+      [[kExprRefFunc, f0.index], [kExprRefFunc, f1.index]],
       wasmRefType(sig));
 
   let passive = builder.addPassiveElementSegment(
-      [WasmInitExpr.RefFunc(f0.index), WasmInitExpr.RefFunc(f1.index)],
+      [[kExprRefFunc, f0.index], [kExprRefFunc, f1.index]],
       wasmRefType(sig));
 
   builder.addFunction('init', kSig_v_v)
@@ -98,21 +89,21 @@ d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
   assertEquals(instance.exports.table.get(3)(10), 11);
 })();
 
-// Test that mutable globals cannot be used in element segments, even under
-// --experimental-wasm-gc.
+// Test that mutable globals cannot be used in element segments, even with
+// wasm-gc.
 (function TestMutableGlobalInElementSegment() {
   print(arguments.callee.name);
   let builder = new WasmModuleBuilder();
   let global = builder.addImportedGlobal("m", "g", kWasmFuncRef, true);
   let table = builder.addTable(kWasmFuncRef, 10, 10);
   builder.addActiveElementSegment(
-      table.index, WasmInitExpr.I32Const(0),
-      [WasmInitExpr.GlobalGet(global.index)], kWasmFuncRef);
+      table.index, wasmI32Const(0),
+      [[kExprGlobalGet, global]], kWasmFuncRef);
   builder.addExportOfKind("table", kExternalTable, table.index);
 
   assertThrows(
     () => builder.instantiate({m : {g :
         new WebAssembly.Global({value: "anyfunc", mutable: true}, null)}}),
     WebAssembly.CompileError,
-    /mutable globals cannot be used in initializer expressions/);
+    /mutable globals cannot be used in constant expressions/);
 })();

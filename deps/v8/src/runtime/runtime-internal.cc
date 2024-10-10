@@ -6,33 +6,21 @@
 
 #include "src/api/api-inl.h"
 #include "src/api/api.h"
-#include "src/ast/ast-traversal-visitor.h"
-#include "src/ast/prettyprinter.h"
 #include "src/builtins/builtins.h"
 #include "src/common/message-template.h"
-#include "src/debug/debug.h"
 #include "src/execution/arguments-inl.h"
-#include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/execution/messages.h"
 #include "src/execution/tiering-manager.h"
 #include "src/handles/maybe-handles.h"
-#include "src/init/bootstrapper.h"
 #include "src/logging/counters.h"
 #include "src/numbers/conversions.h"
-#include "src/objects/feedback-vector-inl.h"
-#include "src/objects/js-array-inl.h"
 #include "src/objects/template-objects-inl.h"
-#include "src/parsing/parse-info.h"
-#include "src/parsing/parsing.h"
-#include "src/runtime/runtime-utils.h"
-#include "src/snapshot/snapshot.h"
-#include "src/strings/string-builder-inl.h"
 #include "src/utils/ostreams.h"
 
 #if V8_ENABLE_WEBASSEMBLY
-// TODO(jkummerow): Drop this when the "SaveAndClearThreadInWasmFlag"
-// short-term mitigation is no longer needed.
+// TODO(chromium:1236668): Drop this when the "SaveAndClearThreadInWasmFlag"
+// approach is no longer needed.
 #include "src/trap-handler/trap-handler.h"
 #endif  // V8_ENABLE_WEBASSEMBLY
 
@@ -43,9 +31,10 @@ RUNTIME_FUNCTION(Runtime_AccessCheck) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   Handle<JSObject> object = args.at<JSObject>(0);
-  if (!isolate->MayAccess(handle(isolate->context(), isolate), object)) {
-    isolate->ReportFailedAccessCheck(object);
-    RETURN_FAILURE_IF_SCHEDULED_EXCEPTION(isolate);
+  if (!isolate->MayAccess(isolate->native_context(), object)) {
+    RETURN_FAILURE_ON_EXCEPTION(isolate,
+                                isolate->ReportFailedAccessCheck(object));
+    UNREACHABLE();
   }
   return ReadOnlyRoots(isolate).undefined_value();
 }
@@ -61,6 +50,13 @@ RUNTIME_FUNCTION(Runtime_FatalProcessOutOfMemoryInvalidArrayLength) {
   HandleScope scope(isolate);
   DCHECK_EQ(0, args.length());
   isolate->heap()->FatalProcessOutOfMemory("invalid array length");
+  UNREACHABLE();
+}
+
+RUNTIME_FUNCTION(Runtime_FatalInvalidSize) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(0, args.length());
+  FATAL("Invalid size");
   UNREACHABLE();
 }
 
@@ -95,22 +91,45 @@ RUNTIME_FUNCTION(Runtime_ThrowSymbolAsyncIteratorInvalid) {
       isolate, NewTypeError(MessageTemplate::kSymbolAsyncIteratorInvalid));
 }
 
-#define THROW_ERROR(isolate, args, call)                               \
-  HandleScope scope(isolate);                                          \
-  DCHECK_LE(1, args.length());                                         \
-  int message_id_smi = args.smi_value_at(0);                           \
-                                                                       \
-  Handle<Object> undefined = isolate->factory()->undefined_value();    \
-  Handle<Object> arg0 = (args.length() > 1) ? args.at(1) : undefined;  \
-  Handle<Object> arg1 = (args.length() > 2) ? args.at(2) : undefined;  \
-  Handle<Object> arg2 = (args.length() > 3) ? args.at(3) : undefined;  \
-                                                                       \
-  MessageTemplate message_id = MessageTemplateFromInt(message_id_smi); \
-                                                                       \
-  THROW_NEW_ERROR_RETURN_FAILURE(isolate, call(message_id, arg0, arg1, arg2));
+RUNTIME_FUNCTION(Runtime_TerminateExecution) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(0, args.length());
+  return isolate->TerminateExecution();
+}
+
+namespace {
+
+Tagged<Object> NewError(Isolate* isolate, RuntimeArguments args,
+                        Handle<JSFunction> (Isolate::*constructor_fn)()) {
+  HandleScope scope(isolate);
+  DCHECK_LE(1, args.length());
+  int message_id_smi = args.smi_value_at(0);
+
+  constexpr int kMaxMessageArgs = 3;
+  Handle<Object> message_args[kMaxMessageArgs];
+  int num_message_args = 0;
+  while (num_message_args < kMaxMessageArgs &&
+         args.length() > num_message_args + 1) {
+    message_args[num_message_args] = args.at(num_message_args + 1);
+    ++num_message_args;
+  }
+
+  MessageTemplate message_id = MessageTemplateFromInt(message_id_smi);
+
+  return *isolate->factory()->NewError(
+      (isolate->*constructor_fn)(), message_id,
+      base::VectorOf(message_args, num_message_args));
+}
+
+Tagged<Object> ThrowError(Isolate* isolate, RuntimeArguments args,
+                          Handle<JSFunction> (Isolate::*constructor_fn)()) {
+  return isolate->Throw(NewError(isolate, args, constructor_fn));
+}
+
+}  // namespace
 
 RUNTIME_FUNCTION(Runtime_ThrowRangeError) {
-  if (FLAG_correctness_fuzzer_suppressions) {
+  if (v8_flags.correctness_fuzzer_suppressions) {
     DCHECK_LE(1, args.length());
     int message_id_smi = args.smi_value_at(0);
 
@@ -126,21 +145,20 @@ RUNTIME_FUNCTION(Runtime_ThrowRangeError) {
     }
   }
 
-  THROW_ERROR(isolate, args, NewRangeError);
+  return ThrowError(isolate, args, &Isolate::range_error_function);
 }
 
 RUNTIME_FUNCTION(Runtime_ThrowTypeError) {
-  THROW_ERROR(isolate, args, NewTypeError);
+  return ThrowError(isolate, args, &Isolate::type_error_function);
 }
 
 RUNTIME_FUNCTION(Runtime_ThrowTypeErrorIfStrict) {
   if (GetShouldThrow(isolate, Nothing<ShouldThrow>()) ==
-      ShouldThrow::kDontThrow)
+      ShouldThrow::kDontThrow) {
     return ReadOnlyRoots(isolate).undefined_value();
-  THROW_ERROR(isolate, args, NewTypeError);
+  }
+  return ThrowError(isolate, args, &Isolate::type_error_function);
 }
-
-#undef THROW_ERROR
 
 namespace {
 
@@ -189,10 +207,11 @@ RUNTIME_FUNCTION(Runtime_UnwindAndFindExceptionHandler) {
   return isolate->UnwindAndFindHandler();
 }
 
-RUNTIME_FUNCTION(Runtime_PromoteScheduledException) {
+RUNTIME_FUNCTION(Runtime_PropagateException) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(0, args.length());
-  return isolate->PromoteScheduledException();
+  DCHECK(isolate->has_exception());
+  return ReadOnlyRoots(isolate).exception();
 }
 
 RUNTIME_FUNCTION(Runtime_ThrowReferenceError) {
@@ -228,27 +247,7 @@ RUNTIME_FUNCTION(Runtime_NewForeign) {
 }
 
 RUNTIME_FUNCTION(Runtime_NewTypeError) {
-  HandleScope scope(isolate);
-  DCHECK_LE(args.length(), 4);
-  DCHECK_GE(args.length(), 1);
-  int template_index = args.smi_value_at(0);
-  MessageTemplate message_template = MessageTemplateFromInt(template_index);
-
-  Handle<Object> arg0;
-  if (args.length() >= 2) {
-    arg0 = args.at<Object>(1);
-  }
-
-  Handle<Object> arg1;
-  if (args.length() >= 3) {
-    arg1 = args.at<Object>(2);
-  }
-  Handle<Object> arg2;
-  if (args.length() >= 4) {
-    arg2 = args.at<Object>(3);
-  }
-
-  return *isolate->factory()->NewTypeError(message_template, arg0, arg1, arg2);
+  return NewError(isolate, args, &Isolate::type_error_function);
 }
 
 RUNTIME_FUNCTION(Runtime_NewReferenceError) {
@@ -304,8 +303,8 @@ RUNTIME_FUNCTION(Runtime_ThrowNoAccess) {
   // TODO(verwaest): We would like to throw using the calling context instead
   // of the entered context but we don't currently have access to that.
   HandleScopeImplementer* impl = isolate->handle_scope_implementer();
-  SaveAndSwitchContext save(
-      isolate, impl->LastEnteredOrMicrotaskContext()->native_context());
+  SaveAndSwitchContext save(isolate,
+                            impl->LastEnteredContext()->native_context());
   THROW_NEW_ERROR_RETURN_FAILURE(isolate,
                                  NewTypeError(MessageTemplate::kNoAccess));
 }
@@ -323,8 +322,22 @@ RUNTIME_FUNCTION(Runtime_ThrowApplyNonFunction) {
   DCHECK_EQ(1, args.length());
   Handle<Object> object = args.at(0);
   Handle<String> type = Object::TypeOf(isolate, object);
+  Handle<String> msg;
+  if (IsNull(*object)) {
+    // "which is null"
+    msg = isolate->factory()->NewStringFromAsciiChecked("null");
+  } else if (isolate->factory()->object_string()->Equals(*type)) {
+    // "which is an object"
+    msg = isolate->factory()->NewStringFromAsciiChecked("an object");
+  } else {
+    // "which is a typeof arg"
+    msg = isolate->factory()
+              ->NewConsString(
+                  isolate->factory()->NewStringFromAsciiChecked("a "), type)
+              .ToHandleChecked();
+  }
   THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kApplyNonFunction, object, type));
+      isolate, NewTypeError(MessageTemplate::kApplyNonFunction, object, msg));
 }
 
 RUNTIME_FUNCTION(Runtime_StackGuard) {
@@ -338,7 +351,23 @@ RUNTIME_FUNCTION(Runtime_StackGuard) {
     return isolate->StackOverflow();
   }
 
-  return isolate->stack_guard()->HandleInterrupts();
+  return isolate->stack_guard()->HandleInterrupts(
+      StackGuard::InterruptLevel::kAnyEffect);
+}
+
+RUNTIME_FUNCTION(Runtime_HandleNoHeapWritesInterrupts) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(0, args.length());
+  TRACE_EVENT0("v8.execute", "V8.StackGuard");
+
+  // First check if this is a real stack overflow.
+  StackLimitCheck check(isolate);
+  if (check.JsHasOverflowed()) {
+    return isolate->StackOverflow();
+  }
+
+  return isolate->stack_guard()->HandleInterrupts(
+      StackGuard::InterruptLevel::kNoHeapWrites);
 }
 
 RUNTIME_FUNCTION(Runtime_StackGuardWithGap) {
@@ -353,10 +382,15 @@ RUNTIME_FUNCTION(Runtime_StackGuardWithGap) {
     return isolate->StackOverflow();
   }
 
-  return isolate->stack_guard()->HandleInterrupts();
+  return isolate->stack_guard()->HandleInterrupts(
+      StackGuard::InterruptLevel::kAnyEffect);
 }
 
-RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterruptWithStackCheck) {
+namespace {
+
+Tagged<Object> BytecodeBudgetInterruptWithStackCheck(Isolate* isolate,
+                                                     RuntimeArguments& args,
+                                                     CodeKind code_kind) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   Handle<JSFunction> function = args.at<JSFunction>(0);
@@ -369,33 +403,61 @@ RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterruptWithStackCheck) {
     // We ideally wouldn't actually get StackOverflows here, since we stack
     // check on bytecode entry, but it's possible that this check fires due to
     // the runtime function call being what overflows the stack.
-    // if our function entry
     return isolate->StackOverflow();
   } else if (check.InterruptRequested()) {
-    Object return_value = isolate->stack_guard()->HandleInterrupts();
-    if (!return_value.IsUndefined(isolate)) {
+    Tagged<Object> return_value = isolate->stack_guard()->HandleInterrupts();
+    if (!IsUndefined(return_value, isolate)) {
       return return_value;
     }
   }
 
-  isolate->tiering_manager()->OnInterruptTick(function);
+  isolate->tiering_manager()->OnInterruptTick(function, code_kind);
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
-RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterrupt) {
+Tagged<Object> BytecodeBudgetInterrupt(Isolate* isolate, RuntimeArguments& args,
+                                       CodeKind code_kind) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   Handle<JSFunction> function = args.at<JSFunction>(0);
   TRACE_EVENT0("v8.execute", "V8.BytecodeBudgetInterrupt");
 
-  isolate->tiering_manager()->OnInterruptTick(function);
+  isolate->tiering_manager()->OnInterruptTick(function, code_kind);
   return ReadOnlyRoots(isolate).undefined_value();
+}
+
+}  // namespace
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterruptWithStackCheck_Ignition) {
+  return BytecodeBudgetInterruptWithStackCheck(isolate, args,
+                                               CodeKind::INTERPRETED_FUNCTION);
+}
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterrupt_Ignition) {
+  return BytecodeBudgetInterrupt(isolate, args, CodeKind::INTERPRETED_FUNCTION);
+}
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterruptWithStackCheck_Sparkplug) {
+  return BytecodeBudgetInterruptWithStackCheck(isolate, args,
+                                               CodeKind::BASELINE);
+}
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterrupt_Sparkplug) {
+  return BytecodeBudgetInterrupt(isolate, args, CodeKind::BASELINE);
+}
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterrupt_Maglev) {
+  return BytecodeBudgetInterrupt(isolate, args, CodeKind::MAGLEV);
+}
+
+RUNTIME_FUNCTION(Runtime_BytecodeBudgetInterruptWithStackCheck_Maglev) {
+  return BytecodeBudgetInterruptWithStackCheck(isolate, args, CodeKind::MAGLEV);
 }
 
 namespace {
 
 #if V8_ENABLE_WEBASSEMBLY
-class SaveAndClearThreadInWasmFlag {
+class V8_NODISCARD SaveAndClearThreadInWasmFlag {
  public:
   SaveAndClearThreadInWasmFlag() {
     if (trap_handler::IsTrapHandlerEnabled()) {
@@ -422,24 +484,21 @@ class SaveAndClearThreadInWasmFlag {};
 
 RUNTIME_FUNCTION(Runtime_AllocateInYoungGeneration) {
   HandleScope scope(isolate);
+  DCHECK(isolate->IsOnCentralStack());
   DCHECK_EQ(2, args.length());
-  int size = args.smi_value_at(0);
+  // TODO(v8:13070): Align allocations in the builtins that call this.
+  int size = ALIGN_TO_ALLOCATION_ALIGNMENT(args.smi_value_at(0));
   int flags = args.smi_value_at(1);
   AllocationAlignment alignment =
       AllocateDoubleAlignFlag::decode(flags) ? kDoubleAligned : kTaggedAligned;
-  bool allow_large_object_allocation =
-      AllowLargeObjectAllocationFlag::decode(flags);
   CHECK(IsAligned(size, kTaggedSize));
   CHECK_GT(size, 0);
-  if (!allow_large_object_allocation) {
-    CHECK(size <= kMaxRegularHeapObjectSize);
-  }
 
 #if V8_ENABLE_WEBASSEMBLY
-  // Short-term mitigation for crbug.com/1236668. When this is called from
-  // WasmGC code, clear the "thread in wasm" flag, which is important in case
-  // any GC needs to happen.
-  // TODO(jkummerow): Find a better fix, likely by replacing the global flag.
+  // When this is called from WasmGC code, clear the "thread in wasm" flag,
+  // which is important in case any GC needs to happen.
+  // TODO(chromium:1236668): Find a better fix, likely by replacing the global
+  // flag.
   SaveAndClearThreadInWasmFlag clear_wasm_flag;
 #endif  // V8_ENABLE_WEBASSEMBLY
 
@@ -455,17 +514,13 @@ RUNTIME_FUNCTION(Runtime_AllocateInYoungGeneration) {
 RUNTIME_FUNCTION(Runtime_AllocateInOldGeneration) {
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
-  int size = args.smi_value_at(0);
+  // TODO(v8:13070): Align allocations in the builtins that call this.
+  int size = ALIGN_TO_ALLOCATION_ALIGNMENT(args.smi_value_at(0));
   int flags = args.smi_value_at(1);
   AllocationAlignment alignment =
       AllocateDoubleAlignFlag::decode(flags) ? kDoubleAligned : kTaggedAligned;
-  bool allow_large_object_allocation =
-      AllowLargeObjectAllocationFlag::decode(flags);
   CHECK(IsAligned(size, kTaggedSize));
   CHECK_GT(size, 0);
-  if (!allow_large_object_allocation) {
-    CHECK(size <= kMaxRegularHeapObjectSize);
-  }
   return *isolate->factory()->NewFillerObject(
       size, alignment, AllocationType::kOld, AllocationOrigin::kGeneratedCode);
 }
@@ -566,10 +621,39 @@ RUNTIME_FUNCTION(Runtime_IncrementUseCounter) {
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
+RUNTIME_FUNCTION(Runtime_GetAndResetTurboProfilingData) {
+  HandleScope scope(isolate);
+  DCHECK_LE(args.length(), 2);
+  if (!BasicBlockProfiler::Get()->HasData(isolate)) {
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate,
+        NewTypeError(
+            MessageTemplate::kInvalid,
+            isolate->factory()->NewStringFromAsciiChecked("Runtime Call"),
+            isolate->factory()->NewStringFromAsciiChecked(
+                "V8 was not built with v8_enable_builtins_profiling=true")));
+  }
+
+  std::stringstream stats_stream;
+  BasicBlockProfiler::Get()->Log(isolate, stats_stream);
+  Handle<String> result =
+      isolate->factory()->NewStringFromAsciiChecked(stats_stream.str().c_str());
+  BasicBlockProfiler::Get()->ResetCounts(isolate);
+  return *result;
+}
+
 RUNTIME_FUNCTION(Runtime_GetAndResetRuntimeCallStats) {
   HandleScope scope(isolate);
   DCHECK_LE(args.length(), 2);
 #ifdef V8_RUNTIME_CALL_STATS
+  if (!v8_flags.runtime_call_stats) {
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate, NewTypeError(MessageTemplate::kInvalid,
+                              isolate->factory()->NewStringFromAsciiChecked(
+                                  "Runtime Call"),
+                              isolate->factory()->NewStringFromAsciiChecked(
+                                  "--runtime-call-stats is not set")));
+  }
   // Append any worker thread runtime call stats to the main table before
   // printing.
   isolate->counters()->worker_thread_runtime_call_stats()->AddToMainTable(
@@ -586,7 +670,7 @@ RUNTIME_FUNCTION(Runtime_GetAndResetRuntimeCallStats) {
   }
 
   std::FILE* f;
-  if (args[0].IsString()) {
+  if (IsString(args[0])) {
     // With a string argument, the results are appended to that file.
     Handle<String> filename = args.at<String>(0);
     f = std::fopen(filename->ToCString().get(), "a");
@@ -607,13 +691,20 @@ RUNTIME_FUNCTION(Runtime_GetAndResetRuntimeCallStats) {
   OFStream stats_stream(f);
   isolate->counters()->runtime_call_stats()->Print(stats_stream);
   isolate->counters()->runtime_call_stats()->Reset();
-  if (args[0].IsString()) {
+  if (IsString(args[0])) {
     std::fclose(f);
   } else {
     std::fflush(f);
   }
-#endif  // V8_RUNTIME_CALL_STATS
   return ReadOnlyRoots(isolate).undefined_value();
+#else   // V8_RUNTIME_CALL_STATS
+  THROW_NEW_ERROR_RETURN_FAILURE(
+      isolate, NewTypeError(MessageTemplate::kInvalid,
+                            isolate->factory()->NewStringFromAsciiChecked(
+                                "Runtime Call"),
+                            isolate->factory()->NewStringFromAsciiChecked(
+                                "RCS was disabled at compile-time")));
+#endif  // V8_RUNTIME_CALL_STATS
 }
 
 RUNTIME_FUNCTION(Runtime_OrdinaryHasInstance) {
@@ -647,7 +738,7 @@ RUNTIME_FUNCTION(Runtime_CreateAsyncFromSyncIterator) {
 
   Handle<Object> sync_iterator = args.at(0);
 
-  if (!sync_iterator->IsJSReceiver()) {
+  if (!IsJSReceiver(*sync_iterator)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kSymbolIteratorInvalid));
   }
@@ -670,7 +761,7 @@ RUNTIME_FUNCTION(Runtime_GetTemplateObject) {
   Handle<SharedFunctionInfo> shared_info = args.at<SharedFunctionInfo>(1);
   int slot_id = args.smi_value_at(2);
 
-  Handle<NativeContext> native_context(isolate->context().native_context(),
+  Handle<NativeContext> native_context(isolate->context()->native_context(),
                                        isolate);
   return *TemplateObjectDescription::GetTemplateObject(
       isolate, native_context, description, shared_info, slot_id);
@@ -685,13 +776,13 @@ RUNTIME_FUNCTION(Runtime_ReportMessageFromMicrotask) {
 
   Handle<Object> exception = args.at(0);
 
-  DCHECK(!isolate->has_pending_exception());
-  isolate->set_pending_exception(*exception);
+  DCHECK(!isolate->has_exception());
+  isolate->set_exception(*exception);
   MessageLocation* no_location = nullptr;
   Handle<JSMessageObject> message =
       isolate->CreateMessageOrAbort(exception, no_location);
   MessageHandler::ReportMessage(isolate, no_location, message);
-  isolate->clear_pending_exception();
+  isolate->clear_exception();
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
@@ -711,7 +802,7 @@ RUNTIME_FUNCTION(Runtime_DoubleToStringWithRadix) {
   DCHECK_EQ(2, args.length());
   double number = args.number_value_at(0);
   int32_t radix = 0;
-  CHECK(args[1].ToInt32(&radix));
+  CHECK(Object::ToInt32(args[1], &radix));
 
   char* const str = DoubleToRadixCString(number, radix);
   Handle<String> result = isolate->factory()->NewStringFromAsciiChecked(str);
@@ -727,6 +818,17 @@ RUNTIME_FUNCTION(Runtime_SharedValueBarrierSlow) {
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
       isolate, shared_value, Object::ShareSlow(isolate, value, kThrowOnError));
   return *shared_value;
+}
+
+RUNTIME_FUNCTION(Runtime_InvalidateDependentCodeForConstTrackingLet) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  Handle<ConstTrackingLetCell> const_tracking_let_cell =
+      Handle<ConstTrackingLetCell>::cast(args.at<HeapObject>(0));
+  DependentCode::DeoptimizeDependencyGroups(
+      isolate, *const_tracking_let_cell,
+      DependentCode::kConstTrackingLetChangedGroup);
+  return ReadOnlyRoots(isolate).undefined_value();
 }
 
 }  // namespace internal

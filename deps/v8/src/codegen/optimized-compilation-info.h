@@ -17,8 +17,13 @@
 #include "src/handles/handles.h"
 #include "src/handles/persistent-handles.h"
 #include "src/objects/objects.h"
+#include "src/objects/tagged.h"
 #include "src/utils/identity-map.h"
 #include "src/utils/utils.h"
+
+#if V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/wasm-builtin-list.h"
+#endif
 
 namespace v8 {
 
@@ -36,6 +41,7 @@ class Zone;
 
 namespace compiler {
 class NodeObserver;
+class JSHeapBroker;
 }
 
 namespace wasm {
@@ -67,9 +73,9 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
   V(TraceTurboScheduled, trace_turbo_scheduled, 13)                  \
   V(TraceTurboAllocation, trace_turbo_allocation, 14)                \
   V(TraceHeapBroker, trace_heap_broker, 15)                          \
-  V(WasmRuntimeExceptionSupport, wasm_runtime_exception_support, 16) \
-  V(DiscardResultForTesting, discard_result_for_testing, 17)         \
-  V(InlineJSWasmCalls, inline_js_wasm_calls, 18)
+  V(DiscardResultForTesting, discard_result_for_testing, 16)         \
+  V(InlineJSWasmCalls, inline_js_wasm_calls, 17)                     \
+  V(TurboshaftTraceReduction, turboshaft_trace_reduction, 18)
 
   enum Flag {
 #define DEF_ENUM(Camel, Lower, Bit) k##Camel = 1 << Bit,
@@ -95,14 +101,13 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
   OptimizedCompilationInfo(Zone* zone, Isolate* isolate,
                            Handle<SharedFunctionInfo> shared,
                            Handle<JSFunction> closure, CodeKind code_kind,
-                           BytecodeOffset osr_offset,
-                           JavaScriptFrame* osr_frame);
+                           BytecodeOffset osr_offset);
   // For testing.
   OptimizedCompilationInfo(Zone* zone, Isolate* isolate,
                            Handle<SharedFunctionInfo> shared,
                            Handle<JSFunction> closure, CodeKind code_kind)
       : OptimizedCompilationInfo(zone, isolate, shared, closure, code_kind,
-                                 BytecodeOffset::None(), nullptr) {}
+                                 BytecodeOffset::None()) {}
   // Construct a compilation info for stub compilation, Wasm, and testing.
   OptimizedCompilationInfo(base::Vector<const char> debug_name, Zone* zone,
                            CodeKind code_kind);
@@ -124,7 +129,6 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
   Builtin builtin() const { return builtin_; }
   void set_builtin(Builtin builtin) { builtin_ = builtin; }
   BytecodeOffset osr_offset() const { return osr_offset_; }
-  JavaScriptFrame* osr_frame() const { return osr_frame_; }
   void SetNodeObserver(compiler::NodeObserver* observer) {
     DCHECK_NULL(node_observer_);
     node_observer_ = observer;
@@ -141,13 +145,13 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
 #endif  // V8_ENABLE_WEBASSEMBLY
 
   bool has_context() const;
-  Context context() const;
+  Tagged<Context> context() const;
 
   bool has_native_context() const;
-  NativeContext native_context() const;
+  Tagged<NativeContext> native_context() const;
 
   bool has_global_object() const;
-  JSGlobalObject global_object() const;
+  Tagged<JSGlobalObject> global_object() const;
 
   // Accessors for the different compilation modes.
   bool IsOptimizing() const {
@@ -155,6 +159,15 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
   }
 #if V8_ENABLE_WEBASSEMBLY
   bool IsWasm() const { return code_kind() == CodeKind::WASM_FUNCTION; }
+  bool IsWasmBuiltin() const {
+    return code_kind() == CodeKind::WASM_TO_JS_FUNCTION ||
+           code_kind() == CodeKind::JS_TO_WASM_FUNCTION ||
+           (code_kind() == CodeKind::BUILTIN &&
+            (builtin() == Builtin::kJSToWasmWrapper ||
+             builtin() == Builtin::kJSToWasmHandleReturns ||
+             builtin() == Builtin::kWasmToJsWrapperCSA ||
+             wasm::BuiltinLookup::IsWasmBuiltinId(builtin())));
+  }
 #endif  // V8_ENABLE_WEBASSEMBLY
 
   void set_persistent_handles(
@@ -171,7 +184,18 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
     DCHECK_NOT_NULL(canonical_handles_);
   }
 
-  void ReopenHandlesInNewHandleScope(Isolate* isolate);
+  template <typename T>
+  Handle<T> CanonicalHandle(Tagged<T> object, Isolate* isolate) {
+    DCHECK_NOT_NULL(canonical_handles_);
+    DCHECK(PersistentHandlesScope::IsActive(isolate));
+    auto find_result = canonical_handles_->FindOrInsert(object);
+    if (!find_result.already_exists) {
+      *find_result.entry = Handle<T>(object, isolate).location();
+    }
+    return Handle<T>(*find_result.entry);
+  }
+
+  void ReopenAndCanonicalizeHandlesInNewScope(Isolate* isolate);
 
   void AbortOptimization(BailoutReason reason);
 
@@ -249,8 +273,19 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
 
   void SetTracingFlags(bool passes_filter);
 
+  // Storing the raw pointer to the CanonicalHandlesMap is generally not safe.
+  // Use DetachCanonicalHandles() to transfer ownership instead.
+  // We explicitly allow the JSHeapBroker to store the raw pointer as it is
+  // guaranteed that the OptimizedCompilationInfo's lifetime exceeds the
+  // lifetime of the broker.
+  CanonicalHandlesMap* canonical_handles() { return canonical_handles_.get(); }
+  friend class compiler::JSHeapBroker;
+
   // Compilation flags.
   unsigned flags_ = 0;
+
+  // Take care when accessing this on any background thread.
+  Isolate* const isolate_unsafe_;
 
   const CodeKind code_kind_;
   Builtin builtin_ = Builtin::kNoBuiltinId;
@@ -274,8 +309,6 @@ class V8_EXPORT_PRIVATE OptimizedCompilationInfo final {
 
   // Entry point when compiling for OSR, {BytecodeOffset::None} otherwise.
   const BytecodeOffset osr_offset_ = BytecodeOffset::None();
-  // The current OSR frame for specialization or {nullptr}.
-  JavaScriptFrame* const osr_frame_ = nullptr;
 
   // The zone from which the compilation pipeline working on this
   // OptimizedCompilationInfo allocates.

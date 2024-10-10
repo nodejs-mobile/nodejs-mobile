@@ -49,8 +49,6 @@ const path = require('path');
     delete providers.WORKER;
     // TODO(danbev): Test for these
     delete providers.JSUDPWRAP;
-    if (!common.isMainThread)
-      delete providers.INSPECTORJSBINDING;
     delete providers.KEYPAIRGENREQUEST;
     delete providers.KEYGENREQUEST;
     delete providers.KEYEXPORTREQUEST;
@@ -65,12 +63,17 @@ const path = require('path');
     delete providers.ELDHISTOGRAM;
     delete providers.SIGINTWATCHDOG;
     delete providers.WORKERHEAPSNAPSHOT;
-    delete providers.FIXEDSIZEBLOBCOPY;
+    delete providers.BLOBREADER;
     delete providers.RANDOMPRIMEREQUEST;
     delete providers.CHECKPRIMEREQUEST;
     delete providers.QUIC_LOGSTREAM;
     delete providers.QUIC_PACKET;
+    delete providers.QUIC_UDP;
+    delete providers.QUIC_ENDPOINT;
+    delete providers.QUIC_SESSION;
+    delete providers.QUIC_STREAM;
 
+    // nodejs-mobile patch
     if (common.isIOS) {
       // These providers are not tested on iOS.
       delete providers.PIPECONNECTWRAP;
@@ -169,7 +172,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   req.oncomplete = () => { };
 
   testInitialized(req, 'FSReqCallback');
-  binding.access(path.toNamespacedPath('../'), fs.F_OK, req);
+  binding.access(path.toNamespacedPath('../'), fs.constants.F_OK, req);
 
   const StatWatcher = binding.StatWatcher;
   testInitialized(new StatWatcher(), 'StatWatcher');
@@ -321,13 +324,6 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   testInitialized(req, 'SendWrap');
 }
 
-if (process.features.inspector && common.isMainThread) {
-  const binding = internalBinding('inspector');
-  const handle = new binding.Connection(() => {});
-  testInitialized(handle, 'Connection');
-  handle.disconnect();
-}
-
 // PROVIDER_HEAPDUMP
 {
   v8.getHeapSnapshot().destroy();
@@ -337,6 +333,7 @@ if (process.features.inspector && common.isMainThread) {
 {
   const dirBinding = internalBinding('fs_dir');
   const handle = dirBinding.opendir(
+    // nodejs-mobile patch
     common.isAndroid ? __dirname : './', 'utf8', undefined, {}
   );
   testInitialized(handle, 'DirHandle');

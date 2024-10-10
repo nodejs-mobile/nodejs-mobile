@@ -24,7 +24,6 @@ namespace internal {
   V(WASM_TO_CAPI_FUNCTION) \
   V(WASM_TO_JS_FUNCTION)   \
   V(JS_TO_WASM_FUNCTION)   \
-  V(JS_TO_JS_FUNCTION)     \
   V(C_WASM_ENTRY)          \
   V(INTERPRETED_FUNCTION)  \
   V(BASELINE)              \
@@ -36,14 +35,14 @@ enum class CodeKind : uint8_t {
   CODE_KIND_LIST(DEFINE_CODE_KIND_ENUM)
 #undef DEFINE_CODE_KIND_ENUM
 };
-STATIC_ASSERT(CodeKind::INTERPRETED_FUNCTION < CodeKind::BASELINE);
-STATIC_ASSERT(CodeKind::BASELINE < CodeKind::TURBOFAN);
+static_assert(CodeKind::INTERPRETED_FUNCTION < CodeKind::BASELINE);
+static_assert(CodeKind::BASELINE < CodeKind::TURBOFAN);
 
 #define V(...) +1
 static constexpr int kCodeKindCount = CODE_KIND_LIST(V);
 #undef V
 // Unlikely, but just to be safe:
-STATIC_ASSERT(kCodeKindCount <= std::numeric_limits<uint8_t>::max());
+static_assert(kCodeKindCount <= std::numeric_limits<uint8_t>::max());
 
 const char* CodeKindToString(CodeKind kind);
 
@@ -58,20 +57,20 @@ inline constexpr bool CodeKindIsBaselinedJSFunction(CodeKind kind) {
 }
 
 inline constexpr bool CodeKindIsUnoptimizedJSFunction(CodeKind kind) {
-  STATIC_ASSERT(static_cast<int>(CodeKind::INTERPRETED_FUNCTION) + 1 ==
+  static_assert(static_cast<int>(CodeKind::INTERPRETED_FUNCTION) + 1 ==
                 static_cast<int>(CodeKind::BASELINE));
   return base::IsInRange(kind, CodeKind::INTERPRETED_FUNCTION,
                          CodeKind::BASELINE);
 }
 
 inline constexpr bool CodeKindIsOptimizedJSFunction(CodeKind kind) {
-  STATIC_ASSERT(static_cast<int>(CodeKind::MAGLEV) + 1 ==
+  static_assert(static_cast<int>(CodeKind::MAGLEV) + 1 ==
                 static_cast<int>(CodeKind::TURBOFAN));
   return base::IsInRange(kind, CodeKind::MAGLEV, CodeKind::TURBOFAN);
 }
 
 inline constexpr bool CodeKindIsJSFunction(CodeKind kind) {
-  STATIC_ASSERT(static_cast<int>(CodeKind::BASELINE) + 1 ==
+  static_assert(static_cast<int>(CodeKind::BASELINE) + 1 ==
                 static_cast<int>(CodeKind::MAGLEV));
   return base::IsInRange(kind, CodeKind::INTERPRETED_FUNCTION,
                          CodeKind::TURBOFAN);
@@ -86,17 +85,36 @@ inline constexpr bool CodeKindCanDeoptimize(CodeKind kind) {
 }
 
 inline constexpr bool CodeKindCanOSR(CodeKind kind) {
-  return kind == CodeKind::TURBOFAN;
+  return kind == CodeKind::TURBOFAN || kind == CodeKind::MAGLEV;
 }
 
 inline constexpr bool CodeKindCanTierUp(CodeKind kind) {
-  return CodeKindIsUnoptimizedJSFunction(kind);
+  return CodeKindIsUnoptimizedJSFunction(kind) || kind == CodeKind::MAGLEV;
 }
 
 // TODO(jgruber): Rename or remove this predicate. Currently it means 'is this
 // kind stored either in the FeedbackVector cache, or in the OSR cache?'.
 inline constexpr bool CodeKindIsStoredInOptimizedCodeCache(CodeKind kind) {
-  return kind == CodeKind::TURBOFAN;
+  return kind == CodeKind::MAGLEV || kind == CodeKind::TURBOFAN;
+}
+
+inline constexpr bool CodeKindUsesBytecodeOrInterpreterData(CodeKind kind) {
+  return CodeKindIsBaselinedJSFunction(kind);
+}
+
+inline constexpr bool CodeKindUsesDeoptimizationData(CodeKind kind) {
+  return CodeKindCanDeoptimize(kind);
+}
+
+inline constexpr bool CodeKindUsesBytecodeOffsetTable(CodeKind kind) {
+  return kind == CodeKind::BASELINE;
+}
+
+inline constexpr bool CodeKindMayLackSourcePositionTable(CodeKind kind) {
+  // Either code that uses a bytecode offset table or code that may be embedded
+  // in the snapshot, in which case the source position table is cleared.
+  return CodeKindUsesBytecodeOffsetTable(kind) || kind == CodeKind::BUILTIN ||
+         kind == CodeKind::BYTECODE_HANDLER || kind == CodeKind::FOR_TESTING;
 }
 
 inline CodeKind CodeKindForTopTier() { return CodeKind::TURBOFAN; }
@@ -108,7 +126,7 @@ enum class CodeKindFlag {
   CODE_KIND_LIST(V)
 #undef V
 };
-STATIC_ASSERT(kCodeKindCount <= kInt32Size * kBitsPerByte);
+static_assert(kCodeKindCount <= kInt32Size * kBitsPerByte);
 
 inline constexpr CodeKindFlag CodeKindToCodeKindFlag(CodeKind kind) {
 #define V(name) kind == CodeKind::name ? CodeKindFlag::name:

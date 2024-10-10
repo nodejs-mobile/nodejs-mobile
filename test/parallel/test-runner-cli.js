@@ -4,96 +4,186 @@ require('../common');
 const assert = require('assert');
 const { spawnSync } = require('child_process');
 const { join } = require('path');
-const { readdirSync } = require('fs');
 const fixtures = require('../common/fixtures');
 const testFixtures = fixtures.path('test-runner');
 
-{
-  // File not found.
-  const args = ['--test', 'a-random-file-that-does-not-exist.js'];
-  const child = spawnSync(process.execPath, args);
+for (const isolation of ['none', 'process']) {
+  {
+    // File not found.
+    const args = [
+      '--test',
+      `--experimental-test-isolation=${isolation}`,
+      'a-random-file-that-does-not-exist.js',
+    ];
+    const child = spawnSync(process.execPath, args);
 
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stdout.toString(), '');
-  assert.match(child.stderr.toString(), /^Could not find/);
-}
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stdout.toString(), '');
+    assert.match(child.stderr.toString(), /^Could not find/);
+  }
 
-{
-  // Default behavior. node_modules is ignored. Files that don't match the
-  // pattern are ignored except in test/ directories.
-  const args = ['--test'];
-  const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'default-behavior') });
+  {
+    // Default behavior. node_modules is ignored. Files that don't match the
+    // pattern are ignored except in test/ directories.
+    const args = ['--test', '--test-reporter=tap',
+                  `--experimental-test-isolation=${isolation}`];
+    const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'default-behavior') });
 
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /ok 1 - this should pass/);
-  assert.match(stdout, /not ok 2 - this should fail/);
-  assert.match(stdout, /ok 3 - .+subdir.+subdir_test\.js/);
-  assert.match(stdout, /ok 4 - this should pass/);
-  assert.match(stdout, /ok 5 - this should be skipped/);
-  assert.match(stdout, /ok 6 - this should be executed/);
-}
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
 
-{
-  // Same but with a prototype mutation in require scripts.
-  const args = ['--require', join(testFixtures, 'protoMutation.js'), '--test'];
-  const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'default-behavior') });
+    assert.match(stdout, /ok 1 - this should pass/);
+    assert.match(stdout, /not ok 2 - this should fail/);
+    assert.match(stdout, /ok 3 - subdir.+subdir_test\.js/);
+    assert.match(stdout, /ok 4 - this should pass/);
+    assert.match(stdout, /ok 5 - this should be skipped/);
+    assert.match(stdout, /ok 6 - this should be executed/);
+  }
 
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /ok 1 - this should pass/);
-  assert.match(stdout, /not ok 2 - this should fail/);
-  assert.match(stdout, /ok 3 - .+subdir.+subdir_test\.js/);
-  assert.match(stdout, /ok 4 - this should pass/);
-  assert.match(stdout, /ok 5 - this should be skipped/);
-  assert.match(stdout, /ok 6 - this should be executed/);
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-}
+  {
+    // Should match files with "-test.(c|m)js" suffix.
+    const args = ['--test', '--test-reporter=tap',
+                  `--experimental-test-isolation=${isolation}`];
+    const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'matching-patterns') });
 
-{
-  // User specified files that don't match the pattern are still run.
-  const args = ['--test', join(testFixtures, 'index.js')];
-  const child = spawnSync(process.execPath, args, { cwd: testFixtures });
+    assert.strictEqual(child.status, 0);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
 
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /not ok 1 - .+index\.js/);
-}
+    assert.match(stdout, /ok 1 - this should pass/);
+    assert.match(stdout, /ok 2 - this should pass/);
+    assert.match(stdout, /ok 3 - this should pass/);
+  }
 
-{
-  // Searches node_modules if specified.
-  const args = ['--test', join(testFixtures, 'default-behavior/node_modules')];
-  const child = spawnSync(process.execPath, args);
+  {
+    // Same but with a prototype mutation in require scripts.
+    const args = [
+      '--require', join(testFixtures, 'protoMutation.js'),
+      '--test',
+      '--test-reporter=tap',
+      `--experimental-test-isolation=${isolation}`,
+    ];
+    const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'default-behavior') });
 
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /not ok 1 - .+test-nm\.js/);
-}
+    const stdout = child.stdout.toString();
+    assert.match(stdout, /ok 1 - this should pass/);
+    assert.match(stdout, /not ok 2 - this should fail/);
+    assert.match(stdout, /ok 3 - subdir.+subdir_test\.js/);
+    assert.match(stdout, /ok 4 - this should pass/);
+    assert.match(stdout, /ok 5 - this should be skipped/);
+    assert.match(stdout, /ok 6 - this should be executed/);
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+  }
 
-{
-  // The current directory is used by default.
-  const args = ['--test'];
-  const options = { cwd: join(testFixtures, 'default-behavior') };
-  const child = spawnSync(process.execPath, args, options);
+  {
+    // User specified files that don't match the pattern are still run.
+    const args = [
+      '--test',
+      '--test-reporter=tap',
+      `--experimental-test-isolation=${isolation}`,
+      join(testFixtures, 'index.js'),
+    ];
+    const child = spawnSync(process.execPath, args, { cwd: testFixtures });
 
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /ok 1 - this should pass/);
-  assert.match(stdout, /not ok 2 - this should fail/);
-  assert.match(stdout, /ok 3 - .+subdir.+subdir_test\.js/);
-  assert.match(stdout, /ok 4 - this should pass/);
-  assert.match(stdout, /ok 5 - this should be skipped/);
-  assert.match(stdout, /ok 6 - this should be executed/);
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
+    assert.match(stdout, /not ok 1 - .+index\.js/);
+  }
+
+  {
+    // Searches node_modules if specified.
+    const args = [
+      '--test',
+      '--test-reporter=tap',
+      `--experimental-test-isolation=${isolation}`,
+      join(testFixtures, 'default-behavior/node_modules/*.js'),
+    ];
+    const child = spawnSync(process.execPath, args);
+
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
+    assert.match(stdout, /not ok 1 - .+test-nm\.js/);
+  }
+
+  {
+    // The current directory is used by default.
+    const args = ['--test', `--experimental-test-isolation=${isolation}`];
+    const options = { cwd: join(testFixtures, 'default-behavior') };
+    const child = spawnSync(process.execPath, args, options);
+
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
+    assert.match(stdout, /this should pass/);
+    assert.match(stdout, /this should fail/);
+    assert.match(stdout, /subdir.+subdir_test\.js/);
+    assert.match(stdout, /this should pass/);
+    assert.match(stdout, /this should be skipped/);
+    assert.match(stdout, /this should be executed/);
+  }
+
+  {
+    // Test combined stream outputs
+    const args = [
+      '--test',
+      '--test-reporter=tap',
+      `--experimental-test-isolation=${isolation}`,
+      'test/fixtures/test-runner/default-behavior/index.test.js',
+      'test/fixtures/test-runner/nested.js',
+      'test/fixtures/test-runner/invalid-tap.js',
+    ];
+    const child = spawnSync(process.execPath, args);
+
+    assert.strictEqual(child.status, 1);
+    assert.strictEqual(child.signal, null);
+    assert.strictEqual(child.stderr.toString(), '');
+    const stdout = child.stdout.toString();
+    assert.match(stdout, /# Subtest: this should pass/);
+    assert.match(stdout, /ok 1 - this should pass/);
+    assert.match(stdout, / {2}---/);
+    assert.match(stdout, / {2}duration_ms: .*/);
+    assert.match(stdout, / {2}\.\.\./);
+
+    assert.match(stdout, /# Subtest: .+invalid-tap\.js/);
+    assert.match(stdout, /invalid tap output/);
+    assert.match(stdout, /ok 2 - .+invalid-tap\.js/);
+
+    assert.match(stdout, /# Subtest: level 0a/);
+    assert.match(stdout, / {4}# Subtest: level 1a/);
+    assert.match(stdout, / {4}ok 1 - level 1a/);
+    assert.match(stdout, / {4}# Subtest: level 1b/);
+    assert.match(stdout, / {4}not ok 2 - level 1b/);
+    assert.match(stdout, / {6}code: 'ERR_TEST_FAILURE'/);
+    assert.match(stdout, / {6}stack: |-'/);
+    assert.match(stdout, / {8}TestContext\.<anonymous> .*/);
+    assert.match(stdout, / {4}# Subtest: level 1c/);
+    assert.match(stdout, / {4}ok 3 - level 1c # SKIP aaa/);
+    assert.match(stdout, / {4}# Subtest: level 1d/);
+    assert.match(stdout, / {4}ok 4 - level 1d/);
+    assert.match(stdout, /not ok 3 - level 0a/);
+    assert.match(stdout, / {2}error: '1 subtest failed'/);
+    assert.match(stdout, /# Subtest: level 0b/);
+    assert.match(stdout, /not ok 4 - level 0b/);
+    assert.match(stdout, / {2}error: 'level 0b error'/);
+    assert.match(stdout, /# tests 8/);
+    assert.match(stdout, /# suites 0/);
+    assert.match(stdout, /# pass 4/);
+    assert.match(stdout, /# fail 3/);
+    assert.match(stdout, /# cancelled 0/);
+    assert.match(stdout, /# skipped 1/);
+    assert.match(stdout, /# todo 0/);
+  }
 }
 
 {
@@ -105,7 +195,7 @@ const testFixtures = fixtures.path('test-runner');
     ['--print', 'console.log("should not print")', '--test'],
   ];
 
-  flags.forEach((args) => {
+  for (const args of flags) {
     const child = spawnSync(process.execPath, args);
 
     assert.notStrictEqual(child.status, 0);
@@ -113,64 +203,14 @@ const testFixtures = fixtures.path('test-runner');
     assert.strictEqual(child.stdout.toString(), '');
     const stderr = child.stderr.toString();
     assert.match(stderr, /--test/);
-  });
-}
-
-{
-  // Test combined stream outputs
-  const args = [
-    '--test',
-    'test/fixtures/test-runner/default-behavior/index.test.js',
-    'test/fixtures/test-runner/nested.js',
-    'test/fixtures/test-runner/invalid-tap.js',
-  ];
-  const child = spawnSync(process.execPath, args);
-
-
-  assert.strictEqual(child.status, 1);
-  assert.strictEqual(child.signal, null);
-  assert.strictEqual(child.stderr.toString(), '');
-  const stdout = child.stdout.toString();
-  assert.match(stdout, /# Subtest: this should pass/);
-  assert.match(stdout, /ok 1 - this should pass/);
-  assert.match(stdout, / {2}---/);
-  assert.match(stdout, / {2}duration_ms: .*/);
-  assert.match(stdout, / {2}\.\.\./);
-
-  assert.match(stdout, /# Subtest: .+invalid-tap\.js/);
-  assert.match(stdout, /# invalid tap output/);
-  assert.match(stdout, /ok 2 - .+invalid-tap\.js/);
-
-  assert.match(stdout, /# Subtest: level 0a/);
-  assert.match(stdout, / {4}# Subtest: level 1a/);
-  assert.match(stdout, / {4}ok 1 - level 1a/);
-  assert.match(stdout, / {4}# Subtest: level 1b/);
-  assert.match(stdout, / {4}not ok 2 - level 1b/);
-  assert.match(stdout, / {6}code: 'ERR_TEST_FAILURE'/);
-  assert.match(stdout, / {6}stack: |-'/);
-  assert.match(stdout, / {8}TestContext\.<anonymous> .*/);
-  assert.match(stdout, / {4}# Subtest: level 1c/);
-  assert.match(stdout, / {4}ok 3 - level 1c # SKIP aaa/);
-  assert.match(stdout, / {4}# Subtest: level 1d/);
-  assert.match(stdout, / {4}ok 4 - level 1d/);
-  assert.match(stdout, /not ok 3 - level 0a/);
-  assert.match(stdout, / {2}error: '1 subtest failed'/);
-  assert.match(stdout, /# Subtest: level 0b/);
-  assert.match(stdout, /not ok 4 - level 0b/);
-  assert.match(stdout, / {2}error: 'level 0b error'/);
-  assert.match(stdout, /# tests 8/);
-  assert.match(stdout, /# suites 0/);
-  assert.match(stdout, /# pass 4/);
-  assert.match(stdout, /# fail 3/);
-  assert.match(stdout, /# cancelled 0/);
-  assert.match(stdout, /# skipped 1/);
-  assert.match(stdout, /# todo 0/);
+  }
 }
 
 {
   // Test user logging in tests.
   const args = [
     '--test',
+    '--test-reporter=tap',
     'test/fixtures/test-runner/user-logs.js',
   ];
   const child = spawnSync(process.execPath, args);
@@ -205,7 +245,7 @@ const testFixtures = fixtures.path('test-runner');
   assert.strictEqual(child.status, 0);
   assert.strictEqual(child.signal, null);
   const stdout = child.stdout.toString();
-  assert.match(stdout, /ok 1 - this should pass/);
+  assert.match(stdout, /this should pass/);
 }
 
 {
@@ -239,7 +279,7 @@ const testFixtures = fixtures.path('test-runner');
 
   assert.strictEqual(child.status, 1);
   assert.strictEqual(child.signal, null);
-  assert.match(child.stderr.toString(), /The value of "options\.shard\.index" is out of range\. It must be >= 1 && <= 3 \("options\.shard\.total"\)\. Received 0/);
+  assert.match(child.stderr.toString(), /The value of "options\.shard\.index" is out of range\. It must be >= 1 && <= 3\. Received 0/);
   const stdout = child.stdout.toString();
   assert.strictEqual(stdout, '');
 }
@@ -270,12 +310,11 @@ const testFixtures = fixtures.path('test-runner');
 
 {
   // --test-shard option, first shard
-  const shardsTestPath = join(testFixtures, 'shards');
-  const allShardsTestsFiles = readdirSync(shardsTestPath).map((file) => join(shardsTestPath, file));
   const args = [
     '--test',
+    '--test-reporter=tap',
     '--test-shard=1/2',
-    ...allShardsTestsFiles,
+    join(testFixtures, 'shards/*.cjs'),
   ];
   const child = spawnSync(process.execPath, args);
 
@@ -306,12 +345,11 @@ const testFixtures = fixtures.path('test-runner');
 
 {
   // --test-shard option, last shard
-  const shardsTestPath = join(testFixtures, 'shards');
-  const allShardsTestsFiles = readdirSync(shardsTestPath).map((file) => join(shardsTestPath, file));
   const args = [
     '--test',
+    '--test-reporter=tap',
     '--test-shard=2/2',
-    ...allShardsTestsFiles,
+    join(testFixtures, 'shards/*.cjs'),
   ];
   const child = spawnSync(process.execPath, args);
 
@@ -338,4 +376,23 @@ const testFixtures = fixtures.path('test-runner');
   assert.match(stdout, /# pass 5/);
   assert.match(stdout, /# fail 0/);
   assert.match(stdout, /# skipped 0/);
+}
+
+{
+  // Should not match files like latest.js
+  const args = ['--test', '--test-reporter=tap'];
+  const child = spawnSync(process.execPath, args, { cwd: join(testFixtures, 'issue-54726') });
+
+  assert.strictEqual(child.status, 0);
+  assert.strictEqual(child.signal, null);
+  assert.strictEqual(child.stderr.toString(), '');
+  const stdout = child.stdout.toString();
+
+  assert.match(stdout, /tests 0/);
+  assert.match(stdout, /suites 0/);
+  assert.match(stdout, /pass 0/);
+  assert.match(stdout, /fail 0/);
+  assert.match(stdout, /cancelled 0/);
+  assert.match(stdout, /skipped 0/);
+  assert.match(stdout, /todo 0/);
 }

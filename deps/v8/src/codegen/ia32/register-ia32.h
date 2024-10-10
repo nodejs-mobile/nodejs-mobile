@@ -69,6 +69,13 @@ ASSERT_TRIVIALLY_COPYABLE(Register);
 static_assert(sizeof(Register) <= sizeof(int),
               "Register can efficiently be passed by value");
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 #define DEFINE_REGISTER(R) \
   constexpr Register R = Register::from_code(kRegCode_##R);
 GENERAL_REGISTERS(DEFINE_REGISTER)
@@ -136,10 +143,6 @@ constexpr Register kJavaScriptCallNewTargetRegister = edx;
 // mostly there to simplify consistent interface descriptor definitions across
 // platforms. Note that on ia32 it aliases kJavaScriptCallCodeStartRegister.
 constexpr Register kJavaScriptCallExtraArg1Register = ecx;
-
-// The off-heap trampoline does not need a register on ia32 (it uses a
-// pc-relative call instead).
-constexpr Register kOffHeapTrampolineRegister = no_reg;
 
 constexpr Register kRuntimeCallFunctionRegister = edx;
 constexpr Register kRuntimeCallArgCountRegister = eax;

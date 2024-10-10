@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { spawnSync, execFileSync } = require('child_process');
 const common = require('./');
 const util = require('util');
 
@@ -14,14 +15,13 @@ function cleanupStaleProcess(filename) {
   process.once('beforeExit', () => {
     const basename = filename.replace(/.*[/\\]/g, '');
     try {
-      require('child_process')
-        .execFileSync(`${process.env.SystemRoot}\\System32\\wbem\\WMIC.exe`, [
-          'process',
-          'where',
-          `commandline like '%${basename}%child'`,
-          'delete',
-          '/nointeractive',
-        ]);
+      execFileSync(`${process.env.SystemRoot}\\System32\\wbem\\WMIC.exe`, [
+        'process',
+        'where',
+        `commandline like '%${basename}%child'`,
+        'delete',
+        '/nointeractive',
+      ]);
     } catch {
       // Ignore failures, there might not be any stale process to clean up.
     }
@@ -60,13 +60,14 @@ function checkOutput(str, check) {
   return { passed: true };
 }
 
-function expectSyncExit(child, {
+function expectSyncExit(caller, spawnArgs, {
   status,
   signal,
   stderr: stderrCheck,
   stdout: stdoutCheck,
   trim = false,
 }) {
+  const child = spawnSync(...spawnArgs);
   const failures = [];
   let stderrStr, stdoutStr;
   if (status !== undefined && child.status !== status) {
@@ -83,7 +84,18 @@ function expectSyncExit(child, {
     console.error(`${tag} --- stdout ---`);
     console.error(stdoutStr === undefined ? child.stdout.toString() : stdoutStr);
     console.error(`${tag} status = ${child.status}, signal = ${child.signal}`);
-    throw new Error(`${failures.join('\n')}`);
+
+    const error = new Error(`${failures.join('\n')}`);
+    if (spawnArgs[2]) {
+      error.options = spawnArgs[2];
+    }
+    let command = spawnArgs[0];
+    if (Array.isArray(spawnArgs[1])) {
+      command += ' ' + spawnArgs[1].join(' ');
+    }
+    error.command = command;
+    Error.captureStackTrace(error, caller);
+    throw error;
   }
 
   // If status and signal are not matching expectations, fail early.
@@ -111,11 +123,25 @@ function expectSyncExit(child, {
   return { child, stderr: stderrStr, stdout: stdoutStr };
 }
 
-function expectSyncExitWithoutError(child, options) {
-  return expectSyncExit(child, {
+function spawnSyncAndExit(...args) {
+  const spawnArgs = args.slice(0, args.length - 1);
+  const expectations = args[args.length - 1];
+  return expectSyncExit(spawnSyncAndExit, spawnArgs, expectations);
+}
+
+function spawnSyncAndExitWithoutError(...args) {
+  return expectSyncExit(spawnSyncAndExitWithoutError, [...args], {
     status: 0,
     signal: null,
-    ...options,
+  });
+}
+
+function spawnSyncAndAssert(...args) {
+  const expectations = args.pop();
+  return expectSyncExit(spawnSyncAndAssert, [...args], {
+    status: 0,
+    signal: null,
+    ...expectations,
   });
 }
 
@@ -124,6 +150,7 @@ module.exports = {
   logAfterTime,
   kExpiringChildRunTime,
   kExpiringParentTimer,
-  expectSyncExit,
-  expectSyncExitWithoutError,
+  spawnSyncAndAssert,
+  spawnSyncAndExit,
+  spawnSyncAndExitWithoutError,
 };

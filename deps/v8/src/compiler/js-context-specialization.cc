@@ -4,13 +4,17 @@
 
 #include "src/compiler/js-context-specialization.h"
 
+#include "src/compiler/access-builder.h"
 #include "src/compiler/common-operator.h"
+#include "src/compiler/compilation-dependencies.h"
+#include "src/compiler/const-tracking-let-helpers.h"
 #include "src/compiler/js-graph.h"
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/js-operator.h"
 #include "src/compiler/linkage.h"
-#include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
+#include "src/compiler/simplified-operator.h"
+#include "src/deoptimizer/deoptimize-reason.h"
 #include "src/objects/contexts-inl.h"
 
 namespace v8 {
@@ -25,6 +29,8 @@ Reduction JSContextSpecialization::Reduce(Node* node) {
       return ReduceJSLoadContext(node);
     case IrOpcode::kJSStoreContext:
       return ReduceJSStoreContext(node);
+    case IrOpcode::kJSStoreScriptContext:
+      return ReduceJSStoreScriptContext(node);
     case IrOpcode::kJSGetImportMeta:
       return ReduceJSGetImportMeta(node);
     default:
@@ -40,7 +46,8 @@ Reduction JSContextSpecialization::ReduceParameter(Node* node) {
     // Constant-fold the function parameter {node}.
     Handle<JSFunction> function;
     if (closure().ToHandle(&function)) {
-      Node* value = jsgraph()->Constant(MakeRef(broker_, function));
+      Node* value =
+          jsgraph()->ConstantNoHole(MakeRef(broker_, function), broker());
       return Replace(value);
     }
   }
@@ -98,9 +105,9 @@ bool IsContextParameter(Node* node) {
 // context (which we want to read from or store to), try to return a
 // specialization context.  If successful, update {distance} to whatever
 // distance remains from the specialization context.
-base::Optional<ContextRef> GetSpecializationContext(
-    JSHeapBroker* broker, Node* node, size_t* distance,
-    Maybe<OuterContext> maybe_outer) {
+OptionalContextRef GetSpecializationContext(JSHeapBroker* broker, Node* node,
+                                            size_t* distance,
+                                            Maybe<OuterContext> maybe_outer) {
   switch (node->opcode()) {
     case IrOpcode::kHeapConstant: {
       // TODO(jgruber,chromium:1209798): Using kAssumeMemoryFence works around
@@ -128,7 +135,7 @@ base::Optional<ContextRef> GetSpecializationContext(
     default:
       break;
   }
-  return base::Optional<ContextRef>();
+  return OptionalContextRef();
 }
 
 }  // anonymous namespace
@@ -142,7 +149,7 @@ Reduction JSContextSpecialization::ReduceJSLoadContext(Node* node) {
   // First walk up the context chain in the graph as far as possible.
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  base::Optional<ContextRef> maybe_concrete =
+  OptionalContextRef maybe_concrete =
       GetSpecializationContext(broker(), context, &depth, outer());
   if (!maybe_concrete.has_value()) {
     // We do not have a concrete context object, so we can only partially reduce
@@ -152,44 +159,46 @@ Reduction JSContextSpecialization::ReduceJSLoadContext(Node* node) {
 
   // Now walk up the concrete context chain for the remaining depth.
   ContextRef concrete = maybe_concrete.value();
-  concrete = concrete.previous(&depth);
+  concrete = concrete.previous(broker(), &depth);
   if (depth > 0) {
     TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  if (!access.immutable()) {
+  if (!access.immutable() &&
+      !broker()->dependencies()->DependOnConstTrackingLet(
+          concrete, access.index(), broker())) {
     // We found the requested context object but since the context slot is
     // mutable we can only partially reduce the load.
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
   // This will hold the final value, if we can figure it out.
-  base::Optional<ObjectRef> maybe_value;
-  maybe_value = concrete.get(static_cast<int>(access.index()));
+  OptionalObjectRef maybe_value;
+  maybe_value = concrete.get(broker(), static_cast<int>(access.index()));
 
   if (!maybe_value.has_value()) {
     TRACE_BROKER_MISSING(broker(), "slot value " << access.index()
                                                  << " for context "
                                                  << concrete);
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  if (!maybe_value->IsSmi()) {
-    // Even though the context slot is immutable, the context might have escaped
-    // before the function to which it belongs has initialized the slot.
-    // We must be conservative and check if the value in the slot is currently
-    // the hole or undefined. Only if it is neither of these, can we be sure
-    // that it won't change anymore.
-    OddballType oddball_type = maybe_value->AsHeapObject().map().oddball_type();
-    if (oddball_type == OddballType::kUndefined ||
-        oddball_type == OddballType::kHole) {
-      return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
-    }
+  // Even though the context slot is immutable, the context might have escaped
+  // before the function to which it belongs has initialized the slot.
+  // We must be conservative and check if the value in the slot is currently
+  // the hole or undefined. Only if it is neither of these, can we be sure
+  // that it won't change anymore.
+  if (maybe_value->IsUndefined() || maybe_value->IsTheHole()) {
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
   // Success. The context load can be replaced with the constant.
-  Node* constant = jsgraph_->Constant(*maybe_value);
+  Node* constant = jsgraph_->ConstantNoHole(*maybe_value, broker());
   ReplaceWithValue(node, constant);
   return Replace(constant);
 }
@@ -205,7 +214,7 @@ Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
   // or hit a node that does not have a CreateXYZContext operator.
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  base::Optional<ContextRef> maybe_concrete =
+  OptionalContextRef maybe_concrete =
       GetSpecializationContext(broker(), context, &depth, outer());
   if (!maybe_concrete.has_value()) {
     // We do not have a concrete context object, so we can only partially reduce
@@ -215,24 +224,74 @@ Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
 
   // Now walk up the concrete context chain for the remaining depth.
   ContextRef concrete = maybe_concrete.value();
-  concrete = concrete.previous(&depth);
+  concrete = concrete.previous(broker(), &depth);
   if (depth > 0) {
     TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
-    return SimplifyJSStoreContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSStoreContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  return SimplifyJSStoreContext(node, jsgraph()->Constant(concrete), depth);
+  return SimplifyJSStoreContext(
+      node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
 }
 
-base::Optional<ContextRef> GetModuleContext(JSHeapBroker* broker, Node* node,
-                                            Maybe<OuterContext> maybe_context) {
+Reduction JSContextSpecialization::ReduceJSStoreScriptContext(Node* node) {
+  DCHECK(v8_flags.const_tracking_let);
+  DCHECK_EQ(IrOpcode::kJSStoreScriptContext, node->opcode());
+
+  const ContextAccess& access = ContextAccessOf(node->op());
+  size_t depth = access.depth();
+  int side_data_index = ConstTrackingLetSideDataIndexForAccess(access.index());
+
+  // First walk up the context chain in the graph until we reduce the depth to 0
+  // or hit a node that does not have a CreateXYZContext operator.
+  Node* context = NodeProperties::GetOuterContext(node, &depth);
+
+  OptionalContextRef maybe_context =
+      GetSpecializationContext(broker(), context, &depth, outer());
+  if (IsConstTrackingLetVariableSurelyNotConstant(maybe_context, depth,
+                                                  side_data_index, broker())) {
+    // The value is not a constant any more, so we don't need to generate
+    // code for invalidating the side data.
+    const Operator* op =
+        jsgraph_->javascript()->StoreContext(access.depth(), access.index());
+    NodeProperties::ChangeOp(node, op);
+    return Changed(node);
+  }
+
+  // The value might be a constant. Generate code which checks the side data and
+  // potentially invalidates the constness.
+  Node* effect = NodeProperties::GetEffectInput(node);
+  Node* control = NodeProperties::GetControlInput(node);
+
+  // Generate code to walk up the contexts the remaining depth.
+  for (size_t i = 0; i < depth; ++i) {
+    context = effect = jsgraph_->graph()->NewNode(
+        jsgraph_->simplified()->LoadField(
+            AccessBuilder::ForContextSlotKnownPointer(Context::PREVIOUS_INDEX)),
+        context, effect, control);
+  }
+
+  GenerateCheckConstTrackingLetSideData(context, &effect, &control,
+                                        side_data_index, jsgraph_);
+
+  // If we're still here (not deopted) the side data implied that the value was
+  // already not a constant, so we can just store into it.
+  const Operator* op = jsgraph_->javascript()->StoreContext(0, access.index());
+  Node* new_store = jsgraph_->graph()->NewNode(
+      op, NodeProperties::GetValueInput(node, 0), context, effect, control);
+  return Replace(new_store);
+}
+
+OptionalContextRef GetModuleContext(JSHeapBroker* broker, Node* node,
+                                    Maybe<OuterContext> maybe_context) {
   size_t depth = std::numeric_limits<size_t>::max();
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  auto find_context = [](ContextRef c) {
-    while (c.map().instance_type() != MODULE_CONTEXT_TYPE) {
+  auto find_context = [broker](ContextRef c) {
+    while (c.map(broker).instance_type() != MODULE_CONTEXT_TYPE) {
       size_t depth = 1;
-      c = c.previous(&depth);
+      c = c.previous(broker, &depth);
       CHECK_EQ(depth, 0);
     }
     return c;
@@ -266,19 +325,18 @@ base::Optional<ContextRef> GetModuleContext(JSHeapBroker* broker, Node* node,
       break;
   }
 
-  return base::Optional<ContextRef>();
+  return OptionalContextRef();
 }
 
 Reduction JSContextSpecialization::ReduceJSGetImportMeta(Node* node) {
-  base::Optional<ContextRef> maybe_context =
-      GetModuleContext(broker(), node, outer());
+  OptionalContextRef maybe_context = GetModuleContext(broker(), node, outer());
   if (!maybe_context.has_value()) return NoChange();
 
   ContextRef context = maybe_context.value();
-  base::Optional<ObjectRef> module = context.get(Context::EXTENSION_INDEX);
+  OptionalObjectRef module = context.get(broker(), Context::EXTENSION_INDEX);
   if (!module.has_value()) return NoChange();
-  base::Optional<ObjectRef> import_meta =
-      module->AsSourceTextModule().import_meta();
+  OptionalObjectRef import_meta =
+      module->AsSourceTextModule().import_meta(broker());
   if (!import_meta.has_value()) return NoChange();
   if (!import_meta->IsJSObject()) {
     DCHECK(import_meta->IsTheHole());
@@ -287,7 +345,7 @@ Reduction JSContextSpecialization::ReduceJSGetImportMeta(Node* node) {
     return NoChange();
   }
 
-  Node* import_meta_const = jsgraph()->Constant(*import_meta);
+  Node* import_meta_const = jsgraph()->ConstantNoHole(*import_meta, broker());
   ReplaceWithValue(node, import_meta_const);
   return Changed(import_meta_const);
 }

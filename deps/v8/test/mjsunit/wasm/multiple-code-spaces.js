@@ -4,6 +4,8 @@
 
 // Flags: --allow-natives-syntax --randomize-all-allocations
 // Flags: --wasm-max-initial-code-space-reservation=1
+// Disable lazy compilation, because force easier code generation.
+// Flags: --no-wasm-lazy-compilation
 
 // Disable tier-up, to reduce execution time of this test (Liftoff generates
 // much bigger code, thus reaches the four code spaces much faster).
@@ -23,7 +25,7 @@ while (true) {
     throw new Error('We should have hit four code spaces by now');
   }
   const builder = new WasmModuleBuilder();
-  builder.addMemory(1, 1, false);
+  builder.addMemory(1, 1);
   builder.addFunction('f0', kSig_i_i).addBody([kExprLocalGet, 0]);
   // Generate some code per function to fill the code space.
   // Each function contains a number of loads that will not be executed

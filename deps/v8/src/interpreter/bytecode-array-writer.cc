@@ -9,7 +9,6 @@
 #include "src/interpreter/bytecode-jump-table.h"
 #include "src/interpreter/bytecode-label.h"
 #include "src/interpreter/bytecode-node.h"
-#include "src/interpreter/bytecode-register.h"
 #include "src/interpreter/bytecode-source-info.h"
 #include "src/interpreter/constant-array-builder.h"
 #include "src/interpreter/handler-table-builder.h"
@@ -32,7 +31,8 @@ BytecodeArrayWriter::BytecodeArrayWriter(
       last_bytecode_(Bytecode::kIllegal),
       last_bytecode_offset_(0),
       last_bytecode_had_source_info_(false),
-      elide_noneffectful_bytecodes_(FLAG_ignition_elide_noneffectful_bytecodes),
+      elide_noneffectful_bytecodes_(
+          v8_flags.ignition_elide_noneffectful_bytecodes),
       exit_seen_in_block_(false) {
   bytecodes_.reserve(512);  // Derived via experimentation.
 }
@@ -40,59 +40,58 @@ BytecodeArrayWriter::BytecodeArrayWriter(
 template <typename IsolateT>
 Handle<BytecodeArray> BytecodeArrayWriter::ToBytecodeArray(
     IsolateT* isolate, int register_count, int parameter_count,
-    Handle<ByteArray> handler_table) {
+    Handle<TrustedByteArray> handler_table) {
   DCHECK_EQ(0, unbound_jumps_);
 
   int bytecode_size = static_cast<int>(bytecodes()->size());
   int frame_size = register_count * kSystemPointerSize;
-  Handle<FixedArray> constant_pool =
+  Handle<TrustedFixedArray> constant_pool =
       constant_array_builder()->ToFixedArray(isolate);
   Handle<BytecodeArray> bytecode_array = isolate->factory()->NewBytecodeArray(
       bytecode_size, &bytecodes()->front(), frame_size, parameter_count,
-      constant_pool);
-  bytecode_array->set_handler_table(*handler_table);
+      constant_pool, handler_table);
   return bytecode_array;
 }
 
 template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
     Handle<BytecodeArray> BytecodeArrayWriter::ToBytecodeArray(
         Isolate* isolate, int register_count, int parameter_count,
-        Handle<ByteArray> handler_table);
+        Handle<TrustedByteArray> handler_table);
 template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
     Handle<BytecodeArray> BytecodeArrayWriter::ToBytecodeArray(
         LocalIsolate* isolate, int register_count, int parameter_count,
-        Handle<ByteArray> handler_table);
+        Handle<TrustedByteArray> handler_table);
 
 template <typename IsolateT>
-Handle<ByteArray> BytecodeArrayWriter::ToSourcePositionTable(
+Handle<TrustedByteArray> BytecodeArrayWriter::ToSourcePositionTable(
     IsolateT* isolate) {
   DCHECK(!source_position_table_builder_.Lazy());
-  Handle<ByteArray> source_position_table =
+  Handle<TrustedByteArray> source_position_table =
       source_position_table_builder_.Omit()
-          ? isolate->factory()->empty_byte_array()
+          ? isolate->factory()->empty_trusted_byte_array()
           : source_position_table_builder_.ToSourcePositionTable(isolate);
   return source_position_table;
 }
 
 template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
-    Handle<ByteArray> BytecodeArrayWriter::ToSourcePositionTable(
+    Handle<TrustedByteArray> BytecodeArrayWriter::ToSourcePositionTable(
         Isolate* isolate);
 template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
-    Handle<ByteArray> BytecodeArrayWriter::ToSourcePositionTable(
+    Handle<TrustedByteArray> BytecodeArrayWriter::ToSourcePositionTable(
         LocalIsolate* isolate);
 
 #ifdef DEBUG
-int BytecodeArrayWriter::CheckBytecodeMatches(BytecodeArray bytecode) {
+int BytecodeArrayWriter::CheckBytecodeMatches(Tagged<BytecodeArray> bytecode) {
   int mismatches = false;
   int bytecode_size = static_cast<int>(bytecodes()->size());
-  const byte* bytecode_ptr = &bytecodes()->front();
-  if (bytecode_size != bytecode.length()) mismatches = true;
+  const uint8_t* bytecode_ptr = &bytecodes()->front();
+  if (bytecode_size != bytecode->length()) mismatches = true;
 
   // If there's a mismatch only in the length of the bytecode (very unlikely)
   // then the first mismatch will be the first extra bytecode.
-  int first_mismatch = std::min(bytecode_size, bytecode.length());
+  int first_mismatch = std::min(bytecode_size, bytecode->length());
   for (int i = 0; i < first_mismatch; ++i) {
-    if (bytecode_ptr[i] != bytecode.get(i)) {
+    if (bytecode_ptr[i] != bytecode->get(i)) {
       mismatches = true;
       first_mismatch = i;
       break;
@@ -467,15 +466,32 @@ void BytecodeArrayWriter::EmitJumpLoop(BytecodeNode* node,
 
   CHECK_GE(current_offset, loop_header->offset());
   CHECK_LE(current_offset, static_cast<size_t>(kMaxUInt32));
-  // Label has been bound already so this is a backwards jump.
+
+  // Update the actual jump offset now that we know the bytecode offset of both
+  // the target loop header and this JumpLoop bytecode.
+  //
+  // The label has been bound already so this is a backwards jump.
   uint32_t delta =
       static_cast<uint32_t>(current_offset - loop_header->offset());
-  OperandScale operand_scale = Bytecodes::ScaleForUnsignedOperand(delta);
-  if (operand_scale > OperandScale::kSingle) {
-    // Adjust for scaling byte prefix for wide jump offset.
-    delta += 1;
+  // This JumpLoop bytecode itself may have a kWide or kExtraWide prefix; if
+  // so, bump the delta to account for it.
+  const bool emits_prefix_bytecode =
+      Bytecodes::OperandScaleRequiresPrefixBytecode(node->operand_scale()) ||
+      Bytecodes::OperandScaleRequiresPrefixBytecode(
+          Bytecodes::ScaleForUnsignedOperand(delta));
+  if (emits_prefix_bytecode) {
+    static constexpr int kPrefixBytecodeSize = 1;
+    delta += kPrefixBytecodeSize;
+    DCHECK_EQ(Bytecodes::Size(Bytecode::kWide, OperandScale::kSingle),
+              kPrefixBytecodeSize);
+    DCHECK_EQ(Bytecodes::Size(Bytecode::kExtraWide, OperandScale::kSingle),
+              kPrefixBytecodeSize);
   }
   node->update_operand0(delta);
+  DCHECK_EQ(
+      Bytecodes::OperandScaleRequiresPrefixBytecode(node->operand_scale()),
+      emits_prefix_bytecode);
+
   EmitBytecode(node);
 }
 

@@ -6,6 +6,7 @@
 
 @abstract
 @reserveBitsInInstanceType(7)
+@cppObjectLayoutDefinition
 extern class String extends Name {
   macro StringInstanceType(): StringInstanceType {
     return %RawDownCast<StringInstanceType>(
@@ -14,6 +15,33 @@ extern class String extends Name {
 
   macro IsNotInternalized(): bool {
     return this.StringInstanceType().is_not_internalized;
+  }
+
+  // Keep this in sync with the C++ String::IsOneByteRepresentationUnderneath.
+  macro IsOneByteRepresentationUnderneath(): bool {
+    let string = this;
+    while (true) {
+      typeswitch (string) {
+        case (cons: ConsString): {
+          dcheck(cons.IsFlat());
+          string = cons.first;
+        }
+        case (thin: ThinString): {
+          // Internalized strings can't change representation.
+          dcheck(
+              thin.StringInstanceType().is_one_byte ==
+              thin.actual.StringInstanceType().is_one_byte);
+          return thin.StringInstanceType().is_one_byte;
+        }
+        case (slice: SlicedString): {
+          string = slice.parent;
+        }
+        case (String): {
+          return string.StringInstanceType().is_one_byte;
+        }
+      }
+    }
+    VerifiedUnreachable();
   }
 
   const length: int32;
@@ -35,8 +63,8 @@ bitfield struct StringInstanceType extends uint16 {
   is_shared: bool: 1 bit;
 }
 
-@generateBodyDescriptor
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class ConsString extends String {
   // Corresponds to String::IsFlat() in the C++ runtime.
   macro IsFlat(): bool {
@@ -53,6 +81,7 @@ extern class ConsString extends String {
 
 @abstract
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class ExternalString extends String {
   resource: ExternalPointer;
   // WARNING: This field is missing for uncached external strings.
@@ -74,6 +103,7 @@ extern macro ExternalTwoByteStringGetChars(ExternalTwoByteString):
     RawPtr<char16>;
 
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class ExternalOneByteString extends ExternalString {
   macro GetChars(): RawPtr<char8> {
     if (this.StringInstanceType().is_uncached) {
@@ -85,6 +115,7 @@ extern class ExternalOneByteString extends ExternalString {
 }
 
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class ExternalTwoByteString extends ExternalString {
   macro GetChars(): RawPtr<char16> {
     if (this.StringInstanceType().is_uncached) {
@@ -96,33 +127,35 @@ extern class ExternalTwoByteString extends ExternalString {
 }
 
 @doNotGenerateCast
-extern class InternalizedString extends String {
-}
+@cppObjectLayoutDefinition
+extern class InternalizedString extends String {}
 
 @abstract
 @doNotGenerateCast
-extern class SeqString extends String {
-}
-@generateBodyDescriptor
+@cppObjectLayoutDefinition
+extern class SeqString extends String {}
+
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class SeqOneByteString extends SeqString {
   const chars[length]: char8;
 }
-@generateBodyDescriptor
+
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class SeqTwoByteString extends SeqString {
   const chars[length]: char16;
 }
 
-@generateBodyDescriptor
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class SlicedString extends String {
   parent: String;
   offset: Smi;
 }
 
-@generateBodyDescriptor
 @doNotGenerateCast
+@cppObjectLayoutDefinition
 extern class ThinString extends String {
   actual: String;
 }
@@ -134,8 +167,8 @@ type DirectString extends String;
 macro AllocateNonEmptySeqOneByteString<Iterator: type>(
     length: uint32, content: Iterator): SeqOneByteString {
   dcheck(length != 0 && length <= kStringMaxLength);
-  return new SeqOneByteString{
-    map: kOneByteStringMap,
+  return new (ClearPadding) SeqOneByteString{
+    map: kSeqOneByteStringMap,
     raw_hash_field: kNameEmptyHashField,
     length: Signed(length),
     chars: ...content
@@ -145,8 +178,8 @@ macro AllocateNonEmptySeqOneByteString<Iterator: type>(
 macro AllocateNonEmptySeqTwoByteString<Iterator: type>(
     length: uint32, content: Iterator): SeqTwoByteString {
   dcheck(length > 0 && length <= kStringMaxLength);
-  return new SeqTwoByteString{
-    map: kStringMap,
+  return new (ClearPadding) SeqTwoByteString{
+    map: kSeqTwoByteStringMap,
     raw_hash_field: kNameEmptyHashField,
     length: Signed(length),
     chars: ...content
@@ -173,12 +206,14 @@ macro AllocateSeqTwoByteString<Iterator: type>(
 }
 
 @export
-macro AllocateSeqOneByteString(length: uint32): SeqOneByteString|EmptyString {
+macro AllocateSeqOneByteString(length: uint32): SeqOneByteString|
+    EmptyString {
   return AllocateSeqOneByteString(length, UninitializedIterator{});
 }
 
 @export
-macro AllocateSeqTwoByteString(length: uint32): SeqTwoByteString|EmptyString {
+macro AllocateSeqTwoByteString(length: uint32): SeqTwoByteString|
+    EmptyString {
   return AllocateSeqTwoByteString(length, UninitializedIterator{});
 }
 
@@ -367,8 +402,9 @@ macro Call<A: type, B: type>(
       Convert<intptr>(self.fromIndex)));
 }
 
-macro AbstractStringIndexOf(implicit context: Context)(
-    string: String, searchString: String, fromIndex: Smi): Smi {
+macro AbstractStringIndexOf(
+    implicit context: Context)(string: String, searchString: String,
+    fromIndex: Smi): Smi {
   // Special case the empty string.
   const searchStringLength = searchString.length_intptr;
   const stringLength = string.length_intptr;
@@ -387,7 +423,6 @@ macro AbstractStringIndexOf(implicit context: Context)(
       string, searchString, AbstractStringIndexOfFunctor{fromIndex: fromIndex});
 }
 
-builtin StringIndexOf(implicit context: Context)(
-    s: String, searchString: String, start: Smi): Smi {
+builtin StringIndexOf(s: String, searchString: String, start: Smi): Smi {
   return AbstractStringIndexOf(s, searchString, SmiMax(start, 0));
 }

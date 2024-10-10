@@ -30,6 +30,7 @@
 #include "src/heap/heap-inl.h"
 #include "src/objects/objects-inl.h"
 #include "test/cctest/cctest.h"
+#include "test/cctest/heap/heap-utils.h"
 
 namespace v8 {
 namespace internal {
@@ -37,67 +38,53 @@ namespace internal {
 static void SetUpNewSpaceWithPoisonedMementoAtTop() {
   Isolate* isolate = CcTest::i_isolate();
   Heap* heap = isolate->heap();
-  NewSpace* new_space = heap->new_space();
 
   // Make sure we can allocate some objects without causing a GC later.
-  CcTest::CollectAllGarbage();
+  heap::InvokeMajorGC(heap);
 
   // Allocate a string, the GC may suspect a memento behind the string.
   Handle<SeqOneByteString> string =
       isolate->factory()->NewRawOneByteString(12).ToHandleChecked();
-  CHECK(!string->is_null());
+  CHECK(!(*string).is_null());
 
   // Create an allocation memento behind the string with a garbage allocation
   // site pointer.
-  AllocationMemento memento = AllocationMemento::unchecked_cast(
-      Object(new_space->top() + kHeapObjectTag));
-  memento.set_map_after_allocation(ReadOnlyRoots(heap).allocation_memento_map(),
-                                   SKIP_WRITE_BARRIER);
-  memento.set_allocation_site(
-      AllocationSite::unchecked_cast(Object(kHeapObjectTag)),
-      SKIP_WRITE_BARRIER);
+  Tagged<AllocationMemento> memento = AllocationMemento::unchecked_cast(
+      Tagged<Object>(heap->NewSpaceTop() + kHeapObjectTag));
+  memento->set_map_after_allocation(
+      ReadOnlyRoots(heap).allocation_memento_map(), SKIP_WRITE_BARRIER);
+
+  // Using this accessor as we're writing an invalid tagged pointer.
+  Tagged_t poison = kHeapObjectTag;
+  memento->WriteField<Tagged_t>(AllocationMemento::kAllocationSiteOffset,
+                                poison);
 }
 
 
 TEST(Regress340063) {
   CcTest::InitializeVM();
-  if (!i::FLAG_allocation_site_pretenuring || FLAG_single_generation) return;
+  if (!i::v8_flags.allocation_site_pretenuring || v8_flags.single_generation)
+    return;
   v8::HandleScope scope(CcTest::isolate());
 
   SetUpNewSpaceWithPoisonedMementoAtTop();
 
   // Call GC to see if we can handle a poisonous memento right after the
   // current new space top pointer.
-  CcTest::PreciseCollectAllGarbage();
+  i::heap::InvokeAtomicMajorGC(CcTest::heap());
 }
 
 
-TEST(Regress470390) {
+TEST(BadMementoAfterTopForceMinorGC) {
   CcTest::InitializeVM();
-  if (!i::FLAG_allocation_site_pretenuring || FLAG_single_generation) return;
-  v8::HandleScope scope(CcTest::isolate());
-
-  SetUpNewSpaceWithPoisonedMementoAtTop();
-
-  // Set the new space limit to be equal to the top.
-  Address top = CcTest::i_isolate()->heap()->new_space()->top();
-  *(CcTest::i_isolate()->heap()->new_space()->allocation_limit_address()) = top;
-
-  // Call GC to see if we can handle a poisonous memento right after the
-  // current new space top pointer.
-  CcTest::PreciseCollectAllGarbage();
-}
-
-
-TEST(BadMementoAfterTopForceScavenge) {
-  CcTest::InitializeVM();
-  if (!i::FLAG_allocation_site_pretenuring || FLAG_single_generation) return;
+  if (!i::v8_flags.allocation_site_pretenuring || v8_flags.single_generation)
+    return;
   v8::HandleScope scope(CcTest::isolate());
 
   SetUpNewSpaceWithPoisonedMementoAtTop();
 
   // Force GC to test the poisoned memento handling
-  CcTest::CollectGarbage(i::NEW_SPACE);
+  i::heap::InvokeMinorGC(CcTest::heap());
 }
 
 }  // namespace internal

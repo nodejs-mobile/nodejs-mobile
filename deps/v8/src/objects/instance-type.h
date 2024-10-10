@@ -5,12 +5,12 @@
 #ifndef V8_OBJECTS_INSTANCE_TYPE_H_
 #define V8_OBJECTS_INSTANCE_TYPE_H_
 
-#include "src/objects/elements-kind.h"
+#include "include/v8-internal.h"
 #include "src/objects/objects-definitions.h"
+#include "torque-generated/instance-types.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
-#include "torque-generated/instance-types.h"
 
 namespace v8 {
 namespace internal {
@@ -33,12 +33,19 @@ enum StringRepresentationTag {
 };
 const uint32_t kIsIndirectStringMask = 1 << 0;
 const uint32_t kIsIndirectStringTag = 1 << 0;
-STATIC_ASSERT((kSeqStringTag & kIsIndirectStringMask) == 0);
-STATIC_ASSERT((kExternalStringTag & kIsIndirectStringMask) == 0);
-STATIC_ASSERT((kConsStringTag & kIsIndirectStringMask) == kIsIndirectStringTag);
-STATIC_ASSERT((kSlicedStringTag & kIsIndirectStringMask) ==
+static_assert((kSeqStringTag & kIsIndirectStringMask) == 0);
+static_assert((kExternalStringTag & kIsIndirectStringMask) == 0);
+static_assert((kConsStringTag & kIsIndirectStringMask) == kIsIndirectStringTag);
+static_assert((kSlicedStringTag & kIsIndirectStringMask) ==
               kIsIndirectStringTag);
-STATIC_ASSERT((kThinStringTag & kIsIndirectStringMask) == kIsIndirectStringTag);
+static_assert((kThinStringTag & kIsIndirectStringMask) == kIsIndirectStringTag);
+const uint32_t kThinStringTagBit = 1 << 2;
+// Assert that the kThinStringTagBit is only used in kThinStringTag.
+static_assert((kSeqStringTag & kThinStringTagBit) == 0);
+static_assert((kConsStringTag & kThinStringTagBit) == 0);
+static_assert((kExternalStringTag & kThinStringTagBit) == 0);
+static_assert((kSlicedStringTag & kThinStringTagBit) == 0);
+static_assert((kThinStringTag & kThinStringTagBit) == kThinStringTagBit);
 
 // For strings, bit 3 indicates whether the string consists of two-byte
 // characters or one-byte characters.
@@ -80,8 +87,8 @@ const uint32_t kInternalizedTag = 0;
 //
 // TODO(v8:12007): This bit is currently ignored on internalized strings, which
 // are either always shared or always not shared depending on
-// FLAG_shared_string_table. This will be hardcoded once
-// FLAG_shared_string_table is removed.
+// v8_flags.shared_string_table. This will be hardcoded once
+// v8_flags.shared_string_table is removed.
 const uint32_t kSharedStringMask = 1 << 6;
 const uint32_t kSharedStringTag = 1 << 6;
 
@@ -104,46 +111,54 @@ static inline bool IsShortcutCandidate(int type) {
 
 enum InstanceType : uint16_t {
   // String types.
-  INTERNALIZED_STRING_TYPE =
+  INTERNALIZED_TWO_BYTE_STRING_TYPE =
       kTwoByteStringTag | kSeqStringTag | kInternalizedTag,
-  ONE_BYTE_INTERNALIZED_STRING_TYPE =
+  INTERNALIZED_ONE_BYTE_STRING_TYPE =
       kOneByteStringTag | kSeqStringTag | kInternalizedTag,
-  EXTERNAL_INTERNALIZED_STRING_TYPE =
+  EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE =
       kTwoByteStringTag | kExternalStringTag | kInternalizedTag,
-  EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE =
+  EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE =
       kOneByteStringTag | kExternalStringTag | kInternalizedTag,
-  UNCACHED_EXTERNAL_INTERNALIZED_STRING_TYPE =
-      EXTERNAL_INTERNALIZED_STRING_TYPE | kUncachedExternalStringTag |
+  UNCACHED_EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE =
+      EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE | kUncachedExternalStringTag |
       kInternalizedTag,
-  UNCACHED_EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE =
-      EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE | kUncachedExternalStringTag |
+  UNCACHED_EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE =
+      EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE | kUncachedExternalStringTag |
       kInternalizedTag,
-  STRING_TYPE = INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
-  ONE_BYTE_STRING_TYPE =
-      ONE_BYTE_INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
-  CONS_STRING_TYPE = kTwoByteStringTag | kConsStringTag | kNotInternalizedTag,
+  SEQ_TWO_BYTE_STRING_TYPE =
+      INTERNALIZED_TWO_BYTE_STRING_TYPE | kNotInternalizedTag,
+  SEQ_ONE_BYTE_STRING_TYPE =
+      INTERNALIZED_ONE_BYTE_STRING_TYPE | kNotInternalizedTag,
+  CONS_TWO_BYTE_STRING_TYPE =
+      kTwoByteStringTag | kConsStringTag | kNotInternalizedTag,
   CONS_ONE_BYTE_STRING_TYPE =
       kOneByteStringTag | kConsStringTag | kNotInternalizedTag,
-  SLICED_STRING_TYPE =
+  SLICED_TWO_BYTE_STRING_TYPE =
       kTwoByteStringTag | kSlicedStringTag | kNotInternalizedTag,
   SLICED_ONE_BYTE_STRING_TYPE =
       kOneByteStringTag | kSlicedStringTag | kNotInternalizedTag,
-  EXTERNAL_STRING_TYPE =
-      EXTERNAL_INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
+  EXTERNAL_TWO_BYTE_STRING_TYPE =
+      EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE | kNotInternalizedTag,
   EXTERNAL_ONE_BYTE_STRING_TYPE =
-      EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
-  UNCACHED_EXTERNAL_STRING_TYPE =
-      UNCACHED_EXTERNAL_INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
+      EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE | kNotInternalizedTag,
+  UNCACHED_EXTERNAL_TWO_BYTE_STRING_TYPE =
+      UNCACHED_EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE | kNotInternalizedTag,
   UNCACHED_EXTERNAL_ONE_BYTE_STRING_TYPE =
-      UNCACHED_EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE | kNotInternalizedTag,
-  THIN_STRING_TYPE = kTwoByteStringTag | kThinStringTag | kNotInternalizedTag,
+      UNCACHED_EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE | kNotInternalizedTag,
+  THIN_TWO_BYTE_STRING_TYPE =
+      kTwoByteStringTag | kThinStringTag | kNotInternalizedTag,
   THIN_ONE_BYTE_STRING_TYPE =
       kOneByteStringTag | kThinStringTag | kNotInternalizedTag,
-  SHARED_STRING_TYPE = STRING_TYPE | kSharedStringTag,
-  SHARED_ONE_BYTE_STRING_TYPE = ONE_BYTE_STRING_TYPE | kSharedStringTag,
-  SHARED_THIN_STRING_TYPE = THIN_STRING_TYPE | kSharedStringTag,
-  SHARED_THIN_ONE_BYTE_STRING_TYPE =
-      THIN_ONE_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_SEQ_TWO_BYTE_STRING_TYPE = SEQ_TWO_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_SEQ_ONE_BYTE_STRING_TYPE = SEQ_ONE_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_EXTERNAL_TWO_BYTE_STRING_TYPE =
+      EXTERNAL_TWO_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_EXTERNAL_ONE_BYTE_STRING_TYPE =
+      EXTERNAL_ONE_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_UNCACHED_EXTERNAL_TWO_BYTE_STRING_TYPE =
+      UNCACHED_EXTERNAL_TWO_BYTE_STRING_TYPE | kSharedStringTag,
+  SHARED_UNCACHED_EXTERNAL_ONE_BYTE_STRING_TYPE =
+      UNCACHED_EXTERNAL_ONE_BYTE_STRING_TYPE | kSharedStringTag,
 
 // Most instance types are defined in Torque, with the exception of the string
 // types above. They are ordered by inheritance hierarchy so that we can easily
@@ -160,7 +175,7 @@ enum InstanceType : uint16_t {
 #undef MAKE_TORQUE_INSTANCE_TYPE
 
   // Pseudo-types
-  FIRST_UNIQUE_NAME_TYPE = INTERNALIZED_STRING_TYPE,
+  FIRST_UNIQUE_NAME_TYPE = INTERNALIZED_TWO_BYTE_STRING_TYPE,
   LAST_UNIQUE_NAME_TYPE = SYMBOL_TYPE,
   FIRST_NONSTRING_TYPE = SYMBOL_TYPE,
   // Callable JS Functions are all JS Functions except class constructors.
@@ -177,12 +192,6 @@ enum InstanceType : uint16_t {
   FIRST_TYPE = FIRST_HEAP_OBJECT_TYPE,
   LAST_TYPE = LAST_HEAP_OBJECT_TYPE,
   BIGINT_TYPE = BIG_INT_BASE_TYPE,
-
-#ifdef V8_EXTERNAL_CODE_SPACE
-  CODET_TYPE = CODE_DATA_CONTAINER_TYPE,
-#else
-  CODET_TYPE = CODE_TYPE,
-#endif
 };
 
 // This constant is defined outside of the InstanceType enum because the
@@ -191,26 +200,26 @@ enum InstanceType : uint16_t {
 constexpr InstanceType LAST_STRING_TYPE =
     static_cast<InstanceType>(FIRST_NONSTRING_TYPE - 1);
 
-STATIC_ASSERT((FIRST_NONSTRING_TYPE & kIsNotStringMask) != kStringTag);
-STATIC_ASSERT(JS_OBJECT_TYPE == Internals::kJSObjectType);
-STATIC_ASSERT(FIRST_JS_API_OBJECT_TYPE == Internals::kFirstJSApiObjectType);
-STATIC_ASSERT(LAST_JS_API_OBJECT_TYPE == Internals::kLastJSApiObjectType);
-STATIC_ASSERT(JS_SPECIAL_API_OBJECT_TYPE == Internals::kJSSpecialApiObjectType);
-STATIC_ASSERT(FIRST_NONSTRING_TYPE == Internals::kFirstNonstringType);
-STATIC_ASSERT(ODDBALL_TYPE == Internals::kOddballType);
-STATIC_ASSERT(FOREIGN_TYPE == Internals::kForeignType);
+static_assert((FIRST_NONSTRING_TYPE & kIsNotStringMask) != kStringTag);
+static_assert(JS_OBJECT_TYPE == Internals::kJSObjectType);
+static_assert(FIRST_JS_API_OBJECT_TYPE == Internals::kFirstJSApiObjectType);
+static_assert(LAST_JS_API_OBJECT_TYPE == Internals::kLastJSApiObjectType);
+static_assert(JS_SPECIAL_API_OBJECT_TYPE == Internals::kJSSpecialApiObjectType);
+static_assert(FIRST_NONSTRING_TYPE == Internals::kFirstNonstringType);
+static_assert(ODDBALL_TYPE == Internals::kOddballType);
+static_assert(FOREIGN_TYPE == Internals::kForeignType);
 
 // Verify that string types are all less than other types.
 #define CHECK_STRING_RANGE(TYPE, ...) \
-  STATIC_ASSERT(TYPE < FIRST_NONSTRING_TYPE);
+  static_assert(TYPE < FIRST_NONSTRING_TYPE);
 STRING_TYPE_LIST(CHECK_STRING_RANGE)
 #undef CHECK_STRING_RANGE
-#define CHECK_NONSTRING_RANGE(TYPE) STATIC_ASSERT(TYPE >= FIRST_NONSTRING_TYPE);
+#define CHECK_NONSTRING_RANGE(TYPE) static_assert(TYPE >= FIRST_NONSTRING_TYPE);
 TORQUE_ASSIGNED_INSTANCE_TYPE_LIST(CHECK_NONSTRING_RANGE)
 #undef CHECK_NONSTRING_RANGE
 
 // classConstructor type has to be the last one in the JS Function type range.
-STATIC_ASSERT(JS_CLASS_CONSTRUCTOR_TYPE == LAST_JS_FUNCTION_TYPE);
+static_assert(JS_CLASS_CONSTRUCTOR_TYPE == LAST_JS_FUNCTION_TYPE);
 static_assert(JS_CLASS_CONSTRUCTOR_TYPE < FIRST_CALLABLE_JS_FUNCTION_TYPE ||
                   JS_CLASS_CONSTRUCTOR_TYPE > LAST_CALLABLE_JS_FUNCTION_TYPE,
               "JS_CLASS_CONSTRUCTOR_TYPE must not be in the callable JS "
@@ -226,7 +235,7 @@ static_assert(JS_CLASS_CONSTRUCTOR_TYPE < FIRST_CALLABLE_JS_FUNCTION_TYPE ||
 // that are not also subclasses of JSObject (currently only JSProxy).
 // clang-format off
 #define CHECK_INSTANCE_TYPE(TYPE)                                          \
-  STATIC_ASSERT((TYPE >= FIRST_JS_RECEIVER_TYPE &&                         \
+  static_assert((TYPE >= FIRST_JS_RECEIVER_TYPE &&                         \
                  TYPE <= LAST_SPECIAL_RECEIVER_TYPE) ==                    \
                 (IF_WASM(EXPAND, TYPE == WASM_STRUCT_TYPE ||               \
                                  TYPE == WASM_ARRAY_TYPE ||)               \
@@ -234,7 +243,7 @@ static_assert(JS_CLASS_CONSTRUCTOR_TYPE < FIRST_CALLABLE_JS_FUNCTION_TYPE ||
                  TYPE == JS_GLOBAL_PROXY_TYPE ||                           \
                  TYPE == JS_MODULE_NAMESPACE_TYPE ||                       \
                  TYPE == JS_SPECIAL_API_OBJECT_TYPE));                     \
-  STATIC_ASSERT((TYPE >= FIRST_JS_RECEIVER_TYPE &&                         \
+  static_assert((TYPE >= FIRST_JS_RECEIVER_TYPE &&                         \
                  TYPE <= LAST_CUSTOM_ELEMENTS_RECEIVER) ==                 \
                 (IF_WASM(EXPAND, TYPE == WASM_STRUCT_TYPE ||               \
                                  TYPE == WASM_ARRAY_TYPE ||)               \
@@ -249,45 +258,10 @@ TORQUE_ASSIGNED_INSTANCE_TYPE_LIST(CHECK_INSTANCE_TYPE)
 
 // Make sure it doesn't matter whether we sign-extend or zero-extend these
 // values, because Torque treats InstanceType as signed.
-STATIC_ASSERT(LAST_TYPE < 1 << 15);
+static_assert(LAST_TYPE < 1 << 15);
 
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                            InstanceType instance_type);
-
-// List of object types that have a single unique instance type.
-#define INSTANCE_TYPE_CHECKERS_SINGLE(V)           \
-  TORQUE_INSTANCE_CHECKERS_SINGLE_FULLY_DEFINED(V) \
-  TORQUE_INSTANCE_CHECKERS_SINGLE_ONLY_DECLARED(V) \
-  V(BigInt, BIGINT_TYPE)                           \
-  V(FixedArrayExact, FIXED_ARRAY_TYPE)
-
-#define INSTANCE_TYPE_CHECKERS_RANGE(V)           \
-  TORQUE_INSTANCE_CHECKERS_RANGE_FULLY_DEFINED(V) \
-  TORQUE_INSTANCE_CHECKERS_RANGE_ONLY_DECLARED(V)
-
-#define INSTANCE_TYPE_CHECKERS_CUSTOM(V) \
-  V(FreeSpaceOrFiller)                   \
-  V(ExternalString)                      \
-  V(InternalizedString)
-
-#define INSTANCE_TYPE_CHECKERS(V)  \
-  INSTANCE_TYPE_CHECKERS_SINGLE(V) \
-  INSTANCE_TYPE_CHECKERS_RANGE(V)  \
-  INSTANCE_TYPE_CHECKERS_CUSTOM(V)
-
-namespace InstanceTypeChecker {
-#define IS_TYPE_FUNCTION_DECL(Type, ...) \
-  V8_INLINE constexpr bool Is##Type(InstanceType instance_type);
-
-INSTANCE_TYPE_CHECKERS(IS_TYPE_FUNCTION_DECL)
-
-#define TYPED_ARRAY_IS_TYPE_FUNCTION_DECL(Type, ...) \
-  IS_TYPE_FUNCTION_DECL(Fixed##Type##Array)
-TYPED_ARRAYS(TYPED_ARRAY_IS_TYPE_FUNCTION_DECL)
-#undef TYPED_ARRAY_IS_TYPE_FUNCTION_DECL
-
-#undef IS_TYPE_FUNCTION_DECL
-}  // namespace InstanceTypeChecker
 
 // This list must contain only maps that are shared by all objects of their
 // instance type AND respective object must not represent a parent class for
@@ -303,21 +277,17 @@ TYPED_ARRAYS(TYPED_ARRAY_IS_TYPE_FUNCTION_DECL)
   V(_, BreakPointMap, break_point_map, BreakPoint)                             \
   V(_, BreakPointInfoMap, break_point_info_map, BreakPointInfo)                \
   V(_, BytecodeArrayMap, bytecode_array_map, BytecodeArray)                    \
-  V(_, CachedTemplateObjectMap, cached_template_object_map,                    \
-    CachedTemplateObject)                                                      \
   V(_, CellMap, cell_map, Cell)                                                \
   V(_, WeakCellMap, weak_cell_map, WeakCell)                                   \
+  V(_, InstructionStreamMap, instruction_stream_map, InstructionStream)        \
   V(_, CodeMap, code_map, Code)                                                \
-  V(_, CodeDataContainerMap, code_data_container_map, CodeDataContainer)       \
   V(_, CoverageInfoMap, coverage_info_map, CoverageInfo)                       \
   V(_, DebugInfoMap, debug_info_map, DebugInfo)                                \
   V(_, FreeSpaceMap, free_space_map, FreeSpace)                                \
   V(_, FeedbackVectorMap, feedback_vector_map, FeedbackVector)                 \
   V(_, FixedDoubleArrayMap, fixed_double_array_map, FixedDoubleArray)          \
-  V(_, FunctionTemplateInfoMap, function_template_info_map,                    \
-    FunctionTemplateInfo)                                                      \
+  V(_, InterpreterDataMap, interpreter_data_map, InterpreterData)              \
   V(_, MegaDomHandlerMap, mega_dom_handler_map, MegaDomHandler)                \
-  V(_, MetaMap, meta_map, Map)                                                 \
   V(_, PreparseDataMap, preparse_data_map, PreparseData)                       \
   V(_, PropertyArrayMap, property_array_map, PropertyArray)                    \
   V(_, PrototypeInfoMap, prototype_info_map, PrototypeInfo)                    \
@@ -335,11 +305,28 @@ TYPED_ARRAYS(TYPED_ARRAY_IS_TYPE_FUNCTION_DECL)
 
 // This list must contain only maps that are shared by all objects of their
 // instance type.
-#define UNIQUE_INSTANCE_TYPE_MAP_LIST_GENERATOR(V, _)           \
-  UNIQUE_LEAF_INSTANCE_TYPE_MAP_LIST_GENERATOR(V, _)            \
-  V(_, HeapNumberMap, heap_number_map, HeapNumber)              \
-  V(_, WeakFixedArrayMap, weak_fixed_array_map, WeakFixedArray) \
+#define UNIQUE_INSTANCE_TYPE_MAP_LIST_GENERATOR(V, _)                     \
+  UNIQUE_LEAF_INSTANCE_TYPE_MAP_LIST_GENERATOR(V, _)                      \
+  V(_, ByteArrayMap, byte_array_map, ByteArray)                           \
+  V(_, NameDictionaryMap, name_dictionary_map, NameDictionary)            \
+  V(_, OrderedNameDictionaryMap, ordered_name_dictionary_map,             \
+    OrderedNameDictionary)                                                \
+  V(_, GlobalDictionaryMap, global_dictionary_map, GlobalDictionary)      \
+  V(_, GlobalPropertyCellMap, global_property_cell_map, PropertyCell)     \
+  V(_, GlobalConstTrackingLetCellMap, global_const_tracking_let_cell_map, \
+    ConstTrackingLetCell)                                                 \
+  V(_, HeapNumberMap, heap_number_map, HeapNumber)                        \
+  V(_, WeakFixedArrayMap, weak_fixed_array_map, WeakFixedArray)           \
+  V(_, ScopeInfoMap, scope_info_map, ScopeInfo)                           \
+  V(_, WeakArrayListMap, weak_array_list_map, WeakArrayList)              \
   TORQUE_DEFINED_MAP_CSA_LIST_GENERATOR(V, _)
+
+#ifdef V8_ENABLE_SWISS_NAME_DICTIONARY
+static constexpr InstanceType PROPERTY_DICTIONARY_TYPE =
+    SWISS_NAME_DICTIONARY_TYPE;
+#else
+static constexpr InstanceType PROPERTY_DICTIONARY_TYPE = NAME_DICTIONARY_TYPE;
+#endif
 
 }  // namespace internal
 }  // namespace v8

@@ -68,7 +68,9 @@ added:
   - v15.12.0
   - v14.18.0
 changes:
-  - version: v17.5.0
+  - version:
+    - v17.5.0
+    - v16.15.0
     pr-url: https://github.com/nodejs/node/pull/41272
     description: No longer experimental.
 -->
@@ -128,8 +130,11 @@ added:
   - v12.19.0
 -->
 
+* `object` {any} Any arbitrary JavaScript value.
+
 Mark an object as not transferable. If `object` occurs in the transfer list of
-a [`port.postMessage()`][] call, it is ignored.
+a [`port.postMessage()`][] call, an error is thrown. This is a no-op if
+`object` is a primitive value.
 
 In particular, this makes sense for objects that can be cloned, rather than
 transferred, and which are used by other objects on the sending side.
@@ -148,14 +153,43 @@ const typedArray2 = new Float64Array(pooledBuffer);
 markAsUntransferable(pooledBuffer);
 
 const { port1 } = new MessageChannel();
-port1.postMessage(typedArray1, [ typedArray1.buffer ]);
+try {
+  // This will throw an error, because pooledBuffer is not transferable.
+  port1.postMessage(typedArray1, [ typedArray1.buffer ]);
+} catch (error) {
+  // error.name === 'DataCloneError'
+}
 
 // The following line prints the contents of typedArray1 -- it still owns
-// its memory and has been cloned, not transferred. Without
-// `markAsUntransferable()`, this would print an empty Uint8Array.
+// its memory and has not been transferred. Without
+// `markAsUntransferable()`, this would print an empty Uint8Array and the
+// postMessage call would have succeeded.
 // typedArray2 is intact as well.
 console.log(typedArray1);
 console.log(typedArray2);
+```
+
+There is no equivalent to this API in browsers.
+
+## `worker.isMarkedAsUntransferable(object)`
+
+<!-- YAML
+added: v21.0.0
+-->
+
+* `object` {any} Any JavaScript value.
+* Returns: {boolean}
+
+Check if an object is marked as not transferable with
+[`markAsUntransferable()`][].
+
+```js
+const { markAsUntransferable, isMarkedAsUntransferable } = require('node:worker_threads');
+
+const pooledBuffer = new ArrayBuffer(8);
+markAsUntransferable(pooledBuffer);
+
+isMarkedAsUntransferable(pooledBuffer);  // Returns true.
 ```
 
 There is no equivalent to this API in browsers.
@@ -216,6 +250,114 @@ if (isMainThread) {
     parentPort.postMessage(message);
   });
 }
+```
+
+## `worker.postMessageToThread(threadId, value[, transferList][, timeout])`
+
+<!-- YAML
+added: v22.5.0
+-->
+
+> Stability: 1.1 - Active development
+
+* `threadId` {number} The target thread ID. If the thread ID is invalid, a
+  [`ERR_WORKER_MESSAGING_FAILED`][] error will be thrown. If the target thread ID is the current thread ID,
+  a [`ERR_WORKER_MESSAGING_SAME_THREAD`][] error will be thrown.
+* `value` {any} The value to send.
+* `transferList` {Object\[]} If one or more `MessagePort`-like objects are passed in `value`,
+  a `transferList` is required for those items or [`ERR_MISSING_MESSAGE_PORT_IN_TRANSFER_LIST`][] is thrown.
+  See [`port.postMessage()`][] for more information.
+* `timeout` {number} Time to wait for the message to be delivered in milliseconds.
+  By default it's `undefined`, which means wait forever. If the operation times out,
+  a [`ERR_WORKER_MESSAGING_TIMEOUT`][] error is thrown.
+* Returns: {Promise} A promise which is fulfilled if the message was successfully processed by destination thread.
+
+Sends a value to another worker, identified by its thread ID.
+
+If the target thread has no listener for the `workerMessage` event, then the operation will throw
+a [`ERR_WORKER_MESSAGING_FAILED`][] error.
+
+If the target thread threw an error while processing the `workerMessage` event, then the operation will throw
+a [`ERR_WORKER_MESSAGING_ERRORED`][] error.
+
+This method should be used when the target thread is not the direct
+parent or child of the current thread.
+If the two threads are parent-children, use the [`require('node:worker_threads').parentPort.postMessage()`][]
+and the [`worker.postMessage()`][] to let the threads communicate.
+
+The example below shows the use of of `postMessageToThread`: it creates 10 nested threads,
+the last one will try to communicate with the main thread.
+
+```mjs
+import { fileURLToPath } from 'node:url';
+import process from 'node:process';
+import {
+  postMessageToThread,
+  threadId,
+  workerData,
+  Worker,
+} from 'node:worker_threads';
+
+const channel = new BroadcastChannel('sync');
+const level = workerData?.level ?? 0;
+
+if (level < 10) {
+  const worker = new Worker(fileURLToPath(import.meta.url), {
+    workerData: { level: level + 1 },
+  });
+}
+
+if (level === 0) {
+  process.on('workerMessage', (value, source) => {
+    console.log(`${source} -> ${threadId}:`, value);
+    postMessageToThread(source, { message: 'pong' });
+  });
+} else if (level === 10) {
+  process.on('workerMessage', (value, source) => {
+    console.log(`${source} -> ${threadId}:`, value);
+    channel.postMessage('done');
+    channel.close();
+  });
+
+  await postMessageToThread(0, { message: 'ping' });
+}
+
+channel.onmessage = channel.close;
+```
+
+```cjs
+const {
+  postMessageToThread,
+  threadId,
+  workerData,
+  Worker,
+} = require('node:worker_threads');
+
+const channel = new BroadcastChannel('sync');
+const level = workerData?.level ?? 0;
+
+if (level < 10) {
+  const worker = new Worker(__filename, {
+    workerData: { level: level + 1 },
+  });
+}
+
+if (level === 0) {
+  process.on('workerMessage', (value, source) => {
+    console.log(`${source} -> ${threadId}:`, value);
+    postMessageToThread(source, { message: 'pong' });
+  });
+} else if (level === 10) {
+  process.on('workerMessage', (value, source) => {
+    console.log(`${source} -> ${threadId}:`, value);
+    channel.postMessage('done');
+    channel.close();
+  });
+
+  postMessageToThread(0, { message: 'ping' });
+}
+
+channel.onmessage = channel.close;
 ```
 
 ## `worker.receiveMessageOnPort(port)`
@@ -298,7 +440,9 @@ added:
   - v15.12.0
   - v14.18.0
 changes:
-  - version: v17.5.0
+  - version:
+    - v17.5.0
+    - v16.15.0
     pr-url: https://github.com/nodejs/node/pull/41272
     description: No longer experimental.
 -->
@@ -564,6 +708,10 @@ are part of the channel.
 <!-- YAML
 added: v10.5.0
 changes:
+  - version: v21.0.0
+    pr-url: https://github.com/nodejs/node/pull/47604
+    description: An error is thrown when an untransferable object is in the
+                 transfer list.
   - version:
       - v15.14.0
       - v14.18.0
@@ -766,7 +914,9 @@ port2.postMessage(new URL('https://example.org'));
 ### `port.hasRef()`
 
 <!-- YAML
-added: v18.1.0
+added:
+  - v18.1.0
+  - v16.17.0
 -->
 
 > Stability: 1 - Experimental
@@ -901,7 +1051,9 @@ if (isMainThread) {
 <!-- YAML
 added: v10.5.0
 changes:
-  - version: v18.16.0
+  - version:
+    - v19.8.0
+    - v18.16.0
     pr-url: https://github.com/nodejs/node/pull/46832
     description: Added support for a `name` option, which allows
                  adding a name to worker title for debugging.
@@ -1069,14 +1221,23 @@ added: v10.5.0
 The `'online'` event is emitted when the worker thread has started executing
 JavaScript code.
 
-### `worker.getHeapSnapshot()`
+### `worker.getHeapSnapshot([options])`
 
 <!-- YAML
 added:
  - v13.9.0
  - v12.17.0
+changes:
+  - version: v19.1.0
+    pr-url: https://github.com/nodejs/node/pull/44989
+    description: Support options to configure the heap snapshot.
 -->
 
+* `options` {Object}
+  * `exposeInternals` {boolean} If true, expose internals in the heap snapshot.
+    **Default:** `false`.
+  * `exposeNumericValues` {boolean} If true, expose numeric values in
+    artificial fields. **Default:** `false`.
 * Returns: {Promise} A promise for a Readable Stream containing
   a V8 heap snapshot
 
@@ -1112,7 +1273,7 @@ added:
   `eventLoopUtilization()`.
 * `utilization2` {Object} The result of a previous call to
   `eventLoopUtilization()` prior to `utilization1`.
-* Returns {Object}
+* Returns: {Object}
   * `idle` {number}
   * `active` {number}
   * `utilization` {number}
@@ -1290,7 +1451,7 @@ Node.js event loop.
 import {
   Worker,
   isMainThread,
-} from 'worker_threads';
+} from 'node:worker_threads';
 
 if (isMainThread) {
   new Worker(new URL(import.meta.url));
@@ -1339,13 +1500,17 @@ thread spawned will spawn another until the application crashes.
 [`'close'` event]: #event-close
 [`'exit'` event]: #event-exit
 [`'online'` event]: #event-online
-[`--max-old-space-size`]: cli.md#--max-old-space-sizesize-in-megabytes
-[`--max-semi-space-size`]: cli.md#--max-semi-space-sizesize-in-megabytes
+[`--max-old-space-size`]: cli.md#--max-old-space-sizesize-in-mib
+[`--max-semi-space-size`]: cli.md#--max-semi-space-sizesize-in-mib
 [`ArrayBuffer`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer
 [`AsyncResource`]: async_hooks.md#class-asyncresource
 [`Buffer.allocUnsafe()`]: buffer.md#static-method-bufferallocunsafesize
 [`Buffer`]: buffer.md
 [`ERR_MISSING_MESSAGE_PORT_IN_TRANSFER_LIST`]: errors.md#err_missing_message_port_in_transfer_list
+[`ERR_WORKER_MESSAGING_ERRORED`]: errors.md#err_worker_messaging_errored
+[`ERR_WORKER_MESSAGING_FAILED`]: errors.md#err_worker_messaging_failed
+[`ERR_WORKER_MESSAGING_SAME_THREAD`]: errors.md#err_worker_messaging_same_thread
+[`ERR_WORKER_MESSAGING_TIMEOUT`]: errors.md#err_worker_messaging_timeout
 [`ERR_WORKER_NOT_RUNNING`]: errors.md#err_worker_not_running
 [`EventTarget`]: https://developer.mozilla.org/en-US/docs/Web/API/EventTarget
 [`FileHandle`]: fs.md#class-filehandle
@@ -1381,7 +1546,7 @@ thread spawned will spawn another until the application crashes.
 [`require('node:worker_threads').threadId`]: #workerthreadid
 [`require('node:worker_threads').workerData`]: #workerworkerdata
 [`trace_events`]: tracing.md
-[`v8.getHeapSnapshot()`]: v8.md#v8getheapsnapshot
+[`v8.getHeapSnapshot()`]: v8.md#v8getheapsnapshotoptions
 [`vm`]: vm.md
 [`worker.SHARE_ENV`]: #workershare_env
 [`worker.on('message')`]: #event-message_1

@@ -7,33 +7,33 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 (function exportImmutableGlobal() {
   var builder = new WasmModuleBuilder();
   let globals = [
-    [kWasmI32, 'i32', WasmInitExpr.I32Const(4711)],
-    [kWasmF32, 'f32', WasmInitExpr.F32Const(Math.fround(3.14))],
-    [kWasmF64, 'f64', WasmInitExpr.F64Const(1 / 7)]
+    [kWasmI32, 'i32', 4711, wasmI32Const(4711)],
+    [kWasmF32, 'f32', Math.fround(3.14), wasmF32Const(Math.fround(3.14))],
+    [kWasmF64, 'f64', 1/7, wasmF64Const(1 / 7)]
   ];
-  for (let [type, name, value] of globals) {
-    builder.addGlobal(type, false, value).exportAs(name);
+  for (let [type, name, value, bytes] of globals) {
+    builder.addGlobal(type, false, false, bytes).exportAs(name);
   }
   var instance = builder.instantiate();
 
-  for (let [type, name, value] of globals) {
+  for (let [type, name, value, bytes] of globals) {
     let obj = instance.exports[name];
     assertEquals("object", typeof obj, name);
     assertTrue(obj instanceof WebAssembly.Global, name);
-    assertEquals(value.value || 0, obj.value, name);
+    assertEquals(value || 0, obj.value, name);
     assertThrows(() => obj.value = 0);
   }
 })();
 
 (function canExportI64Global() {
   var builder = new WasmModuleBuilder();
-  builder.addGlobal(kWasmI64, false).exportAs('g');
+  builder.addGlobal(kWasmI64, false, false).exportAs('g');
   builder.instantiate();
 })();
 
 (function canExportAndImportI64() {
   var builder = new WasmModuleBuilder();
-  builder.addGlobal(kWasmI64, false).exportAs('g');
+  builder.addGlobal(kWasmI64, false, false).exportAs('g');
   let g = builder.instantiate().exports.g;
 
   builder = new WasmModuleBuilder();
@@ -44,12 +44,12 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 (function exportMutableGlobal() {
   var builder = new WasmModuleBuilder();
   let globals = [
-    [kWasmI32, 'i32', WasmInitExpr.I32Const(4711)],               // -
-    [kWasmF32, 'f32', WasmInitExpr.F32Const(Math.fround(3.14))],  // -
-    [kWasmF64, 'f64', WasmInitExpr.F64Const(1 / 7)]               // -
+    [kWasmI32, 'i32', 4711, wasmI32Const(4711)],
+    [kWasmF32, 'f32', Math.fround(3.14), wasmF32Const(Math.fround(3.14))],
+    [kWasmF64, 'f64', 1/7, wasmF64Const(1 / 7)]
   ];
-  for (let [index, [type, name, value]] of globals.entries()) {
-    builder.addGlobal(type, true, value).exportAs(name);
+  for (let [index, [type, name, value, bytes]] of globals.entries()) {
+    builder.addGlobal(type, true, false, bytes).exportAs(name);
     builder.addFunction("get " + name, makeSig([], [type]))
       .addBody([kExprGlobalGet, index])
       .exportFunc();
@@ -59,10 +59,10 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
   }
   var instance = builder.instantiate();
 
-  for (let [type, name, value] of globals) {
+  for (let [type, name, value, bytes] of globals) {
     let obj = instance.exports[name];
 
-    assertEquals(value.value || 0, obj.value, name);
+    assertEquals(value || 0, obj.value, name);
 
     // Changing the exported global should change the instance's global.
     obj.value = 1001;
@@ -76,7 +76,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 (function exportImportedMutableGlobal() {
   let builder = new WasmModuleBuilder();
-  builder.addGlobal(kWasmI32, true).exportAs('g1');
+  builder.addGlobal(kWasmI32, true, false).exportAs('g1');
   let g1 = builder.instantiate().exports.g1;
 
   builder = new WasmModuleBuilder();

@@ -74,7 +74,8 @@ class SamplingTestHelper {
   }
 
  private:
-  static void CollectSample(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  static void CollectSample(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    CHECK(i::ValidateCallbackInfo(info));
     instance_->DoCollectSample();
   }
 
@@ -201,7 +202,7 @@ TEST(BuiltinsInSamples) {
 //                              ^      ^       ^
 // sample.stack indices         2      1       0
 TEST(StackFramesConsistent) {
-  i::FLAG_allow_natives_syntax = true;
+  i::v8_flags.allow_natives_syntax = true;
   const char* test_script =
       "function test_sampler_api_inner() {"
       "  CollectSample();"

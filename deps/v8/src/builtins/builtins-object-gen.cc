@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/builtins/builtins-object-gen.h"
+
+#include "src/builtins/builtins-inl.h"
 #include "src/builtins/builtins-utils-gen.h"
-#include "src/builtins/builtins.h"
-#include "src/codegen/code-stub-assembler.h"
 #include "src/common/globals.h"
 #include "src/heap/factory-inl.h"
 #include "src/ic/accessor-assembler.h"
@@ -17,43 +18,6 @@
 
 namespace v8 {
 namespace internal {
-
-// -----------------------------------------------------------------------------
-// ES6 section 19.1 Object Objects
-
-class ObjectBuiltinsAssembler : public CodeStubAssembler {
- public:
-  explicit ObjectBuiltinsAssembler(compiler::CodeAssemblerState* state)
-      : CodeStubAssembler(state) {}
-
- protected:
-  void ReturnToStringFormat(TNode<Context> context, TNode<String> string);
-
-  // TODO(v8:11167) remove |context| and |object| once OrderedNameDictionary
-  // supported.
-  void AddToDictionaryIf(TNode<BoolT> condition, TNode<Context> context,
-                         TNode<Object> object,
-                         TNode<HeapObject> name_dictionary, Handle<Name> name,
-                         TNode<Object> value, Label* bailout);
-  TNode<JSObject> FromPropertyDescriptor(TNode<Context> context,
-                                         TNode<PropertyDescriptorObject> desc);
-  TNode<JSObject> FromPropertyDetails(TNode<Context> context,
-                                      TNode<Object> raw_value,
-                                      TNode<Word32T> details,
-                                      Label* if_bailout);
-  TNode<JSObject> ConstructAccessorDescriptor(TNode<Context> context,
-                                              TNode<Object> getter,
-                                              TNode<Object> setter,
-                                              TNode<BoolT> enumerable,
-                                              TNode<BoolT> configurable);
-  TNode<JSObject> ConstructDataDescriptor(TNode<Context> context,
-                                          TNode<Object> value,
-                                          TNode<BoolT> writable,
-                                          TNode<BoolT> enumerable,
-                                          TNode<BoolT> configurable);
-  TNode<HeapObject> GetAccessorOrUndefined(TNode<HeapObject> accessor,
-                                           Label* if_bailout);
-};
 
 class ObjectEntriesValuesBuiltinsAssembler : public ObjectBuiltinsAssembler {
  public:
@@ -92,10 +56,10 @@ void ObjectBuiltinsAssembler::ReturnToStringFormat(TNode<Context> context,
   TNode<String> lhs = StringConstant("[object ");
   TNode<String> rhs = StringConstant("]");
 
-  Callable callable = CodeFactory::StringAdd(isolate(), STRING_ADD_CHECK_NONE);
+  Builtin builtin = Builtins::StringAdd(STRING_ADD_CHECK_NONE);
 
-  Return(CallStub(callable, context, CallStub(callable, context, lhs, string),
-                  rhs));
+  Return(CallBuiltin(builtin, context,
+                     CallBuiltin(builtin, context, lhs, string), rhs));
 }
 
 TNode<JSObject> ObjectBuiltinsAssembler::ConstructAccessorDescriptor(
@@ -252,8 +216,7 @@ TNode<JSArray> ObjectEntriesValuesBuiltinsAssembler::FastGetOwnValuesOrEntries(
   {
     GotoIf(WordEqual(object_enum_length, IntPtrConstant(0)), if_no_properties);
     TNode<FixedArray> values_or_entries =
-        CAST(AllocateFixedArray(PACKED_ELEMENTS, object_enum_length,
-                                AllocationFlag::kAllowLargeObjectAllocation));
+        CAST(AllocateFixedArray(PACKED_ELEMENTS, object_enum_length));
 
     // If in case we have enum_cache,
     // we can't detect accessor of object until loop through descriptors.
@@ -738,7 +701,7 @@ TF_BUILTIN(ObjectPrototypeIsPrototypeOf, ObjectBuiltinsAssembler) {
       // If {value} is a primitive HeapObject, we need to return
       // false instead of throwing an exception per order of the
       // steps in the specification, so check that first here.
-      GotoIfNot(IsJSReceiver(value_heap_object), &if_valueisnotreceiver);
+      GotoIfNot(JSAnyIsNotPrimitive(value_heap_object), &if_valueisnotreceiver);
 
       // Simulate the ToObject invocation on {receiver}.
       ToObject(context, receiver);
@@ -751,18 +714,19 @@ TF_BUILTIN(ObjectPrototypeIsPrototypeOf, ObjectBuiltinsAssembler) {
 }
 
 TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
+  TVARIABLE(String, var_default);
+  TVARIABLE(HeapObject, var_holder);
+  TVARIABLE(Map, var_holder_map);
+
   Label checkstringtag(this), if_arguments(this), if_array(this),
       if_boolean(this), if_date(this), if_error(this), if_function(this),
       if_number(this, Label::kDeferred), if_object(this), if_primitive(this),
-      if_proxy(this, Label::kDeferred), if_regexp(this), if_string(this),
-      if_symbol(this, Label::kDeferred), if_value(this),
-      if_bigint(this, Label::kDeferred);
+      if_proxy(this, {&var_holder, &var_holder_map}, Label::kDeferred),
+      if_regexp(this), if_string(this), if_symbol(this, Label::kDeferred),
+      if_value(this), if_bigint(this, Label::kDeferred);
 
   auto receiver = Parameter<Object>(Descriptor::kReceiver);
   auto context = Parameter<Context>(Descriptor::kContext);
-
-  TVARIABLE(String, var_default);
-  TVARIABLE(HeapObject, var_holder);
 
   // This is arranged to check the likely cases first.
   GotoIf(TaggedIsSmi(receiver), &if_number);
@@ -770,6 +734,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
   TNode<HeapObject> receiver_heap_object = CAST(receiver);
   TNode<Map> receiver_map = LoadMap(receiver_heap_object);
   var_holder = receiver_heap_object;
+  var_holder_map = receiver_map;
   TNode<Uint16T> receiver_instance_type = LoadMapInstanceType(receiver_map);
   GotoIf(IsPrimitiveInstanceType(receiver_instance_type), &if_primitive);
   GotoIf(IsFunctionInstanceType(receiver_instance_type), &if_function);
@@ -819,6 +784,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadObjectField<HeapObject>(boolean_initial_map, Map::kPrototypeOffset);
     var_default = BooleanToStringConstant();
     var_holder = boolean_prototype;
+    var_holder_map = LoadMap(boolean_prototype);
     Goto(&checkstringtag);
   }
 
@@ -851,6 +817,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadObjectField<HeapObject>(number_initial_map, Map::kPrototypeOffset);
     var_default = NumberToStringConstant();
     var_holder = number_prototype;
+    var_holder_map = LoadMap(number_prototype);
     Goto(&checkstringtag);
   }
 
@@ -878,41 +845,6 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
     Return(UndefinedToStringConstant());
   }
 
-  BIND(&if_proxy);
-  {
-    // If {receiver} is a proxy for a JSArray, we default to "[object Array]",
-    // otherwise we default to "[object Object]" or "[object Function]" here,
-    // depending on whether the {receiver} is callable. The order matters here,
-    // i.e. we need to execute the %ArrayIsArray check before the [[Get]] below,
-    // as the exception is observable.
-    TNode<Object> receiver_is_array =
-        CallRuntime(Runtime::kArrayIsArray, context, receiver);
-    TNode<String> builtin_tag = Select<String>(
-        IsTrue(receiver_is_array), [=] { return ArrayStringConstant(); },
-        [=] {
-          return Select<String>(
-              IsCallableMap(receiver_map),
-              [=] { return FunctionStringConstant(); },
-              [=] { return ObjectStringConstant(); });
-        });
-
-    // Lookup the @@toStringTag property on the {receiver}.
-    TVARIABLE(Object, var_tag,
-              GetProperty(context, receiver,
-                          isolate()->factory()->to_string_tag_symbol()));
-    Label if_tagisnotstring(this), if_tagisstring(this);
-    GotoIf(TaggedIsSmi(var_tag.value()), &if_tagisnotstring);
-    Branch(IsString(CAST(var_tag.value())), &if_tagisstring,
-           &if_tagisnotstring);
-    BIND(&if_tagisnotstring);
-    {
-      var_tag = builtin_tag;
-      Goto(&if_tagisstring);
-    }
-    BIND(&if_tagisstring);
-    ReturnToStringFormat(context, CAST(var_tag.value()));
-  }
-
   BIND(&if_regexp);
   {
     var_default = RegexpToStringConstant();
@@ -930,6 +862,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadObjectField<HeapObject>(string_initial_map, Map::kPrototypeOffset);
     var_default = StringToStringConstant();
     var_holder = string_prototype;
+    var_holder_map = LoadMap(string_prototype);
     Goto(&checkstringtag);
   }
 
@@ -944,6 +877,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadObjectField<HeapObject>(symbol_initial_map, Map::kPrototypeOffset);
     var_default = ObjectToStringConstant();
     var_holder = symbol_prototype;
+    var_holder_map = LoadMap(symbol_prototype);
     Goto(&checkstringtag);
   }
 
@@ -958,6 +892,7 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadObjectField<HeapObject>(bigint_initial_map, Map::kPrototypeOffset);
     var_default = ObjectToStringConstant();
     var_holder = bigint_prototype;
+    var_holder_map = LoadMap(bigint_prototype);
     Goto(&checkstringtag);
   }
 
@@ -973,7 +908,6 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
         LoadJSPrimitiveWrapperValue(CAST(receiver_heap_object));
     // We need to start with the object to see if the value was a subclass
     // which might have interesting properties.
-    var_holder = receiver_heap_object;
     GotoIf(TaggedIsSmi(receiver_value), &if_value_is_number);
     TNode<Map> receiver_value_map = LoadMap(CAST(receiver_value));
     GotoIf(IsHeapNumberMap(receiver_value_map), &if_value_is_number);
@@ -1019,36 +953,67 @@ TF_BUILTIN(ObjectToString, ObjectBuiltinsAssembler) {
 
   BIND(&checkstringtag);
   {
-    // Check if all relevant maps (including the prototype maps) don't
-    // have any interesting symbols (i.e. that none of them have the
-    // @@toStringTag property).
-    Label loop(this, &var_holder), return_default(this),
-        return_generic(this, Label::kDeferred);
-    Goto(&loop);
-    BIND(&loop);
-    {
-      TNode<HeapObject> holder = var_holder.value();
-      GotoIf(IsNull(holder), &return_default);
-      TNode<Map> holder_map = LoadMap(holder);
-      TNode<Uint32T> holder_bit_field3 = LoadMapBitField3(holder_map);
-      GotoIf(IsSetWord32<Map::Bits3::MayHaveInterestingSymbolsBit>(
-                 holder_bit_field3),
-             &return_generic);
-      var_holder = LoadMapPrototype(holder_map);
-      Goto(&loop);
-    }
-
-    BIND(&return_generic);
-    {
-      TNode<Object> tag = GetProperty(context, ToObject(context, receiver),
-                                      ToStringTagSymbolConstant());
-      GotoIf(TaggedIsSmi(tag), &return_default);
-      GotoIfNot(IsString(CAST(tag)), &return_default);
-      ReturnToStringFormat(context, CAST(tag));
-    }
+    Label return_default(this);
+    TNode<Object> tag =
+        GetInterestingProperty(context, receiver, &var_holder, &var_holder_map,
+                               ToStringTagSymbolConstant(), &return_default);
+    GotoIf(TaggedIsSmi(tag), &return_default);
+    GotoIfNot(IsString(CAST(tag)), &return_default);
+    ReturnToStringFormat(context, CAST(tag));
 
     BIND(&return_default);
     Return(var_default.value());
+  }
+
+  BIND(&if_proxy);
+  {
+    receiver_heap_object = var_holder.value();
+    receiver_map = var_holder_map.value();
+    // Check if the proxy has been revoked.
+    Label throw_proxy_handler_revoked(this, Label::kDeferred);
+    TNode<HeapObject> handler =
+        CAST(LoadObjectField(receiver_heap_object, JSProxy::kHandlerOffset));
+    CSA_DCHECK(this, IsNullOrJSReceiver(handler));
+    GotoIfNot(JSAnyIsNotPrimitive(handler), &throw_proxy_handler_revoked);
+
+    // If {receiver_heap_object} is a proxy for a JSArray, we default to
+    // "[object Array]", otherwise we default to "[object Object]" or "[object
+    // Function]" here, depending on whether the {receiver_heap_object} is
+    // callable. The order matters here, i.e. we need to execute the
+    // %ArrayIsArray check before the [[Get]] below, as the exception is
+    // observable.
+    TNode<Object> receiver_is_array =
+        CallRuntime(Runtime::kArrayIsArray, context, receiver_heap_object);
+    TNode<String> builtin_tag = Select<String>(
+        IsTrue(receiver_is_array), [=] { return ArrayStringConstant(); },
+        [=] {
+          return Select<String>(
+              IsCallableMap(receiver_map),
+              [=] { return FunctionStringConstant(); },
+              [=] { return ObjectStringConstant(); });
+        });
+
+    // Lookup the @@toStringTag property on the {receiver_heap_object}.
+    TVARIABLE(Object, var_tag,
+              GetProperty(context, receiver_heap_object,
+                          isolate()->factory()->to_string_tag_symbol()));
+    Label if_tagisnotstring(this), if_tagisstring(this);
+    GotoIf(TaggedIsSmi(var_tag.value()), &if_tagisnotstring);
+    Branch(IsString(CAST(var_tag.value())), &if_tagisstring,
+           &if_tagisnotstring);
+    BIND(&if_tagisnotstring);
+    {
+      var_tag = builtin_tag;
+      Goto(&if_tagisstring);
+    }
+    BIND(&if_tagisstring);
+    ReturnToStringFormat(context, CAST(var_tag.value()));
+
+    BIND(&throw_proxy_handler_revoked);
+    {
+      ThrowTypeError(context, MessageTemplate::kProxyRevoked,
+                     "Object.prototype.toString");
+    }
   }
 }
 
@@ -1107,13 +1072,8 @@ TF_BUILTIN(ObjectCreate, ObjectBuiltinsAssembler) {
     BIND(&null_proto);
     {
       map = LoadSlowObjectWithNullPrototypeMap(native_context);
-      if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
-        new_properties =
-            AllocateSwissNameDictionary(SwissNameDictionary::kInitialCapacity);
-      } else {
-        new_properties =
-            AllocateNameDictionary(NameDictionary::kInitialCapacity);
-      }
+      new_properties =
+          AllocatePropertyDictionary(PropertyDictionary::kInitialCapacity);
       Goto(&instantiate_map);
     }
 
@@ -1127,9 +1087,15 @@ TF_BUILTIN(ObjectCreate, ObjectBuiltinsAssembler) {
       TNode<PrototypeInfo> prototype_info =
           LoadMapPrototypeInfo(LoadMap(CAST(prototype)), &call_runtime);
       Comment("Load ObjectCreateMap from PrototypeInfo");
-      TNode<MaybeObject> maybe_map = LoadMaybeWeakObjectField(
-          prototype_info, PrototypeInfo::kObjectCreateMapOffset);
-      GotoIf(TaggedEqual(maybe_map, UndefinedConstant()), &call_runtime);
+      TNode<HeapObject> derived_maps = CAST(
+          LoadObjectField(prototype_info, PrototypeInfo::kDerivedMapsOffset));
+      // In case it exists, derived maps is a weak array list where the first
+      // element is the object create map.
+      GotoIf(TaggedEqual(derived_maps, UndefinedConstant()), &call_runtime);
+      CSA_DCHECK(this, InstanceTypeEqual(LoadInstanceType(derived_maps),
+                                         WEAK_ARRAY_LIST_TYPE));
+      TNode<MaybeObject> maybe_map = UncheckedCast<MaybeObject>(LoadObjectField(
+          derived_maps, IntPtrConstant(WeakArrayList::kHeaderSize)));
       map = CAST(GetHeapObjectAssumeWeak(maybe_map, &call_runtime));
       Goto(&instantiate_map);
     }
@@ -1167,7 +1133,7 @@ TF_BUILTIN(ObjectIs, ObjectBuiltinsAssembler) {
 
 TF_BUILTIN(CreateIterResultObject, ObjectBuiltinsAssembler) {
   const auto value = Parameter<Object>(Descriptor::kValue);
-  const auto done = Parameter<Oddball>(Descriptor::kDone);
+  const auto done = Parameter<Boolean>(Descriptor::kDone);
   const auto context = Parameter<Context>(Descriptor::kContext);
 
   const TNode<NativeContext> native_context = LoadNativeContext(context);
@@ -1255,8 +1221,8 @@ TF_BUILTIN(CreateGeneratorObject, ObjectBuiltinsAssembler) {
   TNode<IntPtrT> size =
       IntPtrAdd(WordSar(frame_size, IntPtrConstant(kTaggedSizeLog2)),
                 formal_parameter_count);
-  TNode<FixedArrayBase> parameters_and_registers = AllocateFixedArray(
-      HOLEY_ELEMENTS, size, AllocationFlag::kAllowLargeObjectAllocation);
+  TNode<FixedArrayBase> parameters_and_registers =
+      AllocateFixedArray(HOLEY_ELEMENTS, size);
   FillFixedArrayWithValue(HOLEY_ELEMENTS, parameters_and_registers,
                           IntPtrConstant(0), size, RootIndex::kUndefinedValue);
   // TODO(cbruni): support start_offset to avoid double initialization.
@@ -1295,6 +1261,67 @@ TF_BUILTIN(CreateGeneratorObject, ObjectBuiltinsAssembler) {
   }
 }
 
+TF_BUILTIN(OrdinaryGetOwnPropertyDescriptor, ObjectBuiltinsAssembler) {
+  auto context = Parameter<Context>(Descriptor::kContext);
+  auto object = Parameter<JSReceiver>(Descriptor::kReceiver);
+  auto name = Parameter<Name>(Descriptor::kKey);
+  CSA_DCHECK(this, Word32BinaryNot(IsSpecialReceiverInstanceType(
+                       LoadMapInstanceType(LoadMap(object)))));
+
+  Label if_notunique_name(this), if_iskeyunique(this), done(this),
+      if_keyisindex(this), call_runtime(this);
+
+  TVARIABLE(IntPtrT, var_index, IntPtrConstant(0));
+  TVARIABLE(Name, var_name, name);
+  TVARIABLE(HeapObject, result, UndefinedConstant());
+
+  TryToName(name, &if_keyisindex, &var_index, &if_iskeyunique, &var_name,
+            &call_runtime, &if_notunique_name);
+
+  BIND(&if_notunique_name);
+  {
+    Label not_in_string_table(this);
+    // If the string was not found in the string table, then no regular
+    // object can have a property with that name, so return |undefined|.
+    TryInternalizeString(CAST(name), &if_keyisindex, &var_index,
+                         &if_iskeyunique, &var_name, &done, &call_runtime);
+  }
+
+  BIND(&if_iskeyunique);
+  {
+    Label if_found_value(this), if_not_found(this);
+
+    TVARIABLE(Object, var_value);
+    TVARIABLE(Uint32T, var_details);
+    TVARIABLE(Object, var_raw_value);
+    TNode<Map> map = LoadMap(object);
+    TNode<Int32T> instance_type = LoadMapInstanceType(map);
+
+    TryGetOwnProperty(context, object, object, map, instance_type,
+                      var_name.value(), &if_found_value, &var_value,
+                      &var_details, &var_raw_value, &done, &call_runtime,
+                      kReturnAccessorPair);
+
+    BIND(&if_found_value);
+
+    // 4. Return FromPropertyDetails(desc).
+    result = AllocatePropertyDescriptorObject(context);
+    InitializePropertyDescriptorObject(CAST(result.value()), var_value.value(),
+                                       var_details.value(), &call_runtime);
+    Goto(&done);
+  }
+
+  BIND(&done);
+  Return(result.value());
+
+  BIND(&if_keyisindex);
+  Goto(&call_runtime);
+
+  BIND(&call_runtime);
+  TailCallRuntime(Runtime::kGetOwnPropertyDescriptorObject, context, object,
+                  var_name.value());
+}
+
 // ES6 section 19.1.2.7 Object.getOwnPropertyDescriptor ( O, P )
 TF_BUILTIN(ObjectGetOwnPropertyDescriptor, ObjectBuiltinsAssembler) {
   auto argc = UncheckedParameter<Int32T>(Descriptor::kJSActualArgumentsCount);
@@ -1312,81 +1339,13 @@ TF_BUILTIN(ObjectGetOwnPropertyDescriptor, ObjectBuiltinsAssembler) {
   key = CallBuiltin(Builtin::kToName, context, key);
 
   // 3. Let desc be ? obj.[[GetOwnProperty]](key).
-  Label if_keyisindex(this), if_iskeyunique(this),
-      call_runtime(this, Label::kDeferred),
-      return_undefined(this, Label::kDeferred), if_notunique_name(this);
+  TNode<Object> desc =
+      CallBuiltin(Builtin::kGetOwnPropertyDescriptor, context, object, key);
 
-  TNode<Map> map = LoadMap(object);
-  TNode<Uint16T> instance_type = LoadMapInstanceType(map);
-  GotoIf(IsSpecialReceiverInstanceType(instance_type), &call_runtime);
-  {
-    TVARIABLE(IntPtrT, var_index, IntPtrConstant(0));
-    TVARIABLE(Name, var_name);
+  // 4. Return FromPropertyDescriptor(desc).
+  TNode<HeapObject> result = FromPropertyDescriptor(context, desc);
 
-    TryToName(key, &if_keyisindex, &var_index, &if_iskeyunique, &var_name,
-              &call_runtime, &if_notunique_name);
-
-    BIND(&if_notunique_name);
-    {
-      Label not_in_string_table(this);
-      TryInternalizeString(CAST(key), &if_keyisindex, &var_index,
-                           &if_iskeyunique, &var_name, &not_in_string_table,
-                           &call_runtime);
-
-      BIND(&not_in_string_table);
-      {
-        // If the string was not found in the string table, then no regular
-        // object can have a property with that name, so return |undefined|.
-        Goto(&return_undefined);
-      }
-    }
-
-    BIND(&if_iskeyunique);
-    {
-      Label if_found_value(this), return_empty(this), if_not_found(this);
-
-      TVARIABLE(Object, var_value);
-      TVARIABLE(Uint32T, var_details);
-      TVARIABLE(Object, var_raw_value);
-
-      TryGetOwnProperty(context, object, object, map, instance_type,
-                        var_name.value(), &if_found_value, &var_value,
-                        &var_details, &var_raw_value, &return_empty,
-                        &if_not_found, kReturnAccessorPair);
-
-      BIND(&if_found_value);
-      // 4. Return FromPropertyDetails(desc).
-      TNode<JSObject> js_desc = FromPropertyDetails(
-          context, var_value.value(), var_details.value(), &call_runtime);
-      args.PopAndReturn(js_desc);
-
-      BIND(&return_empty);
-      var_value = UndefinedConstant();
-      args.PopAndReturn(UndefinedConstant());
-
-      BIND(&if_not_found);
-      Goto(&call_runtime);
-    }
-  }
-
-  BIND(&if_keyisindex);
-  Goto(&call_runtime);
-
-  BIND(&call_runtime);
-  {
-    TNode<Object> desc =
-        CallRuntime(Runtime::kGetOwnPropertyDescriptor, context, object, key);
-
-    GotoIf(IsUndefined(desc), &return_undefined);
-
-    TNode<PropertyDescriptorObject> desc_object = CAST(desc);
-
-    // 4. Return FromPropertyDescriptor(desc).
-    TNode<JSObject> js_desc = FromPropertyDescriptor(context, desc_object);
-    args.PopAndReturn(js_desc);
-  }
-  BIND(&return_undefined);
-  args.PopAndReturn(UndefinedConstant());
+  args.PopAndReturn(result);
 }
 
 // TODO(v8:11167) remove remove |context| and |object| parameters once
@@ -1398,8 +1357,8 @@ void ObjectBuiltinsAssembler::AddToDictionaryIf(
   Label done(this);
   GotoIfNot(condition, &done);
 
-  Add<PropertyDictionary>(CAST(name_dictionary), HeapConstant(name), value,
-                          bailout);
+  AddToDictionary<PropertyDictionary>(CAST(name_dictionary),
+                                      HeapConstantNoHole(name), value, bailout);
   Goto(&done);
 
   BIND(&done);
@@ -1455,10 +1414,7 @@ TNode<JSObject> ObjectBuiltinsAssembler::FromPropertyDescriptor(
         native_context, Context::SLOW_OBJECT_WITH_OBJECT_PROTOTYPE_MAP));
     // We want to preallocate the slots for value, writable, get, set,
     // enumerable and configurable - a total of 6
-    TNode<HeapObject> properties =
-        V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL
-            ? TNode<HeapObject>(AllocateSwissNameDictionary(6))
-            : AllocateNameDictionary(6);
+    TNode<HeapObject> properties = AllocatePropertyDictionary(6);
     TNode<JSObject> js_desc = AllocateJSObjectFromMap(map, properties);
 
     Label bailout(this, Label::kDeferred);
@@ -1507,6 +1463,24 @@ TNode<JSObject> ObjectBuiltinsAssembler::FromPropertyDescriptor(
 
   BIND(&return_desc);
   return js_descriptor.value();
+}
+
+TNode<HeapObject> ObjectBuiltinsAssembler::FromPropertyDescriptor(
+    TNode<Context> context, TNode<Object> desc) {
+  CSA_DCHECK(this, TaggedIsNotSmi(desc));
+
+  if (IsUndefinedConstant(desc)) return UndefinedConstant();
+
+  Label done(this);
+  TVARIABLE(HeapObject, result, UndefinedConstant());
+  GotoIf(IsUndefined(desc), &done);
+
+  TNode<PropertyDescriptorObject> property_descriptor = CAST(desc);
+  result = FromPropertyDescriptor(context, property_descriptor);
+  Goto(&done);
+
+  BIND(&done);
+  return result.value();
 }
 
 TNode<JSObject> ObjectBuiltinsAssembler::FromPropertyDetails(

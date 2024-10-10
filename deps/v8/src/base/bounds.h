@@ -16,11 +16,25 @@ namespace base {
 template <typename T, typename U>
 inline constexpr bool IsInRange(T value, U lower_limit, U higher_limit) {
   DCHECK_LE(lower_limit, higher_limit);
-  STATIC_ASSERT(sizeof(U) <= sizeof(T));
+  static_assert(sizeof(U) <= sizeof(T));
   using unsigned_T = typename std::make_unsigned<T>::type;
   // Use static_cast to support enum classes.
   return static_cast<unsigned_T>(static_cast<unsigned_T>(value) -
                                  static_cast<unsigned_T>(lower_limit)) <=
+         static_cast<unsigned_T>(static_cast<unsigned_T>(higher_limit) -
+                                 static_cast<unsigned_T>(lower_limit));
+}
+
+// Like IsInRange but for the half-open range [lower_limit, higher_limit).
+template <typename T, typename U>
+inline constexpr bool IsInHalfOpenRange(T value, U lower_limit,
+                                        U higher_limit) {
+  DCHECK_LE(lower_limit, higher_limit);
+  static_assert(sizeof(U) <= sizeof(T));
+  using unsigned_T = typename std::make_unsigned<T>::type;
+  // Use static_cast to support enum classes.
+  return static_cast<unsigned_T>(static_cast<unsigned_T>(value) -
+                                 static_cast<unsigned_T>(lower_limit)) <
          static_cast<unsigned_T>(static_cast<unsigned_T>(higher_limit) -
                                  static_cast<unsigned_T>(lower_limit));
 }

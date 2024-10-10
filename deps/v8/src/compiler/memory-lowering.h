@@ -75,6 +75,7 @@ class MemoryLowering final : public Reducer {
 
   MemoryLowering(
       JSGraph* jsgraph, Zone* zone, JSGraphAssembler* graph_assembler,
+      bool is_wasm,
       AllocationFolding allocation_folding =
           AllocationFolding::kDontAllocationFolding,
       WriteBarrierAssertFailedCallback callback = [](Node*, Node*, const char*,
@@ -89,7 +90,6 @@ class MemoryLowering final : public Reducer {
   // Specific reducers for each optype to enable keeping track of
   // AllocationState by the MemoryOptimizer.
   Reduction ReduceAllocateRaw(Node* node, AllocationType allocation_type,
-                              AllowLargeObjects allow_large_objects,
                               AllocationState const** state);
   Reduction ReduceLoadFromObject(Node* node);
   Reduction ReduceLoadElement(Node* node);
@@ -108,11 +108,16 @@ class MemoryLowering final : public Reducer {
                                            Node* value,
                                            AllocationState const* state,
                                            WriteBarrierKind);
-  Node* DecodeExternalPointer(Node* encoded_pointer, ExternalPointerTag tag);
-  Reduction ReduceLoadMap(Node* encoded_pointer);
+  Reduction ReduceLoadExternalPointerField(Node* node);
+  Reduction ReduceLoadBoundedSize(Node* node);
+  Reduction ReduceLoadMap(Node* node);
   Node* ComputeIndex(ElementAccess const& access, Node* node);
   void EnsureAllocateOperator();
   Node* GetWasmInstanceNode();
+
+  // Align the value to kObjectAlignment8GbHeap if V8_COMPRESS_POINTERS_8GB is
+  // defined.
+  Node* AlignToAllocationAlignment(Node* address);
 
   Graph* graph() const { return graph_; }
   Isolate* isolate() const { return isolate_; }
@@ -130,6 +135,7 @@ class MemoryLowering final : public Reducer {
   CommonOperatorBuilder* common_;
   MachineOperatorBuilder* machine_;
   JSGraphAssembler* graph_assembler_;
+  bool is_wasm_;
   AllocationFolding allocation_folding_;
   WriteBarrierAssertFailedCallback write_barrier_assert_failed_;
   const char* function_debug_name_;

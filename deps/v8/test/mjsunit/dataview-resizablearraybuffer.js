@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-rab-gsab --allow-natives-syntax
+// Flags: --allow-natives-syntax --js-float16array
 
 "use strict";
 
@@ -431,4 +431,33 @@ d8.file.execute('test/mjsunit/typedarray-helpers.js');
     assertThrows(() => { lengthTrackingWithOffset.setUint8(0, evil); },
                  TypeError);
   }
+})();
+
+(function DataViewsAndRabGsabDataViews() {
+  // Internally we differentiate between JSDataView and JSRabGsabDataView. Test
+  // that they're indistinguishable externally.
+  const ab = new ArrayBuffer(10);
+  const rab = new ArrayBuffer(10, {maxByteLength: 20});
+
+  const dv1 = new DataView(ab);
+  const dv2 = new DataView(rab);
+
+  assertEquals(DataView.prototype, dv1.__proto__);
+  assertEquals(DataView.prototype, dv2.__proto__);
+  assertEquals(DataView, dv1.constructor);
+  assertEquals(DataView, dv2.constructor);
+
+  class MyDataView extends DataView {
+    constructor(buffer) {
+      super(buffer);
+    }
+  }
+
+  const dv3 = new MyDataView(ab);
+  const dv4 = new MyDataView(rab);
+
+  assertEquals(MyDataView.prototype, dv3.__proto__);
+  assertEquals(MyDataView.prototype, dv4.__proto__);
+  assertEquals(MyDataView, dv3.constructor);
+  assertEquals(MyDataView, dv4.constructor);
 })();

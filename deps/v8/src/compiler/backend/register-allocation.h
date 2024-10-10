@@ -71,28 +71,15 @@ inline int ByteWidthForStackSlot(MachineRepresentation rep) {
       return kDoubleSize;
     case MachineRepresentation::kSimd128:
       return kSimd128Size;
+    case MachineRepresentation::kSimd256:
+      return kSimd256Size;
     case MachineRepresentation::kNone:
     case MachineRepresentation::kMapWord:
+    case MachineRepresentation::kIndirectPointer:
       break;
   }
   UNREACHABLE();
 }
-
-class RegisterAllocationData : public ZoneObject {
- public:
-  enum Type {
-    kTopTier,
-    kMidTier,
-  };
-
-  Type type() const { return type_; }
-
- protected:
-  explicit RegisterAllocationData(Type type) : type_(type) {}
-
- private:
-  Type type_;
-};
 
 }  // namespace compiler
 }  // namespace internal

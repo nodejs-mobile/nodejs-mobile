@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "src/wasm/wasm-features.h"
-#include "src/execution/isolate.h"
+
+#include "src/execution/isolate-inl.h"
 #include "src/flags/flags.h"
 #include "src/handles/handles-inl.h"
 
@@ -15,7 +16,7 @@ namespace wasm {
 WasmFeatures WasmFeatures::FromFlags() {
   WasmFeatures features = WasmFeatures::None();
 #define FLAG_REF(feat, ...) \
-  if (FLAG_experimental_wasm_##feat) features.Add(kFeature_##feat);
+  if (v8_flags.experimental_wasm_##feat) features.Add(kFeature_##feat);
   FOREACH_WASM_FEATURE_FLAG(FLAG_REF)
 #undef FLAG_REF
 #define NON_FLAG_REF(feat, ...) features.Add(kFeature_##feat);
@@ -26,19 +27,30 @@ WasmFeatures WasmFeatures::FromFlags() {
 
 // static
 WasmFeatures WasmFeatures::FromIsolate(Isolate* isolate) {
-  return FromContext(isolate, handle(isolate->context(), isolate));
+  return FromContext(isolate, isolate->native_context());
 }
 
 // static
 WasmFeatures WasmFeatures::FromContext(Isolate* isolate,
-                                       Handle<Context> context) {
+                                       Handle<NativeContext> context) {
   WasmFeatures features = WasmFeatures::FromFlags();
-  if (isolate->IsWasmSimdEnabled(context)) {
-    features.Add(kFeature_simd);
+  if (isolate->IsWasmStringRefEnabled(context)) {
+    features.Add(kFeature_stringref);
   }
-  if (isolate->AreWasmExceptionsEnabled(context)) {
-    features.Add(kFeature_eh);
+  if (isolate->IsWasmInliningEnabled(context)) {
+    features.Add(kFeature_inlining);
   }
+  if (isolate->IsWasmImportedStringsEnabled(context)) {
+    features.Add(kFeature_imported_strings);
+  }
+  if (isolate->IsWasmJSPIEnabled(context)) {
+    features.Add(kFeature_jspi);
+    features.Add(kFeature_type_reflection);
+  }
+  if (v8_flags.experimental_wasm_type_reflection) {
+    features.Add(kFeature_type_reflection);
+  }
+  // This space intentionally left blank for future Wasm origin trials.
   return features;
 }
 

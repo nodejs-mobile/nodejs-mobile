@@ -29,11 +29,8 @@
 
 #include <vector>
 
-#include "include/v8-initialization.h"
 #include "src/api/api-inl.h"
 #include "src/base/bit-field.h"
-#include "src/base/platform/platform.h"
-#include "src/init/v8.h"
 #include "src/numbers/conversions.h"
 #include "test/cctest/cctest.h"
 #include "test/cctest/collector.h"
@@ -150,12 +147,8 @@ TEST(SNPrintF) {
 
 static const int kAreaSize = 512;
 
-
-void TestMemMove(byte* area1,
-                 byte* area2,
-                 int src_offset,
-                 int dest_offset,
-                 int length) {
+void TestMemMove(uint8_t* area1, uint8_t* area2, int src_offset,
+                 int dest_offset, int length) {
   for (int i = 0; i < kAreaSize; i++) {
     area1[i] = i & 0xFF;
     area2[i] = i & 0xFF;
@@ -175,13 +168,13 @@ void TestMemMove(byte* area1,
 }
 
 TEST(MemMove) {
-  byte* area1 = new byte[kAreaSize];
-  byte* area2 = new byte[kAreaSize];
+  uint8_t* area1 = new uint8_t[kAreaSize];
+  uint8_t* area2 = new uint8_t[kAreaSize];
 
   static const int kMinOffset = 32;
   static const int kMaxOffset = 64;
   static const int kMaxLength = 128;
-  STATIC_ASSERT(kMaxOffset + kMaxLength < kAreaSize);
+  static_assert(kMaxOffset + kMaxLength < kAreaSize);
 
   for (int src_offset = kMinOffset; src_offset <= kMaxOffset; src_offset++) {
     for (int dst_offset = kMinOffset; dst_offset <= kMaxOffset; dst_offset++) {

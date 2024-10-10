@@ -23,14 +23,11 @@
 namespace v8 {
 namespace internal {
 
-template <typename T>
-class Handle;
 class WasmFrame;
 
 namespace wasm {
 
 class DebugInfoImpl;
-class IndirectNameMap;
 class NativeModule;
 class WasmCode;
 class WireBytesRef;
@@ -104,6 +101,8 @@ class DebugSideTable {
 
     void Print(std::ostream&) const;
 
+    size_t EstimateCurrentMemoryConsumption() const;
+
    private:
     int pc_offset_;
     int stack_height_;
@@ -152,6 +151,8 @@ class DebugSideTable {
 
   void Print(std::ostream&) const;
 
+  size_t EstimateCurrentMemoryConsumption() const;
+
  private:
   struct EntryPositionLess {
     bool operator()(const Entry& a, const Entry& b) const {
@@ -173,30 +174,15 @@ class V8_EXPORT_PRIVATE DebugInfo {
   // For the frame inspection methods below:
   // {fp} is the frame pointer of the Liftoff frame, {debug_break_fp} that of
   // the {WasmDebugBreak} frame (if any).
-  int GetNumLocals(Address pc);
+  int GetNumLocals(Address pc, Isolate* isolate);
   WasmValue GetLocalValue(int local, Address pc, Address fp,
                           Address debug_break_fp, Isolate* isolate);
-  int GetStackDepth(Address pc);
+  int GetStackDepth(Address pc, Isolate* isolate);
 
-  const wasm::WasmFunction& GetFunctionAtAddress(Address pc);
+  const wasm::WasmFunction& GetFunctionAtAddress(Address pc, Isolate* isolate);
 
   WasmValue GetStackValue(int index, Address pc, Address fp,
                           Address debug_break_fp, Isolate* isolate);
-
-  // Returns the name of the entity (with the given |index| and |kind|) derived
-  // from the exports table. If the entity is not exported, an empty reference
-  // will be returned instead.
-  WireBytesRef GetExportName(ImportExportKindCode kind, uint32_t index);
-
-  // Returns the module and field name of the entity (with the given |index|
-  // and |kind|) derived from the imports table. If the entity is not imported,
-  // a pair of empty references will be returned instead.
-  std::pair<WireBytesRef, WireBytesRef> GetImportName(ImportExportKindCode kind,
-                                                      uint32_t index);
-
-  WireBytesRef GetTypeName(int type_index);
-  WireBytesRef GetLocalName(int func_index, int local_index);
-  WireBytesRef GetFieldName(int struct_index, int field_index);
 
   void SetBreakpoint(int func_index, int offset, Isolate* current_isolate);
 
@@ -224,6 +210,8 @@ class V8_EXPORT_PRIVATE DebugInfo {
   DebugSideTable* GetDebugSideTableIfExists(const WasmCode*) const;
 
   void RemoveIsolate(Isolate*);
+
+  size_t EstimateCurrentMemoryConsumption() const;
 
  private:
   std::unique_ptr<DebugInfoImpl> impl_;

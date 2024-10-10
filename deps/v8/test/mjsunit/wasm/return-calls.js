@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --experimental-wasm-return-call
 // Reduce the stack size to test that we are indeed doing return calls (instead
 // of standard calls which consume stack space).
 // Flags: --stack-size=128
@@ -140,7 +139,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
   // Arbitrary location in the table.
   const tableIndex = 3;
 
-  builder.addActiveElementSegment(0, WasmInitExpr.I32Const(tableIndex),[pick]);
+  builder.addActiveElementSegment(0, wasmI32Const(tableIndex),[pick]);
 
   let main = builder.addFunction("main", kSig_i_iii)
         .addBody([

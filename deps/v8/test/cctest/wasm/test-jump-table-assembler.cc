@@ -38,15 +38,16 @@ constexpr uint32_t kJumpTableSize =
 // V8 is known to support. Arm64 linux can support up to 64k at runtime.
 constexpr size_t kThunkBufferSize = 64 * KB;
 
-#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_LOONG64
 // We need the branches (from CompileJumpTableThunk) to be within near-call
 // range of the jump table slots. The address hint to AllocateAssemblerBuffer
 // is not reliable enough to guarantee that we can always achieve this with
 // separate allocations, so we generate all code in a single
 // kMaxCodeMemory-sized chunk.
-constexpr size_t kAssemblerBufferSize = WasmCodeAllocator::kMaxCodeSpaceSize;
+constexpr size_t kAssemblerBufferSize =
+    size_t{kDefaultMaxWasmCodeSpaceSizeMb} * MB;
 constexpr uint32_t kAvailableBufferSlots =
-    (WasmCodeAllocator::kMaxCodeSpaceSize - kJumpTableSize) / kThunkBufferSize;
+    (kAssemblerBufferSize - kJumpTableSize) / kThunkBufferSize;
 constexpr uint32_t kBufferSlotStartOffset =
     RoundUp<kThunkBufferSize>(kJumpTableSize);
 #else
@@ -55,22 +56,11 @@ constexpr uint32_t kAvailableBufferSlots = 0;
 constexpr uint32_t kBufferSlotStartOffset = 0;
 #endif
 
-void EnsureThreadHasWritePermissions() {
-#if defined(V8_OS_DARWIN) && defined(V8_HOST_ARCH_ARM64)
-// Ignoring this warning is considered better than relying on
-// __builtin_available.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunguarded-availability-new"
-  pthread_jit_write_protect_np(0);
-#pragma clang diagnostic pop
-#endif
-}
-
 Address AllocateJumpTableThunk(
-    Address jump_target, byte* thunk_slot_buffer,
+    Address jump_target, uint8_t* thunk_slot_buffer,
     std::bitset<kAvailableBufferSlots>* used_slots,
     std::vector<std::unique_ptr<TestingAssemblerBuffer>>* thunk_buffers) {
-#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_LOONG64
   // To guarantee that the branch range lies within the near-call range,
   // generate the thunk in the same (kMaxWasmCodeSpaceSize-sized) buffer as the
   // jump_target itself.
@@ -161,7 +151,7 @@ void CompileJumpTableThunk(Address thunk, Address jump_target) {
   __ lw(scratch, MemOperand(scratch, 0));
   __ Branch(&exit, ne, scratch, Operand(zero_reg));
   __ Jump(jump_target, RelocInfo::NO_INFO);
-#elif V8_TARGET_ARCH_RISCV64
+#elif V8_TARGET_ARCH_RISCV64 || V8_TARGET_ARCH_RISCV32
   __ li(scratch, Operand(stop_bit_address, RelocInfo::NO_INFO));
   __ Lw(scratch, MemOperand(scratch, 0));
   __ Branch(&exit, ne, scratch, Operand(zero_reg));
@@ -214,7 +204,7 @@ class JumpTablePatcher : public v8::base::Thread {
 
   void Run() override {
     TRACE("Patcher %p is starting ...\n", this);
-    EnsureThreadHasWritePermissions();
+    RwxMemoryWriteScopeForTesting rwx_write_scope;
     Address slot_address =
         slot_start_ + JumpTableAssembler::JumpSlotIndexToOffset(slot_index_);
     // First, emit code to the two thunks.
@@ -258,10 +248,10 @@ TEST(JumpTablePatchingStress) {
   constexpr int kNumberOfRunnerThreads = 5;
   constexpr int kNumberOfPatcherThreads = 3;
 
-  STATIC_ASSERT(kAssemblerBufferSize >= kJumpTableSize);
+  static_assert(kAssemblerBufferSize >= kJumpTableSize);
   auto buffer = AllocateAssemblerBuffer(kAssemblerBufferSize, nullptr,
-                                        VirtualMemory::kMapAsJittable);
-  byte* thunk_slot_buffer = buffer->start() + kBufferSlotStartOffset;
+                                        JitPermission::kMapAsJittable);
+  uint8_t* thunk_slot_buffer = buffer->start() + kBufferSlotStartOffset;
 
   std::bitset<kAvailableBufferSlots> used_thunk_slots;
   buffer->MakeWritableAndExecutable();
@@ -269,13 +259,13 @@ TEST(JumpTablePatchingStress) {
   // Iterate through jump-table slots to hammer at different alignments within
   // the jump-table, thereby increasing stress for variable-length ISAs.
   Address slot_start = reinterpret_cast<Address>(buffer->start());
-  EnsureThreadHasWritePermissions();
   for (int slot = 0; slot < kJumpTableSlotCount; ++slot) {
     TRACE("Hammering on jump table slot #%d ...\n", slot);
     uint32_t slot_offset = JumpTableAssembler::JumpSlotIndexToOffset(slot);
     std::vector<std::unique_ptr<TestingAssemblerBuffer>> thunk_buffers;
     std::vector<Address> patcher_thunks;
     {
+      RwxMemoryWriteScopeForTesting rwx_write_scope;
       // Patch the jump table slot to jump to itself. This will later be patched
       // by the patchers.
       Address slot_addr =

@@ -9,31 +9,31 @@
 
 #include "src/base/bits.h"
 #include "src/base/division-by-constant.h"
+#include "src/builtins/builtins-inl.h"
 #include "src/codegen/callable.h"
 #include "src/codegen/code-factory.h"
 #include "src/codegen/external-reference-table.h"
 #include "src/codegen/interface-descriptors-inl.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/codegen/register-configuration.h"
+#include "src/codegen/register.h"
 #include "src/debug/debug.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/frames-inl.h"
-#include "src/heap/memory-chunk.h"
+#include "src/heap/mutable-page.h"
 #include "src/init/bootstrapper.h"
 #include "src/logging/counters.h"
 #include "src/objects/smi.h"
 #include "src/runtime/runtime.h"
 #include "src/snapshot/snapshot.h"
 
-#if V8_ENABLE_WEBASSEMBLY
-#include "src/wasm/wasm-code-manager.h"
-#endif  // V8_ENABLE_WEBASSEMBLY
-
 // Satisfy cpplint check, but don't include platform-specific header. It is
 // included recursively via macro-assembler.h.
 #if 0
 #include "src/codegen/s390/macro-assembler-s390.h"
 #endif
+
+#define __ ACCESS_MASM(masm)
 
 namespace v8 {
 namespace internal {
@@ -53,7 +53,7 @@ constexpr int kStackSavedSavedFPSizeInBytes =
 
 }  // namespace
 
-void TurboAssembler::DoubleMax(DoubleRegister result_reg,
+void MacroAssembler::DoubleMax(DoubleRegister result_reg,
                                DoubleRegister left_reg,
                                DoubleRegister right_reg) {
   if (CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1)) {
@@ -99,7 +99,7 @@ void TurboAssembler::DoubleMax(DoubleRegister result_reg,
   bind(&done);
 }
 
-void TurboAssembler::DoubleMin(DoubleRegister result_reg,
+void MacroAssembler::DoubleMin(DoubleRegister result_reg,
                                DoubleRegister left_reg,
                                DoubleRegister right_reg) {
   if (CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1)) {
@@ -150,7 +150,7 @@ void TurboAssembler::DoubleMin(DoubleRegister result_reg,
   bind(&done);
 }
 
-void TurboAssembler::FloatMax(DoubleRegister result_reg,
+void MacroAssembler::FloatMax(DoubleRegister result_reg,
                               DoubleRegister left_reg,
                               DoubleRegister right_reg) {
   if (CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1)) {
@@ -195,7 +195,7 @@ void TurboAssembler::FloatMax(DoubleRegister result_reg,
   bind(&done);
 }
 
-void TurboAssembler::FloatMin(DoubleRegister result_reg,
+void MacroAssembler::FloatMin(DoubleRegister result_reg,
                               DoubleRegister left_reg,
                               DoubleRegister right_reg) {
   if (CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1)) {
@@ -247,39 +247,39 @@ void TurboAssembler::FloatMin(DoubleRegister result_reg,
   bind(&done);
 }
 
-void TurboAssembler::CeilF32(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::CeilF32(DoubleRegister dst, DoubleRegister src) {
   fiebra(ROUND_TOWARD_POS_INF, dst, src);
 }
 
-void TurboAssembler::CeilF64(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::CeilF64(DoubleRegister dst, DoubleRegister src) {
   fidbra(ROUND_TOWARD_POS_INF, dst, src);
 }
 
-void TurboAssembler::FloorF32(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::FloorF32(DoubleRegister dst, DoubleRegister src) {
   fiebra(ROUND_TOWARD_NEG_INF, dst, src);
 }
 
-void TurboAssembler::FloorF64(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::FloorF64(DoubleRegister dst, DoubleRegister src) {
   fidbra(ROUND_TOWARD_NEG_INF, dst, src);
 }
 
-void TurboAssembler::TruncF32(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::TruncF32(DoubleRegister dst, DoubleRegister src) {
   fiebra(ROUND_TOWARD_0, dst, src);
 }
 
-void TurboAssembler::TruncF64(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::TruncF64(DoubleRegister dst, DoubleRegister src) {
   fidbra(ROUND_TOWARD_0, dst, src);
 }
 
-void TurboAssembler::NearestIntF32(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::NearestIntF32(DoubleRegister dst, DoubleRegister src) {
   fiebra(ROUND_TO_NEAREST_TO_EVEN, dst, src);
 }
 
-void TurboAssembler::NearestIntF64(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::NearestIntF64(DoubleRegister dst, DoubleRegister src) {
   fidbra(ROUND_TO_NEAREST_TO_EVEN, dst, src);
 }
 
-int TurboAssembler::RequiredStackSizeForCallerSaved(SaveFPRegsMode fp_mode,
+int MacroAssembler::RequiredStackSizeForCallerSaved(SaveFPRegsMode fp_mode,
                                                     Register exclusion1,
                                                     Register exclusion2,
                                                     Register exclusion3) const {
@@ -296,7 +296,7 @@ int TurboAssembler::RequiredStackSizeForCallerSaved(SaveFPRegsMode fp_mode,
   return bytes;
 }
 
-int TurboAssembler::PushCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
+int MacroAssembler::PushCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
                                     Register exclusion1, Register exclusion2,
                                     Register exclusion3) {
   int bytes = 0;
@@ -314,7 +314,7 @@ int TurboAssembler::PushCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
   return bytes;
 }
 
-int TurboAssembler::PopCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
+int MacroAssembler::PopCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
                                    Register exclusion1, Register exclusion2,
                                    Register exclusion3) {
   int bytes = 0;
@@ -331,7 +331,7 @@ int TurboAssembler::PopCallerSaved(SaveFPRegsMode fp_mode, Register scratch,
   return bytes;
 }
 
-void TurboAssembler::LoadFromConstantsTable(Register destination,
+void MacroAssembler::LoadFromConstantsTable(Register destination,
                                             int constant_index) {
   DCHECK(RootsTable::IsImmortalImmovable(RootIndex::kBuiltinsConstantsTable));
 
@@ -341,18 +341,21 @@ void TurboAssembler::LoadFromConstantsTable(Register destination,
   CHECK(is_uint19(offset));
   DCHECK_NE(destination, r0);
   LoadRoot(destination, RootIndex::kBuiltinsConstantsTable);
-  LoadTaggedPointerField(
-      destination,
-      FieldMemOperand(destination,
-                      FixedArray::OffsetOfElementAt(constant_index)),
-      r1);
+  LoadTaggedField(destination,
+                  FieldMemOperand(destination, FixedArray::OffsetOfElementAt(
+                                                   constant_index)),
+                  r1);
 }
 
-void TurboAssembler::LoadRootRelative(Register destination, int32_t offset) {
+void MacroAssembler::LoadRootRelative(Register destination, int32_t offset) {
   LoadU64(destination, MemOperand(kRootRegister, offset));
 }
 
-void TurboAssembler::LoadRootRegisterOffset(Register destination,
+void MacroAssembler::StoreRootRelative(int32_t offset, Register value) {
+  StoreU64(value, MemOperand(kRootRegister, offset));
+}
+
+void MacroAssembler::LoadRootRegisterOffset(Register destination,
                                             intptr_t offset) {
   if (offset == 0) {
     mov(destination, kRootRegister);
@@ -364,9 +367,39 @@ void TurboAssembler::LoadRootRegisterOffset(Register destination,
   }
 }
 
-void TurboAssembler::Jump(Register target, Condition cond) { b(cond, target); }
+MemOperand MacroAssembler::ExternalReferenceAsOperand(
+    ExternalReference reference, Register scratch) {
+  if (root_array_available_ && options().enable_root_relative_access) {
+    int64_t offset =
+        RootRegisterOffsetForExternalReference(isolate(), reference);
+    if (is_int32(offset)) {
+      return MemOperand(kRootRegister, static_cast<int32_t>(offset));
+    }
+  }
+  if (root_array_available_ && options().isolate_independent_code) {
+    if (IsAddressableThroughRootRegister(isolate(), reference)) {
+      // Some external references can be efficiently loaded as an offset from
+      // kRootRegister.
+      intptr_t offset =
+          RootRegisterOffsetForExternalReference(isolate(), reference);
+      CHECK(is_int32(offset));
+      return MemOperand(kRootRegister, static_cast<int32_t>(offset));
+    } else {
+      // Otherwise, do a memory load from the external reference table.
+      LoadU64(scratch,
+              MemOperand(kRootRegister,
+                         RootRegisterOffsetForExternalReferenceTableEntry(
+                             isolate(), reference)));
+      return MemOperand(scratch, 0);
+    }
+  }
+  Move(scratch, reference);
+  return MemOperand(scratch, 0);
+}
 
-void TurboAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
+void MacroAssembler::Jump(Register target, Condition cond) { b(cond, target); }
+
+void MacroAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
                           Condition cond) {
   Label skip;
 
@@ -378,40 +411,35 @@ void TurboAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
   bind(&skip);
 }
 
-void TurboAssembler::Jump(Address target, RelocInfo::Mode rmode,
+void MacroAssembler::Jump(Address target, RelocInfo::Mode rmode,
                           Condition cond) {
   DCHECK(!RelocInfo::IsCodeTarget(rmode));
   Jump(static_cast<intptr_t>(target), rmode, cond);
 }
 
-void TurboAssembler::Jump(Handle<Code> code, RelocInfo::Mode rmode,
+void MacroAssembler::Jump(Handle<Code> code, RelocInfo::Mode rmode,
                           Condition cond) {
   DCHECK(RelocInfo::IsCodeTarget(rmode));
   DCHECK_IMPLIES(options().isolate_independent_code,
                  Builtins::IsIsolateIndependentBuiltin(*code));
 
   Builtin builtin = Builtin::kNoBuiltinId;
-  bool target_is_builtin =
-      isolate()->builtins()->IsBuiltinHandle(code, &builtin);
-
-  if (options().inline_offheap_trampolines && target_is_builtin) {
-    // Inline the trampoline.
-    RecordCommentForOffHeapTrampoline(builtin);
-    mov(ip, Operand(BuiltinEntry(builtin), RelocInfo::OFF_HEAP_TARGET));
-    b(cond, ip);
+  if (isolate()->builtins()->IsBuiltinHandle(code, &builtin)) {
+    TailCallBuiltin(builtin, cond);
     return;
   }
+  DCHECK(RelocInfo::IsCodeTarget(rmode));
   jump(code, RelocInfo::RELATIVE_CODE_TARGET, cond);
 }
 
-void TurboAssembler::Jump(const ExternalReference& reference) {
+void MacroAssembler::Jump(const ExternalReference& reference) {
   UseScratchRegisterScope temps(this);
   Register scratch = temps.Acquire();
   Move(scratch, reference);
   Jump(scratch);
 }
 
-void TurboAssembler::Call(Register target) {
+void MacroAssembler::Call(Register target) {
   // Branch to target via indirect branch
   basr(r14, target);
 }
@@ -434,7 +462,7 @@ int MacroAssembler::CallSizeNotPredictableCodeSize(Address target,
   return size;
 }
 
-void TurboAssembler::Call(Address target, RelocInfo::Mode rmode,
+void MacroAssembler::Call(Address target, RelocInfo::Mode rmode,
                           Condition cond) {
   DCHECK(cond == al);
 
@@ -442,42 +470,77 @@ void TurboAssembler::Call(Address target, RelocInfo::Mode rmode,
   basr(r14, ip);
 }
 
-void TurboAssembler::Call(Handle<Code> code, RelocInfo::Mode rmode,
+void MacroAssembler::Call(Handle<Code> code, RelocInfo::Mode rmode,
                           Condition cond) {
   DCHECK(RelocInfo::IsCodeTarget(rmode) && cond == al);
 
   DCHECK_IMPLIES(options().isolate_independent_code,
                  Builtins::IsIsolateIndependentBuiltin(*code));
-  Builtin builtin = Builtin::kNoBuiltinId;
-  bool target_is_builtin =
-      isolate()->builtins()->IsBuiltinHandle(code, &builtin);
 
-  if (target_is_builtin && options().inline_offheap_trampolines) {
-    // Inline the trampoline.
+  Builtin builtin = Builtin::kNoBuiltinId;
+  if (isolate()->builtins()->IsBuiltinHandle(code, &builtin)) {
     CallBuiltin(builtin);
     return;
   }
-  DCHECK(code->IsExecutable());
+  DCHECK(RelocInfo::IsCodeTarget(rmode));
   call(code, rmode);
 }
 
-void TurboAssembler::CallBuiltin(Builtin builtin) {
+void MacroAssembler::CallBuiltin(Builtin builtin, Condition cond) {
   ASM_CODE_COMMENT_STRING(this, CommentForOffHeapTrampoline("call", builtin));
-  DCHECK(Builtins::IsBuiltinId(builtin));
   // Use ip directly instead of using UseScratchRegisterScope, as we do not
   // preserve scratch registers across calls.
-  mov(ip, Operand(BuiltinEntry(builtin), RelocInfo::OFF_HEAP_TARGET));
-  Call(ip);
+  switch (options().builtin_call_jump_mode) {
+    case BuiltinCallJumpMode::kAbsolute: {
+      mov(ip, Operand(BuiltinEntry(builtin), RelocInfo::OFF_HEAP_TARGET));
+      Call(ip);
+      break;
+    }
+    case BuiltinCallJumpMode::kPCRelative:
+      UNREACHABLE();
+    case BuiltinCallJumpMode::kIndirect:
+      LoadU64(ip, EntryFromBuiltinAsOperand(builtin));
+      Call(ip);
+      break;
+    case BuiltinCallJumpMode::kForMksnapshot: {
+      Handle<Code> code = isolate()->builtins()->code_handle(builtin);
+      call(code, RelocInfo::CODE_TARGET);
+      break;
+    }
+  }
 }
 
-void TurboAssembler::TailCallBuiltin(Builtin builtin) {
+void MacroAssembler::TailCallBuiltin(Builtin builtin, Condition cond) {
   ASM_CODE_COMMENT_STRING(this,
                           CommentForOffHeapTrampoline("tail call", builtin));
-  mov(ip, Operand(BuiltinEntry(builtin), RelocInfo::OFF_HEAP_TARGET));
-  b(ip);
+  // Use ip directly instead of using UseScratchRegisterScope, as we do not
+  // preserve scratch registers across calls.
+  switch (options().builtin_call_jump_mode) {
+    case BuiltinCallJumpMode::kAbsolute: {
+      mov(ip, Operand(BuiltinEntry(builtin), RelocInfo::OFF_HEAP_TARGET));
+      Jump(ip, cond);
+      break;
+    }
+    case BuiltinCallJumpMode::kPCRelative:
+      UNREACHABLE();
+    case BuiltinCallJumpMode::kIndirect:
+      LoadU64(ip, EntryFromBuiltinAsOperand(builtin));
+      Jump(ip, cond);
+      break;
+    case BuiltinCallJumpMode::kForMksnapshot: {
+      if (options().use_pc_relative_calls_and_jumps_for_mksnapshot) {
+        Handle<Code> code = isolate()->builtins()->code_handle(builtin);
+        jump(code, RelocInfo::RELATIVE_CODE_TARGET, cond);
+      } else {
+        LoadU64(ip, EntryFromBuiltinAsOperand(builtin));
+        Jump(ip, cond);
+      }
+      break;
+    }
+  }
 }
 
-void TurboAssembler::Drop(int count) {
+void MacroAssembler::Drop(int count) {
   if (count > 0) {
     int total = count * kSystemPointerSize;
     if (is_uint12(total)) {
@@ -490,24 +553,34 @@ void TurboAssembler::Drop(int count) {
   }
 }
 
-void TurboAssembler::Drop(Register count, Register scratch) {
+void MacroAssembler::Drop(Register count, Register scratch) {
   ShiftLeftU64(scratch, count, Operand(kSystemPointerSizeLog2));
   AddS64(sp, sp, scratch);
 }
 
-void TurboAssembler::Call(Label* target) { b(r14, target); }
+void MacroAssembler::TestCodeIsMarkedForDeoptimization(Register code,
+                                                       Register scratch) {
+  LoadU32(scratch, FieldMemOperand(code, Code::kFlagsOffset));
+  TestBit(scratch, Code::kMarkedForDeoptimizationBit, scratch);
+}
 
-void TurboAssembler::Push(Handle<HeapObject> handle) {
+Operand MacroAssembler::ClearedValue() const {
+  return Operand(static_cast<int32_t>(i::ClearedValue(isolate()).ptr()));
+}
+
+void MacroAssembler::Call(Label* target) { b(r14, target); }
+
+void MacroAssembler::Push(Handle<HeapObject> handle) {
   mov(r0, Operand(handle));
   push(r0);
 }
 
-void TurboAssembler::Push(Smi smi) {
+void MacroAssembler::Push(Tagged<Smi> smi) {
   mov(r0, Operand(smi));
   push(r0);
 }
 
-void TurboAssembler::Move(Register dst, Handle<HeapObject> value,
+void MacroAssembler::Move(Register dst, Handle<HeapObject> value,
                           RelocInfo::Mode rmode) {
   // TODO(jgruber,v8:8887): Also consider a root-relative load when generating
   // non-isolate-independent code. In many cases it might be cheaper than
@@ -525,7 +598,7 @@ void TurboAssembler::Move(Register dst, Handle<HeapObject> value,
   }
 }
 
-void TurboAssembler::Move(Register dst, ExternalReference reference) {
+void MacroAssembler::Move(Register dst, ExternalReference reference) {
   // TODO(jgruber,v8:8887): Also consider a root-relative load when generating
   // non-isolate-independent code. In many cases it might be cheaper than
   // embedding the relocatable value.
@@ -536,7 +609,7 @@ void TurboAssembler::Move(Register dst, ExternalReference reference) {
   mov(dst, Operand(reference));
 }
 
-void TurboAssembler::Move(Register dst, Register src, Condition cond) {
+void MacroAssembler::Move(Register dst, Register src, Condition cond) {
   if (dst != src) {
     if (cond == al) {
       mov(dst, src);
@@ -546,38 +619,38 @@ void TurboAssembler::Move(Register dst, Register src, Condition cond) {
   }
 }
 
-void TurboAssembler::Move(DoubleRegister dst, DoubleRegister src) {
+void MacroAssembler::Move(DoubleRegister dst, DoubleRegister src) {
   if (dst != src) {
     ldr(dst, src);
   }
 }
 
-void TurboAssembler::Move(Register dst, const MemOperand& src) {
+void MacroAssembler::Move(Register dst, const MemOperand& src) {
   LoadU64(dst, src);
 }
 
 // Wrapper around Assembler::mvc (SS-a format)
-void TurboAssembler::MoveChar(const MemOperand& opnd1, const MemOperand& opnd2,
+void MacroAssembler::MoveChar(const MemOperand& opnd1, const MemOperand& opnd2,
                               const Operand& length) {
   mvc(opnd1, opnd2, Operand(static_cast<intptr_t>(length.immediate() - 1)));
 }
 
 // Wrapper around Assembler::clc (SS-a format)
-void TurboAssembler::CompareLogicalChar(const MemOperand& opnd1,
+void MacroAssembler::CompareLogicalChar(const MemOperand& opnd1,
                                         const MemOperand& opnd2,
                                         const Operand& length) {
   clc(opnd1, opnd2, Operand(static_cast<intptr_t>(length.immediate() - 1)));
 }
 
 // Wrapper around Assembler::xc (SS-a format)
-void TurboAssembler::ExclusiveOrChar(const MemOperand& opnd1,
+void MacroAssembler::ExclusiveOrChar(const MemOperand& opnd1,
                                      const MemOperand& opnd2,
                                      const Operand& length) {
   xc(opnd1, opnd2, Operand(static_cast<intptr_t>(length.immediate() - 1)));
 }
 
 // Wrapper around Assembler::risbg(n) (RIE-f)
-void TurboAssembler::RotateInsertSelectBits(Register dst, Register src,
+void MacroAssembler::RotateInsertSelectBits(Register dst, Register src,
                                             const Operand& startBit,
                                             const Operand& endBit,
                                             const Operand& shiftAmt,
@@ -590,7 +663,7 @@ void TurboAssembler::RotateInsertSelectBits(Register dst, Register src,
     risbg(dst, src, startBit, endBit, shiftAmt);
 }
 
-void TurboAssembler::BranchRelativeOnIdxHighP(Register dst, Register inc,
+void MacroAssembler::BranchRelativeOnIdxHighP(Register dst, Register inc,
                                               Label* L) {
 #if V8_TARGET_ARCH_S390X
   brxhg(dst, inc, L);
@@ -599,7 +672,7 @@ void TurboAssembler::BranchRelativeOnIdxHighP(Register dst, Register inc,
 #endif  // V8_TARGET_ARCH_S390X
 }
 
-void TurboAssembler::PushArray(Register array, Register size, Register scratch,
+void MacroAssembler::PushArray(Register array, Register size, Register scratch,
                                Register scratch2, PushArrayOrder order) {
   Label loop, done;
 
@@ -630,7 +703,7 @@ void TurboAssembler::PushArray(Register array, Register size, Register scratch,
   }
 }
 
-void TurboAssembler::MultiPush(RegList regs, Register location) {
+void MacroAssembler::MultiPush(RegList regs, Register location) {
   int16_t num_to_push = regs.Count();
   int16_t stack_offset = num_to_push * kSystemPointerSize;
 
@@ -643,7 +716,7 @@ void TurboAssembler::MultiPush(RegList regs, Register location) {
   }
 }
 
-void TurboAssembler::MultiPop(RegList regs, Register location) {
+void MacroAssembler::MultiPop(RegList regs, Register location) {
   int16_t stack_offset = 0;
 
   for (int16_t i = 0; i < Register::kNumRegisters; i++) {
@@ -655,7 +728,7 @@ void TurboAssembler::MultiPop(RegList regs, Register location) {
   AddS64(location, location, Operand(stack_offset));
 }
 
-void TurboAssembler::MultiPushDoubles(DoubleRegList dregs, Register location) {
+void MacroAssembler::MultiPushDoubles(DoubleRegList dregs, Register location) {
   int16_t num_to_push = dregs.Count();
   int16_t stack_offset = num_to_push * kDoubleSize;
 
@@ -669,7 +742,7 @@ void TurboAssembler::MultiPushDoubles(DoubleRegList dregs, Register location) {
   }
 }
 
-void TurboAssembler::MultiPushV128(DoubleRegList dregs, Register scratch,
+void MacroAssembler::MultiPushV128(DoubleRegList dregs, Register scratch,
                                    Register location) {
   int16_t num_to_push = dregs.Count();
   int16_t stack_offset = num_to_push * kSimd128Size;
@@ -684,7 +757,7 @@ void TurboAssembler::MultiPushV128(DoubleRegList dregs, Register scratch,
   }
 }
 
-void TurboAssembler::MultiPopDoubles(DoubleRegList dregs, Register location) {
+void MacroAssembler::MultiPopDoubles(DoubleRegList dregs, Register location) {
   int16_t stack_offset = 0;
 
   for (int16_t i = 0; i < DoubleRegister::kNumRegisters; i++) {
@@ -697,7 +770,7 @@ void TurboAssembler::MultiPopDoubles(DoubleRegList dregs, Register location) {
   AddS64(location, location, Operand(stack_offset));
 }
 
-void TurboAssembler::MultiPopV128(DoubleRegList dregs, Register scratch,
+void MacroAssembler::MultiPopV128(DoubleRegList dregs, Register scratch,
                                   Register location) {
   int16_t stack_offset = 0;
 
@@ -711,7 +784,7 @@ void TurboAssembler::MultiPopV128(DoubleRegList dregs, Register scratch,
   AddS64(location, location, Operand(stack_offset));
 }
 
-void TurboAssembler::MultiPushF64OrV128(DoubleRegList dregs, Register scratch,
+void MacroAssembler::MultiPushF64OrV128(DoubleRegList dregs, Register scratch,
                                         Register location) {
 #if V8_ENABLE_WEBASSEMBLY
   bool generating_bultins =
@@ -745,7 +818,7 @@ void TurboAssembler::MultiPushF64OrV128(DoubleRegList dregs, Register scratch,
 #endif
 }
 
-void TurboAssembler::MultiPopF64OrV128(DoubleRegList dregs, Register scratch,
+void MacroAssembler::MultiPopF64OrV128(DoubleRegList dregs, Register scratch,
                                        Register location) {
 #if V8_ENABLE_WEBASSEMBLY
   bool generating_bultins =
@@ -777,33 +850,36 @@ void TurboAssembler::MultiPopF64OrV128(DoubleRegList dregs, Register scratch,
 #endif
 }
 
-void TurboAssembler::LoadRoot(Register destination, RootIndex index,
+void MacroAssembler::LoadTaggedRoot(Register destination, RootIndex index) {
+  ASM_CODE_COMMENT(this);
+  if (CanBeImmediate(index)) {
+    mov(destination, Operand(ReadOnlyRootPtr(index), RelocInfo::Mode::NO_INFO));
+    return;
+  }
+  LoadRoot(destination, index);
+}
+
+void MacroAssembler::LoadRoot(Register destination, RootIndex index,
                               Condition) {
+  if (CanBeImmediate(index)) {
+    DecompressTagged(destination, ReadOnlyRootPtr(index));
+    return;
+  }
   LoadU64(destination,
           MemOperand(kRootRegister, RootRegisterOffsetForRootIndex(index)), r0);
 }
 
-void TurboAssembler::LoadTaggedPointerField(const Register& destination,
-                                            const MemOperand& field_operand,
-                                            const Register& scratch) {
+void MacroAssembler::LoadTaggedField(const Register& destination,
+                                     const MemOperand& field_operand,
+                                     const Register& scratch) {
   if (COMPRESS_POINTERS_BOOL) {
-    DecompressTaggedPointer(destination, field_operand);
+    DecompressTagged(destination, field_operand);
   } else {
     LoadU64(destination, field_operand, scratch);
   }
 }
 
-void TurboAssembler::LoadAnyTaggedField(const Register& destination,
-                                        const MemOperand& field_operand,
-                                        const Register& scratch) {
-  if (COMPRESS_POINTERS_BOOL) {
-    DecompressAnyTagged(destination, field_operand);
-  } else {
-    LoadU64(destination, field_operand, scratch);
-  }
-}
-
-void TurboAssembler::SmiUntag(Register dst, const MemOperand& src) {
+void MacroAssembler::SmiUntag(Register dst, const MemOperand& src) {
   if (SmiValuesAre31Bits()) {
     LoadS32(dst, src);
   } else {
@@ -812,11 +888,11 @@ void TurboAssembler::SmiUntag(Register dst, const MemOperand& src) {
   SmiUntag(dst);
 }
 
-void TurboAssembler::SmiUntagField(Register dst, const MemOperand& src) {
+void MacroAssembler::SmiUntagField(Register dst, const MemOperand& src) {
   SmiUntag(dst, src);
 }
 
-void TurboAssembler::StoreTaggedField(const Register& value,
+void MacroAssembler::StoreTaggedField(const Register& value,
                                       const MemOperand& dst_field_operand,
                                       const Register& scratch) {
   if (COMPRESS_POINTERS_BOOL) {
@@ -828,53 +904,43 @@ void TurboAssembler::StoreTaggedField(const Register& value,
   }
 }
 
-void TurboAssembler::DecompressTaggedSigned(Register destination,
+void MacroAssembler::DecompressTaggedSigned(Register destination,
                                             Register src) {
   RecordComment("[ DecompressTaggedSigned");
   llgfr(destination, src);
   RecordComment("]");
 }
 
-void TurboAssembler::DecompressTaggedSigned(Register destination,
+void MacroAssembler::DecompressTaggedSigned(Register destination,
                                             MemOperand field_operand) {
   RecordComment("[ DecompressTaggedSigned");
   llgf(destination, field_operand);
   RecordComment("]");
 }
 
-void TurboAssembler::DecompressTaggedPointer(Register destination,
-                                             Register source) {
-  RecordComment("[ DecompressTaggedPointer");
+void MacroAssembler::DecompressTagged(Register destination, Register source) {
+  RecordComment("[ DecompressTagged");
   llgfr(destination, source);
-  agr(destination, kRootRegister);
+  agr(destination, kPtrComprCageBaseRegister);
   RecordComment("]");
 }
 
-void TurboAssembler::DecompressTaggedPointer(Register destination,
-                                             MemOperand field_operand) {
-  RecordComment("[ DecompressTaggedPointer");
+void MacroAssembler::DecompressTagged(Register destination,
+                                      MemOperand field_operand) {
+  RecordComment("[ DecompressTagged");
   llgf(destination, field_operand);
-  agr(destination, kRootRegister);
+  agr(destination, kPtrComprCageBaseRegister);
   RecordComment("]");
 }
 
-void TurboAssembler::DecompressAnyTagged(Register destination,
-                                         MemOperand field_operand) {
-  RecordComment("[ DecompressAnyTagged");
-  llgf(destination, field_operand);
+void MacroAssembler::DecompressTagged(const Register& destination,
+                                      Tagged_t immediate) {
+  ASM_CODE_COMMENT(this);
+  mov(destination, Operand(immediate, RelocInfo::NO_INFO));
   agr(destination, kRootRegister);
-  RecordComment("]");
 }
 
-void TurboAssembler::DecompressAnyTagged(Register destination,
-                                         Register source) {
-  RecordComment("[ DecompressAnyTagged");
-  llgfr(destination, source);
-  agr(destination, kRootRegister);
-  RecordComment("]");
-}
-
-void TurboAssembler::LoadTaggedSignedField(Register destination,
+void MacroAssembler::LoadTaggedSignedField(Register destination,
                                            MemOperand field_operand) {
   if (COMPRESS_POINTERS_BOOL) {
     DecompressTaggedSigned(destination, field_operand);
@@ -887,7 +953,6 @@ void MacroAssembler::RecordWriteField(Register object, int offset,
                                       Register value, Register slot_address,
                                       LinkRegisterStatus lr_status,
                                       SaveFPRegsMode save_fp,
-                                      RememberedSetAction remembered_set_action,
                                       SmiCheck smi_check) {
   // First, check if a write barrier is even needed. The tests below
   // catch stores of Smis.
@@ -903,7 +968,7 @@ void MacroAssembler::RecordWriteField(Register object, int offset,
   DCHECK(IsAligned(offset, kTaggedSize));
 
   lay(slot_address, MemOperand(object, offset - kHeapObjectTag));
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     Label ok;
     AndP(r0, slot_address, Operand(kTaggedSize - 1));
     beq(&ok, Label::kNear);
@@ -911,30 +976,29 @@ void MacroAssembler::RecordWriteField(Register object, int offset,
     bind(&ok);
   }
 
-  RecordWrite(object, slot_address, value, lr_status, save_fp,
-              remembered_set_action, SmiCheck::kOmit);
+  RecordWrite(object, slot_address, value, lr_status, save_fp, SmiCheck::kOmit);
 
   bind(&done);
 
   // Clobber clobbered input registers when running with the debug-code flag
   // turned on to provoke errors.
-  if (FLAG_debug_code) {
-    mov(value, Operand(bit_cast<intptr_t>(kZapValue + 4)));
-    mov(slot_address, Operand(bit_cast<intptr_t>(kZapValue + 8)));
+  if (v8_flags.debug_code) {
+    mov(value, Operand(base::bit_cast<intptr_t>(kZapValue + 4)));
+    mov(slot_address, Operand(base::bit_cast<intptr_t>(kZapValue + 8)));
   }
 }
 
-void TurboAssembler::MaybeSaveRegisters(RegList registers) {
+void MacroAssembler::MaybeSaveRegisters(RegList registers) {
   if (registers.is_empty()) return;
   MultiPush(registers);
 }
 
-void TurboAssembler::MaybeRestoreRegisters(RegList registers) {
+void MacroAssembler::MaybeRestoreRegisters(RegList registers) {
   if (registers.is_empty()) return;
   MultiPop(registers);
 }
 
-void TurboAssembler::CallEphemeronKeyBarrier(Register object,
+void MacroAssembler::CallEphemeronKeyBarrier(Register object,
                                              Register slot_address,
                                              SaveFPRegsMode fp_mode) {
   DCHECK(!AreAliased(object, slot_address));
@@ -951,16 +1015,14 @@ void TurboAssembler::CallEphemeronKeyBarrier(Register object,
   Pop(slot_address_parameter);
   Pop(object_parameter);
 
-  Call(isolate()->builtins()->code_handle(
-           Builtins::GetEphemeronKeyBarrierStub(fp_mode)),
-       RelocInfo::CODE_TARGET);
+  CallBuiltin(Builtins::EphemeronKeyBarrier(fp_mode));
   MaybeRestoreRegisters(registers);
 }
 
-void TurboAssembler::CallRecordWriteStubSaveRegisters(
-    Register object, Register slot_address,
-    RememberedSetAction remembered_set_action, SaveFPRegsMode fp_mode,
-    StubCallMode mode) {
+void MacroAssembler::CallRecordWriteStubSaveRegisters(Register object,
+                                                      Register slot_address,
+                                                      SaveFPRegsMode fp_mode,
+                                                      StubCallMode mode) {
   DCHECK(!AreAliased(object, slot_address));
   RegList registers =
       WriteBarrierDescriptor::ComputeSavedRegisters(object, slot_address);
@@ -975,16 +1037,14 @@ void TurboAssembler::CallRecordWriteStubSaveRegisters(
   Pop(slot_address_parameter);
   Pop(object_parameter);
 
-  CallRecordWriteStub(object_parameter, slot_address_parameter,
-                      remembered_set_action, fp_mode, mode);
+  CallRecordWriteStub(object_parameter, slot_address_parameter, fp_mode, mode);
 
   MaybeRestoreRegisters(registers);
 }
 
-void TurboAssembler::CallRecordWriteStub(
-    Register object, Register slot_address,
-    RememberedSetAction remembered_set_action, SaveFPRegsMode fp_mode,
-    StubCallMode mode) {
+void MacroAssembler::CallRecordWriteStub(Register object, Register slot_address,
+                                         SaveFPRegsMode fp_mode,
+                                         StubCallMode mode) {
   // Use CallRecordWriteStubSaveRegisters if the object and slot registers
   // need to be caller saved.
   DCHECK_EQ(WriteBarrierDescriptor::ObjectRegister(), object);
@@ -992,23 +1052,13 @@ void TurboAssembler::CallRecordWriteStub(
 #if V8_ENABLE_WEBASSEMBLY
   if (mode == StubCallMode::kCallWasmRuntimeStub) {
     auto wasm_target =
-        wasm::WasmCode::GetRecordWriteStub(remembered_set_action, fp_mode);
+        static_cast<Address>(wasm::WasmCode::GetRecordWriteBuiltin(fp_mode));
     Call(wasm_target, RelocInfo::WASM_STUB_CALL);
 #else
   if (false) {
 #endif
   } else {
-    auto builtin_index =
-        Builtins::GetRecordWriteStub(remembered_set_action, fp_mode);
-    if (options().inline_offheap_trampolines) {
-      RecordCommentForOffHeapTrampoline(builtin_index);
-      mov(ip, Operand(BuiltinEntry(builtin_index), RelocInfo::OFF_HEAP_TARGET));
-      Call(ip);
-    } else {
-      Handle<Code> code_target =
-          isolate()->builtins()->code_handle(builtin_index);
-      Call(code_target, RelocInfo::CODE_TARGET);
-    }
+    CallBuiltin(Builtins::RecordWrite(fp_mode));
   }
 }
 
@@ -1017,19 +1067,15 @@ void TurboAssembler::CallRecordWriteStub(
 // tag is shifted away.
 void MacroAssembler::RecordWrite(Register object, Register slot_address,
                                  Register value, LinkRegisterStatus lr_status,
-                                 SaveFPRegsMode fp_mode,
-                                 RememberedSetAction remembered_set_action,
-                                 SmiCheck smi_check) {
+                                 SaveFPRegsMode fp_mode, SmiCheck smi_check) {
   DCHECK(!AreAliased(object, slot_address, value));
-  if (FLAG_debug_code) {
-    LoadTaggedPointerField(r0, MemOperand(slot_address));
+  if (v8_flags.debug_code) {
+    LoadTaggedField(r0, MemOperand(slot_address));
     CmpS64(value, r0);
     Check(eq, AbortReason::kWrongAddressOrValuePassedToRecordWrite);
   }
 
-  if ((remembered_set_action == RememberedSetAction::kOmit &&
-       !FLAG_incremental_marking) ||
-      FLAG_disable_write_barriers) {
+  if (v8_flags.disable_write_barriers) {
     return;
   }
   // First, check if a write barrier is even needed. The tests below
@@ -1051,25 +1097,24 @@ void MacroAssembler::RecordWrite(Register object, Register slot_address,
   if (lr_status == kLRHasNotBeenSaved) {
     push(r14);
   }
-  CallRecordWriteStubSaveRegisters(object, slot_address, remembered_set_action,
-                                   fp_mode);
+  CallRecordWriteStubSaveRegisters(object, slot_address, fp_mode);
   if (lr_status == kLRHasNotBeenSaved) {
     pop(r14);
   }
 
-  if (FLAG_debug_code) mov(slot_address, Operand(kZapValue));
+  if (v8_flags.debug_code) mov(slot_address, Operand(kZapValue));
 
   bind(&done);
 
   // Clobber clobbered registers when running with the debug-code flag
   // turned on to provoke errors.
-  if (FLAG_debug_code) {
-    mov(slot_address, Operand(bit_cast<intptr_t>(kZapValue + 12)));
-    mov(value, Operand(bit_cast<intptr_t>(kZapValue + 16)));
+  if (v8_flags.debug_code) {
+    mov(slot_address, Operand(base::bit_cast<intptr_t>(kZapValue + 12)));
+    mov(value, Operand(base::bit_cast<intptr_t>(kZapValue + 16)));
   }
 }
 
-void TurboAssembler::PushCommonFrame(Register marker_reg) {
+void MacroAssembler::PushCommonFrame(Register marker_reg) {
   ASM_CODE_COMMENT(this);
   int fp_delta = 0;
   CleanseP(r14);
@@ -1083,7 +1128,7 @@ void TurboAssembler::PushCommonFrame(Register marker_reg) {
   la(fp, MemOperand(sp, fp_delta * kSystemPointerSize));
 }
 
-void TurboAssembler::PopCommonFrame(Register marker_reg) {
+void MacroAssembler::PopCommonFrame(Register marker_reg) {
   if (marker_reg.is_valid()) {
     Pop(r14, fp, marker_reg);
   } else {
@@ -1091,7 +1136,7 @@ void TurboAssembler::PopCommonFrame(Register marker_reg) {
   }
 }
 
-void TurboAssembler::PushStandardFrame(Register function_reg) {
+void MacroAssembler::PushStandardFrame(Register function_reg) {
   int fp_delta = 0;
   CleanseP(r14);
   if (function_reg.is_valid()) {
@@ -1105,18 +1150,18 @@ void TurboAssembler::PushStandardFrame(Register function_reg) {
   Push(kJavaScriptCallArgCountRegister);
 }
 
-void TurboAssembler::RestoreFrameStateForTailCall() {
-  // if (FLAG_enable_embedded_constant_pool) {
+void MacroAssembler::RestoreFrameStateForTailCall() {
+  // if (V8_EMBEDDED_CONSTANT_POOL_BOOL) {
   //   LoadU64(kConstantPoolRegister,
   //         MemOperand(fp, StandardFrameConstants::kConstantPoolOffset));
   //   set_constant_pool_available(false);
   // }
-  DCHECK(!FLAG_enable_embedded_constant_pool);
+  DCHECK(!V8_EMBEDDED_CONSTANT_POOL_BOOL);
   LoadU64(r14, MemOperand(fp, StandardFrameConstants::kCallerPCOffset));
   LoadU64(fp, MemOperand(fp, StandardFrameConstants::kCallerFPOffset));
 }
 
-void TurboAssembler::CanonicalizeNaN(const DoubleRegister dst,
+void MacroAssembler::CanonicalizeNaN(const DoubleRegister dst,
                                      const DoubleRegister src) {
   // Turn potential sNaN into qNaN
   if (dst != src) ldr(dst, src);
@@ -1124,11 +1169,11 @@ void TurboAssembler::CanonicalizeNaN(const DoubleRegister dst,
   sdbr(dst, kDoubleRegZero);
 }
 
-void TurboAssembler::ConvertIntToDouble(DoubleRegister dst, Register src) {
+void MacroAssembler::ConvertIntToDouble(DoubleRegister dst, Register src) {
   cdfbr(dst, src);
 }
 
-void TurboAssembler::ConvertUnsignedIntToDouble(DoubleRegister dst,
+void MacroAssembler::ConvertUnsignedIntToDouble(DoubleRegister dst,
                                                 Register src) {
   if (CpuFeatures::IsSupported(FLOATING_POINT_EXT)) {
     cdlfbr(Condition(5), Condition(0), dst, src);
@@ -1140,36 +1185,36 @@ void TurboAssembler::ConvertUnsignedIntToDouble(DoubleRegister dst,
   }
 }
 
-void TurboAssembler::ConvertIntToFloat(DoubleRegister dst, Register src) {
+void MacroAssembler::ConvertIntToFloat(DoubleRegister dst, Register src) {
   cefbra(Condition(4), dst, src);
 }
 
-void TurboAssembler::ConvertUnsignedIntToFloat(DoubleRegister dst,
+void MacroAssembler::ConvertUnsignedIntToFloat(DoubleRegister dst,
                                                Register src) {
   celfbr(Condition(4), Condition(0), dst, src);
 }
 
-void TurboAssembler::ConvertInt64ToFloat(DoubleRegister double_dst,
+void MacroAssembler::ConvertInt64ToFloat(DoubleRegister double_dst,
                                          Register src) {
   cegbr(double_dst, src);
 }
 
-void TurboAssembler::ConvertInt64ToDouble(DoubleRegister double_dst,
+void MacroAssembler::ConvertInt64ToDouble(DoubleRegister double_dst,
                                           Register src) {
   cdgbr(double_dst, src);
 }
 
-void TurboAssembler::ConvertUnsignedInt64ToFloat(DoubleRegister double_dst,
+void MacroAssembler::ConvertUnsignedInt64ToFloat(DoubleRegister double_dst,
                                                  Register src) {
   celgbr(Condition(0), Condition(0), double_dst, src);
 }
 
-void TurboAssembler::ConvertUnsignedInt64ToDouble(DoubleRegister double_dst,
+void MacroAssembler::ConvertUnsignedInt64ToDouble(DoubleRegister double_dst,
                                                   Register src) {
   cdlgbr(Condition(0), Condition(0), double_dst, src);
 }
 
-void TurboAssembler::ConvertFloat32ToInt64(const Register dst,
+void MacroAssembler::ConvertFloat32ToInt64(const Register dst,
                                            const DoubleRegister double_input,
                                            FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1191,7 +1236,7 @@ void TurboAssembler::ConvertFloat32ToInt64(const Register dst,
   cgebr(m, dst, double_input);
 }
 
-void TurboAssembler::ConvertDoubleToInt64(const Register dst,
+void MacroAssembler::ConvertDoubleToInt64(const Register dst,
                                           const DoubleRegister double_input,
                                           FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1213,7 +1258,7 @@ void TurboAssembler::ConvertDoubleToInt64(const Register dst,
   cgdbr(m, dst, double_input);
 }
 
-void TurboAssembler::ConvertDoubleToInt32(const Register dst,
+void MacroAssembler::ConvertDoubleToInt32(const Register dst,
                                           const DoubleRegister double_input,
                                           FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1239,7 +1284,7 @@ void TurboAssembler::ConvertDoubleToInt32(const Register dst,
   cfdbr(m, dst, double_input);
 }
 
-void TurboAssembler::ConvertFloat32ToInt32(const Register result,
+void MacroAssembler::ConvertFloat32ToInt32(const Register result,
                                            const DoubleRegister double_input,
                                            FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1265,7 +1310,7 @@ void TurboAssembler::ConvertFloat32ToInt32(const Register result,
   cfebr(m, result, double_input);
 }
 
-void TurboAssembler::ConvertFloat32ToUnsignedInt32(
+void MacroAssembler::ConvertFloat32ToUnsignedInt32(
     const Register result, const DoubleRegister double_input,
     FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1290,7 +1335,7 @@ void TurboAssembler::ConvertFloat32ToUnsignedInt32(
   clfebr(m, Condition(0), result, double_input);
 }
 
-void TurboAssembler::ConvertFloat32ToUnsignedInt64(
+void MacroAssembler::ConvertFloat32ToUnsignedInt64(
     const Register result, const DoubleRegister double_input,
     FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1312,7 +1357,7 @@ void TurboAssembler::ConvertFloat32ToUnsignedInt64(
   clgebr(m, Condition(0), result, double_input);
 }
 
-void TurboAssembler::ConvertDoubleToUnsignedInt64(
+void MacroAssembler::ConvertDoubleToUnsignedInt64(
     const Register dst, const DoubleRegister double_input,
     FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1334,7 +1379,7 @@ void TurboAssembler::ConvertDoubleToUnsignedInt64(
   clgdbr(m, Condition(0), dst, double_input);
 }
 
-void TurboAssembler::ConvertDoubleToUnsignedInt32(
+void MacroAssembler::ConvertDoubleToUnsignedInt32(
     const Register dst, const DoubleRegister double_input,
     FPRoundingMode rounding_mode) {
   Condition m = Condition(0);
@@ -1359,15 +1404,15 @@ void TurboAssembler::ConvertDoubleToUnsignedInt32(
   clfdbr(m, Condition(0), dst, double_input);
 }
 
-void TurboAssembler::MovDoubleToInt64(Register dst, DoubleRegister src) {
+void MacroAssembler::MovDoubleToInt64(Register dst, DoubleRegister src) {
   lgdr(dst, src);
 }
 
-void TurboAssembler::MovInt64ToDouble(DoubleRegister dst, Register src) {
+void MacroAssembler::MovInt64ToDouble(DoubleRegister dst, Register src) {
   ldgr(dst, src);
 }
 
-void TurboAssembler::StubPrologue(StackFrame::Type type, Register base,
+void MacroAssembler::StubPrologue(StackFrame::Type type, Register base,
                                   int prologue_offset) {
   {
     ConstantPoolUnavailableScope constant_pool_unavailable(this);
@@ -1376,12 +1421,12 @@ void TurboAssembler::StubPrologue(StackFrame::Type type, Register base,
   }
 }
 
-void TurboAssembler::Prologue(Register base, int prologue_offset) {
+void MacroAssembler::Prologue(Register base, int prologue_offset) {
   DCHECK(base != no_reg);
   PushStandardFrame(r3);
 }
 
-void TurboAssembler::DropArguments(Register count, ArgumentsCountType type,
+void MacroAssembler::DropArguments(Register count, ArgumentsCountType type,
                                    ArgumentsCountMode mode) {
   int receiver_bytes =
       (mode == kCountExcludesReceiver) ? kSystemPointerSize : 0;
@@ -1392,7 +1437,7 @@ void TurboAssembler::DropArguments(Register count, ArgumentsCountType type,
       break;
     }
     case kCountIsSmi: {
-      STATIC_ASSERT(kSmiTagSize == 1 && kSmiTag == 0);
+      static_assert(kSmiTagSize == 1 && kSmiTag == 0);
       SmiToPtrArrayOffset(count, count);
       AddS64(sp, sp, count);
       break;
@@ -1407,7 +1452,7 @@ void TurboAssembler::DropArguments(Register count, ArgumentsCountType type,
   }
 }
 
-void TurboAssembler::DropArgumentsAndPushNewReceiver(Register argc,
+void MacroAssembler::DropArgumentsAndPushNewReceiver(Register argc,
                                                      Register receiver,
                                                      ArgumentsCountType type,
                                                      ArgumentsCountMode mode) {
@@ -1422,7 +1467,7 @@ void TurboAssembler::DropArgumentsAndPushNewReceiver(Register argc,
   }
 }
 
-void TurboAssembler::EnterFrame(StackFrame::Type type,
+void MacroAssembler::EnterFrame(StackFrame::Type type,
                                 bool load_constant_pool_pointer_reg) {
   ASM_CODE_COMMENT(this);
   // We create a stack frame with:
@@ -1443,7 +1488,7 @@ void TurboAssembler::EnterFrame(StackFrame::Type type,
 #endif  // V8_ENABLE_WEBASSEMBLY
 }
 
-int TurboAssembler::LeaveFrame(StackFrame::Type type, int stack_adjustment) {
+int MacroAssembler::LeaveFrame(StackFrame::Type type, int stack_adjustment) {
   ASM_CODE_COMMENT(this);
   // Drop the execution stack down to the frame pointer and restore
   // the caller frame pointer, return address and constant pool pointer.
@@ -1483,10 +1528,11 @@ int TurboAssembler::LeaveFrame(StackFrame::Type type, int stack_adjustment) {
 // gaps
 // Args
 // ABIRes <- newSP
-void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
+void MacroAssembler::EnterExitFrame(int stack_space,
                                     StackFrame::Type frame_type) {
   DCHECK(frame_type == StackFrame::EXIT ||
-         frame_type == StackFrame::BUILTIN_EXIT);
+         frame_type == StackFrame::BUILTIN_EXIT ||
+         frame_type == StackFrame::API_CALLBACK_EXIT);
   // Set up the frame structure on the stack.
   DCHECK_EQ(2 * kSystemPointerSize, ExitFrameConstants::kCallerSPDisplacement);
   DCHECK_EQ(1 * kSystemPointerSize, ExitFrameConstants::kCallerPCOffset);
@@ -1502,7 +1548,7 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
   // Reserve room for saved entry sp.
   lay(sp, MemOperand(fp, -ExitFrameConstants::kFixedFrameSizeFromFp));
 
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     StoreU64(MemOperand(fp, ExitFrameConstants::kSPOffset), Operand::Zero(),
              r1);
   }
@@ -1515,20 +1561,11 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
        ExternalReference::Create(IsolateAddressId::kContextAddress, isolate()));
   StoreU64(cp, MemOperand(r1));
 
-  // Optionally save all volatile double registers.
-  if (save_doubles) {
-    MultiPushDoubles(kCallerSavedDoubles);
-    // Note that d0 will be accessible at
-    //   fp - ExitFrameConstants::kFrameSize -
-    //   kNumCallerSavedDoubles * kDoubleSize,
-    // since the sp slot and code slot were pushed after the fp.
-  }
-
   lay(sp, MemOperand(sp, -stack_space * kSystemPointerSize));
 
   // Allocate and align the frame preparing for calling the runtime
   // function.
-  const int frame_alignment = TurboAssembler::ActivationFrameAlignment();
+  const int frame_alignment = MacroAssembler::ActivationFrameAlignment();
   if (frame_alignment > 0) {
     DCHECK_EQ(frame_alignment, 8);
     ClearRightImm(sp, sp, Operand(3));  // equivalent to &= -8
@@ -1542,7 +1579,7 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space,
   StoreU64(r1, MemOperand(fp, ExitFrameConstants::kSPOffset));
 }
 
-int TurboAssembler::ActivationFrameAlignment() {
+int MacroAssembler::ActivationFrameAlignment() {
 #if !defined(USE_SIMULATOR)
   // Running on the real platform. Use the alignment as mandated by the local
   // environment.
@@ -1554,21 +1591,12 @@ int TurboAssembler::ActivationFrameAlignment() {
   // alignment. As the simulator is used to generate snapshots we do not know
   // if the target platform will need alignment, so this is controlled from a
   // flag.
-  return FLAG_sim_stack_alignment;
+  return v8_flags.sim_stack_alignment;
 #endif
 }
 
-void MacroAssembler::LeaveExitFrame(bool save_doubles, Register argument_count,
+void MacroAssembler::LeaveExitFrame(Register argument_count,
                                     bool argument_count_is_length) {
-  // Optionally restore all double registers.
-  if (save_doubles) {
-    // Calculate the stack location of the saved doubles and restore them.
-    const int kNumRegs = kNumCallerSavedDoubles;
-    lay(r5, MemOperand(fp, -(ExitFrameConstants::kFixedFrameSizeFromFp +
-                             kNumRegs * kDoubleSize)));
-    MultiPopDoubles(kCallerSavedDoubles, r5);
-  }
-
   // Clear top frame.
   Move(ip, ExternalReference::Create(IsolateAddressId::kCEntryFPAddress,
                                      isolate()));
@@ -1598,11 +1626,11 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles, Register argument_count,
   }
 }
 
-void TurboAssembler::MovFromFloatResult(const DoubleRegister dst) {
+void MacroAssembler::MovFromFloatResult(const DoubleRegister dst) {
   Move(dst, d0);
 }
 
-void TurboAssembler::MovFromFloatParameter(const DoubleRegister dst) {
+void MacroAssembler::MovFromFloatParameter(const DoubleRegister dst) {
   Move(dst, d0);
 }
 
@@ -1613,10 +1641,10 @@ MemOperand MacroAssembler::StackLimitAsMemOperand(StackLimitKind kind) {
       kind == StackLimitKind::kRealStackLimit
           ? ExternalReference::address_of_real_jslimit(isolate)
           : ExternalReference::address_of_jslimit(isolate);
-  DCHECK(TurboAssembler::IsAddressableThroughRootRegister(isolate, limit));
+  DCHECK(MacroAssembler::IsAddressableThroughRootRegister(isolate, limit));
 
   intptr_t offset =
-      TurboAssembler::RootRegisterOffsetForExternalReference(isolate, limit);
+      MacroAssembler::RootRegisterOffsetForExternalReference(isolate, limit);
   CHECK(is_int32(offset));
   return MemOperand(kRootRegister, offset);
 }
@@ -1647,13 +1675,6 @@ void MacroAssembler::InvokePrologue(Register expected_parameter_count,
 
   DCHECK_EQ(actual_parameter_count, r2);
   DCHECK_EQ(expected_parameter_count, r4);
-
-  // If the expected parameter count is equal to the adaptor sentinel, no need
-  // to push undefined value as arguments.
-  if (kDontAdaptArgumentsSentinel != 0) {
-    CmpS64(expected_parameter_count, Operand(kDontAdaptArgumentsSentinel));
-    beq(&regular_invoke);
-  }
 
   // If overapplication or if the actual argument count is equal to the
   // formal parameter count, no need to push extra undefined values.
@@ -1724,7 +1745,7 @@ void MacroAssembler::CheckDebugHook(Register fun, Register new_target,
 
   {
     // Load receiver to pass it later to DebugOnFunctionCall hook.
-    LoadReceiver(r6, actual_parameter_count);
+    LoadReceiver(r6);
     FrameScope frame(
         this, has_frame() ? StackFrame::NO_FRAME_TYPE : StackFrame::INTERNAL);
 
@@ -1776,15 +1797,12 @@ void MacroAssembler::InvokeFunctionCode(Register function, Register new_target,
   // We call indirectly through the code field in the function to
   // allow recompilation to take effect without changing any of the
   // call sites.
-  Register code = kJavaScriptCallCodeStartRegister;
-  LoadTaggedPointerField(code,
-                         FieldMemOperand(function, JSFunction::kCodeOffset));
   switch (type) {
     case InvokeType::kCall:
-      CallCodeObject(code);
+      CallJSFunction(function);
       break;
     case InvokeType::kJump:
-      JumpCodeObject(code);
+      JumpJSFunction(function);
       break;
   }
   // Continue here if InvokePrologue does handle the invocation due to
@@ -1803,13 +1821,12 @@ void MacroAssembler::InvokeFunctionWithNewTarget(
 
   Register expected_reg = r4;
   Register temp_reg = r6;
-  LoadTaggedPointerField(cp, FieldMemOperand(fun, JSFunction::kContextOffset));
-  LoadTaggedPointerField(
-      temp_reg, FieldMemOperand(fun, JSFunction::kSharedFunctionInfoOffset));
-  LoadU16(
-      expected_reg,
-      FieldMemOperand(temp_reg,
-                      SharedFunctionInfo::kFormalParameterCountOffset));
+  LoadTaggedField(cp, FieldMemOperand(fun, JSFunction::kContextOffset));
+  LoadTaggedField(temp_reg,
+                  FieldMemOperand(fun, JSFunction::kSharedFunctionInfoOffset));
+  LoadU16(expected_reg,
+          FieldMemOperand(temp_reg,
+                          SharedFunctionInfo::kFormalParameterCountOffset));
 
   InvokeFunctionCode(fun, new_target, expected_reg, actual_parameter_count,
                      type);
@@ -1826,8 +1843,7 @@ void MacroAssembler::InvokeFunction(Register function,
   DCHECK_EQ(function, r3);
 
   // Get the function and setup the context.
-  LoadTaggedPointerField(cp,
-                         FieldMemOperand(function, JSFunction::kContextOffset));
+  LoadTaggedField(cp, FieldMemOperand(function, JSFunction::kContextOffset));
 
   InvokeFunctionCode(r3, no_reg, expected_parameter_count,
                      actual_parameter_count, type);
@@ -1835,8 +1851,8 @@ void MacroAssembler::InvokeFunction(Register function,
 
 void MacroAssembler::PushStackHandler() {
   // Adjust this code if not the case.
-  STATIC_ASSERT(StackHandlerConstants::kSize == 2 * kSystemPointerSize);
-  STATIC_ASSERT(StackHandlerConstants::kNextOffset == 0 * kSystemPointerSize);
+  static_assert(StackHandlerConstants::kSize == 2 * kSystemPointerSize);
+  static_assert(StackHandlerConstants::kNextOffset == 0 * kSystemPointerSize);
 
   // Link the current handler as the next handler.
   Move(r7,
@@ -1857,8 +1873,8 @@ void MacroAssembler::PushStackHandler() {
 }
 
 void MacroAssembler::PopStackHandler() {
-  STATIC_ASSERT(StackHandlerConstants::kSize == 2 * kSystemPointerSize);
-  STATIC_ASSERT(StackHandlerConstants::kNextOffset == 0);
+  static_assert(StackHandlerConstants::kSize == 2 * kSystemPointerSize);
+  static_assert(StackHandlerConstants::kNextOffset == 0);
 
   // Pop the Next Handler into r3 and store it into Handler Address reference.
   Pop(r3);
@@ -1879,8 +1895,8 @@ void MacroAssembler::CompareObjectType(Register object, Register map,
 
 void MacroAssembler::CompareInstanceType(Register map, Register type_reg,
                                          InstanceType type) {
-  STATIC_ASSERT(Map::kInstanceTypeOffset < 4096);
-  STATIC_ASSERT(LAST_TYPE <= 0xFFFF);
+  static_assert(Map::kInstanceTypeOffset < 4096);
+  static_assert(LAST_TYPE <= 0xFFFF);
   LoadS16(type_reg, FieldMemOperand(map, Map::kInstanceTypeOffset));
   CmpS64(type_reg, Operand(type));
 }
@@ -1909,6 +1925,10 @@ void MacroAssembler::CompareInstanceTypeRange(Register map, Register type_reg,
 }
 
 void MacroAssembler::CompareRoot(Register obj, RootIndex index) {
+  if (CanBeImmediate(index)) {
+    CompareTagged(obj, Operand(ReadOnlyRootPtr(index)));
+    return;
+  }
   int32_t offset = RootRegisterOffsetForRootIndex(index);
 #ifdef V8_TARGET_BIG_ENDIAN
   offset += (COMPRESS_POINTERS_BOOL ? kTaggedSize : 0);
@@ -1923,7 +1943,7 @@ void MacroAssembler::JumpIfIsInRange(Register value, unsigned lower_limit,
   ble(on_in_range);
 }
 
-void TurboAssembler::TruncateDoubleToI(Isolate* isolate, Zone* zone,
+void MacroAssembler::TruncateDoubleToI(Isolate* isolate, Zone* zone,
                                        Register result,
                                        DoubleRegister double_input,
                                        StubCallMode stub_mode) {
@@ -1939,13 +1959,13 @@ void TurboAssembler::TruncateDoubleToI(Isolate* isolate, Zone* zone,
 
 #if V8_ENABLE_WEBASSEMBLY
   if (stub_mode == StubCallMode::kCallWasmRuntimeStub) {
-    Call(wasm::WasmCode::kDoubleToI, RelocInfo::WASM_STUB_CALL);
+    Call(static_cast<Address>(Builtin::kDoubleToI), RelocInfo::WASM_STUB_CALL);
 #else
   // For balance.
   if (false) {
 #endif  // V8_ENABLE_WEBASSEMBLY
   } else {
-    Call(BUILTIN_CODE(isolate, DoubleToI), RelocInfo::CODE_TARGET);
+    CallBuiltin(Builtin::kDoubleToI);
   }
 
   LoadU64(result, MemOperand(sp, 0));
@@ -1955,7 +1975,7 @@ void TurboAssembler::TruncateDoubleToI(Isolate* isolate, Zone* zone,
   bind(&done);
 }
 
-void TurboAssembler::TryInlineTruncateDoubleToI(Register result,
+void MacroAssembler::TryInlineTruncateDoubleToI(Register result,
                                                 DoubleRegister double_input,
                                                 Label* done) {
   ConvertDoubleToInt64(result, double_input);
@@ -1965,8 +1985,164 @@ void TurboAssembler::TryInlineTruncateDoubleToI(Register result,
   beq(done);
 }
 
-void MacroAssembler::CallRuntime(const Runtime::Function* f, int num_arguments,
-                                 SaveFPRegsMode save_doubles) {
+namespace {
+
+void TailCallOptimizedCodeSlot(MacroAssembler* masm,
+                               Register optimized_code_entry,
+                               Register scratch) {
+  // ----------- S t a t e -------------
+  //  -- r2 : actual argument count
+  //  -- r5 : new target (preserved for callee if needed, and caller)
+  //  -- r3 : target function (preserved for callee if needed, and caller)
+  // -----------------------------------
+  DCHECK(!AreAliased(r3, r5, optimized_code_entry, scratch));
+
+  Register closure = r3;
+  Label heal_optimized_code_slot;
+
+  // If the optimized code is cleared, go to runtime to update the optimization
+  // marker field.
+  __ LoadWeakValue(optimized_code_entry, optimized_code_entry,
+                   &heal_optimized_code_slot);
+
+  // The entry references a CodeWrapper object. Unwrap it now.
+  __ LoadTaggedField(
+      optimized_code_entry,
+      FieldMemOperand(optimized_code_entry, CodeWrapper::kCodeOffset));
+
+  // Check if the optimized code is marked for deopt. If it is, call the
+  // runtime to clear it.
+  {
+    __ TestCodeIsMarkedForDeoptimization(optimized_code_entry, scratch);
+    __ bne(&heal_optimized_code_slot);
+  }
+
+  // Optimized code is good, get it into the closure and link the closure
+  // into the optimized functions list, then tail call the optimized code.
+  __ ReplaceClosureCodeWithOptimizedCode(optimized_code_entry, closure, scratch,
+                                         r7);
+  static_assert(kJavaScriptCallCodeStartRegister == r4, "ABI mismatch");
+  __ LoadCodeInstructionStart(r4, optimized_code_entry);
+  __ Jump(r4);
+
+  // Optimized code slot contains deoptimized code or code is cleared and
+  // optimized code marker isn't updated. Evict the code, update the marker
+  // and re-enter the closure's code.
+  __ bind(&heal_optimized_code_slot);
+  __ GenerateTailCallToReturnedCode(Runtime::kHealOptimizedCodeSlot);
+}
+
+}  // namespace
+
+#ifdef V8_ENABLE_DEBUG_CODE
+void MacroAssembler::AssertFeedbackCell(Register object, Register scratch) {
+  if (v8_flags.debug_code) {
+    CompareObjectType(object, scratch, scratch, FEEDBACK_CELL_TYPE);
+    Assert(eq, AbortReason::kExpectedFeedbackCell);
+  }
+}
+void MacroAssembler::AssertFeedbackVector(Register object, Register scratch) {
+  if (v8_flags.debug_code) {
+    CompareObjectType(object, scratch, scratch, FEEDBACK_VECTOR_TYPE);
+    Assert(eq, AbortReason::kExpectedFeedbackVector);
+  }
+}
+#endif  // V8_ENABLE_DEBUG_CODE
+
+// Optimized code is good, get it into the closure and link the closure
+// into the optimized functions list, then tail call the optimized code.
+void MacroAssembler::ReplaceClosureCodeWithOptimizedCode(
+    Register optimized_code, Register closure, Register scratch1,
+    Register slot_address) {
+  DCHECK(!AreAliased(optimized_code, closure, scratch1, slot_address));
+  DCHECK_EQ(closure, kJSFunctionRegister);
+  DCHECK(!AreAliased(optimized_code, closure));
+  // Store code entry in the closure.
+  StoreTaggedField(optimized_code,
+                   FieldMemOperand(closure, JSFunction::kCodeOffset), r0);
+  // Write barrier clobbers scratch1 below.
+  Register value = scratch1;
+  mov(value, optimized_code);
+
+  RecordWriteField(closure, JSFunction::kCodeOffset, value, slot_address,
+                   kLRHasNotBeenSaved, SaveFPRegsMode::kIgnore,
+                   SmiCheck::kOmit);
+}
+
+void MacroAssembler::GenerateTailCallToReturnedCode(
+    Runtime::FunctionId function_id) {
+  // ----------- S t a t e -------------
+  //  -- r2 : actual argument count
+  //  -- r3 : target function (preserved for callee)
+  //  -- r5 : new target (preserved for callee)
+  // -----------------------------------
+  {
+    FrameAndConstantPoolScope scope(this, StackFrame::INTERNAL);
+    // Push a copy of the target function, the new target and the actual
+    // argument count.
+    // Push function as parameter to the runtime call.
+    SmiTag(kJavaScriptCallArgCountRegister);
+    Push(kJavaScriptCallTargetRegister, kJavaScriptCallNewTargetRegister,
+         kJavaScriptCallArgCountRegister, kJavaScriptCallTargetRegister);
+
+    CallRuntime(function_id, 1);
+    mov(r4, r2);
+
+    // Restore target function, new target and actual argument count.
+    Pop(kJavaScriptCallTargetRegister, kJavaScriptCallNewTargetRegister,
+        kJavaScriptCallArgCountRegister);
+    SmiUntag(kJavaScriptCallArgCountRegister);
+  }
+  static_assert(kJavaScriptCallCodeStartRegister == r4, "ABI mismatch");
+  JumpCodeObject(r4);
+}
+
+// Read off the flags in the feedback vector and check if there
+// is optimized code or a tiering state that needs to be processed.
+void MacroAssembler::LoadFeedbackVectorFlagsAndJumpIfNeedsProcessing(
+    Register flags, Register feedback_vector, CodeKind current_code_kind,
+    Label* flags_need_processing) {
+  ASM_CODE_COMMENT(this);
+  DCHECK(!AreAliased(flags, feedback_vector));
+  DCHECK(CodeKindCanTierUp(current_code_kind));
+  LoadU16(flags,
+          FieldMemOperand(feedback_vector, FeedbackVector::kFlagsOffset));
+  uint32_t kFlagsMask = FeedbackVector::kFlagsTieringStateIsAnyRequested |
+                        FeedbackVector::kFlagsMaybeHasTurbofanCode |
+                        FeedbackVector::kFlagsLogNextExecution;
+  if (current_code_kind != CodeKind::MAGLEV) {
+    kFlagsMask |= FeedbackVector::kFlagsMaybeHasMaglevCode;
+  }
+  CHECK(is_uint16(kFlagsMask));
+  tmll(flags, Operand(kFlagsMask));
+  b(Condition(7), flags_need_processing);
+}
+
+void MacroAssembler::OptimizeCodeOrTailCallOptimizedCodeSlot(
+    Register flags, Register feedback_vector) {
+  DCHECK(!AreAliased(flags, feedback_vector));
+  Label maybe_has_optimized_code, maybe_needs_logging;
+  // Check if optimized code is available
+  TestBitMask(flags, FeedbackVector::kFlagsTieringStateIsAnyRequested, r0);
+  beq(&maybe_needs_logging);
+
+  GenerateTailCallToReturnedCode(Runtime::kCompileOptimized);
+
+  bind(&maybe_needs_logging);
+  TestBitMask(flags, FeedbackVector::LogNextExecutionBit::kMask, r0);
+  beq(&maybe_has_optimized_code);
+  GenerateTailCallToReturnedCode(Runtime::kFunctionLogNextExecution);
+
+  bind(&maybe_has_optimized_code);
+  Register optimized_code_entry = flags;
+  LoadTaggedField(optimized_code_entry,
+                  FieldMemOperand(feedback_vector,
+                                  FeedbackVector::kMaybeOptimizedCodeOffset));
+  TailCallOptimizedCodeSlot(this, optimized_code_entry, r1);
+}
+
+void MacroAssembler::CallRuntime(const Runtime::Function* f,
+                                 int num_arguments) {
   // All parameters are on the stack.  r2 has the return value after call.
 
   // If the expected number of arguments of the runtime function is
@@ -1981,13 +2157,10 @@ void MacroAssembler::CallRuntime(const Runtime::Function* f, int num_arguments,
   mov(r2, Operand(num_arguments));
   Move(r3, ExternalReference::Create(f));
 #if V8_TARGET_ARCH_S390X
-  Handle<Code> code =
-      CodeFactory::CEntry(isolate(), f->result_size, save_doubles);
+  CallBuiltin(Builtins::RuntimeCEntry(f->result_size));
 #else
-  Handle<Code> code = CodeFactory::CEntry(isolate(), 1, save_doubles);
+  CallBuiltin(Builtins::RuntimeCEntry(1));
 #endif
-
-  Call(code, RelocInfo::CODE_TARGET);
 }
 
 void MacroAssembler::TailCallRuntime(Runtime::FunctionId fid) {
@@ -2002,14 +2175,7 @@ void MacroAssembler::TailCallRuntime(Runtime::FunctionId fid) {
 void MacroAssembler::JumpToExternalReference(const ExternalReference& builtin,
                                              bool builtin_exit_frame) {
   Move(r3, builtin);
-  Handle<Code> code = CodeFactory::CEntry(isolate(), 1, SaveFPRegsMode::kIgnore,
-                                          ArgvMode::kStack, builtin_exit_frame);
-  Jump(code, RelocInfo::CODE_TARGET);
-}
-
-void MacroAssembler::JumpToOffHeapInstructionStream(Address entry) {
-  mov(kOffHeapTrampolineRegister, Operand(entry, RelocInfo::OFF_HEAP_TARGET));
-  Jump(kOffHeapTrampolineRegister);
+  TailCallBuiltin(Builtins::CEntry(1, ArgvMode::kStack, builtin_exit_frame));
 }
 
 void MacroAssembler::LoadWeakValue(Register out, Register in,
@@ -2024,7 +2190,7 @@ void MacroAssembler::EmitIncrementCounter(StatsCounter* counter, int value,
                                           Register scratch1,
                                           Register scratch2) {
   DCHECK(value > 0 && is_int8(value));
-  if (FLAG_native_code_counters && counter->Enabled()) {
+  if (v8_flags.native_code_counters && counter->Enabled()) {
     Move(scratch2, ExternalReference::Create(counter));
     // @TODO(john.yan): can be optimized by asi()
     LoadS32(scratch1, MemOperand(scratch2));
@@ -2037,7 +2203,7 @@ void MacroAssembler::EmitDecrementCounter(StatsCounter* counter, int value,
                                           Register scratch1,
                                           Register scratch2) {
   DCHECK(value > 0 && is_int8(value));
-  if (FLAG_native_code_counters && counter->Enabled()) {
+  if (v8_flags.native_code_counters && counter->Enabled()) {
     Move(scratch2, ExternalReference::Create(counter));
     // @TODO(john.yan): can be optimized by asi()
     LoadS32(scratch1, MemOperand(scratch2));
@@ -2046,15 +2212,7 @@ void MacroAssembler::EmitDecrementCounter(StatsCounter* counter, int value,
   }
 }
 
-void TurboAssembler::Assert(Condition cond, AbortReason reason, CRegister cr) {
-  if (FLAG_debug_code) Check(cond, reason, cr);
-}
-
-void TurboAssembler::AssertUnreachable(AbortReason reason) {
-  if (FLAG_debug_code) Abort(reason);
-}
-
-void TurboAssembler::Check(Condition cond, AbortReason reason, CRegister cr) {
+void MacroAssembler::Check(Condition cond, AbortReason reason, CRegister cr) {
   Label L;
   b(cond, &L);
   Abort(reason);
@@ -2062,10 +2220,10 @@ void TurboAssembler::Check(Condition cond, AbortReason reason, CRegister cr) {
   bind(&L);
 }
 
-void TurboAssembler::Abort(AbortReason reason) {
+void MacroAssembler::Abort(AbortReason reason) {
   Label abort_start;
   bind(&abort_start);
-  if (FLAG_code_comments) {
+  if (v8_flags.code_comments) {
     const char* msg = GetAbortReason(reason);
     RecordComment("Abort message: ");
     RecordComment(msg);
@@ -2091,50 +2249,86 @@ void TurboAssembler::Abort(AbortReason reason) {
 
   LoadSmiLiteral(r3, Smi::FromInt(static_cast<int>(reason)));
 
-  // Disable stub call restrictions to always allow calls to abort.
-  if (!has_frame_) {
+  {
     // We don't actually want to generate a pile of code for this, so just
     // claim there is a stack frame, without generating one.
     FrameScope scope(this, StackFrame::NO_FRAME_TYPE);
-    Call(BUILTIN_CODE(isolate(), Abort), RelocInfo::CODE_TARGET);
-  } else {
-    Call(BUILTIN_CODE(isolate(), Abort), RelocInfo::CODE_TARGET);
+    if (root_array_available()) {
+      // Generate an indirect call via builtins entry table here in order to
+      // ensure that the interpreter_entry_return_pc_offset is the same for
+      // InterpreterEntryTrampoline and InterpreterEntryTrampolineForProfiling
+      // when v8_flags.debug_code is enabled.
+      LoadEntryFromBuiltin(Builtin::kAbort, ip);
+      Call(ip);
+    } else {
+      CallBuiltin(Builtin::kAbort);
+    }
   }
   // will not return here
 }
 
-void TurboAssembler::LoadMap(Register destination, Register object) {
-  LoadTaggedPointerField(destination,
-                         FieldMemOperand(object, HeapObject::kMapOffset));
+void MacroAssembler::LoadMap(Register destination, Register object) {
+  LoadTaggedField(destination, FieldMemOperand(object, HeapObject::kMapOffset));
+}
+
+void MacroAssembler::LoadFeedbackVector(Register dst, Register closure,
+                                        Register scratch, Label* fbv_undef) {
+  Label done;
+
+  // Load the feedback vector from the closure.
+  LoadTaggedField(dst,
+                  FieldMemOperand(closure, JSFunction::kFeedbackCellOffset));
+  LoadTaggedField(dst, FieldMemOperand(dst, FeedbackCell::kValueOffset));
+
+  // Check if feedback vector is valid.
+  LoadTaggedField(scratch, FieldMemOperand(dst, HeapObject::kMapOffset));
+  LoadU16(scratch, FieldMemOperand(scratch, Map::kInstanceTypeOffset));
+  CmpS32(scratch, Operand(FEEDBACK_VECTOR_TYPE));
+  b(eq, &done);
+
+  // Not valid, load undefined.
+  LoadRoot(dst, RootIndex::kUndefinedValue);
+  b(fbv_undef);
+
+  bind(&done);
 }
 
 void MacroAssembler::LoadNativeContextSlot(Register dst, int index) {
   LoadMap(dst, cp);
-  LoadTaggedPointerField(
+  LoadTaggedField(
       dst, FieldMemOperand(
                dst, Map::kConstructorOrBackPointerOrNativeContextOffset));
-  LoadTaggedPointerField(dst, MemOperand(dst, Context::SlotOffset(index)));
+  LoadTaggedField(dst, MemOperand(dst, Context::SlotOffset(index)));
 }
 
-void TurboAssembler::AssertNotSmi(Register object) {
-  if (FLAG_debug_code) {
-    STATIC_ASSERT(kSmiTag == 0);
+#ifdef V8_ENABLE_DEBUG_CODE
+void MacroAssembler::Assert(Condition cond, AbortReason reason, CRegister cr) {
+  if (v8_flags.debug_code) Check(cond, reason, cr);
+}
+
+void MacroAssembler::AssertUnreachable(AbortReason reason) {
+  if (v8_flags.debug_code) Abort(reason);
+}
+
+void MacroAssembler::AssertNotSmi(Register object) {
+  if (v8_flags.debug_code) {
+    static_assert(kSmiTag == 0);
     TestIfSmi(object);
     Check(ne, AbortReason::kOperandIsASmi, cr0);
   }
 }
 
-void TurboAssembler::AssertSmi(Register object) {
-  if (FLAG_debug_code) {
-    STATIC_ASSERT(kSmiTag == 0);
+void MacroAssembler::AssertSmi(Register object) {
+  if (v8_flags.debug_code) {
+    static_assert(kSmiTag == 0);
     TestIfSmi(object);
     Check(eq, AbortReason::kOperandIsNotASmi, cr0);
   }
 }
 
 void MacroAssembler::AssertConstructor(Register object, Register scratch) {
-  if (FLAG_debug_code) {
-    STATIC_ASSERT(kSmiTag == 0);
+  if (v8_flags.debug_code) {
+    static_assert(kSmiTag == 0);
     TestIfSmi(object);
     Check(ne, AbortReason::kOperandIsASmiAndNotAConstructor);
     LoadMap(scratch, object);
@@ -2145,8 +2339,8 @@ void MacroAssembler::AssertConstructor(Register object, Register scratch) {
 }
 
 void MacroAssembler::AssertFunction(Register object) {
-  if (FLAG_debug_code) {
-    STATIC_ASSERT(kSmiTag == 0);
+  if (v8_flags.debug_code) {
+    static_assert(kSmiTag == 0);
     TestIfSmi(object);
     Check(ne, AbortReason::kOperandIsASmiAndNotAFunction, cr0);
     push(object);
@@ -2159,9 +2353,9 @@ void MacroAssembler::AssertFunction(Register object) {
 }
 
 void MacroAssembler::AssertCallableFunction(Register object) {
-  if (!FLAG_debug_code) return;
+  if (!v8_flags.debug_code) return;
   ASM_CODE_COMMENT(this);
-  STATIC_ASSERT(kSmiTag == 0);
+  static_assert(kSmiTag == 0);
   TestIfSmi(object);
   Check(ne, AbortReason::kOperandIsASmiAndNotAFunction);
   push(object);
@@ -2173,8 +2367,8 @@ void MacroAssembler::AssertCallableFunction(Register object) {
 }
 
 void MacroAssembler::AssertBoundFunction(Register object) {
-  if (FLAG_debug_code) {
-    STATIC_ASSERT(kSmiTag == 0);
+  if (v8_flags.debug_code) {
+    static_assert(kSmiTag == 0);
     TestIfSmi(object);
     Check(ne, AbortReason::kOperandIsASmiAndNotABoundFunction, cr0);
     push(object);
@@ -2185,7 +2379,7 @@ void MacroAssembler::AssertBoundFunction(Register object) {
 }
 
 void MacroAssembler::AssertGeneratorObject(Register object) {
-  if (!FLAG_debug_code) return;
+  if (!v8_flags.debug_code) return;
   TestIfSmi(object);
   Check(ne, AbortReason::kOperandIsASmiAndNotAGeneratorObject, cr0);
 
@@ -2195,27 +2389,17 @@ void MacroAssembler::AssertGeneratorObject(Register object) {
   LoadMap(map, object);
 
   // Check if JSGeneratorObject
-  Label do_check;
   Register instance_type = object;
-  CompareInstanceType(map, instance_type, JS_GENERATOR_OBJECT_TYPE);
-  beq(&do_check);
-
-  // Check if JSAsyncFunctionObject (See MacroAssembler::CompareInstanceType)
-  CmpS64(instance_type, Operand(JS_ASYNC_FUNCTION_OBJECT_TYPE));
-  beq(&do_check);
-
-  // Check if JSAsyncGeneratorObject (See MacroAssembler::CompareInstanceType)
-  CmpS64(instance_type, Operand(JS_ASYNC_GENERATOR_OBJECT_TYPE));
-
-  bind(&do_check);
+  CompareInstanceTypeRange(map, instance_type, FIRST_JS_GENERATOR_OBJECT_TYPE,
+                           LAST_JS_GENERATOR_OBJECT_TYPE);
   // Restore generator object to register and perform assertion
   pop(object);
-  Check(eq, AbortReason::kOperandIsNotAGeneratorObject);
+  Check(le, AbortReason::kOperandIsNotAGeneratorObject);
 }
 
 void MacroAssembler::AssertUndefinedOrAllocationSite(Register object,
                                                      Register scratch) {
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     Label done_checking;
     AssertNotSmi(object);
     CompareRoot(object, RootIndex::kUndefinedValue);
@@ -2227,9 +2411,49 @@ void MacroAssembler::AssertUndefinedOrAllocationSite(Register object,
   }
 }
 
-static const int kRegisterPassedArguments = 5;
+void MacroAssembler::AssertJSAny(Register object, Register map_tmp,
+                                 Register tmp, AbortReason abort_reason) {
+  if (!v8_flags.debug_code) return;
 
-int TurboAssembler::CalculateStackPassedWords(int num_reg_arguments,
+  ASM_CODE_COMMENT(this);
+  DCHECK(!AreAliased(object, map_tmp, tmp));
+  Label ok;
+
+  JumpIfSmi(object, &ok);
+
+  LoadMap(map_tmp, object);
+  CompareInstanceType(map_tmp, tmp, LAST_NAME_TYPE);
+  ble(&ok);
+
+  CompareInstanceType(map_tmp, tmp, FIRST_JS_RECEIVER_TYPE);
+  bge(&ok);
+
+  CompareRoot(map_tmp, RootIndex::kHeapNumberMap);
+  beq(&ok);
+
+  CompareRoot(map_tmp, RootIndex::kBigIntMap);
+  beq(&ok);
+
+  CompareRoot(object, RootIndex::kUndefinedValue);
+  beq(&ok);
+
+  CompareRoot(object, RootIndex::kTrueValue);
+  beq(&ok);
+
+  CompareRoot(object, RootIndex::kFalseValue);
+  beq(&ok);
+
+  CompareRoot(object, RootIndex::kNullValue);
+  beq(&ok);
+
+  Abort(abort_reason);
+
+  bind(&ok);
+}
+
+#endif  // V8_ENABLE_DEBUG_CODE
+
+int MacroAssembler::CalculateStackPassedWords(int num_reg_arguments,
                                               int num_double_arguments) {
   int stack_passed_words = 0;
   if (num_double_arguments > DoubleRegister::kNumRegisters) {
@@ -2243,7 +2467,7 @@ int TurboAssembler::CalculateStackPassedWords(int num_reg_arguments,
   return stack_passed_words;
 }
 
-void TurboAssembler::PrepareCallCFunction(int num_reg_arguments,
+void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
                                           int num_double_arguments,
                                           Register scratch) {
   int frame_alignment = ActivationFrameAlignment();
@@ -2266,16 +2490,16 @@ void TurboAssembler::PrepareCallCFunction(int num_reg_arguments,
   lay(sp, MemOperand(sp, (-stack_space) * kSystemPointerSize));
 }
 
-void TurboAssembler::PrepareCallCFunction(int num_reg_arguments,
+void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
                                           Register scratch) {
   PrepareCallCFunction(num_reg_arguments, 0, scratch);
 }
 
-void TurboAssembler::MovToFloatParameter(DoubleRegister src) { Move(d0, src); }
+void MacroAssembler::MovToFloatParameter(DoubleRegister src) { Move(d0, src); }
 
-void TurboAssembler::MovToFloatResult(DoubleRegister src) { Move(d0, src); }
+void MacroAssembler::MovToFloatResult(DoubleRegister src) { Move(d0, src); }
 
-void TurboAssembler::MovToFloatParameters(DoubleRegister src1,
+void MacroAssembler::MovToFloatParameters(DoubleRegister src1,
                                           DoubleRegister src2) {
   if (src2 == d0) {
     DCHECK(src1 != d2);
@@ -2287,53 +2511,62 @@ void TurboAssembler::MovToFloatParameters(DoubleRegister src1,
   }
 }
 
-void TurboAssembler::CallCFunction(ExternalReference function,
-                                   int num_reg_arguments,
-                                   int num_double_arguments) {
+int MacroAssembler::CallCFunction(ExternalReference function,
+                                  int num_reg_arguments,
+                                  int num_double_arguments,
+                                  SetIsolateDataSlots set_isolate_data_slots,
+                                  Label* return_label) {
   Move(ip, function);
-  CallCFunctionHelper(ip, num_reg_arguments, num_double_arguments);
+  return CallCFunction(ip, num_reg_arguments, num_double_arguments,
+                       set_isolate_data_slots, return_label);
 }
 
-void TurboAssembler::CallCFunction(Register function, int num_reg_arguments,
-                                   int num_double_arguments) {
-  CallCFunctionHelper(function, num_reg_arguments, num_double_arguments);
-}
-
-void TurboAssembler::CallCFunction(ExternalReference function,
-                                   int num_arguments) {
-  CallCFunction(function, num_arguments, 0);
-}
-
-void TurboAssembler::CallCFunction(Register function, int num_arguments) {
-  CallCFunction(function, num_arguments, 0);
-}
-
-void TurboAssembler::CallCFunctionHelper(Register function,
-                                         int num_reg_arguments,
-                                         int num_double_arguments) {
+int MacroAssembler::CallCFunction(Register function, int num_reg_arguments,
+                                  int num_double_arguments,
+                                  SetIsolateDataSlots set_isolate_data_slots,
+                                  Label* return_label) {
+  ASM_CODE_COMMENT(this);
   DCHECK_LE(num_reg_arguments + num_double_arguments, kMaxCParameters);
   DCHECK(has_frame());
 
-  // Save the frame pointer and PC so that the stack layout remains iterable,
-  // even without an ExitFrame which normally exists between JS and C frames.
-  Register addr_scratch = r1;
-  // See x64 code for reasoning about how to address the isolate data fields.
-  if (root_array_available()) {
-    LoadPC(r0);
-    StoreU64(r0, MemOperand(kRootRegister,
-                            IsolateData::fast_c_call_caller_pc_offset()));
-    StoreU64(fp, MemOperand(kRootRegister,
-                            IsolateData::fast_c_call_caller_fp_offset()));
-  } else {
-    DCHECK_NOT_NULL(isolate());
+  Label get_pc;
 
-    Move(addr_scratch,
-         ExternalReference::fast_c_call_caller_pc_address(isolate()));
-    LoadPC(r0);
-    StoreU64(r0, MemOperand(addr_scratch));
-    Move(addr_scratch,
-         ExternalReference::fast_c_call_caller_fp_address(isolate()));
-    StoreU64(fp, MemOperand(addr_scratch));
+  if (set_isolate_data_slots == SetIsolateDataSlots::kYes) {
+    // Save the frame pointer and PC so that the stack layout remains iterable,
+    // even without an ExitFrame which normally exists between JS and C frames.
+    // See x64 code for reasoning about how to address the isolate data fields.
+    larl(r0, &get_pc);
+    if (root_array_available()) {
+      StoreU64(r0, MemOperand(kRootRegister,
+                              IsolateData::fast_c_call_caller_pc_offset()));
+      StoreU64(fp, MemOperand(kRootRegister,
+                              IsolateData::fast_c_call_caller_fp_offset()));
+#if DEBUG
+      // Reset Isolate::context field right before the fast C call such that the
+      // GC can visit this field unconditionally. This is necessary because
+      // CEntry sets it to kInvalidContext in debug build only.
+      mov(r0, Operand(Context::kNoContext));
+      StoreRootRelative(IsolateData::context_offset(), r0);
+#endif
+    } else {
+      DCHECK_NOT_NULL(isolate());
+      Register addr_scratch = r1;
+      Move(addr_scratch,
+           ExternalReference::fast_c_call_caller_pc_address(isolate()));
+      StoreU64(r0, MemOperand(addr_scratch));
+      Move(addr_scratch,
+           ExternalReference::fast_c_call_caller_fp_address(isolate()));
+      StoreU64(fp, MemOperand(addr_scratch));
+#if DEBUG
+      // Reset Isolate::context field right before the fast C call such that the
+      // GC can visit this field unconditionally. This is necessary because
+      // CEntry sets it to kInvalidContext in debug build only.
+      mov(r0, Operand(Context::kNoContext));
+      StoreU64(
+          r0, ExternalReferenceAsOperand(
+                  ExternalReference::context_address(isolate()), addr_scratch));
+#endif
+    }
   }
 
   // Just call directly. The function called cannot cause a GC, or
@@ -2346,20 +2579,26 @@ void TurboAssembler::CallCFunctionHelper(Register function,
   }
 
   Call(dest);
+  int call_pc_offset = pc_offset();
+  bind(&get_pc);
+  if (return_label) bind(return_label);
 
-  // We don't unset the PC; the FP is the source of truth.
-  Register zero_scratch = r0;
-  lghi(zero_scratch, Operand::Zero());
+  if (set_isolate_data_slots == SetIsolateDataSlots::kYes) {
+    // We don't unset the PC; the FP is the source of truth.
+    Register zero_scratch = r0;
+    lghi(zero_scratch, Operand::Zero());
 
-  if (root_array_available()) {
-    StoreU64(
-        zero_scratch,
-        MemOperand(kRootRegister, IsolateData::fast_c_call_caller_fp_offset()));
-  } else {
-    DCHECK_NOT_NULL(isolate());
-    Move(addr_scratch,
-         ExternalReference::fast_c_call_caller_fp_address(isolate()));
-    StoreU64(zero_scratch, MemOperand(addr_scratch));
+    if (root_array_available()) {
+      StoreU64(zero_scratch,
+               MemOperand(kRootRegister,
+                          IsolateData::fast_c_call_caller_fp_offset()));
+    } else {
+      DCHECK_NOT_NULL(isolate());
+      Register addr_scratch = r1;
+      Move(addr_scratch,
+           ExternalReference::fast_c_call_caller_fp_address(isolate()));
+      StoreU64(zero_scratch, MemOperand(addr_scratch));
+    }
   }
 
   int stack_passed_arguments =
@@ -2371,9 +2610,25 @@ void TurboAssembler::CallCFunctionHelper(Register function,
   } else {
     la(sp, MemOperand(sp, stack_space * kSystemPointerSize));
   }
+
+  return call_pc_offset;
 }
 
-void TurboAssembler::CheckPageFlag(
+int MacroAssembler::CallCFunction(ExternalReference function, int num_arguments,
+                                  SetIsolateDataSlots set_isolate_data_slots,
+                                  Label* return_label) {
+  return CallCFunction(function, num_arguments, 0, set_isolate_data_slots,
+                       return_label);
+}
+
+int MacroAssembler::CallCFunction(Register function, int num_arguments,
+                                  SetIsolateDataSlots set_isolate_data_slots,
+                                  Label* return_label) {
+  return CallCFunction(function, num_arguments, 0, set_isolate_data_slots,
+                       return_label);
+}
+
+void MacroAssembler::CheckPageFlag(
     Register object,
     Register scratch,  // scratch may be same register as object
     int mask, Condition cc, Label* condition_met) {
@@ -2402,10 +2657,10 @@ void TurboAssembler::CheckPageFlag(
     // Reverse the byte_offset if emulating on little endian platform
     byte_offset = kSystemPointerSize - byte_offset - 1;
 #endif
-    tm(MemOperand(scratch, BasicMemoryChunk::kFlagsOffset + byte_offset),
+    tm(MemOperand(scratch, MemoryChunkLayout::kFlagsOffset + byte_offset),
        Operand(shifted_mask));
   } else {
-    LoadU64(scratch, MemOperand(scratch, BasicMemoryChunk::kFlagsOffset));
+    LoadU64(scratch, MemOperand(scratch, MemoryChunkLayout::kFlagsOffset));
     AndP(r0, scratch, Operand(mask));
   }
   // Should be okay to remove rc
@@ -2433,13 +2688,13 @@ Register GetRegisterThatIsNotOneOf(Register reg1, Register reg2, Register reg3,
   UNREACHABLE();
 }
 
-void TurboAssembler::mov(Register dst, Register src) { lgr(dst, src); }
+void MacroAssembler::mov(Register dst, Register src) { lgr(dst, src); }
 
-void TurboAssembler::mov(Register dst, const Operand& src) {
+void MacroAssembler::mov(Register dst, const Operand& src) {
   int64_t value = 0;
 
-  if (src.is_heap_object_request()) {
-    RequestHeapObject(src.heap_object_request());
+  if (src.is_heap_number_request()) {
+    RequestHeapNumber(src.heap_number_request());
   } else {
     value = src.immediate();
   }
@@ -2480,7 +2735,7 @@ void TurboAssembler::mov(Register dst, const Operand& src) {
   iilf(dst, Operand(lo_32));
 }
 
-void TurboAssembler::MulS32(Register dst, const MemOperand& src1) {
+void MacroAssembler::MulS32(Register dst, const MemOperand& src1) {
   if (is_uint12(src1.offset())) {
     ms(dst, src1);
   } else if (is_int20(src1.offset())) {
@@ -2490,9 +2745,9 @@ void TurboAssembler::MulS32(Register dst, const MemOperand& src1) {
   }
 }
 
-void TurboAssembler::MulS32(Register dst, Register src1) { msr(dst, src1); }
+void MacroAssembler::MulS32(Register dst, Register src1) { msr(dst, src1); }
 
-void TurboAssembler::MulS32(Register dst, const Operand& src1) {
+void MacroAssembler::MulS32(Register dst, const Operand& src1) {
   msfi(dst, src1);
 }
 
@@ -2503,19 +2758,19 @@ void TurboAssembler::MulS32(Register dst, const Operand& src1) {
     srlg(dst, dst, Operand(32));  \
   }
 
-void TurboAssembler::MulHighS32(Register dst, Register src1,
+void MacroAssembler::MulHighS32(Register dst, Register src1,
                                 const MemOperand& src2) {
   Generate_MulHigh32(msgf);
 }
 
-void TurboAssembler::MulHighS32(Register dst, Register src1, Register src2) {
+void MacroAssembler::MulHighS32(Register dst, Register src1, Register src2) {
   if (dst == src2) {
     std::swap(src1, src2);
   }
   Generate_MulHigh32(msgfr);
 }
 
-void TurboAssembler::MulHighS32(Register dst, Register src1,
+void MacroAssembler::MulHighS32(Register dst, Register src1,
                                 const Operand& src2) {
   Generate_MulHigh32(msgfi);
 }
@@ -2526,19 +2781,19 @@ void TurboAssembler::MulHighS32(Register dst, Register src1,
   {                                \
     lr(r1, src1);                  \
     instr(r0, src2);               \
-    LoadU32(dst, r0);               \
+    LoadU32(dst, r0);              \
   }
 
-void TurboAssembler::MulHighU32(Register dst, Register src1,
+void MacroAssembler::MulHighU32(Register dst, Register src1,
                                 const MemOperand& src2) {
   Generate_MulHighU32(ml);
 }
 
-void TurboAssembler::MulHighU32(Register dst, Register src1, Register src2) {
+void MacroAssembler::MulHighU32(Register dst, Register src1, Register src2) {
   Generate_MulHighU32(mlr);
 }
 
-void TurboAssembler::MulHighU32(Register dst, Register src1,
+void MacroAssembler::MulHighU32(Register dst, Register src1,
                                 const Operand& src2) {
   USE(dst);
   USE(src1);
@@ -2555,7 +2810,7 @@ void TurboAssembler::MulHighU32(Register dst, Register src1,
     cgfr(dst, dst);                                  \
   }
 
-void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
+void MacroAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
                                                   const MemOperand& src2) {
   Register result = dst;
   if (src2.rx() == dst || src2.rb() == dst) dst = r0;
@@ -2563,7 +2818,7 @@ void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
   if (result != dst) llgfr(result, dst);
 }
 
-void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
+void MacroAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
                                                   Register src2) {
   if (dst == src2) {
     std::swap(src1, src2);
@@ -2571,7 +2826,7 @@ void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
   Generate_Mul32WithOverflowIfCCUnequal(msgfr);
 }
 
-void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
+void MacroAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
                                                   const Operand& src2) {
   Generate_Mul32WithOverflowIfCCUnequal(msgfi);
 }
@@ -2582,15 +2837,15 @@ void TurboAssembler::Mul32WithOverflowIfCCUnequal(Register dst, Register src1,
   {                           \
     lgfr(r1, src1);           \
     instr(r0, src2);          \
-    LoadU32(dst, r1);          \
+    LoadU32(dst, r1);         \
   }
 
-void TurboAssembler::DivS32(Register dst, Register src1,
+void MacroAssembler::DivS32(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_Div32(dsgf);
 }
 
-void TurboAssembler::DivS32(Register dst, Register src1, Register src2) {
+void MacroAssembler::DivS32(Register dst, Register src1, Register src2) {
   Generate_Div32(dsgfr);
 }
 
@@ -2601,15 +2856,15 @@ void TurboAssembler::DivS32(Register dst, Register src1, Register src2) {
     lr(r0, src1);              \
     srdl(r0, Operand(32));     \
     instr(r0, src2);           \
-    LoadU32(dst, r1);           \
+    LoadU32(dst, r1);          \
   }
 
-void TurboAssembler::DivU32(Register dst, Register src1,
+void MacroAssembler::DivU32(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_DivU32(dl);
 }
 
-void TurboAssembler::DivU32(Register dst, Register src1, Register src2) {
+void MacroAssembler::DivU32(Register dst, Register src1, Register src2) {
   Generate_DivU32(dlr);
 }
 
@@ -2622,12 +2877,12 @@ void TurboAssembler::DivU32(Register dst, Register src1, Register src2) {
     lgr(dst, r1);             \
   }
 
-void TurboAssembler::DivS64(Register dst, Register src1,
+void MacroAssembler::DivS64(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_Div64(dsg);
 }
 
-void TurboAssembler::DivS64(Register dst, Register src1, Register src2) {
+void MacroAssembler::DivS64(Register dst, Register src1, Register src2) {
   Generate_Div64(dsgr);
 }
 
@@ -2641,12 +2896,12 @@ void TurboAssembler::DivS64(Register dst, Register src1, Register src2) {
     lgr(dst, r1);              \
   }
 
-void TurboAssembler::DivU64(Register dst, Register src1,
+void MacroAssembler::DivU64(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_DivU64(dlg);
 }
 
-void TurboAssembler::DivU64(Register dst, Register src1, Register src2) {
+void MacroAssembler::DivU64(Register dst, Register src1, Register src2) {
   Generate_DivU64(dlgr);
 }
 
@@ -2656,15 +2911,15 @@ void TurboAssembler::DivU64(Register dst, Register src1, Register src2) {
   {                           \
     lgfr(r1, src1);           \
     instr(r0, src2);          \
-    LoadU32(dst, r0);          \
+    LoadU32(dst, r0);         \
   }
 
-void TurboAssembler::ModS32(Register dst, Register src1,
+void MacroAssembler::ModS32(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_Mod32(dsgf);
 }
 
-void TurboAssembler::ModS32(Register dst, Register src1, Register src2) {
+void MacroAssembler::ModS32(Register dst, Register src1, Register src2) {
   Generate_Mod32(dsgfr);
 }
 
@@ -2675,15 +2930,15 @@ void TurboAssembler::ModS32(Register dst, Register src1, Register src2) {
     lr(r0, src1);              \
     srdl(r0, Operand(32));     \
     instr(r0, src2);           \
-    LoadU32(dst, r0);           \
+    LoadU32(dst, r0);          \
   }
 
-void TurboAssembler::ModU32(Register dst, Register src1,
+void MacroAssembler::ModU32(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_ModU32(dl);
 }
 
-void TurboAssembler::ModU32(Register dst, Register src1, Register src2) {
+void MacroAssembler::ModU32(Register dst, Register src1, Register src2) {
   Generate_ModU32(dlr);
 }
 
@@ -2696,12 +2951,12 @@ void TurboAssembler::ModU32(Register dst, Register src1, Register src2) {
     lgr(dst, r0);             \
   }
 
-void TurboAssembler::ModS64(Register dst, Register src1,
+void MacroAssembler::ModS64(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_Mod64(dsg);
 }
 
-void TurboAssembler::ModS64(Register dst, Register src1, Register src2) {
+void MacroAssembler::ModS64(Register dst, Register src1, Register src2) {
   Generate_Mod64(dsgr);
 }
 
@@ -2715,31 +2970,69 @@ void TurboAssembler::ModS64(Register dst, Register src1, Register src2) {
     lgr(dst, r0);              \
   }
 
-void TurboAssembler::ModU64(Register dst, Register src1,
+void MacroAssembler::ModU64(Register dst, Register src1,
                             const MemOperand& src2) {
   Generate_ModU64(dlg);
 }
 
-void TurboAssembler::ModU64(Register dst, Register src1, Register src2) {
+void MacroAssembler::ModU64(Register dst, Register src1, Register src2) {
   Generate_ModU64(dlgr);
 }
 
 #undef Generate_ModU64
 
-void TurboAssembler::MulS64(Register dst, const Operand& opnd) {
+void MacroAssembler::MulS64(Register dst, const Operand& opnd) {
   msgfi(dst, opnd);
 }
 
-void TurboAssembler::MulS64(Register dst, Register src) { msgr(dst, src); }
+void MacroAssembler::MulS64(Register dst, Register src) { msgr(dst, src); }
 
-void TurboAssembler::MulS64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::MulS64(Register dst, const MemOperand& opnd) {
   msg(dst, opnd);
 }
 
-void TurboAssembler::Sqrt(DoubleRegister result, DoubleRegister input) {
+void MacroAssembler::MulHighS64(Register dst, Register src1, Register src2) {
+  if (CpuFeatures::IsSupported(MISC_INSTR_EXT2)) {
+    mgrk(r0, src1, src2);
+    lgr(dst, r0);
+  } else {
+    SaveFPRegsMode fp_mode = SaveFPRegsMode::kSave;
+    PushCallerSaved(fp_mode, ip);
+    Push(src1, src2);
+    Pop(r2, r3);
+    {
+      FrameScope scope(this, StackFrame::INTERNAL);
+      PrepareCallCFunction(2, 0, r0);
+      CallCFunction(ExternalReference::int64_mul_high_function(), 2, 0);
+    }
+    mov(r0, r2);
+    PopCallerSaved(fp_mode, ip);
+    mov(dst, r0);
+  }
+}
+
+void MacroAssembler::MulHighS64(Register dst, Register src1,
+                                const MemOperand& src2) {
+  // TODO(v8): implement this.
+  UNIMPLEMENTED();
+}
+
+void MacroAssembler::MulHighU64(Register dst, Register src1, Register src2) {
+  lgr(r1, src1);
+  mlgr(r0, src2);
+  lgr(dst, r0);
+}
+
+void MacroAssembler::MulHighU64(Register dst, Register src1,
+                                const MemOperand& src2) {
+  // TODO(v8): implement this.
+  UNIMPLEMENTED();
+}
+
+void MacroAssembler::Sqrt(DoubleRegister result, DoubleRegister input) {
   sqdbr(result, input);
 }
-void TurboAssembler::Sqrt(DoubleRegister result, const MemOperand& input) {
+void MacroAssembler::Sqrt(DoubleRegister result, const MemOperand& input) {
   if (is_uint12(input.offset())) {
     sqdb(result, input);
   } else {
@@ -2752,7 +3045,7 @@ void TurboAssembler::Sqrt(DoubleRegister result, const MemOperand& input) {
 //----------------------------------------------------------------------------
 
 // Add 32-bit (Register dst = Register dst + Immediate opnd)
-void TurboAssembler::AddS32(Register dst, const Operand& opnd) {
+void MacroAssembler::AddS32(Register dst, const Operand& opnd) {
   if (is_int16(opnd.immediate()))
     ahi(dst, opnd);
   else
@@ -2760,19 +3053,19 @@ void TurboAssembler::AddS32(Register dst, const Operand& opnd) {
 }
 
 // Add Pointer Size (Register dst = Register dst + Immediate opnd)
-void TurboAssembler::AddS64(Register dst, const Operand& opnd) {
+void MacroAssembler::AddS64(Register dst, const Operand& opnd) {
   if (is_int16(opnd.immediate()))
     aghi(dst, opnd);
   else
     agfi(dst, opnd);
 }
 
-void TurboAssembler::AddS32(Register dst, Register src, int32_t opnd) {
+void MacroAssembler::AddS32(Register dst, Register src, int32_t opnd) {
   AddS32(dst, src, Operand(opnd));
 }
 
 // Add 32-bit (Register dst = Register src + Immediate opnd)
-void TurboAssembler::AddS32(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::AddS32(Register dst, Register src, const Operand& opnd) {
   if (dst != src) {
     if (CpuFeatures::IsSupported(DISTINCT_OPS) && is_int16(opnd.immediate())) {
       ahik(dst, src, opnd);
@@ -2783,12 +3076,12 @@ void TurboAssembler::AddS32(Register dst, Register src, const Operand& opnd) {
   AddS32(dst, opnd);
 }
 
-void TurboAssembler::AddS64(Register dst, Register src, int32_t opnd) {
+void MacroAssembler::AddS64(Register dst, Register src, int32_t opnd) {
   AddS64(dst, src, Operand(opnd));
 }
 
 // Add Pointer Size (Register dst = Register src + Immediate opnd)
-void TurboAssembler::AddS64(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::AddS64(Register dst, Register src, const Operand& opnd) {
   if (dst != src) {
     if (CpuFeatures::IsSupported(DISTINCT_OPS) && is_int16(opnd.immediate())) {
       aghik(dst, src, opnd);
@@ -2800,13 +3093,13 @@ void TurboAssembler::AddS64(Register dst, Register src, const Operand& opnd) {
 }
 
 // Add 32-bit (Register dst = Register dst + Register src)
-void TurboAssembler::AddS32(Register dst, Register src) { ar(dst, src); }
+void MacroAssembler::AddS32(Register dst, Register src) { ar(dst, src); }
 
 // Add Pointer Size (Register dst = Register dst + Register src)
-void TurboAssembler::AddS64(Register dst, Register src) { agr(dst, src); }
+void MacroAssembler::AddS64(Register dst, Register src) { agr(dst, src); }
 
 // Add 32-bit (Register dst = Register src1 + Register src2)
-void TurboAssembler::AddS32(Register dst, Register src1, Register src2) {
+void MacroAssembler::AddS32(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate AR/AGR, over the non clobbering ARK/AGRK
     // as AR is a smaller instruction
@@ -2823,7 +3116,7 @@ void TurboAssembler::AddS32(Register dst, Register src1, Register src2) {
 }
 
 // Add Pointer Size (Register dst = Register src1 + Register src2)
-void TurboAssembler::AddS64(Register dst, Register src1, Register src2) {
+void MacroAssembler::AddS64(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate AR/AGR, over the non clobbering ARK/AGRK
     // as AR is a smaller instruction
@@ -2840,7 +3133,7 @@ void TurboAssembler::AddS64(Register dst, Register src1, Register src2) {
 }
 
 // Add 32-bit (Register-Memory)
-void TurboAssembler::AddS32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::AddS32(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     a(dst, opnd);
@@ -2849,13 +3142,13 @@ void TurboAssembler::AddS32(Register dst, const MemOperand& opnd) {
 }
 
 // Add Pointer Size (Register-Memory)
-void TurboAssembler::AddS64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::AddS64(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   ag(dst, opnd);
 }
 
 // Add 32-bit (Memory - Immediate)
-void TurboAssembler::AddS32(const MemOperand& opnd, const Operand& imm) {
+void MacroAssembler::AddS32(const MemOperand& opnd, const Operand& imm) {
   DCHECK(is_int8(imm.immediate()));
   DCHECK(is_int20(opnd.offset()));
   DCHECK(CpuFeatures::IsSupported(GENERAL_INSTR_EXT));
@@ -2863,7 +3156,7 @@ void TurboAssembler::AddS32(const MemOperand& opnd, const Operand& imm) {
 }
 
 // Add Pointer-sized (Memory - Immediate)
-void TurboAssembler::AddS64(const MemOperand& opnd, const Operand& imm) {
+void MacroAssembler::AddS64(const MemOperand& opnd, const Operand& imm) {
   DCHECK(is_int8(imm.immediate()));
   DCHECK(is_int20(opnd.offset()));
   DCHECK(CpuFeatures::IsSupported(GENERAL_INSTR_EXT));
@@ -2875,7 +3168,7 @@ void TurboAssembler::AddS64(const MemOperand& opnd, const Operand& imm) {
 //----------------------------------------------------------------------------
 
 // Add Logical 32-bit (Register dst = Register src1 + Register src2)
-void TurboAssembler::AddU32(Register dst, Register src1, Register src2) {
+void MacroAssembler::AddU32(Register dst, Register src1, Register src2) {
   if (dst != src2 && dst != src1) {
     lr(dst, src1);
     alr(dst, src2);
@@ -2891,16 +3184,16 @@ void TurboAssembler::AddU32(Register dst, Register src1, Register src2) {
 }
 
 // Add Logical 32-bit (Register dst = Register dst + Immediate opnd)
-void TurboAssembler::AddU32(Register dst, const Operand& imm) {
+void MacroAssembler::AddU32(Register dst, const Operand& imm) {
   alfi(dst, imm);
 }
 
 // Add Logical Pointer Size (Register dst = Register dst + Immediate opnd)
-void TurboAssembler::AddU64(Register dst, const Operand& imm) {
+void MacroAssembler::AddU64(Register dst, const Operand& imm) {
   algfi(dst, imm);
 }
 
-void TurboAssembler::AddU64(Register dst, Register src1, Register src2) {
+void MacroAssembler::AddU64(Register dst, Register src1, Register src2) {
   if (dst != src2 && dst != src1) {
     if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
       algrk(dst, src1, src2);
@@ -2920,7 +3213,7 @@ void TurboAssembler::AddU64(Register dst, Register src1, Register src2) {
 }
 
 // Add Logical 32-bit (Register-Memory)
-void TurboAssembler::AddU32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::AddU32(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     al_z(dst, opnd);
@@ -2929,7 +3222,7 @@ void TurboAssembler::AddU32(Register dst, const MemOperand& opnd) {
 }
 
 // Add Logical Pointer Size (Register-Memory)
-void TurboAssembler::AddU64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::AddU64(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   alg(dst, opnd);
 }
@@ -2939,7 +3232,7 @@ void TurboAssembler::AddU64(Register dst, const MemOperand& opnd) {
 //----------------------------------------------------------------------------
 
 // Subtract Logical 32-bit (Register dst = Register src1 - Register src2)
-void TurboAssembler::SubU32(Register dst, Register src1, Register src2) {
+void MacroAssembler::SubU32(Register dst, Register src1, Register src2) {
   if (dst != src2 && dst != src1) {
     lr(dst, src1);
     slr(dst, src2);
@@ -2956,41 +3249,41 @@ void TurboAssembler::SubU32(Register dst, Register src1, Register src2) {
 }
 
 // Subtract 32-bit (Register dst = Register dst - Immediate opnd)
-void TurboAssembler::SubS32(Register dst, const Operand& imm) {
+void MacroAssembler::SubS32(Register dst, const Operand& imm) {
   AddS32(dst, Operand(-(imm.immediate())));
 }
 
 // Subtract Pointer Size (Register dst = Register dst - Immediate opnd)
-void TurboAssembler::SubS64(Register dst, const Operand& imm) {
+void MacroAssembler::SubS64(Register dst, const Operand& imm) {
   AddS64(dst, Operand(-(imm.immediate())));
 }
 
-void TurboAssembler::SubS32(Register dst, Register src, int32_t imm) {
+void MacroAssembler::SubS32(Register dst, Register src, int32_t imm) {
   SubS32(dst, src, Operand(imm));
 }
 
 // Subtract 32-bit (Register dst = Register src - Immediate opnd)
-void TurboAssembler::SubS32(Register dst, Register src, const Operand& imm) {
+void MacroAssembler::SubS32(Register dst, Register src, const Operand& imm) {
   AddS32(dst, src, Operand(-(imm.immediate())));
 }
 
-void TurboAssembler::SubS64(Register dst, Register src, int32_t imm) {
+void MacroAssembler::SubS64(Register dst, Register src, int32_t imm) {
   SubS64(dst, src, Operand(imm));
 }
 
 // Subtract Pointer Sized (Register dst = Register src - Immediate opnd)
-void TurboAssembler::SubS64(Register dst, Register src, const Operand& imm) {
+void MacroAssembler::SubS64(Register dst, Register src, const Operand& imm) {
   AddS64(dst, src, Operand(-(imm.immediate())));
 }
 
 // Subtract 32-bit (Register dst = Register dst - Register src)
-void TurboAssembler::SubS32(Register dst, Register src) { sr(dst, src); }
+void MacroAssembler::SubS32(Register dst, Register src) { sr(dst, src); }
 
 // Subtract Pointer Size (Register dst = Register dst - Register src)
-void TurboAssembler::SubS64(Register dst, Register src) { sgr(dst, src); }
+void MacroAssembler::SubS64(Register dst, Register src) { sgr(dst, src); }
 
 // Subtract 32-bit (Register = Register - Register)
-void TurboAssembler::SubS32(Register dst, Register src1, Register src2) {
+void MacroAssembler::SubS32(Register dst, Register src1, Register src2) {
   // Use non-clobbering version if possible
   if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
     srk(dst, src1, src2);
@@ -3010,7 +3303,7 @@ void TurboAssembler::SubS32(Register dst, Register src1, Register src2) {
 }
 
 // Subtract Pointer Sized (Register = Register - Register)
-void TurboAssembler::SubS64(Register dst, Register src1, Register src2) {
+void MacroAssembler::SubS64(Register dst, Register src1, Register src2) {
   // Use non-clobbering version if possible
   if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
     sgrk(dst, src1, src2);
@@ -3030,7 +3323,7 @@ void TurboAssembler::SubS64(Register dst, Register src1, Register src2) {
 }
 
 // Subtract 32-bit (Register-Memory)
-void TurboAssembler::SubS32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::SubS32(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     s(dst, opnd);
@@ -3039,7 +3332,7 @@ void TurboAssembler::SubS32(Register dst, const MemOperand& opnd) {
 }
 
 // Subtract Pointer Sized (Register - Memory)
-void TurboAssembler::SubS64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::SubS64(Register dst, const MemOperand& opnd) {
 #if V8_TARGET_ARCH_S390X
   sg(dst, opnd);
 #else
@@ -3047,24 +3340,24 @@ void TurboAssembler::SubS64(Register dst, const MemOperand& opnd) {
 #endif
 }
 
-void TurboAssembler::MovIntToFloat(DoubleRegister dst, Register src) {
+void MacroAssembler::MovIntToFloat(DoubleRegister dst, Register src) {
   sllg(r0, src, Operand(32));
   ldgr(dst, r0);
 }
 
-void TurboAssembler::MovFloatToInt(Register dst, DoubleRegister src) {
+void MacroAssembler::MovFloatToInt(Register dst, DoubleRegister src) {
   lgdr(dst, src);
   srlg(dst, dst, Operand(32));
 }
 
 // Load And Subtract 32-bit (similar to laa/lan/lao/lax)
-void TurboAssembler::LoadAndSub32(Register dst, Register src,
+void MacroAssembler::LoadAndSub32(Register dst, Register src,
                                   const MemOperand& opnd) {
   lcr(dst, src);
   laa(dst, dst, opnd);
 }
 
-void TurboAssembler::LoadAndSub64(Register dst, Register src,
+void MacroAssembler::LoadAndSub64(Register dst, Register src,
                                   const MemOperand& opnd) {
   lcgr(dst, src);
   laag(dst, dst, opnd);
@@ -3075,7 +3368,7 @@ void TurboAssembler::LoadAndSub64(Register dst, Register src,
 //----------------------------------------------------------------------------
 
 // Subtract Logical 32-bit (Register - Memory)
-void TurboAssembler::SubU32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::SubU32(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     sl(dst, opnd);
@@ -3084,7 +3377,7 @@ void TurboAssembler::SubU32(Register dst, const MemOperand& opnd) {
 }
 
 // Subtract Logical Pointer Sized (Register - Memory)
-void TurboAssembler::SubU64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::SubU64(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
   slgf(dst, opnd);
@@ -3098,13 +3391,13 @@ void TurboAssembler::SubU64(Register dst, const MemOperand& opnd) {
 //----------------------------------------------------------------------------
 
 // AND 32-bit - dst = dst & src
-void TurboAssembler::And(Register dst, Register src) { nr(dst, src); }
+void MacroAssembler::And(Register dst, Register src) { nr(dst, src); }
 
 // AND Pointer Size - dst = dst & src
-void TurboAssembler::AndP(Register dst, Register src) { ngr(dst, src); }
+void MacroAssembler::AndP(Register dst, Register src) { ngr(dst, src); }
 
 // Non-clobbering AND 32-bit - dst = src1 & src1
-void TurboAssembler::And(Register dst, Register src1, Register src2) {
+void MacroAssembler::And(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3121,7 +3414,7 @@ void TurboAssembler::And(Register dst, Register src1, Register src2) {
 }
 
 // Non-clobbering AND pointer size - dst = src1 & src1
-void TurboAssembler::AndP(Register dst, Register src1, Register src2) {
+void MacroAssembler::AndP(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3138,7 +3431,7 @@ void TurboAssembler::AndP(Register dst, Register src1, Register src2) {
 }
 
 // AND 32-bit (Reg - Mem)
-void TurboAssembler::And(Register dst, const MemOperand& opnd) {
+void MacroAssembler::And(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     n(dst, opnd);
@@ -3147,7 +3440,7 @@ void TurboAssembler::And(Register dst, const MemOperand& opnd) {
 }
 
 // AND Pointer Size (Reg - Mem)
-void TurboAssembler::AndP(Register dst, const MemOperand& opnd) {
+void MacroAssembler::AndP(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
   ng(dst, opnd);
@@ -3157,10 +3450,10 @@ void TurboAssembler::AndP(Register dst, const MemOperand& opnd) {
 }
 
 // AND 32-bit - dst = dst & imm
-void TurboAssembler::And(Register dst, const Operand& opnd) { nilf(dst, opnd); }
+void MacroAssembler::And(Register dst, const Operand& opnd) { nilf(dst, opnd); }
 
 // AND Pointer Size - dst = dst & imm
-void TurboAssembler::AndP(Register dst, const Operand& opnd) {
+void MacroAssembler::AndP(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   intptr_t value = opnd.immediate();
   if (value >> 32 != -1) {
@@ -3174,13 +3467,13 @@ void TurboAssembler::AndP(Register dst, const Operand& opnd) {
 }
 
 // AND 32-bit - dst = src & imm
-void TurboAssembler::And(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::And(Register dst, Register src, const Operand& opnd) {
   if (dst != src) lr(dst, src);
   nilf(dst, opnd);
 }
 
 // AND Pointer Size - dst = src & imm
-void TurboAssembler::AndP(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::AndP(Register dst, Register src, const Operand& opnd) {
   // Try to exploit RISBG first
   intptr_t value = opnd.immediate();
   if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
@@ -3221,13 +3514,13 @@ void TurboAssembler::AndP(Register dst, Register src, const Operand& opnd) {
 }
 
 // OR 32-bit - dst = dst & src
-void TurboAssembler::Or(Register dst, Register src) { or_z(dst, src); }
+void MacroAssembler::Or(Register dst, Register src) { or_z(dst, src); }
 
 // OR Pointer Size - dst = dst & src
-void TurboAssembler::OrP(Register dst, Register src) { ogr(dst, src); }
+void MacroAssembler::OrP(Register dst, Register src) { ogr(dst, src); }
 
 // Non-clobbering OR 32-bit - dst = src1 & src1
-void TurboAssembler::Or(Register dst, Register src1, Register src2) {
+void MacroAssembler::Or(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3244,7 +3537,7 @@ void TurboAssembler::Or(Register dst, Register src1, Register src2) {
 }
 
 // Non-clobbering OR pointer size - dst = src1 & src1
-void TurboAssembler::OrP(Register dst, Register src1, Register src2) {
+void MacroAssembler::OrP(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3261,7 +3554,7 @@ void TurboAssembler::OrP(Register dst, Register src1, Register src2) {
 }
 
 // OR 32-bit (Reg - Mem)
-void TurboAssembler::Or(Register dst, const MemOperand& opnd) {
+void MacroAssembler::Or(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     o(dst, opnd);
@@ -3270,7 +3563,7 @@ void TurboAssembler::Or(Register dst, const MemOperand& opnd) {
 }
 
 // OR Pointer Size (Reg - Mem)
-void TurboAssembler::OrP(Register dst, const MemOperand& opnd) {
+void MacroAssembler::OrP(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
   og(dst, opnd);
@@ -3280,10 +3573,10 @@ void TurboAssembler::OrP(Register dst, const MemOperand& opnd) {
 }
 
 // OR 32-bit - dst = dst & imm
-void TurboAssembler::Or(Register dst, const Operand& opnd) { oilf(dst, opnd); }
+void MacroAssembler::Or(Register dst, const Operand& opnd) { oilf(dst, opnd); }
 
 // OR Pointer Size - dst = dst & imm
-void TurboAssembler::OrP(Register dst, const Operand& opnd) {
+void MacroAssembler::OrP(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   intptr_t value = opnd.immediate();
   if (value >> 32 != 0) {
@@ -3297,25 +3590,25 @@ void TurboAssembler::OrP(Register dst, const Operand& opnd) {
 }
 
 // OR 32-bit - dst = src & imm
-void TurboAssembler::Or(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::Or(Register dst, Register src, const Operand& opnd) {
   if (dst != src) lr(dst, src);
   oilf(dst, opnd);
 }
 
 // OR Pointer Size - dst = src & imm
-void TurboAssembler::OrP(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::OrP(Register dst, Register src, const Operand& opnd) {
   if (dst != src) mov(dst, src);
   OrP(dst, opnd);
 }
 
 // XOR 32-bit - dst = dst & src
-void TurboAssembler::Xor(Register dst, Register src) { xr(dst, src); }
+void MacroAssembler::Xor(Register dst, Register src) { xr(dst, src); }
 
 // XOR Pointer Size - dst = dst & src
-void TurboAssembler::XorP(Register dst, Register src) { xgr(dst, src); }
+void MacroAssembler::XorP(Register dst, Register src) { xgr(dst, src); }
 
 // Non-clobbering XOR 32-bit - dst = src1 & src1
-void TurboAssembler::Xor(Register dst, Register src1, Register src2) {
+void MacroAssembler::Xor(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3332,7 +3625,7 @@ void TurboAssembler::Xor(Register dst, Register src1, Register src2) {
 }
 
 // Non-clobbering XOR pointer size - dst = src1 & src1
-void TurboAssembler::XorP(Register dst, Register src1, Register src2) {
+void MacroAssembler::XorP(Register dst, Register src1, Register src2) {
   if (dst != src1 && dst != src2) {
     // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
     // as XR is a smaller instruction
@@ -3349,7 +3642,7 @@ void TurboAssembler::XorP(Register dst, Register src1, Register src2) {
 }
 
 // XOR 32-bit (Reg - Mem)
-void TurboAssembler::Xor(Register dst, const MemOperand& opnd) {
+void MacroAssembler::Xor(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     x(dst, opnd);
@@ -3358,7 +3651,7 @@ void TurboAssembler::Xor(Register dst, const MemOperand& opnd) {
 }
 
 // XOR Pointer Size (Reg - Mem)
-void TurboAssembler::XorP(Register dst, const MemOperand& opnd) {
+void MacroAssembler::XorP(Register dst, const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
   xg(dst, opnd);
@@ -3368,10 +3661,10 @@ void TurboAssembler::XorP(Register dst, const MemOperand& opnd) {
 }
 
 // XOR 32-bit - dst = dst & imm
-void TurboAssembler::Xor(Register dst, const Operand& opnd) { xilf(dst, opnd); }
+void MacroAssembler::Xor(Register dst, const Operand& opnd) { xilf(dst, opnd); }
 
 // XOR Pointer Size - dst = dst & imm
-void TurboAssembler::XorP(Register dst, const Operand& opnd) {
+void MacroAssembler::XorP(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   intptr_t value = opnd.immediate();
   xihf(dst, Operand(value >> 32));
@@ -3382,29 +3675,29 @@ void TurboAssembler::XorP(Register dst, const Operand& opnd) {
 }
 
 // XOR 32-bit - dst = src & imm
-void TurboAssembler::Xor(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::Xor(Register dst, Register src, const Operand& opnd) {
   if (dst != src) lr(dst, src);
   xilf(dst, opnd);
 }
 
 // XOR Pointer Size - dst = src & imm
-void TurboAssembler::XorP(Register dst, Register src, const Operand& opnd) {
+void MacroAssembler::XorP(Register dst, Register src, const Operand& opnd) {
   if (dst != src) mov(dst, src);
   XorP(dst, opnd);
 }
 
-void TurboAssembler::Not32(Register dst, Register src) {
+void MacroAssembler::Not32(Register dst, Register src) {
   if (src != no_reg && src != dst) lr(dst, src);
   xilf(dst, Operand(0xFFFFFFFF));
 }
 
-void TurboAssembler::Not64(Register dst, Register src) {
+void MacroAssembler::Not64(Register dst, Register src) {
   if (src != no_reg && src != dst) lgr(dst, src);
   xihf(dst, Operand(0xFFFFFFFF));
   xilf(dst, Operand(0xFFFFFFFF));
 }
 
-void TurboAssembler::NotP(Register dst, Register src) {
+void MacroAssembler::NotP(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   Not64(dst, src);
 #else
@@ -3412,7 +3705,7 @@ void TurboAssembler::NotP(Register dst, Register src) {
 #endif
 }
 
-void TurboAssembler::LoadPositiveP(Register result, Register input) {
+void MacroAssembler::LoadPositiveP(Register result, Register input) {
 #if V8_TARGET_ARCH_S390X
   lpgr(result, input);
 #else
@@ -3420,7 +3713,7 @@ void TurboAssembler::LoadPositiveP(Register result, Register input) {
 #endif
 }
 
-void TurboAssembler::LoadPositive32(Register result, Register input) {
+void MacroAssembler::LoadPositive32(Register result, Register input) {
   lpr(result, input);
   lgfr(result, result);
 }
@@ -3430,14 +3723,14 @@ void TurboAssembler::LoadPositive32(Register result, Register input) {
 //-----------------------------------------------------------------------------
 
 // Compare 32-bit Register vs Register
-void TurboAssembler::CmpS32(Register src1, Register src2) { cr_z(src1, src2); }
+void MacroAssembler::CmpS32(Register src1, Register src2) { cr_z(src1, src2); }
 
 // Compare Pointer Sized Register vs Register
-void TurboAssembler::CmpS64(Register src1, Register src2) { cgr(src1, src2); }
+void MacroAssembler::CmpS64(Register src1, Register src2) { cgr(src1, src2); }
 
 // Compare 32-bit Register vs Immediate
 // This helper will set up proper relocation entries if required.
-void TurboAssembler::CmpS32(Register dst, const Operand& opnd) {
+void MacroAssembler::CmpS32(Register dst, const Operand& opnd) {
   if (opnd.rmode() == RelocInfo::NO_INFO) {
     intptr_t value = opnd.immediate();
     if (is_int16(value))
@@ -3453,7 +3746,7 @@ void TurboAssembler::CmpS32(Register dst, const Operand& opnd) {
 
 // Compare Pointer Sized  Register vs Immediate
 // This helper will set up proper relocation entries if required.
-void TurboAssembler::CmpS64(Register dst, const Operand& opnd) {
+void MacroAssembler::CmpS64(Register dst, const Operand& opnd) {
   if (opnd.rmode() == RelocInfo::NO_INFO) {
     cgfi(dst, opnd);
   } else {
@@ -3463,7 +3756,7 @@ void TurboAssembler::CmpS64(Register dst, const Operand& opnd) {
 }
 
 // Compare 32-bit Register vs Memory
-void TurboAssembler::CmpS32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::CmpS32(Register dst, const MemOperand& opnd) {
   // make sure offset is within 20 bit range
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
@@ -3473,14 +3766,14 @@ void TurboAssembler::CmpS32(Register dst, const MemOperand& opnd) {
 }
 
 // Compare Pointer Size Register vs Memory
-void TurboAssembler::CmpS64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::CmpS64(Register dst, const MemOperand& opnd) {
   // make sure offset is within 20 bit range
   DCHECK(is_int20(opnd.offset()));
   cg(dst, opnd);
 }
 
 // Using cs or scy based on the offset
-void TurboAssembler::CmpAndSwap(Register old_val, Register new_val,
+void MacroAssembler::CmpAndSwap(Register old_val, Register new_val,
                                 const MemOperand& opnd) {
   if (is_uint12(opnd.offset())) {
     cs(old_val, new_val, opnd);
@@ -3489,7 +3782,7 @@ void TurboAssembler::CmpAndSwap(Register old_val, Register new_val,
   }
 }
 
-void TurboAssembler::CmpAndSwap64(Register old_val, Register new_val,
+void MacroAssembler::CmpAndSwap64(Register old_val, Register new_val,
                                   const MemOperand& opnd) {
   DCHECK(is_int20(opnd.offset()));
   csg(old_val, new_val, opnd);
@@ -3500,10 +3793,10 @@ void TurboAssembler::CmpAndSwap64(Register old_val, Register new_val,
 //-----------------------------------------------------------------------------
 
 // Compare Logical 32-bit Register vs Register
-void TurboAssembler::CmpU32(Register dst, Register src) { clr(dst, src); }
+void MacroAssembler::CmpU32(Register dst, Register src) { clr(dst, src); }
 
 // Compare Logical Pointer Sized Register vs Register
-void TurboAssembler::CmpU64(Register dst, Register src) {
+void MacroAssembler::CmpU64(Register dst, Register src) {
 #ifdef V8_TARGET_ARCH_S390X
   clgr(dst, src);
 #else
@@ -3512,12 +3805,12 @@ void TurboAssembler::CmpU64(Register dst, Register src) {
 }
 
 // Compare Logical 32-bit Register vs Immediate
-void TurboAssembler::CmpU32(Register dst, const Operand& opnd) {
+void MacroAssembler::CmpU32(Register dst, const Operand& opnd) {
   clfi(dst, opnd);
 }
 
 // Compare Logical Pointer Sized Register vs Immediate
-void TurboAssembler::CmpU64(Register dst, const Operand& opnd) {
+void MacroAssembler::CmpU64(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   DCHECK_EQ(static_cast<uint32_t>(opnd.immediate() >> 32), 0);
   clgfi(dst, opnd);
@@ -3527,7 +3820,7 @@ void TurboAssembler::CmpU64(Register dst, const Operand& opnd) {
 }
 
 // Compare Logical 32-bit Register vs Memory
-void TurboAssembler::CmpU32(Register dst, const MemOperand& opnd) {
+void MacroAssembler::CmpU32(Register dst, const MemOperand& opnd) {
   // make sure offset is within 20 bit range
   DCHECK(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
@@ -3537,7 +3830,7 @@ void TurboAssembler::CmpU32(Register dst, const MemOperand& opnd) {
 }
 
 // Compare Logical Pointer Sized Register vs Memory
-void TurboAssembler::CmpU64(Register dst, const MemOperand& opnd) {
+void MacroAssembler::CmpU64(Register dst, const MemOperand& opnd) {
   // make sure offset is within 20 bit range
   DCHECK(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
@@ -3547,7 +3840,7 @@ void TurboAssembler::CmpU64(Register dst, const MemOperand& opnd) {
 #endif
 }
 
-void TurboAssembler::Branch(Condition c, const Operand& opnd) {
+void MacroAssembler::Branch(Condition c, const Operand& opnd) {
   intptr_t value = opnd.immediate();
   if (is_int16(value))
     brc(c, opnd);
@@ -3556,7 +3849,7 @@ void TurboAssembler::Branch(Condition c, const Operand& opnd) {
 }
 
 // Branch On Count.  Decrement R1, and branch if R1 != 0.
-void TurboAssembler::BranchOnCount(Register r1, Label* l) {
+void MacroAssembler::BranchOnCount(Register r1, Label* l) {
   int32_t offset = branch_offset(l);
   if (is_int16(offset)) {
 #if V8_TARGET_ARCH_S390X
@@ -3570,7 +3863,7 @@ void TurboAssembler::BranchOnCount(Register r1, Label* l) {
   }
 }
 
-void TurboAssembler::LoadSmiLiteral(Register dst, Smi smi) {
+void MacroAssembler::LoadSmiLiteral(Register dst, Tagged<Smi> smi) {
   intptr_t value = static_cast<intptr_t>(smi.ptr());
 #if defined(V8_COMPRESS_POINTERS) || defined(V8_31BIT_SMIS_ON_64BIT_ARCH)
   llilf(dst, Operand(value));
@@ -3581,7 +3874,8 @@ void TurboAssembler::LoadSmiLiteral(Register dst, Smi smi) {
 #endif
 }
 
-void TurboAssembler::CmpSmiLiteral(Register src1, Smi smi, Register scratch) {
+void MacroAssembler::CmpSmiLiteral(Register src1, Tagged<Smi> smi,
+                                   Register scratch) {
 #if defined(V8_COMPRESS_POINTERS) || defined(V8_31BIT_SMIS_ON_64BIT_ARCH)
   // CFI takes 32-bit immediate.
   cfi(src1, Operand(smi));
@@ -3595,7 +3889,7 @@ void TurboAssembler::CmpSmiLiteral(Register src1, Smi smi, Register scratch) {
 #endif
 }
 
-void TurboAssembler::LoadU64(Register dst, const MemOperand& mem,
+void MacroAssembler::LoadU64(Register dst, const MemOperand& mem,
                              Register scratch) {
   int offset = mem.offset();
 
@@ -3610,7 +3904,7 @@ void TurboAssembler::LoadU64(Register dst, const MemOperand& mem,
 }
 
 // Store a "pointer" sized value to the memory location
-void TurboAssembler::StoreU64(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU64(Register src, const MemOperand& mem,
                               Register scratch) {
   if (!is_int20(mem.offset())) {
     DCHECK(scratch != no_reg);
@@ -3623,7 +3917,7 @@ void TurboAssembler::StoreU64(Register src, const MemOperand& mem,
 }
 
 // Store a "pointer" sized constant to the memory location
-void TurboAssembler::StoreU64(const MemOperand& mem, const Operand& opnd,
+void MacroAssembler::StoreU64(const MemOperand& mem, const Operand& opnd,
                               Register scratch) {
   // Relocations not supported
   DCHECK_EQ(opnd.rmode(), RelocInfo::NO_INFO);
@@ -3638,7 +3932,7 @@ void TurboAssembler::StoreU64(const MemOperand& mem, const Operand& opnd,
   }
 }
 
-void TurboAssembler::LoadMultipleP(Register dst1, Register dst2,
+void MacroAssembler::LoadMultipleP(Register dst1, Register dst2,
                                    const MemOperand& mem) {
 #if V8_TARGET_ARCH_S390X
   DCHECK(is_int20(mem.offset()));
@@ -3653,7 +3947,7 @@ void TurboAssembler::LoadMultipleP(Register dst1, Register dst2,
 #endif
 }
 
-void TurboAssembler::StoreMultipleP(Register src1, Register src2,
+void MacroAssembler::StoreMultipleP(Register src1, Register src2,
                                     const MemOperand& mem) {
 #if V8_TARGET_ARCH_S390X
   DCHECK(is_int20(mem.offset()));
@@ -3668,7 +3962,7 @@ void TurboAssembler::StoreMultipleP(Register src1, Register src2,
 #endif
 }
 
-void TurboAssembler::LoadMultipleW(Register dst1, Register dst2,
+void MacroAssembler::LoadMultipleW(Register dst1, Register dst2,
                                    const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
     lm(dst1, dst2, mem);
@@ -3678,7 +3972,7 @@ void TurboAssembler::LoadMultipleW(Register dst1, Register dst2,
   }
 }
 
-void TurboAssembler::StoreMultipleW(Register src1, Register src2,
+void MacroAssembler::StoreMultipleW(Register src1, Register src2,
                                     const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
     stm(src1, src2, mem);
@@ -3689,7 +3983,7 @@ void TurboAssembler::StoreMultipleW(Register src1, Register src2,
 }
 
 // Load 32-bits and sign extend if necessary.
-void TurboAssembler::LoadS32(Register dst, Register src) {
+void MacroAssembler::LoadS32(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   lgfr(dst, src);
 #else
@@ -3698,8 +3992,8 @@ void TurboAssembler::LoadS32(Register dst, Register src) {
 }
 
 // Load 32-bits and sign extend if necessary.
-void TurboAssembler::LoadS32(Register dst, const MemOperand& mem,
-                           Register scratch) {
+void MacroAssembler::LoadS32(Register dst, const MemOperand& mem,
+                             Register scratch) {
   int offset = mem.offset();
 
   if (!is_int20(offset)) {
@@ -3724,7 +4018,7 @@ void TurboAssembler::LoadS32(Register dst, const MemOperand& mem,
 }
 
 // Load 32-bits and zero extend if necessary.
-void TurboAssembler::LoadU32(Register dst, Register src) {
+void MacroAssembler::LoadU32(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   llgfr(dst, src);
 #else
@@ -3734,8 +4028,8 @@ void TurboAssembler::LoadU32(Register dst, Register src) {
 
 // Variable length depending on whether offset fits into immediate field
 // MemOperand of RX or RXY format
-void TurboAssembler::LoadU32(Register dst, const MemOperand& mem,
-                            Register scratch) {
+void MacroAssembler::LoadU32(Register dst, const MemOperand& mem,
+                             Register scratch) {
   Register base = mem.rb();
   int offset = mem.offset();
 
@@ -3775,7 +4069,7 @@ void TurboAssembler::LoadU32(Register dst, const MemOperand& mem,
 #endif
 }
 
-void TurboAssembler::LoadU16(Register dst, const MemOperand& mem) {
+void MacroAssembler::LoadU16(Register dst, const MemOperand& mem) {
   // TODO(s390x): Add scratch reg
 #if V8_TARGET_ARCH_S390X
   llgh(dst, mem);
@@ -3784,7 +4078,7 @@ void TurboAssembler::LoadU16(Register dst, const MemOperand& mem) {
 #endif
 }
 
-void TurboAssembler::LoadU16(Register dst, Register src) {
+void MacroAssembler::LoadU16(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   llghr(dst, src);
 #else
@@ -3792,7 +4086,7 @@ void TurboAssembler::LoadU16(Register dst, Register src) {
 #endif
 }
 
-void TurboAssembler::LoadS8(Register dst, const MemOperand& mem) {
+void MacroAssembler::LoadS8(Register dst, const MemOperand& mem) {
   // TODO(s390x): Add scratch reg
 #if V8_TARGET_ARCH_S390X
   lgb(dst, mem);
@@ -3801,7 +4095,7 @@ void TurboAssembler::LoadS8(Register dst, const MemOperand& mem) {
 #endif
 }
 
-void TurboAssembler::LoadS8(Register dst, Register src) {
+void MacroAssembler::LoadS8(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   lgbr(dst, src);
 #else
@@ -3809,7 +4103,7 @@ void TurboAssembler::LoadS8(Register dst, Register src) {
 #endif
 }
 
-void TurboAssembler::LoadU8(Register dst, const MemOperand& mem) {
+void MacroAssembler::LoadU8(Register dst, const MemOperand& mem) {
   // TODO(s390x): Add scratch reg
 #if V8_TARGET_ARCH_S390X
   llgc(dst, mem);
@@ -3818,7 +4112,7 @@ void TurboAssembler::LoadU8(Register dst, const MemOperand& mem) {
 #endif
 }
 
-void TurboAssembler::LoadU8(Register dst, Register src) {
+void MacroAssembler::LoadU8(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   llgcr(dst, src);
 #else
@@ -3827,34 +4121,34 @@ void TurboAssembler::LoadU8(Register dst, Register src) {
 }
 
 #ifdef V8_TARGET_BIG_ENDIAN
-void TurboAssembler::LoadU64LE(Register dst, const MemOperand& mem,
+void MacroAssembler::LoadU64LE(Register dst, const MemOperand& mem,
                                Register scratch) {
   lrvg(dst, mem);
 }
 
-void TurboAssembler::LoadS32LE(Register dst, const MemOperand& opnd,
+void MacroAssembler::LoadS32LE(Register dst, const MemOperand& opnd,
                                Register scratch) {
   lrv(dst, opnd);
   LoadS32(dst, dst);
 }
 
-void TurboAssembler::LoadU32LE(Register dst, const MemOperand& opnd,
+void MacroAssembler::LoadU32LE(Register dst, const MemOperand& opnd,
                                Register scratch) {
   lrv(dst, opnd);
   LoadU32(dst, dst);
 }
 
-void TurboAssembler::LoadU16LE(Register dst, const MemOperand& opnd) {
+void MacroAssembler::LoadU16LE(Register dst, const MemOperand& opnd) {
   lrvh(dst, opnd);
   LoadU16(dst, dst);
 }
 
-void TurboAssembler::LoadS16LE(Register dst, const MemOperand& opnd) {
+void MacroAssembler::LoadS16LE(Register dst, const MemOperand& opnd) {
   lrvh(dst, opnd);
   LoadS16(dst, dst);
 }
 
-void TurboAssembler::LoadV128LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadV128LE(DoubleRegister dst, const MemOperand& opnd,
                                 Register scratch0, Register scratch1) {
   bool use_vlbr = CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_2) &&
                   is_uint12(opnd.offset());
@@ -3868,20 +4162,20 @@ void TurboAssembler::LoadV128LE(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::LoadF64LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadF64LE(DoubleRegister dst, const MemOperand& opnd,
                                Register scratch) {
   lrvg(scratch, opnd);
   ldgr(dst, scratch);
 }
 
-void TurboAssembler::LoadF32LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadF32LE(DoubleRegister dst, const MemOperand& opnd,
                                Register scratch) {
   lrv(scratch, opnd);
   ShiftLeftU64(scratch, scratch, Operand(32));
   ldgr(dst, scratch);
 }
 
-void TurboAssembler::StoreU64LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU64LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   if (!is_int20(mem.offset())) {
     DCHECK(scratch != no_reg);
@@ -3893,7 +4187,7 @@ void TurboAssembler::StoreU64LE(Register src, const MemOperand& mem,
   }
 }
 
-void TurboAssembler::StoreU32LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU32LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   if (!is_int20(mem.offset())) {
     DCHECK(scratch != no_reg);
@@ -3905,7 +4199,7 @@ void TurboAssembler::StoreU32LE(Register src, const MemOperand& mem,
   }
 }
 
-void TurboAssembler::StoreU16LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU16LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   if (!is_int20(mem.offset())) {
     DCHECK(scratch != no_reg);
@@ -3917,14 +4211,14 @@ void TurboAssembler::StoreU16LE(Register src, const MemOperand& mem,
   }
 }
 
-void TurboAssembler::StoreF64LE(DoubleRegister src, const MemOperand& opnd,
+void MacroAssembler::StoreF64LE(DoubleRegister src, const MemOperand& opnd,
                                 Register scratch) {
   DCHECK(is_uint12(opnd.offset()));
   lgdr(scratch, src);
   strvg(scratch, opnd);
 }
 
-void TurboAssembler::StoreF32LE(DoubleRegister src, const MemOperand& opnd,
+void MacroAssembler::StoreF32LE(DoubleRegister src, const MemOperand& opnd,
                                 Register scratch) {
   DCHECK(is_uint12(opnd.offset()));
   lgdr(scratch, src);
@@ -3932,7 +4226,7 @@ void TurboAssembler::StoreF32LE(DoubleRegister src, const MemOperand& opnd,
   strv(scratch, opnd);
 }
 
-void TurboAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
+void MacroAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
                                  Register scratch1, Register scratch2) {
   bool use_vstbr = CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_2) &&
                    is_uint12(mem.offset());
@@ -3948,73 +4242,73 @@ void TurboAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
 }
 
 #else
-void TurboAssembler::LoadU64LE(Register dst, const MemOperand& mem,
+void MacroAssembler::LoadU64LE(Register dst, const MemOperand& mem,
                                Register scratch) {
   LoadU64(dst, mem, scratch);
 }
 
-void TurboAssembler::LoadS32LE(Register dst, const MemOperand& opnd,
+void MacroAssembler::LoadS32LE(Register dst, const MemOperand& opnd,
                                Register scratch) {
   LoadS32(dst, opnd, scratch);
 }
 
-void TurboAssembler::LoadU32LE(Register dst, const MemOperand& opnd,
+void MacroAssembler::LoadU32LE(Register dst, const MemOperand& opnd,
                                Register scratch) {
   LoadU32(dst, opnd, scratch);
 }
 
-void TurboAssembler::LoadU16LE(Register dst, const MemOperand& opnd) {
+void MacroAssembler::LoadU16LE(Register dst, const MemOperand& opnd) {
   LoadU16(dst, opnd);
 }
 
-void TurboAssembler::LoadS16LE(Register dst, const MemOperand& opnd) {
+void MacroAssembler::LoadS16LE(Register dst, const MemOperand& opnd) {
   LoadS16(dst, opnd);
 }
 
-void TurboAssembler::LoadV128LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadV128LE(DoubleRegister dst, const MemOperand& opnd,
                                 Register scratch0, Register scratch1) {
   USE(scratch1);
   LoadV128(dst, opnd, scratch0);
 }
 
-void TurboAssembler::LoadF64LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadF64LE(DoubleRegister dst, const MemOperand& opnd,
                                Register scratch) {
   USE(scratch);
   LoadF64(dst, opnd);
 }
 
-void TurboAssembler::LoadF32LE(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadF32LE(DoubleRegister dst, const MemOperand& opnd,
                                Register scratch) {
   USE(scratch);
   LoadF32(dst, opnd);
 }
 
-void TurboAssembler::StoreU64LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU64LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   StoreU64(src, mem, scratch);
 }
 
-void TurboAssembler::StoreU32LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU32LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   StoreU32(src, mem, scratch);
 }
 
-void TurboAssembler::StoreU16LE(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU16LE(Register src, const MemOperand& mem,
                                 Register scratch) {
   StoreU16(src, mem, scratch);
 }
 
-void TurboAssembler::StoreF64LE(DoubleRegister src, const MemOperand& opnd,
+void MacroAssembler::StoreF64LE(DoubleRegister src, const MemOperand& opnd,
                                 Register scratch) {
   StoreF64(src, opnd);
 }
 
-void TurboAssembler::StoreF32LE(DoubleRegister src, const MemOperand& opnd,
+void MacroAssembler::StoreF32LE(DoubleRegister src, const MemOperand& opnd,
                                 Register scratch) {
   StoreF32(src, opnd);
 }
 
-void TurboAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
+void MacroAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
                                  Register scratch1, Register scratch2) {
   StoreV128(src, mem, scratch1);
 }
@@ -4022,12 +4316,12 @@ void TurboAssembler::StoreV128LE(Simd128Register src, const MemOperand& mem,
 #endif
 
 // Load And Test (Reg <- Reg)
-void TurboAssembler::LoadAndTest32(Register dst, Register src) {
+void MacroAssembler::LoadAndTest32(Register dst, Register src) {
   ltr(dst, src);
 }
 
 // Load And Test Pointer Sized (Reg <- Reg)
-void TurboAssembler::LoadAndTestP(Register dst, Register src) {
+void MacroAssembler::LoadAndTestP(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   ltgr(dst, src);
 #else
@@ -4036,12 +4330,12 @@ void TurboAssembler::LoadAndTestP(Register dst, Register src) {
 }
 
 // Load And Test 32-bit (Reg <- Mem)
-void TurboAssembler::LoadAndTest32(Register dst, const MemOperand& mem) {
+void MacroAssembler::LoadAndTest32(Register dst, const MemOperand& mem) {
   lt_z(dst, mem);
 }
 
 // Load And Test Pointer Sized (Reg <- Mem)
-void TurboAssembler::LoadAndTestP(Register dst, const MemOperand& mem) {
+void MacroAssembler::LoadAndTestP(Register dst, const MemOperand& mem) {
 #if V8_TARGET_ARCH_S390X
   ltg(dst, mem);
 #else
@@ -4050,7 +4344,7 @@ void TurboAssembler::LoadAndTestP(Register dst, const MemOperand& mem) {
 }
 
 // Load On Condition Pointer Sized (Reg <- Reg)
-void TurboAssembler::LoadOnConditionP(Condition cond, Register dst,
+void MacroAssembler::LoadOnConditionP(Condition cond, Register dst,
                                       Register src) {
 #if V8_TARGET_ARCH_S390X
   locgr(cond, dst, src);
@@ -4060,7 +4354,7 @@ void TurboAssembler::LoadOnConditionP(Condition cond, Register dst,
 }
 
 // Load Double Precision (64-bit) Floating Point number from memory
-void TurboAssembler::LoadF64(DoubleRegister dst, const MemOperand& mem) {
+void MacroAssembler::LoadF64(DoubleRegister dst, const MemOperand& mem) {
   // for 32bit and 64bit we all use 64bit floating point regs
   if (is_uint12(mem.offset())) {
     ld(dst, mem);
@@ -4070,7 +4364,7 @@ void TurboAssembler::LoadF64(DoubleRegister dst, const MemOperand& mem) {
 }
 
 // Load Single Precision (32-bit) Floating Point number from memory
-void TurboAssembler::LoadF32(DoubleRegister dst, const MemOperand& mem) {
+void MacroAssembler::LoadF32(DoubleRegister dst, const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
     le_z(dst, mem);
   } else {
@@ -4079,7 +4373,7 @@ void TurboAssembler::LoadF32(DoubleRegister dst, const MemOperand& mem) {
   }
 }
 
-void TurboAssembler::LoadV128(Simd128Register dst, const MemOperand& mem,
+void MacroAssembler::LoadV128(Simd128Register dst, const MemOperand& mem,
                               Register scratch) {
   DCHECK(scratch != r0);
   if (is_uint12(mem.offset())) {
@@ -4092,7 +4386,7 @@ void TurboAssembler::LoadV128(Simd128Register dst, const MemOperand& mem,
 }
 
 // Store Double Precision (64-bit) Floating Point number to memory
-void TurboAssembler::StoreF64(DoubleRegister dst, const MemOperand& mem) {
+void MacroAssembler::StoreF64(DoubleRegister dst, const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
     std(dst, mem);
   } else {
@@ -4101,7 +4395,7 @@ void TurboAssembler::StoreF64(DoubleRegister dst, const MemOperand& mem) {
 }
 
 // Store Single Precision (32-bit) Floating Point number to memory
-void TurboAssembler::StoreF32(DoubleRegister src, const MemOperand& mem) {
+void MacroAssembler::StoreF32(DoubleRegister src, const MemOperand& mem) {
   if (is_uint12(mem.offset())) {
     ste(src, mem);
   } else {
@@ -4109,7 +4403,7 @@ void TurboAssembler::StoreF32(DoubleRegister src, const MemOperand& mem) {
   }
 }
 
-void TurboAssembler::StoreV128(Simd128Register src, const MemOperand& mem,
+void MacroAssembler::StoreV128(Simd128Register src, const MemOperand& mem,
                                Register scratch) {
   DCHECK(scratch != r0);
   if (is_uint12(mem.offset())) {
@@ -4121,7 +4415,7 @@ void TurboAssembler::StoreV128(Simd128Register src, const MemOperand& mem,
   }
 }
 
-void TurboAssembler::AddF32(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::AddF32(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     aebr(dst, rhs);
@@ -4133,7 +4427,7 @@ void TurboAssembler::AddF32(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::SubF32(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::SubF32(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     sebr(dst, rhs);
@@ -4146,7 +4440,7 @@ void TurboAssembler::SubF32(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::MulF32(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::MulF32(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     meebr(dst, rhs);
@@ -4158,7 +4452,7 @@ void TurboAssembler::MulF32(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::DivF32(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::DivF32(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     debr(dst, rhs);
@@ -4174,7 +4468,7 @@ void TurboAssembler::DivF32(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::AddF64(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::AddF64(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     adbr(dst, rhs);
@@ -4186,7 +4480,7 @@ void TurboAssembler::AddF64(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::SubF64(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::SubF64(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     sdbr(dst, rhs);
@@ -4199,7 +4493,7 @@ void TurboAssembler::SubF64(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::MulF64(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::MulF64(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     mdbr(dst, rhs);
@@ -4211,7 +4505,7 @@ void TurboAssembler::MulF64(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::DivF64(DoubleRegister dst, DoubleRegister lhs,
+void MacroAssembler::DivF64(DoubleRegister dst, DoubleRegister lhs,
                             DoubleRegister rhs) {
   if (dst == lhs) {
     ddbr(dst, rhs);
@@ -4227,7 +4521,7 @@ void TurboAssembler::DivF64(DoubleRegister dst, DoubleRegister lhs,
   }
 }
 
-void TurboAssembler::AddFloat32(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::AddFloat32(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     aeb(dst, opnd);
@@ -4237,7 +4531,7 @@ void TurboAssembler::AddFloat32(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::AddFloat64(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::AddFloat64(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     adb(dst, opnd);
@@ -4247,7 +4541,7 @@ void TurboAssembler::AddFloat64(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::SubFloat32(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::SubFloat32(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     seb(dst, opnd);
@@ -4257,7 +4551,7 @@ void TurboAssembler::SubFloat32(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::SubFloat64(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::SubFloat64(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     sdb(dst, opnd);
@@ -4267,7 +4561,7 @@ void TurboAssembler::SubFloat64(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::MulFloat32(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::MulFloat32(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     meeb(dst, opnd);
@@ -4277,7 +4571,7 @@ void TurboAssembler::MulFloat32(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::MulFloat64(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::MulFloat64(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     mdb(dst, opnd);
@@ -4287,7 +4581,7 @@ void TurboAssembler::MulFloat64(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::DivFloat32(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::DivFloat32(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     deb(dst, opnd);
@@ -4297,7 +4591,7 @@ void TurboAssembler::DivFloat32(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::DivFloat64(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::DivFloat64(DoubleRegister dst, const MemOperand& opnd,
                                 DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     ddb(dst, opnd);
@@ -4307,7 +4601,7 @@ void TurboAssembler::DivFloat64(DoubleRegister dst, const MemOperand& opnd,
   }
 }
 
-void TurboAssembler::LoadF32AsF64(DoubleRegister dst, const MemOperand& opnd,
+void MacroAssembler::LoadF32AsF64(DoubleRegister dst, const MemOperand& opnd,
                                   DoubleRegister scratch) {
   if (is_uint12(opnd.offset())) {
     ldeb(dst, opnd);
@@ -4319,7 +4613,7 @@ void TurboAssembler::LoadF32AsF64(DoubleRegister dst, const MemOperand& opnd,
 
 // Variable length depending on whether offset fits into immediate field
 // MemOperand of RX or RXY format
-void TurboAssembler::StoreU32(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU32(Register src, const MemOperand& mem,
                               Register scratch) {
   Register base = mem.rb();
   int offset = mem.offset();
@@ -4350,7 +4644,7 @@ void TurboAssembler::StoreU32(Register src, const MemOperand& mem,
   }
 }
 
-void TurboAssembler::LoadS16(Register dst, Register src) {
+void MacroAssembler::LoadS16(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
   lghr(dst, src);
 #else
@@ -4360,8 +4654,8 @@ void TurboAssembler::LoadS16(Register dst, Register src) {
 
 // Loads 16-bits half-word value from memory and sign extends to pointer
 // sized register
-void TurboAssembler::LoadS16(Register dst, const MemOperand& mem,
-                                   Register scratch) {
+void MacroAssembler::LoadS16(Register dst, const MemOperand& mem,
+                             Register scratch) {
   Register base = mem.rb();
   int offset = mem.offset();
 
@@ -4388,7 +4682,7 @@ void TurboAssembler::LoadS16(Register dst, const MemOperand& mem,
 
 // Variable length depending on whether offset fits into immediate field
 // MemOperand current only supports d-form
-void TurboAssembler::StoreU16(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU16(Register src, const MemOperand& mem,
                               Register scratch) {
   Register base = mem.rb();
   int offset = mem.offset();
@@ -4406,7 +4700,7 @@ void TurboAssembler::StoreU16(Register src, const MemOperand& mem,
 
 // Variable length depending on whether offset fits into immediate field
 // MemOperand current only supports d-form
-void TurboAssembler::StoreU8(Register src, const MemOperand& mem,
+void MacroAssembler::StoreU8(Register src, const MemOperand& mem,
                              Register scratch) {
   Register base = mem.rb();
   int offset = mem.offset();
@@ -4423,13 +4717,13 @@ void TurboAssembler::StoreU8(Register src, const MemOperand& mem,
 }
 
 // Shift left logical for 32-bit integer types.
-void TurboAssembler::ShiftLeftU32(Register dst, Register src,
+void MacroAssembler::ShiftLeftU32(Register dst, Register src,
                                   const Operand& val) {
   ShiftLeftU32(dst, src, r0, val);
 }
 
 // Shift left logical for 32-bit integer types.
-void TurboAssembler::ShiftLeftU32(Register dst, Register src, Register val,
+void MacroAssembler::ShiftLeftU32(Register dst, Register src, Register val,
                                   const Operand& val2) {
   if (dst == src) {
     sll(dst, val, val2);
@@ -4443,25 +4737,25 @@ void TurboAssembler::ShiftLeftU32(Register dst, Register src, Register val,
 }
 
 // Shift left logical for 32-bit integer types.
-void TurboAssembler::ShiftLeftU64(Register dst, Register src,
+void MacroAssembler::ShiftLeftU64(Register dst, Register src,
                                   const Operand& val) {
   ShiftLeftU64(dst, src, r0, val);
 }
 
 // Shift left logical for 32-bit integer types.
-void TurboAssembler::ShiftLeftU64(Register dst, Register src, Register val,
+void MacroAssembler::ShiftLeftU64(Register dst, Register src, Register val,
                                   const Operand& val2) {
   sllg(dst, src, val, val2);
 }
 
 // Shift right logical for 32-bit integer types.
-void TurboAssembler::ShiftRightU32(Register dst, Register src,
+void MacroAssembler::ShiftRightU32(Register dst, Register src,
                                    const Operand& val) {
   ShiftRightU32(dst, src, r0, val);
 }
 
 // Shift right logical for 32-bit integer types.
-void TurboAssembler::ShiftRightU32(Register dst, Register src, Register val,
+void MacroAssembler::ShiftRightU32(Register dst, Register src, Register val,
                                    const Operand& val2) {
   if (dst == src) {
     srl(dst, val, val2);
@@ -4474,25 +4768,25 @@ void TurboAssembler::ShiftRightU32(Register dst, Register src, Register val,
   }
 }
 
-void TurboAssembler::ShiftRightU64(Register dst, Register src, Register val,
+void MacroAssembler::ShiftRightU64(Register dst, Register src, Register val,
                                    const Operand& val2) {
   srlg(dst, src, val, val2);
 }
 
 // Shift right logical for 64-bit integer types.
-void TurboAssembler::ShiftRightU64(Register dst, Register src,
+void MacroAssembler::ShiftRightU64(Register dst, Register src,
                                    const Operand& val) {
   ShiftRightU64(dst, src, r0, val);
 }
 
 // Shift right arithmetic for 32-bit integer types.
-void TurboAssembler::ShiftRightS32(Register dst, Register src,
+void MacroAssembler::ShiftRightS32(Register dst, Register src,
                                    const Operand& val) {
   ShiftRightS32(dst, src, r0, val);
 }
 
 // Shift right arithmetic for 32-bit integer types.
-void TurboAssembler::ShiftRightS32(Register dst, Register src, Register val,
+void MacroAssembler::ShiftRightS32(Register dst, Register src, Register val,
                                    const Operand& val2) {
   if (dst == src) {
     sra(dst, val, val2);
@@ -4506,19 +4800,19 @@ void TurboAssembler::ShiftRightS32(Register dst, Register src, Register val,
 }
 
 // Shift right arithmetic for 64-bit integer types.
-void TurboAssembler::ShiftRightS64(Register dst, Register src,
+void MacroAssembler::ShiftRightS64(Register dst, Register src,
                                    const Operand& val) {
   ShiftRightS64(dst, src, r0, val);
 }
 
 // Shift right arithmetic for 64-bit integer types.
-void TurboAssembler::ShiftRightS64(Register dst, Register src, Register val,
+void MacroAssembler::ShiftRightS64(Register dst, Register src, Register val,
                                    const Operand& val2) {
   srag(dst, src, val, val2);
 }
 
 // Clear right most # of bits
-void TurboAssembler::ClearRightImm(Register dst, Register src,
+void MacroAssembler::ClearRightImm(Register dst, Register src,
                                    const Operand& val) {
   int numBitsToClear = val.immediate() % (kSystemPointerSize * 8);
 
@@ -4545,7 +4839,7 @@ void TurboAssembler::ClearRightImm(Register dst, Register src,
   }
 }
 
-void TurboAssembler::Popcnt32(Register dst, Register src) {
+void MacroAssembler::Popcnt32(Register dst, Register src) {
   DCHECK(src != r0);
   DCHECK(dst != r0);
 
@@ -4558,7 +4852,7 @@ void TurboAssembler::Popcnt32(Register dst, Register src) {
 }
 
 #ifdef V8_TARGET_ARCH_S390X
-void TurboAssembler::Popcnt64(Register dst, Register src) {
+void MacroAssembler::Popcnt64(Register dst, Register src) {
   DCHECK(src != r0);
   DCHECK(dst != r0);
 
@@ -4573,7 +4867,7 @@ void TurboAssembler::Popcnt64(Register dst, Register src) {
 }
 #endif
 
-void TurboAssembler::SwapP(Register src, Register dst, Register scratch) {
+void MacroAssembler::SwapP(Register src, Register dst, Register scratch) {
   if (src == dst) return;
   DCHECK(!AreAliased(src, dst, scratch));
   mov(scratch, src);
@@ -4581,7 +4875,7 @@ void TurboAssembler::SwapP(Register src, Register dst, Register scratch) {
   mov(dst, scratch);
 }
 
-void TurboAssembler::SwapP(Register src, MemOperand dst, Register scratch) {
+void MacroAssembler::SwapP(Register src, MemOperand dst, Register scratch) {
   if (dst.rx() != r0) DCHECK(!AreAliased(src, dst.rx(), scratch));
   if (dst.rb() != r0) DCHECK(!AreAliased(src, dst.rb(), scratch));
   DCHECK(!AreAliased(src, scratch));
@@ -4590,7 +4884,7 @@ void TurboAssembler::SwapP(Register src, MemOperand dst, Register scratch) {
   StoreU64(scratch, dst);
 }
 
-void TurboAssembler::SwapP(MemOperand src, MemOperand dst, Register scratch_0,
+void MacroAssembler::SwapP(MemOperand src, MemOperand dst, Register scratch_0,
                            Register scratch_1) {
   if (src.rx() != r0) DCHECK(!AreAliased(src.rx(), scratch_0, scratch_1));
   if (src.rb() != r0) DCHECK(!AreAliased(src.rb(), scratch_0, scratch_1));
@@ -4603,7 +4897,7 @@ void TurboAssembler::SwapP(MemOperand src, MemOperand dst, Register scratch_0,
   StoreU64(scratch_1, src);
 }
 
-void TurboAssembler::SwapFloat32(DoubleRegister src, DoubleRegister dst,
+void MacroAssembler::SwapFloat32(DoubleRegister src, DoubleRegister dst,
                                  DoubleRegister scratch) {
   if (src == dst) return;
   DCHECK(!AreAliased(src, dst, scratch));
@@ -4612,7 +4906,7 @@ void TurboAssembler::SwapFloat32(DoubleRegister src, DoubleRegister dst,
   ldr(dst, scratch);
 }
 
-void TurboAssembler::SwapFloat32(DoubleRegister src, MemOperand dst,
+void MacroAssembler::SwapFloat32(DoubleRegister src, MemOperand dst,
                                  DoubleRegister scratch) {
   DCHECK(!AreAliased(src, scratch));
   ldr(scratch, src);
@@ -4620,7 +4914,7 @@ void TurboAssembler::SwapFloat32(DoubleRegister src, MemOperand dst,
   StoreF32(scratch, dst);
 }
 
-void TurboAssembler::SwapFloat32(MemOperand src, MemOperand dst,
+void MacroAssembler::SwapFloat32(MemOperand src, MemOperand dst,
                                  DoubleRegister scratch) {
   // push d0, to be used as scratch
   lay(sp, MemOperand(sp, -kDoubleSize));
@@ -4634,7 +4928,7 @@ void TurboAssembler::SwapFloat32(MemOperand src, MemOperand dst,
   lay(sp, MemOperand(sp, kDoubleSize));
 }
 
-void TurboAssembler::SwapDouble(DoubleRegister src, DoubleRegister dst,
+void MacroAssembler::SwapDouble(DoubleRegister src, DoubleRegister dst,
                                 DoubleRegister scratch) {
   if (src == dst) return;
   DCHECK(!AreAliased(src, dst, scratch));
@@ -4643,7 +4937,7 @@ void TurboAssembler::SwapDouble(DoubleRegister src, DoubleRegister dst,
   ldr(dst, scratch);
 }
 
-void TurboAssembler::SwapDouble(DoubleRegister src, MemOperand dst,
+void MacroAssembler::SwapDouble(DoubleRegister src, MemOperand dst,
                                 DoubleRegister scratch) {
   DCHECK(!AreAliased(src, scratch));
   ldr(scratch, src);
@@ -4651,7 +4945,7 @@ void TurboAssembler::SwapDouble(DoubleRegister src, MemOperand dst,
   StoreF64(scratch, dst);
 }
 
-void TurboAssembler::SwapDouble(MemOperand src, MemOperand dst,
+void MacroAssembler::SwapDouble(MemOperand src, MemOperand dst,
                                 DoubleRegister scratch) {
   // push d0, to be used as scratch
   lay(sp, MemOperand(sp, -kDoubleSize));
@@ -4665,7 +4959,7 @@ void TurboAssembler::SwapDouble(MemOperand src, MemOperand dst,
   lay(sp, MemOperand(sp, kDoubleSize));
 }
 
-void TurboAssembler::SwapSimd128(Simd128Register src, Simd128Register dst,
+void MacroAssembler::SwapSimd128(Simd128Register src, Simd128Register dst,
                                  Simd128Register scratch) {
   if (src == dst) return;
   vlr(scratch, src, Condition(0), Condition(0), Condition(0));
@@ -4673,7 +4967,7 @@ void TurboAssembler::SwapSimd128(Simd128Register src, Simd128Register dst,
   vlr(dst, scratch, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::SwapSimd128(Simd128Register src, MemOperand dst,
+void MacroAssembler::SwapSimd128(Simd128Register src, MemOperand dst,
                                  Simd128Register scratch) {
   DCHECK(!AreAliased(src, scratch));
   vlr(scratch, src, Condition(0), Condition(0), Condition(0));
@@ -4681,7 +4975,7 @@ void TurboAssembler::SwapSimd128(Simd128Register src, MemOperand dst,
   StoreV128(scratch, dst, ip);
 }
 
-void TurboAssembler::SwapSimd128(MemOperand src, MemOperand dst,
+void MacroAssembler::SwapSimd128(MemOperand src, MemOperand dst,
                                  Simd128Register scratch) {
   // push d0, to be used as scratch
   lay(sp, MemOperand(sp, -kSimd128Size));
@@ -4695,128 +4989,106 @@ void TurboAssembler::SwapSimd128(MemOperand src, MemOperand dst,
   lay(sp, MemOperand(sp, kSimd128Size));
 }
 
-void TurboAssembler::ComputeCodeStartAddress(Register dst) {
+void MacroAssembler::ComputeCodeStartAddress(Register dst) {
   larl(dst, Operand(-pc_offset() / 2));
 }
 
-void TurboAssembler::LoadPC(Register dst) {
+void MacroAssembler::LoadPC(Register dst) {
   Label current_pc;
   larl(dst, &current_pc);
   bind(&current_pc);
 }
 
-void TurboAssembler::JumpIfEqual(Register x, int32_t y, Label* dest) {
+void MacroAssembler::JumpIfEqual(Register x, int32_t y, Label* dest) {
   CmpS32(x, Operand(y));
   beq(dest);
 }
 
-void TurboAssembler::JumpIfLessThan(Register x, int32_t y, Label* dest) {
+void MacroAssembler::JumpIfLessThan(Register x, int32_t y, Label* dest) {
   CmpS32(x, Operand(y));
   blt(dest);
 }
 
-void TurboAssembler::LoadEntryFromBuiltinIndex(Register builtin_index) {
-  STATIC_ASSERT(kSystemPointerSize == 8);
-  STATIC_ASSERT(kSmiTagSize == 1);
-  STATIC_ASSERT(kSmiTag == 0);
+void MacroAssembler::LoadEntryFromBuiltinIndex(Register builtin_index,
+                                               Register target) {
+  static_assert(kSystemPointerSize == 8);
+  static_assert(kSmiTagSize == 1);
+  static_assert(kSmiTag == 0);
   // The builtin_index register contains the builtin index as a Smi.
   if (SmiValuesAre32Bits()) {
-    ShiftRightS64(builtin_index, builtin_index,
+    ShiftRightS64(target, builtin_index,
                   Operand(kSmiShift - kSystemPointerSizeLog2));
   } else {
     DCHECK(SmiValuesAre31Bits());
-    ShiftLeftU64(builtin_index, builtin_index,
+    ShiftLeftU64(target, builtin_index,
                  Operand(kSystemPointerSizeLog2 - kSmiShift));
   }
-  LoadU64(builtin_index, MemOperand(kRootRegister, builtin_index,
-                                    IsolateData::builtin_entry_table_offset()));
+  LoadU64(target, MemOperand(kRootRegister, target,
+                             IsolateData::builtin_entry_table_offset()));
 }
 
-void TurboAssembler::CallBuiltinByIndex(Register builtin_index) {
-  LoadEntryFromBuiltinIndex(builtin_index);
-  Call(builtin_index);
+void MacroAssembler::CallBuiltinByIndex(Register builtin_index,
+                                        Register target) {
+  LoadEntryFromBuiltinIndex(builtin_index, target);
+  Call(target);
 }
 
-void TurboAssembler::LoadEntryFromBuiltin(Builtin builtin,
+void MacroAssembler::LoadEntryFromBuiltin(Builtin builtin,
                                           Register destination) {
   ASM_CODE_COMMENT(this);
   LoadU64(destination, EntryFromBuiltinAsOperand(builtin));
 }
 
-MemOperand TurboAssembler::EntryFromBuiltinAsOperand(Builtin builtin) {
+MemOperand MacroAssembler::EntryFromBuiltinAsOperand(Builtin builtin) {
   ASM_CODE_COMMENT(this);
   DCHECK(root_array_available());
   return MemOperand(kRootRegister,
                     IsolateData::BuiltinEntrySlotOffset(builtin));
 }
 
-void TurboAssembler::LoadCodeObjectEntry(Register destination,
-                                         Register code_object) {
-  // Code objects are called differently depending on whether we are generating
-  // builtin code (which will later be embedded into the binary) or compiling
-  // user JS code at runtime.
-  // * Builtin code runs in --jitless mode and thus must not call into on-heap
-  //   Code targets. Instead, we dispatch through the builtins entry table.
-  // * Codegen at runtime does not have this restriction and we can use the
-  //   shorter, branchless instruction sequence. The assumption here is that
-  //   targets are usually generated code and not builtin Code objects.
-
-  if (options().isolate_independent_code) {
-    DCHECK(root_array_available());
-    Label if_code_is_off_heap, out;
-
-    Register scratch = r1;
-
-    DCHECK(!AreAliased(destination, scratch));
-    DCHECK(!AreAliased(code_object, scratch));
-
-    // Check whether the Code object is an off-heap trampoline. If so, call its
-    // (off-heap) entry point directly without going through the (on-heap)
-    // trampoline.  Otherwise, just call the Code object as always.
-    LoadS32(scratch, FieldMemOperand(code_object, Code::kFlagsOffset));
-    tmlh(scratch, Operand(Code::IsOffHeapTrampoline::kMask >> 16));
-    bne(&if_code_is_off_heap);
-
-    // Not an off-heap trampoline, the entry point is at
-    // Code::raw_instruction_start().
-    AddS64(destination, code_object,
-           Operand(Code::kHeaderSize - kHeapObjectTag));
-    b(&out);
-
-    // An off-heap trampoline, the entry point is loaded from the builtin entry
-    // table.
-    bind(&if_code_is_off_heap);
-    LoadS32(scratch, FieldMemOperand(code_object, Code::kBuiltinIndexOffset));
-    ShiftLeftU64(destination, scratch, Operand(kSystemPointerSizeLog2));
-    AddS64(destination, destination, kRootRegister);
-    LoadU64(destination,
-            MemOperand(destination, IsolateData::builtin_entry_table_offset()));
-
-    bind(&out);
-  } else {
-    AddS64(destination, code_object,
-           Operand(Code::kHeaderSize - kHeapObjectTag));
-  }
+void MacroAssembler::LoadCodeInstructionStart(Register destination,
+                                              Register code_object,
+                                              CodeEntrypointTag tag) {
+  ASM_CODE_COMMENT(this);
+  LoadU64(destination,
+          FieldMemOperand(code_object, Code::kInstructionStartOffset));
 }
 
-void TurboAssembler::CallCodeObject(Register code_object) {
-  LoadCodeObjectEntry(code_object, code_object);
+void MacroAssembler::CallCodeObject(Register code_object) {
+  ASM_CODE_COMMENT(this);
+  LoadCodeInstructionStart(code_object, code_object);
   Call(code_object);
 }
 
-void TurboAssembler::JumpCodeObject(Register code_object, JumpMode jump_mode) {
+void MacroAssembler::JumpCodeObject(Register code_object, JumpMode jump_mode) {
+  ASM_CODE_COMMENT(this);
   DCHECK_EQ(JumpMode::kJump, jump_mode);
-  LoadCodeObjectEntry(code_object, code_object);
+  LoadCodeInstructionStart(code_object, code_object);
   Jump(code_object);
 }
 
-void TurboAssembler::StoreReturnAddressAndCall(Register target) {
+void MacroAssembler::CallJSFunction(Register function_object) {
+  Register code = kJavaScriptCallCodeStartRegister;
+  LoadTaggedField(code,
+                  FieldMemOperand(function_object, JSFunction::kCodeOffset));
+  CallCodeObject(code);
+}
+
+void MacroAssembler::JumpJSFunction(Register function_object,
+                                    JumpMode jump_mode) {
+  Register code = kJavaScriptCallCodeStartRegister;
+  LoadTaggedField(code,
+                  FieldMemOperand(function_object, JSFunction::kCodeOffset));
+  JumpCodeObject(code, jump_mode);
+}
+
+void MacroAssembler::StoreReturnAddressAndCall(Register target) {
   // This generates the final instruction sequence for calls to C functions
   // once an exit frame has been constructed.
   //
-  // Note that this assumes the caller code (i.e. the Code object currently
-  // being generated) is immovable or that the callee function cannot trigger
-  // GC, since the callee function will return to it.
+  // Note that this assumes the caller code (i.e. the InstructionStream object
+  // currently being generated) is immovable or that the callee function cannot
+  // trigger GC, since the callee function will return to it.
 
   Label return_label;
   larl(r14, &return_label);  // Generate the return addr of call later.
@@ -4828,7 +5100,7 @@ void TurboAssembler::StoreReturnAddressAndCall(Register target) {
   bind(&return_label);
 }
 
-void TurboAssembler::CallForDeoptimization(Builtin target, int, Label* exit,
+void MacroAssembler::CallForDeoptimization(Builtin target, int, Label* exit,
                                            DeoptimizeKind kind, Label* ret,
                                            Label*) {
   ASM_CODE_COMMENT(this);
@@ -4840,10 +5112,10 @@ void TurboAssembler::CallForDeoptimization(Builtin target, int, Label* exit,
                                             : Deoptimizer::kEagerDeoptExitSize);
 }
 
-void TurboAssembler::Trap() { stop(); }
-void TurboAssembler::DebugBreak() { stop(); }
+void MacroAssembler::Trap() { stop(); }
+void MacroAssembler::DebugBreak() { stop(); }
 
-void TurboAssembler::CountLeadingZerosU32(Register dst, Register src,
+void MacroAssembler::CountLeadingZerosU32(Register dst, Register src,
                                           Register scratch_pair) {
   llgfr(dst, src);
   flogr(scratch_pair,
@@ -4851,14 +5123,14 @@ void TurboAssembler::CountLeadingZerosU32(Register dst, Register src,
   AddS32(dst, scratch_pair, Operand(-32));
 }
 
-void TurboAssembler::CountLeadingZerosU64(Register dst, Register src,
+void MacroAssembler::CountLeadingZerosU64(Register dst, Register src,
                                           Register scratch_pair) {
   flogr(scratch_pair,
         src);  // will modify a register pair scratch and scratch + 1
   mov(dst, scratch_pair);
 }
 
-void TurboAssembler::CountTrailingZerosU32(Register dst, Register src,
+void MacroAssembler::CountTrailingZerosU32(Register dst, Register src,
                                            Register scratch_pair) {
   Register scratch0 = scratch_pair;
   Register scratch1 = Register::from_code(scratch_pair.code() + 1);
@@ -4879,7 +5151,7 @@ void TurboAssembler::CountTrailingZerosU32(Register dst, Register src,
   bind(&done);
 }
 
-void TurboAssembler::CountTrailingZerosU64(Register dst, Register src,
+void MacroAssembler::CountTrailingZerosU64(Register dst, Register src,
                                            Register scratch_pair) {
   Register scratch0 = scratch_pair;
   Register scratch1 = Register::from_code(scratch_pair.code() + 1);
@@ -4899,7 +5171,7 @@ void TurboAssembler::CountTrailingZerosU64(Register dst, Register src,
   bind(&done);
 }
 
-void TurboAssembler::AtomicCmpExchangeHelper(Register addr, Register output,
+void MacroAssembler::AtomicCmpExchangeHelper(Register addr, Register output,
                                              Register old_value,
                                              Register new_value, int start,
                                              int end, int shift_amount,
@@ -4917,7 +5189,7 @@ void TurboAssembler::AtomicCmpExchangeHelper(Register addr, Register output,
                          Operand(64 - shift_amount), true);
 }
 
-void TurboAssembler::AtomicCmpExchangeU8(Register addr, Register output,
+void MacroAssembler::AtomicCmpExchangeU8(Register addr, Register output,
                                          Register old_value, Register new_value,
                                          Register temp0, Register temp1) {
 #ifdef V8_TARGET_BIG_ENDIAN
@@ -4966,7 +5238,7 @@ void TurboAssembler::AtomicCmpExchangeU8(Register addr, Register output,
   bind(&done);
 }
 
-void TurboAssembler::AtomicCmpExchangeU16(Register addr, Register output,
+void MacroAssembler::AtomicCmpExchangeU16(Register addr, Register output,
                                           Register old_value,
                                           Register new_value, Register temp0,
                                           Register temp1) {
@@ -5004,7 +5276,7 @@ void TurboAssembler::AtomicCmpExchangeU16(Register addr, Register output,
   bind(&done);
 }
 
-void TurboAssembler::AtomicExchangeHelper(Register addr, Register value,
+void MacroAssembler::AtomicExchangeHelper(Register addr, Register value,
                                           Register output, int start, int end,
                                           int shift_amount, int offset,
                                           Register scratch) {
@@ -5019,7 +5291,7 @@ void TurboAssembler::AtomicExchangeHelper(Register addr, Register value,
   srl(output, Operand(shift_amount));
 }
 
-void TurboAssembler::AtomicExchangeU8(Register addr, Register value,
+void MacroAssembler::AtomicExchangeU8(Register addr, Register value,
                                       Register output, Register scratch) {
 #ifdef V8_TARGET_BIG_ENDIAN
 #define ATOMIC_EXCHANGE_BYTE(i)                                               \
@@ -5071,7 +5343,7 @@ void TurboAssembler::AtomicExchangeU8(Register addr, Register value,
   bind(&done);
 }
 
-void TurboAssembler::AtomicExchangeU16(Register addr, Register value,
+void MacroAssembler::AtomicExchangeU16(Register addr, Register value,
                                        Register output, Register scratch) {
 #ifdef V8_TARGET_BIG_ENDIAN
 #define ATOMIC_EXCHANGE_HALFWORD(i)                                     \
@@ -5112,77 +5384,77 @@ void TurboAssembler::AtomicExchangeU16(Register addr, Register value,
 }
 
 // Simd Support.
-void TurboAssembler::F64x2Splat(Simd128Register dst, Simd128Register src) {
+void MacroAssembler::F64x2Splat(Simd128Register dst, Simd128Register src) {
   vrep(dst, src, Operand(0), Condition(3));
 }
 
-void TurboAssembler::F32x4Splat(Simd128Register dst, Simd128Register src) {
+void MacroAssembler::F32x4Splat(Simd128Register dst, Simd128Register src) {
   vrep(dst, src, Operand(0), Condition(2));
 }
 
-void TurboAssembler::I64x2Splat(Simd128Register dst, Register src) {
+void MacroAssembler::I64x2Splat(Simd128Register dst, Register src) {
   vlvg(dst, src, MemOperand(r0, 0), Condition(3));
   vrep(dst, dst, Operand(0), Condition(3));
 }
 
-void TurboAssembler::I32x4Splat(Simd128Register dst, Register src) {
+void MacroAssembler::I32x4Splat(Simd128Register dst, Register src) {
   vlvg(dst, src, MemOperand(r0, 0), Condition(2));
   vrep(dst, dst, Operand(0), Condition(2));
 }
 
-void TurboAssembler::I16x8Splat(Simd128Register dst, Register src) {
+void MacroAssembler::I16x8Splat(Simd128Register dst, Register src) {
   vlvg(dst, src, MemOperand(r0, 0), Condition(1));
   vrep(dst, dst, Operand(0), Condition(1));
 }
 
-void TurboAssembler::I8x16Splat(Simd128Register dst, Register src) {
+void MacroAssembler::I8x16Splat(Simd128Register dst, Register src) {
   vlvg(dst, src, MemOperand(r0, 0), Condition(0));
   vrep(dst, dst, Operand(0), Condition(0));
 }
 
-void TurboAssembler::F64x2ExtractLane(DoubleRegister dst, Simd128Register src,
+void MacroAssembler::F64x2ExtractLane(DoubleRegister dst, Simd128Register src,
                                       uint8_t imm_lane_idx, Register) {
   vrep(dst, src, Operand(1 - imm_lane_idx), Condition(3));
 }
 
-void TurboAssembler::F32x4ExtractLane(DoubleRegister dst, Simd128Register src,
+void MacroAssembler::F32x4ExtractLane(DoubleRegister dst, Simd128Register src,
                                       uint8_t imm_lane_idx, Register) {
   vrep(dst, src, Operand(3 - imm_lane_idx), Condition(2));
 }
 
-void TurboAssembler::I64x2ExtractLane(Register dst, Simd128Register src,
+void MacroAssembler::I64x2ExtractLane(Register dst, Simd128Register src,
                                       uint8_t imm_lane_idx, Register) {
   vlgv(dst, src, MemOperand(r0, 1 - imm_lane_idx), Condition(3));
 }
 
-void TurboAssembler::I32x4ExtractLane(Register dst, Simd128Register src,
+void MacroAssembler::I32x4ExtractLane(Register dst, Simd128Register src,
                                       uint8_t imm_lane_idx, Register) {
   vlgv(dst, src, MemOperand(r0, 3 - imm_lane_idx), Condition(2));
 }
 
-void TurboAssembler::I16x8ExtractLaneU(Register dst, Simd128Register src,
+void MacroAssembler::I16x8ExtractLaneU(Register dst, Simd128Register src,
                                        uint8_t imm_lane_idx, Register) {
   vlgv(dst, src, MemOperand(r0, 7 - imm_lane_idx), Condition(1));
 }
 
-void TurboAssembler::I16x8ExtractLaneS(Register dst, Simd128Register src,
+void MacroAssembler::I16x8ExtractLaneS(Register dst, Simd128Register src,
                                        uint8_t imm_lane_idx, Register scratch) {
   vlgv(scratch, src, MemOperand(r0, 7 - imm_lane_idx), Condition(1));
   lghr(dst, scratch);
 }
 
-void TurboAssembler::I8x16ExtractLaneU(Register dst, Simd128Register src,
+void MacroAssembler::I8x16ExtractLaneU(Register dst, Simd128Register src,
                                        uint8_t imm_lane_idx, Register) {
   vlgv(dst, src, MemOperand(r0, 15 - imm_lane_idx), Condition(0));
 }
 
-void TurboAssembler::I8x16ExtractLaneS(Register dst, Simd128Register src,
+void MacroAssembler::I8x16ExtractLaneS(Register dst, Simd128Register src,
                                        uint8_t imm_lane_idx, Register scratch) {
   vlgv(scratch, src, MemOperand(r0, 15 - imm_lane_idx), Condition(0));
   lgbr(dst, scratch);
 }
 
-void TurboAssembler::F64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       DoubleRegister src2, uint8_t imm_lane_idx,
                                       Register scratch) {
   vlgv(scratch, src2, MemOperand(r0, 0), Condition(3));
@@ -5192,7 +5464,7 @@ void TurboAssembler::F64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, scratch, MemOperand(r0, 1 - imm_lane_idx), Condition(3));
 }
 
-void TurboAssembler::F32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       DoubleRegister src2, uint8_t imm_lane_idx,
                                       Register scratch) {
   vlgv(scratch, src2, MemOperand(r0, 0), Condition(2));
@@ -5202,7 +5474,7 @@ void TurboAssembler::F32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, scratch, MemOperand(r0, 3 - imm_lane_idx), Condition(2));
 }
 
-void TurboAssembler::I64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       Register src2, uint8_t imm_lane_idx,
                                       Register) {
   if (src1 != dst) {
@@ -5211,7 +5483,7 @@ void TurboAssembler::I64x2ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, src2, MemOperand(r0, 1 - imm_lane_idx), Condition(3));
 }
 
-void TurboAssembler::I32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       Register src2, uint8_t imm_lane_idx,
                                       Register) {
   if (src1 != dst) {
@@ -5220,7 +5492,7 @@ void TurboAssembler::I32x4ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, src2, MemOperand(r0, 3 - imm_lane_idx), Condition(2));
 }
 
-void TurboAssembler::I16x8ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       Register src2, uint8_t imm_lane_idx,
                                       Register) {
   if (src1 != dst) {
@@ -5229,7 +5501,7 @@ void TurboAssembler::I16x8ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, src2, MemOperand(r0, 7 - imm_lane_idx), Condition(1));
 }
 
-void TurboAssembler::I8x16ReplaceLane(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16ReplaceLane(Simd128Register dst, Simd128Register src1,
                                       Register src2, uint8_t imm_lane_idx,
                                       Register) {
   if (src1 != dst) {
@@ -5238,19 +5510,19 @@ void TurboAssembler::I8x16ReplaceLane(Simd128Register dst, Simd128Register src1,
   vlvg(dst, src2, MemOperand(r0, 15 - imm_lane_idx), Condition(0));
 }
 
-void TurboAssembler::S128Not(Simd128Register dst, Simd128Register src) {
+void MacroAssembler::S128Not(Simd128Register dst, Simd128Register src) {
   vno(dst, src, src, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::S128Zero(Simd128Register dst, Simd128Register src) {
+void MacroAssembler::S128Zero(Simd128Register dst, Simd128Register src) {
   vx(dst, src, src, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::S128AllOnes(Simd128Register dst, Simd128Register src) {
+void MacroAssembler::S128AllOnes(Simd128Register dst, Simd128Register src) {
   vceq(dst, src, src, Condition(0), Condition(3));
 }
 
-void TurboAssembler::S128Select(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::S128Select(Simd128Register dst, Simd128Register src1,
                                 Simd128Register src2, Simd128Register mask) {
   vsel(dst, src1, src2, mask, Condition(0), Condition(0));
 }
@@ -5293,7 +5565,7 @@ void TurboAssembler::S128Select(Simd128Register dst, Simd128Register src1,
   V(I8x16Popcnt, vpopct, 0, 0, 0)
 
 #define EMIT_SIMD_UNOP_VRR_A(name, op, c1, c2, c3)                      \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src) { \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src) { \
     op(dst, src, Condition(c1), Condition(c2), Condition(c3));          \
   }
 SIMD_UNOP_LIST_VRR_A(EMIT_SIMD_UNOP_VRR_A)
@@ -5314,7 +5586,7 @@ SIMD_UNOP_LIST_VRR_A(EMIT_SIMD_UNOP_VRR_A)
   V(I8x16GtU, vchl, 0, 0)
 
 #define EMIT_SIMD_BINOP_VRR_B(name, op, c1, c2)                        \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1, \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1, \
                             Simd128Register src2) {                    \
     op(dst, src1, src2, Condition(c1), Condition(c2));                 \
   }
@@ -5371,7 +5643,7 @@ SIMD_BINOP_LIST_VRR_B(EMIT_SIMD_BINOP_VRR_B)
   V(S128AndNot, vnc, 0, 0, 0)
 
 #define EMIT_SIMD_BINOP_VRR_C(name, op, c1, c2, c3)                    \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1, \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1, \
                             Simd128Register src2) {                    \
     op(dst, src1, src2, Condition(c1), Condition(c2), Condition(c3));  \
   }
@@ -5394,13 +5666,13 @@ SIMD_BINOP_LIST_VRR_C(EMIT_SIMD_BINOP_VRR_C)
   V(I8x16ShrU, vesrlv, 0)
 
 #define EMIT_SIMD_SHIFT(name, op, c1)                                  \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1, \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1, \
                             Register src2, Simd128Register scratch) {  \
     vlvg(scratch, src2, MemOperand(r0, 0), Condition(c1));             \
     vrep(scratch, scratch, Operand(0), Condition(c1));                 \
     op(dst, src1, scratch, Condition(0), Condition(0), Condition(c1)); \
   }                                                                    \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1, \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1, \
                             const Operand& src2, Register scratch1,    \
                             Simd128Register scratch2) {                \
     mov(scratch1, src2);                                               \
@@ -5425,7 +5697,7 @@ SIMD_SHIFT_LIST(EMIT_SIMD_SHIFT)
   V(I16x8ExtMulHighI8x16U, vmle, vmlo, vmrh, 0)
 
 #define EMIT_SIMD_EXT_MUL(name, mul_even, mul_odd, merge, mode)                \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1,         \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1,         \
                             Simd128Register src2, Simd128Register scratch) {   \
     mul_even(scratch, src1, src2, Condition(0), Condition(0),                  \
              Condition(mode));                                                 \
@@ -5443,7 +5715,7 @@ SIMD_EXT_MUL_LIST(EMIT_SIMD_EXT_MUL)
   V(I8x16AllTrue, 0)
 
 #define EMIT_SIMD_ALL_TRUE(name, mode)                                     \
-  void TurboAssembler::name(Register dst, Simd128Register src,             \
+  void MacroAssembler::name(Register dst, Simd128Register src,             \
                             Register scratch1, Simd128Register scratch2) { \
     mov(scratch1, Operand(1));                                             \
     xgr(dst, dst);                                                         \
@@ -5464,15 +5736,15 @@ SIMD_ALL_TRUE_LIST(EMIT_SIMD_ALL_TRUE)
   V(F32x4Qfms, vfnms, 2)
 
 #define EMIT_SIMD_QFM(name, op, c1)                                       \
-  void TurboAssembler::name(Simd128Register dst, Simd128Register src1,    \
+  void MacroAssembler::name(Simd128Register dst, Simd128Register src1,    \
                             Simd128Register src2, Simd128Register src3) { \
-    op(dst, src2, src3, src1, Condition(c1), Condition(0));               \
+    op(dst, src1, src2, src3, Condition(c1), Condition(0));               \
   }
 SIMD_QFM_LIST(EMIT_SIMD_QFM)
 #undef EMIT_SIMD_QFM
 #undef SIMD_QFM_LIST
 
-void TurboAssembler::I64x2Mul(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I64x2Mul(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2, Register scratch1,
                               Register scratch2, Register scratch3) {
   Register scratch_1 = scratch1;
@@ -5487,112 +5759,112 @@ void TurboAssembler::I64x2Mul(Simd128Register dst, Simd128Register src1,
   vlvgp(dst, scratch1, scratch2);
 }
 
-void TurboAssembler::F64x2Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F64x2Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfce(dst, src1, src2, Condition(0), Condition(0), Condition(3));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(3));
 }
 
-void TurboAssembler::F64x2Lt(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F64x2Lt(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfch(dst, src2, src1, Condition(0), Condition(0), Condition(3));
 }
 
-void TurboAssembler::F64x2Le(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F64x2Le(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfche(dst, src2, src1, Condition(0), Condition(0), Condition(3));
 }
 
-void TurboAssembler::F32x4Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F32x4Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfce(dst, src1, src2, Condition(0), Condition(0), Condition(2));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::F32x4Lt(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F32x4Lt(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfch(dst, src2, src1, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::F32x4Le(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::F32x4Le(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vfche(dst, src2, src1, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::I64x2Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I64x2Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vceq(dst, src1, src2, Condition(0), Condition(3));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(3));
 }
 
-void TurboAssembler::I64x2GeS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I64x2GeS(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2) {
   // Compute !(B > A) which is equal to A >= B.
   vch(dst, src2, src1, Condition(0), Condition(3));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(3));
 }
 
-void TurboAssembler::I32x4Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I32x4Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vceq(dst, src1, src2, Condition(0), Condition(2));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::I32x4GeS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I32x4GeS(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2) {
   // Compute !(B > A) which is equal to A >= B.
   vch(dst, src2, src1, Condition(0), Condition(2));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::I32x4GeU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I32x4GeU(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2, Simd128Register scratch) {
   vceq(scratch, src1, src2, Condition(0), Condition(2));
   vchl(dst, src1, src2, Condition(0), Condition(2));
   vo(dst, dst, scratch, Condition(0), Condition(0), Condition(2));
 }
 
-void TurboAssembler::I16x8Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vceq(dst, src1, src2, Condition(0), Condition(1));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(1));
 }
 
-void TurboAssembler::I16x8GeS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8GeS(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2) {
   // Compute !(B > A) which is equal to A >= B.
   vch(dst, src2, src1, Condition(0), Condition(1));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(1));
 }
 
-void TurboAssembler::I16x8GeU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8GeU(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2, Simd128Register scratch) {
   vceq(scratch, src1, src2, Condition(0), Condition(1));
   vchl(dst, src1, src2, Condition(0), Condition(1));
   vo(dst, dst, scratch, Condition(0), Condition(0), Condition(1));
 }
 
-void TurboAssembler::I8x16Ne(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16Ne(Simd128Register dst, Simd128Register src1,
                              Simd128Register src2) {
   vceq(dst, src1, src2, Condition(0), Condition(0));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::I8x16GeS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16GeS(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2) {
   // Compute !(B > A) which is equal to A >= B.
   vch(dst, src2, src1, Condition(0), Condition(0));
   vno(dst, dst, dst, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::I8x16GeU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16GeU(Simd128Register dst, Simd128Register src1,
                               Simd128Register src2, Simd128Register scratch) {
   vceq(scratch, src1, src2, Condition(0), Condition(0));
   vchl(dst, src1, src2, Condition(0), Condition(0));
   vo(dst, dst, scratch, Condition(0), Condition(0), Condition(0));
 }
 
-void TurboAssembler::I64x2BitMask(Register dst, Simd128Register src,
+void MacroAssembler::I64x2BitMask(Register dst, Simd128Register src,
                                   Register scratch1, Simd128Register scratch2) {
   mov(scratch1, Operand(0x8080808080800040));
   vlvg(scratch2, scratch1, MemOperand(r0, 1), Condition(3));
@@ -5600,7 +5872,7 @@ void TurboAssembler::I64x2BitMask(Register dst, Simd128Register src,
   vlgv(dst, scratch2, MemOperand(r0, 7), Condition(0));
 }
 
-void TurboAssembler::I32x4BitMask(Register dst, Simd128Register src,
+void MacroAssembler::I32x4BitMask(Register dst, Simd128Register src,
                                   Register scratch1, Simd128Register scratch2) {
   mov(scratch1, Operand(0x8080808000204060));
   vlvg(scratch2, scratch1, MemOperand(r0, 1), Condition(3));
@@ -5608,7 +5880,7 @@ void TurboAssembler::I32x4BitMask(Register dst, Simd128Register src,
   vlgv(dst, scratch2, MemOperand(r0, 7), Condition(0));
 }
 
-void TurboAssembler::I16x8BitMask(Register dst, Simd128Register src,
+void MacroAssembler::I16x8BitMask(Register dst, Simd128Register src,
                                   Register scratch1, Simd128Register scratch2) {
   mov(scratch1, Operand(0x10203040506070));
   vlvg(scratch2, scratch1, MemOperand(r0, 1), Condition(3));
@@ -5616,19 +5888,19 @@ void TurboAssembler::I16x8BitMask(Register dst, Simd128Register src,
   vlgv(dst, scratch2, MemOperand(r0, 7), Condition(0));
 }
 
-void TurboAssembler::F64x2ConvertLowI32x4S(Simd128Register dst,
+void MacroAssembler::F64x2ConvertLowI32x4S(Simd128Register dst,
                                            Simd128Register src) {
   vupl(dst, src, Condition(0), Condition(0), Condition(2));
   vcdg(dst, dst, Condition(4), Condition(0), Condition(3));
 }
 
-void TurboAssembler::F64x2ConvertLowI32x4U(Simd128Register dst,
+void MacroAssembler::F64x2ConvertLowI32x4U(Simd128Register dst,
                                            Simd128Register src) {
   vupll(dst, src, Condition(0), Condition(0), Condition(2));
   vcdlg(dst, dst, Condition(4), Condition(0), Condition(3));
 }
 
-void TurboAssembler::I8x16BitMask(Register dst, Simd128Register src,
+void MacroAssembler::I8x16BitMask(Register dst, Simd128Register src,
                                   Register scratch1, Register scratch2,
                                   Simd128Register scratch3) {
   mov(scratch1, Operand(0x4048505860687078));
@@ -5638,7 +5910,7 @@ void TurboAssembler::I8x16BitMask(Register dst, Simd128Register src,
   vlgv(dst, scratch3, MemOperand(r0, 3), Condition(1));
 }
 
-void TurboAssembler::V128AnyTrue(Register dst, Simd128Register src,
+void MacroAssembler::V128AnyTrue(Register dst, Simd128Register src,
                                  Register scratch) {
   mov(dst, Operand(1));
   xgr(scratch, scratch);
@@ -5653,7 +5925,7 @@ void TurboAssembler::V128AnyTrue(Register dst, Simd128Register src,
     convert(scratch2, scratch1, kRoundToZero);                        \
     vlvg(dst, scratch2, MemOperand(r0, index), Condition(2));         \
   }
-void TurboAssembler::I32x4SConvertF32x4(Simd128Register dst,
+void MacroAssembler::I32x4SConvertF32x4(Simd128Register dst,
                                         Simd128Register src,
                                         Simd128Register scratch1,
                                         Register scratch2) {
@@ -5667,7 +5939,7 @@ void TurboAssembler::I32x4SConvertF32x4(Simd128Register dst,
   }
 }
 
-void TurboAssembler::I32x4UConvertF32x4(Simd128Register dst,
+void MacroAssembler::I32x4UConvertF32x4(Simd128Register dst,
                                         Simd128Register src,
                                         Simd128Register scratch1,
                                         Register scratch2) {
@@ -5689,7 +5961,7 @@ void TurboAssembler::I32x4UConvertF32x4(Simd128Register dst,
     MovFloatToInt(scratch2, scratch1);                                \
     vlvg(dst, scratch2, MemOperand(r0, index), Condition(2));         \
   }
-void TurboAssembler::F32x4SConvertI32x4(Simd128Register dst,
+void MacroAssembler::F32x4SConvertI32x4(Simd128Register dst,
                                         Simd128Register src,
                                         Simd128Register scratch1,
                                         Register scratch2) {
@@ -5699,7 +5971,7 @@ void TurboAssembler::F32x4SConvertI32x4(Simd128Register dst,
     CONVERT_INT32_TO_FLOAT(ConvertIntToFloat, dst, src, scratch1, scratch2)
   }
 }
-void TurboAssembler::F32x4UConvertI32x4(Simd128Register dst,
+void MacroAssembler::F32x4UConvertI32x4(Simd128Register dst,
                                         Simd128Register src,
                                         Simd128Register scratch1,
                                         Register scratch2) {
@@ -5712,13 +5984,13 @@ void TurboAssembler::F32x4UConvertI32x4(Simd128Register dst,
 }
 #undef CONVERT_INT32_TO_FLOAT
 
-void TurboAssembler::I16x8SConvertI32x4(Simd128Register dst,
+void MacroAssembler::I16x8SConvertI32x4(Simd128Register dst,
                                         Simd128Register src1,
                                         Simd128Register src2) {
   vpks(dst, src2, src1, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I8x16SConvertI16x8(Simd128Register dst,
+void MacroAssembler::I8x16SConvertI16x8(Simd128Register dst,
                                         Simd128Register src1,
                                         Simd128Register src2) {
   vpks(dst, src2, src1, Condition(0), Condition(1));
@@ -5730,7 +6002,7 @@ void TurboAssembler::I8x16SConvertI16x8(Simd128Register dst,
   vmx(scratch, src1, kDoubleRegZero, Condition(0), Condition(0),   \
       Condition(mode));                                            \
   vmx(dst, src2, kDoubleRegZero, Condition(0), Condition(0), Condition(mode));
-void TurboAssembler::I16x8UConvertI32x4(Simd128Register dst,
+void MacroAssembler::I16x8UConvertI32x4(Simd128Register dst,
                                         Simd128Register src1,
                                         Simd128Register src2,
                                         Simd128Register scratch) {
@@ -5739,7 +6011,7 @@ void TurboAssembler::I16x8UConvertI32x4(Simd128Register dst,
   vpkls(dst, dst, scratch, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I8x16UConvertI16x8(Simd128Register dst,
+void MacroAssembler::I8x16UConvertI16x8(Simd128Register dst,
                                         Simd128Register src1,
                                         Simd128Register src2,
                                         Simd128Register scratch) {
@@ -5761,7 +6033,7 @@ void TurboAssembler::I8x16UConvertI16x8(Simd128Register dst,
   extract_low(scratch2, src2, Condition(0), Condition(0), Condition(mode));  \
   op(scratch1, scratch1, scratch2, Condition(0), Condition(0),               \
      Condition(mode + 1));
-void TurboAssembler::I16x8AddSatS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8AddSatS(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5769,7 +6041,7 @@ void TurboAssembler::I16x8AddSatS(Simd128Register dst, Simd128Register src1,
   vpks(dst, dst, scratch1, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I16x8SubSatS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8SubSatS(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5777,7 +6049,7 @@ void TurboAssembler::I16x8SubSatS(Simd128Register dst, Simd128Register src1,
   vpks(dst, dst, scratch1, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I16x8AddSatU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8AddSatU(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5785,7 +6057,7 @@ void TurboAssembler::I16x8AddSatU(Simd128Register dst, Simd128Register src1,
   vpkls(dst, dst, scratch1, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I16x8SubSatU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8SubSatU(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5799,7 +6071,7 @@ void TurboAssembler::I16x8SubSatU(Simd128Register dst, Simd128Register src1,
   vpkls(dst, dst, scratch1, Condition(0), Condition(2));
 }
 
-void TurboAssembler::I8x16AddSatS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16AddSatS(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5807,7 +6079,7 @@ void TurboAssembler::I8x16AddSatS(Simd128Register dst, Simd128Register src1,
   vpks(dst, dst, scratch1, Condition(0), Condition(1));
 }
 
-void TurboAssembler::I8x16SubSatS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16SubSatS(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5815,7 +6087,7 @@ void TurboAssembler::I8x16SubSatS(Simd128Register dst, Simd128Register src1,
   vpks(dst, dst, scratch1, Condition(0), Condition(1));
 }
 
-void TurboAssembler::I8x16AddSatU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16AddSatU(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5823,7 +6095,7 @@ void TurboAssembler::I8x16AddSatU(Simd128Register dst, Simd128Register src1,
   vpkls(dst, dst, scratch1, Condition(0), Condition(1));
 }
 
-void TurboAssembler::I8x16SubSatU(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16SubSatU(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2,
                                   Simd128Register scratch1,
                                   Simd128Register scratch2) {
@@ -5838,7 +6110,7 @@ void TurboAssembler::I8x16SubSatU(Simd128Register dst, Simd128Register src1,
 }
 #undef BINOP_EXTRACT
 
-void TurboAssembler::F64x2PromoteLowF32x4(Simd128Register dst,
+void MacroAssembler::F64x2PromoteLowF32x4(Simd128Register dst,
                                           Simd128Register src,
                                           Simd128Register scratch1,
                                           Register scratch2, Register scratch3,
@@ -5854,7 +6126,7 @@ void TurboAssembler::F64x2PromoteLowF32x4(Simd128Register dst,
   vlvgp(dst, scratch3, scratch4);
 }
 
-void TurboAssembler::F32x4DemoteF64x2Zero(Simd128Register dst,
+void MacroAssembler::F32x4DemoteF64x2Zero(Simd128Register dst,
                                           Simd128Register src,
                                           Simd128Register scratch1,
                                           Register scratch2, Register scratch3,
@@ -5882,29 +6154,35 @@ void TurboAssembler::F32x4DemoteF64x2Zero(Simd128Register dst,
           Condition(lane_size));                                            \
   va(dst, scratch1, scratch2, Condition(0), Condition(0),                   \
      Condition(lane_size + 1));
-void TurboAssembler::I32x4ExtAddPairwiseI16x8S(Simd128Register dst,
+void MacroAssembler::I32x4ExtAddPairwiseI16x8S(Simd128Register dst,
                                                Simd128Register src,
                                                Simd128Register scratch1,
                                                Simd128Register scratch2) {
   EXT_ADD_PAIRWISE(dst, src, scratch1, scratch2, 1, vme, vmo)
 }
 
-void TurboAssembler::I32x4ExtAddPairwiseI16x8U(Simd128Register dst,
+void MacroAssembler::I32x4ExtAddPairwiseI16x8U(Simd128Register dst,
                                                Simd128Register src,
-                                               Simd128Register scratch,
-                                               Simd128Register scratch2) {
-  vx(scratch, scratch, scratch, Condition(0), Condition(0), Condition(3));
-  vsum(dst, src, scratch, Condition(0), Condition(0), Condition(1));
+                                               Simd128Register /* scratch1 */,
+                                               Simd128Register /* scratch2 */) {
+  // Unnamed scratch parameters are still kept to make this function
+  // have the same signature as the other ExtAddPairwise functions.
+  // TF and Liftoff use a uniform Macro for all of them.
+  // TODO(miladfarca): Add a default argument or separate them in TF and
+  // Liftoff.
+  vx(kDoubleRegZero, kDoubleRegZero, kDoubleRegZero, Condition(0), Condition(0),
+     Condition(3));
+  vsum(dst, src, kDoubleRegZero, Condition(0), Condition(0), Condition(1));
 }
 
-void TurboAssembler::I16x8ExtAddPairwiseI8x16S(Simd128Register dst,
+void MacroAssembler::I16x8ExtAddPairwiseI8x16S(Simd128Register dst,
                                                Simd128Register src,
                                                Simd128Register scratch1,
                                                Simd128Register scratch2) {
   EXT_ADD_PAIRWISE(dst, src, scratch1, scratch2, 0, vme, vmo)
 }
 
-void TurboAssembler::I16x8ExtAddPairwiseI8x16U(Simd128Register dst,
+void MacroAssembler::I16x8ExtAddPairwiseI8x16U(Simd128Register dst,
                                                Simd128Register src,
                                                Simd128Register scratch1,
                                                Simd128Register scratch2) {
@@ -5912,19 +6190,18 @@ void TurboAssembler::I16x8ExtAddPairwiseI8x16U(Simd128Register dst,
 }
 #undef EXT_ADD_PAIRWISE
 
-void TurboAssembler::I32x4TruncSatF64x2SZero(Simd128Register dst,
+void MacroAssembler::I32x4TruncSatF64x2SZero(Simd128Register dst,
                                              Simd128Register src,
                                              Simd128Register scratch) {
   // NaN to 0.
-  vlr(scratch, src, Condition(0), Condition(0), Condition(0));
-  vfce(scratch, scratch, scratch, Condition(0), Condition(0), Condition(3));
+  vfce(scratch, src, src, Condition(0), Condition(0), Condition(3));
   vn(scratch, src, scratch, Condition(0), Condition(0), Condition(0));
   vcgd(scratch, scratch, Condition(5), Condition(0), Condition(3));
   vx(dst, dst, dst, Condition(0), Condition(0), Condition(2));
   vpks(dst, dst, scratch, Condition(0), Condition(3));
 }
 
-void TurboAssembler::I32x4TruncSatF64x2UZero(Simd128Register dst,
+void MacroAssembler::I32x4TruncSatF64x2UZero(Simd128Register dst,
                                              Simd128Register src,
                                              Simd128Register scratch) {
   vclgd(scratch, src, Condition(5), Condition(0), Condition(3));
@@ -5932,34 +6209,33 @@ void TurboAssembler::I32x4TruncSatF64x2UZero(Simd128Register dst,
   vpkls(dst, dst, scratch, Condition(0), Condition(3));
 }
 
-void TurboAssembler::S128Const(Simd128Register dst, uint64_t high, uint64_t low,
+void MacroAssembler::S128Const(Simd128Register dst, uint64_t high, uint64_t low,
                                Register scratch1, Register scratch2) {
   mov(scratch1, Operand(low));
   mov(scratch2, Operand(high));
   vlvgp(dst, scratch2, scratch1);
 }
 
-void TurboAssembler::I8x16Swizzle(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16Swizzle(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2, Register scratch1,
-                                  Register scratch2, Simd128Register scratch3,
-                                  Simd128Register scratch4) {
-  DCHECK(!AreAliased(src1, src2, scratch3, scratch4));
+                                  Register scratch2, Simd128Register scratch3) {
+  DCHECK(!AreAliased(src1, src2, scratch3));
   // Saturate the indices to 5 bits. Input indices more than 31 should
   // return 0.
   vrepi(scratch3, Operand(31), Condition(0));
-  vmnl(scratch4, src2, scratch3, Condition(0), Condition(0), Condition(0));
+  vmnl(scratch3, src2, scratch3, Condition(0), Condition(0), Condition(0));
   // Input needs to be reversed.
   vlgv(scratch1, src1, MemOperand(r0, 0), Condition(3));
   vlgv(scratch2, src1, MemOperand(r0, 1), Condition(3));
   lrvgr(scratch1, scratch1);
   lrvgr(scratch2, scratch2);
   vlvgp(dst, scratch2, scratch1);
-  // Clear scratch.
-  vx(scratch3, scratch3, scratch3, Condition(0), Condition(0), Condition(0));
-  vperm(dst, dst, scratch3, scratch4, Condition(0), Condition(0));
+  vx(kDoubleRegZero, kDoubleRegZero, kDoubleRegZero, Condition(0), Condition(0),
+     Condition(0));
+  vperm(dst, dst, kDoubleRegZero, scratch3, Condition(0), Condition(0));
 }
 
-void TurboAssembler::I8x16Shuffle(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I8x16Shuffle(Simd128Register dst, Simd128Register src1,
                                   Simd128Register src2, uint64_t high,
                                   uint64_t low, Register scratch1,
                                   Register scratch2, Simd128Register scratch3) {
@@ -5969,12 +6245,36 @@ void TurboAssembler::I8x16Shuffle(Simd128Register dst, Simd128Register src1,
   vperm(dst, src1, src2, scratch3, Condition(0), Condition(0));
 }
 
-void TurboAssembler::I32x4DotI16x8S(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I32x4DotI16x8S(Simd128Register dst, Simd128Register src1,
                                     Simd128Register src2,
                                     Simd128Register scratch) {
   vme(scratch, src1, src2, Condition(0), Condition(0), Condition(1));
   vmo(dst, src1, src2, Condition(0), Condition(0), Condition(1));
   va(dst, scratch, dst, Condition(0), Condition(0), Condition(2));
+}
+
+void MacroAssembler::I32x4DotI8x16AddS(
+    Simd128Register dst, Simd128Register src1, Simd128Register src2,
+    Simd128Register src3, Simd128Register scratch1, Simd128Register scratch2) {
+  // I8 -> I16.
+  vme(scratch1, src1, src2, Condition(0), Condition(0), Condition(0));
+  vmo(dst, src1, src2, Condition(0), Condition(0), Condition(0));
+  va(dst, scratch1, dst, Condition(0), Condition(0), Condition(1));
+  // I16 -> I32.
+  vrepi(scratch2, Operand(1), Condition(1));
+  vme(scratch1, dst, scratch2, Condition(0), Condition(0), Condition(1));
+  vmo(dst, dst, scratch2, Condition(0), Condition(0), Condition(1));
+  va(dst, scratch1, dst, Condition(0), Condition(0), Condition(2));
+  // Add src3.
+  va(dst, dst, src3, Condition(0), Condition(0), Condition(2));
+}
+
+void MacroAssembler::I16x8DotI8x16S(Simd128Register dst, Simd128Register src1,
+                                    Simd128Register src2,
+                                    Simd128Register scratch) {
+  vme(scratch, src1, src2, Condition(0), Condition(0), Condition(0));
+  vmo(dst, src1, src2, Condition(0), Condition(0), Condition(0));
+  va(dst, scratch, dst, Condition(0), Condition(0), Condition(1));
 }
 
 #define Q15_MUL_ROAUND(accumulator, src1, src2, const_val, scratch, unpack) \
@@ -5987,7 +6287,7 @@ void TurboAssembler::I32x4DotI16x8S(Simd128Register dst, Simd128Register src1,
   vrepi(scratch, Operand(15), Condition(2));                                \
   vesrav(accumulator, accumulator, scratch, Condition(0), Condition(0),     \
          Condition(2));
-void TurboAssembler::I16x8Q15MulRSatS(Simd128Register dst, Simd128Register src1,
+void MacroAssembler::I16x8Q15MulRSatS(Simd128Register dst, Simd128Register src1,
                                       Simd128Register src2,
                                       Simd128Register scratch1,
                                       Simd128Register scratch2,
@@ -6017,7 +6317,7 @@ void TurboAssembler::I16x8Q15MulRSatS(Simd128Register dst, Simd128Register src1,
   V(8x16, vlrep, LoadU8, 0)
 
 #define LOAD_SPLAT(name, vector_instr, scalar_instr, condition)       \
-  void TurboAssembler::LoadAndSplat##name##LE(                        \
+  void MacroAssembler::LoadAndSplat##name##LE(                        \
       Simd128Register dst, const MemOperand& mem, Register scratch) { \
     if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {          \
       vector_instr(dst, mem, Condition(condition));                   \
@@ -6040,7 +6340,7 @@ LOAD_SPLAT_LIST(LOAD_SPLAT)
   V(8x8S, vuph, 0)
 
 #define LOAD_EXTEND(name, unpack_instr, condition)                            \
-  void TurboAssembler::LoadAndExtend##name##LE(                               \
+  void MacroAssembler::LoadAndExtend##name##LE(                               \
       Simd128Register dst, const MemOperand& mem, Register scratch) {         \
     if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {                  \
       vlebrg(dst, mem, Condition(0));                                         \
@@ -6054,7 +6354,7 @@ LOAD_EXTEND_LIST(LOAD_EXTEND)
 #undef LOAD_EXTEND
 #undef LOAD_EXTEND
 
-void TurboAssembler::LoadV32ZeroLE(Simd128Register dst, const MemOperand& mem,
+void MacroAssembler::LoadV32ZeroLE(Simd128Register dst, const MemOperand& mem,
                                    Register scratch) {
   vx(dst, dst, dst, Condition(0), Condition(0), Condition(0));
   if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {
@@ -6065,7 +6365,7 @@ void TurboAssembler::LoadV32ZeroLE(Simd128Register dst, const MemOperand& mem,
   vlvg(dst, scratch, MemOperand(r0, 3), Condition(2));
 }
 
-void TurboAssembler::LoadV64ZeroLE(Simd128Register dst, const MemOperand& mem,
+void MacroAssembler::LoadV64ZeroLE(Simd128Register dst, const MemOperand& mem,
                                    Register scratch) {
   vx(dst, dst, dst, Condition(0), Condition(0), Condition(0));
   if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {
@@ -6083,7 +6383,7 @@ void TurboAssembler::LoadV64ZeroLE(Simd128Register dst, const MemOperand& mem,
   V(8, vleb, LoadU8, 0)
 
 #define LOAD_LANE(name, vector_instr, scalar_instr, condition)             \
-  void TurboAssembler::LoadLane##name##LE(Simd128Register dst,             \
+  void MacroAssembler::LoadLane##name##LE(Simd128Register dst,             \
                                           const MemOperand& mem, int lane, \
                                           Register scratch) {              \
     if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {               \
@@ -6104,7 +6404,7 @@ LOAD_LANE_LIST(LOAD_LANE)
   V(8, vsteb, StoreU8, 0)
 
 #define STORE_LANE(name, vector_instr, scalar_instr, condition)             \
-  void TurboAssembler::StoreLane##name##LE(Simd128Register src,             \
+  void MacroAssembler::StoreLane##name##LE(Simd128Register src,             \
                                            const MemOperand& mem, int lane, \
                                            Register scratch) {              \
     if (CAN_LOAD_STORE_REVERSE && is_uint12(mem.offset())) {                \
@@ -6123,20 +6423,184 @@ STORE_LANE_LIST(STORE_LANE)
 void MacroAssembler::LoadStackLimit(Register destination, StackLimitKind kind) {
   ASM_CODE_COMMENT(this);
   DCHECK(root_array_available());
-  Isolate* isolate = this->isolate();
-  ExternalReference limit =
-      kind == StackLimitKind::kRealStackLimit
-          ? ExternalReference::address_of_real_jslimit(isolate)
-          : ExternalReference::address_of_jslimit(isolate);
-  DCHECK(TurboAssembler::IsAddressableThroughRootRegister(isolate, limit));
-
-  intptr_t offset =
-      TurboAssembler::RootRegisterOffsetForExternalReference(isolate, limit);
+  intptr_t offset = kind == StackLimitKind::kRealStackLimit
+                        ? IsolateData::real_jslimit_offset()
+                        : IsolateData::jslimit_offset();
   CHECK(is_int32(offset));
   LoadU64(destination, MemOperand(kRootRegister, offset));
 }
 
+// Calls an API function.  Allocates HandleScope, extracts returned value
+// from handle and propagates exceptions.  Restores context.  On return removes
+// *stack_space_operand * kSystemPointerSize or stack_space * kSystemPointerSize
+// (GCed, includes the call JS arguments space and the additional space
+// allocated for the fast call).
+void CallApiFunctionAndReturn(MacroAssembler* masm, bool with_profiling,
+                              Register function_address,
+                              ExternalReference thunk_ref, Register thunk_arg,
+                              int stack_space, MemOperand* stack_space_operand,
+                              MemOperand return_value_operand) {
+  using ER = ExternalReference;
+
+  Isolate* isolate = masm->isolate();
+  MemOperand next_mem_op = __ ExternalReferenceAsOperand(
+      ER::handle_scope_next_address(isolate), no_reg);
+  MemOperand limit_mem_op = __ ExternalReferenceAsOperand(
+      ER::handle_scope_limit_address(isolate), no_reg);
+  MemOperand level_mem_op = __ ExternalReferenceAsOperand(
+      ER::handle_scope_level_address(isolate), no_reg);
+
+  Register return_value = r2;
+  Register scratch = ip;
+  Register scratch2 = r1;
+
+  // Allocate HandleScope in callee-saved registers.
+  // We will need to restore the HandleScope after the call to the API function,
+  // by allocating it in callee-saved registers it'll be preserved by C code.
+  Register prev_next_address_reg = r6;
+  Register prev_limit_reg = r7;
+  Register prev_level_reg = r8;
+
+  // C arguments (kCArgRegs[0/1]) are expected to be initialized outside, so
+  // this function must not corrupt them (return_value overlaps with
+  // kCArgRegs[0] but that's ok because we start using it only after the C
+  // call).
+  DCHECK(!AreAliased(kCArgRegs[0], kCArgRegs[1],  // C args
+                     scratch, scratch2, prev_next_address_reg, prev_limit_reg));
+  // function_address and thunk_arg might overlap but this function must not
+  // corrupted them until the call is made (i.e. overlap with return_value is
+  // fine).
+  DCHECK(!AreAliased(function_address,  // incoming parameters
+                     scratch, scratch2, prev_next_address_reg, prev_limit_reg));
+  DCHECK(!AreAliased(thunk_arg,  // incoming parameters
+                     scratch, scratch2, prev_next_address_reg, prev_limit_reg));
+  {
+    ASM_CODE_COMMENT_STRING(masm,
+                            "Allocate HandleScope in callee-save registers.");
+    __ LoadU64(prev_next_address_reg, next_mem_op);
+    __ LoadU64(prev_limit_reg, limit_mem_op);
+    __ LoadU32(prev_level_reg, level_mem_op);
+    __ AddS64(scratch, prev_level_reg, Operand(1));
+    __ StoreU32(scratch, level_mem_op);
+  }
+
+  Label profiler_or_side_effects_check_enabled, done_api_call;
+  if (with_profiling) {
+    __ RecordComment("Check if profiler or side effects check is enabled");
+    __ LoadU8(scratch, __ ExternalReferenceAsOperand(
+                           ER::execution_mode_address(isolate), no_reg));
+    __ CmpS64(scratch, Operand::Zero());
+    __ bne(&profiler_or_side_effects_check_enabled, Label::kNear);
+#ifdef V8_RUNTIME_CALL_STATS
+    __ RecordComment("Check if RCS is enabled");
+    __ Move(scratch, ER::address_of_runtime_stats_flag());
+    __ LoadU32(scratch, MemOperand(scratch, 0));
+    __ CmpS64(scratch, Operand::Zero());
+    __ bne(&profiler_or_side_effects_check_enabled, Label::kNear);
+#endif  // V8_RUNTIME_CALL_STATS
+  }
+
+  __ RecordComment("Call the api function directly.");
+  __ StoreReturnAddressAndCall(function_address);
+  __ bind(&done_api_call);
+
+  Label propagate_exception;
+  Label delete_allocated_handles;
+  Label leave_exit_frame;
+
+  __ RecordComment("Load the value from ReturnValue");
+  __ LoadU64(r2, return_value_operand);
+
+  {
+    ASM_CODE_COMMENT_STRING(
+        masm,
+        "No more valid handles (the result handle was the last one)."
+        "Restore previous handle scope.");
+    __ StoreU64(prev_next_address_reg, next_mem_op);
+    if (v8_flags.debug_code) {
+      __ LoadU32(scratch, level_mem_op);
+      __ SubS64(scratch, Operand(1));
+      __ CmpS64(scratch, prev_level_reg);
+      __ Check(eq, AbortReason::kUnexpectedLevelAfterReturnFromApiCall);
+    }
+    __ StoreU32(prev_level_reg, level_mem_op);
+    __ CmpS64(prev_limit_reg, limit_mem_op);
+    __ bne(&delete_allocated_handles, Label::kNear);
+  }
+
+  __ RecordComment("Leave the API exit frame.");
+  __ bind(&leave_exit_frame);
+  // LeaveExitFrame expects unwind space to be in a register.
+  Register stack_space_reg = prev_limit_reg;
+  if (stack_space_operand == nullptr) {
+    DCHECK_NE(stack_space, 0);
+    __ mov(stack_space_reg, Operand(stack_space));
+  } else {
+    DCHECK_EQ(stack_space, 0);
+    __ LoadU64(stack_space_reg, *stack_space_operand);
+  }
+  __ LeaveExitFrame(stack_space_reg, stack_space_operand != nullptr);
+
+  // Check if the function scheduled an exception.
+  {
+    ASM_CODE_COMMENT_STRING(masm,
+                            "Check if the function scheduled an exception.");
+    __ LoadU64(scratch2, __ ExternalReferenceAsOperand(
+                             ER::exception_address(isolate), no_reg));
+    __ CompareRoot(scratch2, RootIndex::kTheHoleValue);
+    __ bne(&propagate_exception, Label::kNear);
+  }
+
+  {
+    ASM_CODE_COMMENT_STRING(masm, "Convert return value");
+    Label finish_return;
+    __ CompareRoot(return_value, RootIndex::kTheHoleValue);
+    __ bne(&finish_return);
+    __ LoadRoot(return_value, RootIndex::kUndefinedValue);
+    __ bind(&finish_return);
+  }
+
+  __ AssertJSAny(return_value, scratch, scratch2,
+                 AbortReason::kAPICallReturnedInvalidObject);
+
+  __ b(r14);
+
+  if (with_profiling) {
+    ASM_CODE_COMMENT_STRING(masm, "Call the api function via thunk wrapper.");
+    __ bind(&profiler_or_side_effects_check_enabled);
+    // Additional parameter is the address of the actual callback function.
+    MemOperand thunk_arg_mem_op = __ ExternalReferenceAsOperand(
+        ER::api_callback_thunk_argument_address(isolate), no_reg);
+    __ StoreU64(thunk_arg, thunk_arg_mem_op);
+    __ Move(scratch, thunk_ref);
+    __ StoreReturnAddressAndCall(scratch);
+    __ b(&done_api_call);
+  }
+
+  __ RecordComment("An exception was thrown. Propagate it.");
+  __ bind(&propagate_exception);
+  __ TailCallRuntime(Runtime::kPropagateException);
+
+  // HandleScope limit has changed. Delete allocated extensions.
+  {
+    ASM_CODE_COMMENT_STRING(
+        masm, "HandleScope limit has changed. Delete allocated extensions.");
+    __ bind(&delete_allocated_handles);
+    __ StoreU64(prev_limit_reg, limit_mem_op);
+    // Save the return value in a callee-save register.
+    Register saved_result = prev_limit_reg;
+    __ mov(saved_result, return_value);
+    __ PrepareCallCFunction(1, scratch);
+    __ Move(kCArgRegs[0], ER::isolate_address(isolate));
+    __ CallCFunction(ER::delete_handle_scope_extensions(), 1);
+    __ mov(return_value, saved_result);
+    __ b(&leave_exit_frame, Label::kNear);
+  }
+}
+
 }  // namespace internal
 }  // namespace v8
+
+#undef __
 
 #endif  // V8_TARGET_ARCH_S390

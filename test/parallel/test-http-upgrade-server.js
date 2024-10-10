@@ -87,6 +87,7 @@ function test_upgrade_with_listener() {
   conn.on('connect', function() {
     writeReq(conn,
              'GET / HTTP/1.1\r\n' +
+             'Host: example.com\r\n' +
              'Upgrade: WebSocket\r\n' +
              'Connection: Upgrade\r\n' +
              '\r\n' +
@@ -99,7 +100,7 @@ function test_upgrade_with_listener() {
     assert.strictEqual(typeof data, 'string');
 
     if (state === 1) {
-      assert.strictEqual(data.substr(0, 12), 'HTTP/1.1 101');
+      assert.strictEqual(data.slice(0, 12), 'HTTP/1.1 101');
       assert.strictEqual(request_upgradeHead.toString('utf8'), 'WjN}|M(6');
       conn.write('test', 'utf8');
     } else if (state === 2) {
@@ -124,6 +125,7 @@ function test_upgrade_no_listener() {
   conn.on('connect', function() {
     writeReq(conn,
              'GET / HTTP/1.1\r\n' +
+             'Host: example.com\r\n' +
              'Upgrade: WebSocket\r\n' +
              'Connection: Upgrade\r\n' +
              '\r\n');
@@ -131,7 +133,7 @@ function test_upgrade_no_listener() {
 
   conn.once('data', (data) => {
     assert.strictEqual(typeof data, 'string');
-    assert.strictEqual(data.substr(0, 12), 'HTTP/1.1 200');
+    assert.strictEqual(data.slice(0, 12), 'HTTP/1.1 200');
     conn.end();
   });
 
@@ -146,12 +148,12 @@ function test_standard_http() {
   conn.setEncoding('utf8');
 
   conn.on('connect', function() {
-    writeReq(conn, 'GET / HTTP/1.1\r\n\r\n');
+    writeReq(conn, 'GET / HTTP/1.1\r\nHost: example.com\r\n\r\n');
   });
 
   conn.once('data', function(data) {
     assert.strictEqual(typeof data, 'string');
-    assert.strictEqual(data.substr(0, 12), 'HTTP/1.1 200');
+    assert.strictEqual(data.slice(0, 12), 'HTTP/1.1 200');
     conn.end();
   });
 

@@ -8,6 +8,7 @@
 #include "src/base/pointer-with-payload.h"
 #include "src/codegen/register.h"
 #include "src/compiler/backend/instruction.h"
+#include "src/maglev/maglev-assembler.h"
 
 namespace v8 {
 namespace internal {
@@ -15,10 +16,25 @@ namespace maglev {
 
 class ValueNode;
 
-#define COUNT(V) +1
 static constexpr int kAllocatableGeneralRegisterCount =
-    ALLOCATABLE_GENERAL_REGISTERS(COUNT);
-#undef COUNT
+    MaglevAssembler::GetAllocatableRegisters().Count();
+static constexpr int kAllocatableDoubleRegisterCount =
+    MaglevAssembler::GetAllocatableDoubleRegisters().Count();
+
+template <typename T>
+struct AllocatableRegisters;
+
+template <>
+struct AllocatableRegisters<Register> {
+  static constexpr RegList kRegisters =
+      MaglevAssembler::GetAllocatableRegisters();
+};
+
+template <>
+struct AllocatableRegisters<DoubleRegister> {
+  static constexpr DoubleRegList kRegisters =
+      MaglevAssembler::GetAllocatableDoubleRegisters();
+};
 
 struct RegisterStateFlags {
   // TODO(v8:7700): Use the good old Flags mechanism.
@@ -47,10 +63,10 @@ constexpr bool operator==(const RegisterStateFlags& left,
 typedef base::PointerWithPayload<void, RegisterStateFlags, 2> RegisterState;
 
 struct RegisterMerge {
-  compiler::AllocatedOperand* operands() {
-    return reinterpret_cast<compiler::AllocatedOperand*>(this + 1);
+  compiler::InstructionOperand* operands() {
+    return reinterpret_cast<compiler::InstructionOperand*>(this + 1);
   }
-  compiler::AllocatedOperand& operand(size_t i) { return operands()[i]; }
+  compiler::InstructionOperand& operand(size_t i) { return operands()[i]; }
 
   ValueNode* node;
 };

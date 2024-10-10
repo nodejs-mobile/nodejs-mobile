@@ -19,7 +19,7 @@ namespace compiler {
 
 InstructionSelectorTest::InstructionSelectorTest()
     : TestWithNativeContextAndZone(kCompressGraphZone),
-      rng_(FLAG_random_seed) {}
+      rng_(v8_flags.random_seed) {}
 
 InstructionSelectorTest::~InstructionSelectorTest() = default;
 
@@ -28,7 +28,7 @@ InstructionSelectorTest::Stream InstructionSelectorTest::StreamBuilder::Build(
     InstructionSelectorTest::StreamBuilderMode mode,
     InstructionSelector::SourcePositionMode source_position_mode) {
   Schedule* schedule = ExportForTest();
-  if (FLAG_trace_turbo) {
+  if (v8_flags.trace_turbo) {
     StdoutStream{} << "=== Schedule before instruction selection ==="
                    << std::endl
                    << *schedule;
@@ -44,7 +44,7 @@ InstructionSelectorTest::Stream InstructionSelectorTest::StreamBuilder::Build(
   TickCounter tick_counter;
   size_t max_unoptimized_frame_height = 0;
   size_t max_pushed_argument_count = 0;
-  InstructionSelector selector(
+  InstructionSelector selector = InstructionSelector::ForTurbofan(
       test_->zone(), node_count, &linkage, &sequence, schedule,
       &source_position_table, nullptr,
       InstructionSelector::kEnableSwitchJumpTable, &tick_counter, nullptr,
@@ -52,7 +52,7 @@ InstructionSelectorTest::Stream InstructionSelectorTest::StreamBuilder::Build(
       source_position_mode, features, InstructionSelector::kDisableScheduling,
       InstructionSelector::kEnableRootsRelativeAddressing);
   selector.SelectInstructions();
-  if (FLAG_trace_turbo) {
+  if (v8_flags.trace_turbo) {
     StdoutStream{} << "=== Code sequence after instruction selection ==="
                    << std::endl
                    << sequence;
@@ -438,7 +438,7 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeopt) {
 
   Stream s = m.Build(kAllExceptNopInstructions);
 
-  // Skip until kArchCallJSFunction.
+  // Skip until kArchCallCodeObject.
   size_t index = 0;
   for (; index < s.size() && s[index]->arch_opcode() != kArchCallCodeObject;
        index++) {
@@ -453,7 +453,8 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeopt) {
       1 +  // Code object.
       6 +  // Frame state deopt id + one input for each value in frame state.
       1 +  // Function.
-      1;   // Context.
+      1 +  // Context.
+      1;   // Entrypoint tag.
   ASSERT_EQ(num_operands, call_instr->InputCount());
 
   // Code object.
@@ -471,12 +472,14 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeopt) {
   EXPECT_EQ(0, s.ToInt32(call_instr->InputAt(4)));  // This should be a context.
                                                     // We inserted 0 here.
   EXPECT_EQ(0.5, s.ToFloat64(call_instr->InputAt(5)));
-  EXPECT_TRUE(s.ToHeapObject(call_instr->InputAt(6))->IsUndefined(isolate()));
+  EXPECT_TRUE(IsUndefined(*s.ToHeapObject(call_instr->InputAt(6)), isolate()));
 
   // Function.
   EXPECT_EQ(s.ToVreg(function_node), s.ToVreg(call_instr->InputAt(7)));
   // Context.
   EXPECT_EQ(s.ToVreg(context), s.ToVreg(call_instr->InputAt(8)));
+  // Entrypoint tag.
+  EXPECT_TRUE(call_instr->InputAt(9)->IsImmediate());
 
   EXPECT_EQ(kArchRet, s[index++]->arch_opcode());
 
@@ -544,7 +547,7 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeoptRecursiveFrameState) {
 
   Stream s = m.Build(kAllExceptNopInstructions);
 
-  // Skip until kArchCallJSFunction.
+  // Skip until kArchCallCodeObject.
   size_t index = 0;
   for (; index < s.size() && s[index]->arch_opcode() != kArchCallCodeObject;
        index++) {
@@ -561,7 +564,8 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeoptRecursiveFrameState) {
       5 +  // One input for each value in frame state + context.
       5 +  // One input for each value in the parent frame state + context.
       1 +  // Function.
-      1;   // Context.
+      1 +  // Context.
+      1;   // Entrypoint tag.
   EXPECT_EQ(num_operands, call_instr->InputCount());
   // Code object.
   EXPECT_TRUE(call_instr->InputAt(0)->IsImmediate());
@@ -594,6 +598,8 @@ TARGET_TEST_F(InstructionSelectorTest, CallStubWithDeoptRecursiveFrameState) {
   EXPECT_EQ(s.ToVreg(function_node), s.ToVreg(call_instr->InputAt(12)));
   // Context.
   EXPECT_EQ(s.ToVreg(context2), s.ToVreg(call_instr->InputAt(13)));
+  // Entrypoint tag.
+  EXPECT_TRUE(call_instr->InputAt(14)->IsImmediate());
   // Continuation.
 
   EXPECT_EQ(kArchRet, s[index++]->arch_opcode());
