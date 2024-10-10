@@ -1440,7 +1440,7 @@
         }],
         ['node_write_snapshot_as_array_literals=="true"', {
           'defines': [ 'NODE_MKSNAPSHOT_USE_ARRAY_LITERALS=1' ],
-        }]
+        }],
         [ 'node_use_openssl=="true"', {
           'dependencies': [
             'deps/ncrypto/ncrypto.gyp:ncrypto',
