@@ -58,10 +58,13 @@ log_and_run cd spec/interpreter
 
 # The next step requires that ocaml is installed. See the README.md in
 # https://github.com/WebAssembly/spec/tree/master/interpreter/.
-log_and_run make clean opt
+log_and_run make distclean wasm
 
 log_and_run cd ${TMP_DIR}/spec/test/core
 log_and_run cp *.wast ${SPEC_TEST_DIR}/tests/
+# SIMD tests are in a subdirectory. The "run.py" script below takes care of
+# that, but we have to copy the .wast files explicitly.
+log_and_run cp simd/*.wast ${SPEC_TEST_DIR}/tests/
 
 log_and_run ./run.py --wasm ${TMP_DIR}/spec/interpreter/wasm --out ${TMP_DIR}
 log_and_run cp ${TMP_DIR}/*.js ${SPEC_TEST_DIR}/tests/
@@ -91,7 +94,7 @@ done
 # Generate the proposal tests.
 ###############################################################################
 
-repos='js-types tail-call simd memory64'
+repos='exception-handling js-types tail-call memory64 extended-const multi-memory function-references gc'
 
 for repo in ${repos}; do
   echo "Process ${repo}"
@@ -100,7 +103,7 @@ for repo in ${repos}; do
   log_and_run git clone https://github.com/WebAssembly/${repo}
   # Compile the spec interpreter to generate the .js test cases later.
   log_and_run cd ${repo}/interpreter
-  log_and_run make clean opt
+  log_and_run make clean wasm
   log_and_run cd ../test/core
   log_and_run mkdir ${SPEC_TEST_DIR}/tests/proposals/${repo}
 

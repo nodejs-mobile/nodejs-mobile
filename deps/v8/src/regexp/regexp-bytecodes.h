@@ -25,7 +25,7 @@ constexpr int BYTECODE_MASK = kRegExpPaddedBytecodeCount - 1;
 // positive values.
 const unsigned int MAX_FIRST_ARG = 0x7fffffu;
 const int BYTECODE_SHIFT = 8;
-STATIC_ASSERT(1 << BYTECODE_SHIFT > BYTECODE_MASK);
+static_assert(1 << BYTECODE_SHIFT > BYTECODE_MASK);
 
 // The list of bytecodes, in format: V(Name, Code, ByteLength).
 // TODO(pthier): Argument offsets of bytecodes should be easily accessible by
@@ -221,7 +221,7 @@ static constexpr int kRegExpBytecodeCount = BYTECODE_ITERATOR(COUNT);
 // contiguous, strictly increasing, and start at 0.
 // TODO(jgruber): Do not explicitly assign values, instead generate them
 // implicitly from the list order.
-STATIC_ASSERT(kRegExpBytecodeCount == 59);
+static_assert(kRegExpBytecodeCount == 59);
 
 #define DECLARE_BYTECODES(name, code, length) \
   static constexpr int BC_##name = code;
@@ -250,8 +250,9 @@ inline constexpr const char* RegExpBytecodeName(int bytecode) {
   return kRegExpBytecodeNames[bytecode];
 }
 
-void RegExpBytecodeDisassembleSingle(const byte* code_base, const byte* pc);
-void RegExpBytecodeDisassemble(const byte* code_base, int length,
+void RegExpBytecodeDisassembleSingle(const uint8_t* code_base,
+                                     const uint8_t* pc);
+void RegExpBytecodeDisassemble(const uint8_t* code_base, int length,
                                const char* pattern);
 
 }  // namespace internal

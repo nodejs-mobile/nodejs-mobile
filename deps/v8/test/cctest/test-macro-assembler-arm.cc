@@ -31,7 +31,6 @@
 #include "src/codegen/macro-assembler.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/simulator.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "src/utils/ostreams.h"
 #include "test/cctest/cctest.h"
@@ -151,9 +150,9 @@ TEST(ExtractLane) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F3>::FromCode(*code);
+  auto f = GeneratedCode<F3>::FromCode(isolate, *code);
   f.Call(&t, 0, 0, 0, 0);
   for (int i = 0; i < 4; i++) {
     CHECK_EQ(i, t.i32x4_low[i]);
@@ -282,9 +281,9 @@ TEST(ReplaceLane) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F3>::FromCode(*code);
+  auto f = GeneratedCode<F3>::FromCode(isolate, *code);
   f.Call(&t, 0, 0, 0, 0);
   for (int i = 0; i < 4; i++) {
     CHECK_EQ(i, t.i32x4_low[i]);
@@ -317,7 +316,7 @@ TEST(DeoptExitSizeIsFixed) {
   MacroAssembler masm(isolate, v8::internal::CodeObjectRequired::kYes,
                       buffer->CreateView());
 
-  STATIC_ASSERT(static_cast<int>(kFirstDeoptimizeKind) == 0);
+  static_assert(static_cast<int>(kFirstDeoptimizeKind) == 0);
   for (int i = 0; i < kDeoptimizeKindCount; i++) {
     DeoptimizeKind kind = static_cast<DeoptimizeKind>(i);
     Label before_exit;

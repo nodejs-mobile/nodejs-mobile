@@ -17,15 +17,13 @@
 namespace v8 {
 namespace internal {
 
-template <typename T>
-class Handle;
-class Isolate;
 class JSModuleNamespace;
 class SourceTextModuleDescriptor;
 class SourceTextModuleInfo;
 class SourceTextModuleInfoEntry;
-class String;
 class Zone;
+template <typename T>
+class ZoneForwardList;
 
 #include "torque-generated/src/objects/module-tq.inc"
 
@@ -51,7 +49,7 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
   };
 
   // The exception in the case {status} is kErrored.
-  Object GetException();
+  Tagged<Object> GetException();
 
   // Returns if this module or any transitively requested module is [[Async]],
   // i.e. has a top-level await.
@@ -121,13 +119,9 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
   static void Reset(Isolate* isolate, Handle<Module> module);
   static void ResetGraph(Isolate* isolate, Handle<Module> module);
 
-  // To set status to kErrored, RecordError or RecordErrorUsingPendingException
-  // should be used.
+  // To set status to kErrored, RecordError should be used.
   void SetStatus(Status status);
-  static void RecordErrorUsingPendingException(Isolate* isolate,
-                                               Handle<Module>);
-  static void RecordError(Isolate* isolate, Handle<Module> module,
-                          Handle<Object> error);
+  void RecordError(Isolate* isolate, Tagged<Object> error);
 
   TQ_OBJECT_CONSTRUCTORS(Module)
 };
@@ -146,6 +140,8 @@ class JSModuleNamespace
   // schedule an exception and return Nothing.
   V8_WARN_UNUSED_RESULT MaybeHandle<Object> GetExport(Isolate* isolate,
                                                       Handle<String> name);
+
+  bool HasExport(Isolate* isolate, Handle<String> name);
 
   // Return the (constant) property attributes for the referenced property,
   // which is assumed to correspond to an export. If the export is

@@ -189,15 +189,21 @@ struct NamespaceDeclaration : Declaration {
 };
 
 struct EnumDescription {
+  struct Entry {
+    std::string name;
+    std::string alias_entry;
+    Entry(std::string name, std::string alias_entry)
+        : name(std::move(name)), alias_entry(std::move(alias_entry)) {}
+  };
   SourcePosition pos;
   std::string name;
   std::string constexpr_generates;
   bool is_open;
-  std::vector<std::string> entries;
+  std::vector<Entry> entries;
 
   EnumDescription(SourcePosition pos, std::string name,
                   std::string constexpr_generates, bool is_open,
-                  std::vector<std::string> entries = {})
+                  std::vector<Entry> entries = {})
       : pos(std::move(pos)),
         name(std::move(name)),
         constexpr_generates(std::move(constexpr_generates)),
@@ -595,11 +601,13 @@ struct AssumeTypeImpossibleExpression : Expression {
 struct NewExpression : Expression {
   DEFINE_AST_NODE_LEAF_BOILERPLATE(NewExpression)
   NewExpression(SourcePosition pos, TypeExpression* type,
-                std::vector<NameAndExpression> initializers, bool pretenured)
+                std::vector<NameAndExpression> initializers, bool pretenured,
+                bool clear_padding)
       : Expression(kKind, pos),
         type(type),
         initializers(std::move(initializers)),
-        pretenured(pretenured) {}
+        pretenured(pretenured),
+        clear_padding(clear_padding) {}
 
   void VisitAllSubExpressions(VisitCallback callback) override {
     for (auto& initializer : initializers) {
@@ -611,6 +619,7 @@ struct NewExpression : Expression {
   TypeExpression* type;
   std::vector<NameAndExpression> initializers;
   bool pretenured;
+  bool clear_padding;
 };
 
 enum class ImplicitKind { kNoImplicit, kJSImplicit, kImplicit };
@@ -724,13 +733,10 @@ struct ReturnStatement : Statement {
 
 struct DebugStatement : Statement {
   DEFINE_AST_NODE_LEAF_BOILERPLATE(DebugStatement)
-  DebugStatement(SourcePosition pos, const std::string& reason,
-                 bool never_continues)
-      : Statement(kKind, pos),
-        reason(reason),
-        never_continues(never_continues) {}
-  std::string reason;
-  bool never_continues;
+  enum class Kind { kUnreachable, kDebug };
+  DebugStatement(SourcePosition pos, Kind kind)
+      : Statement(kKind, pos), kind(kind) {}
+  Kind kind;
 };
 
 struct AssertStatement : Statement {
@@ -1083,10 +1089,13 @@ struct TorqueBuiltinDeclaration : BuiltinDeclaration {
                            bool javascript_linkage, Identifier* name,
                            ParameterList parameters,
                            TypeExpression* return_type,
+                           bool has_custom_interface_descriptor,
                            base::Optional<Statement*> body)
       : BuiltinDeclaration(kKind, pos, javascript_linkage, transitioning, name,
                            std::move(parameters), return_type),
+        has_custom_interface_descriptor(has_custom_interface_descriptor),
         body(body) {}
+  bool has_custom_interface_descriptor;
   base::Optional<Statement*> body;
 };
 

@@ -10,8 +10,8 @@
 #include "src/base/macros.h"
 #include "src/common/globals.h"
 #include "src/debug/debug-frames.h"
+#include "src/debug/debug-interface.h"
 #include "src/debug/debug-scopes.h"
-#include "src/debug/debug.h"
 #include "src/execution/frames.h"
 #include "src/objects/objects.h"
 #include "src/objects/shared-function-info.h"
@@ -27,10 +27,6 @@ class DebugEvaluate : public AllStatic {
   static V8_EXPORT_PRIVATE MaybeHandle<Object> Global(
       Isolate* isolate, Handle<String> source, debug::EvaluateGlobalMode mode,
       REPLMode repl_mode = REPLMode::kNo);
-
-  static V8_EXPORT_PRIVATE MaybeHandle<Object> Global(
-      Isolate* isolate, Handle<JSFunction> function,
-      debug::EvaluateGlobalMode mode, REPLMode repl_mode = REPLMode::kNo);
 
   // Evaluate a piece of JavaScript in the context of a stack frame for
   // debugging.  Things that need special attention are:

@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// The test needs --wasm-tier-up because we can't serialize and deserialize
-// Liftoff code.
+// Force TurboFan code for serialization.
 // Flags: --expose-wasm --allow-natives-syntax --expose-gc --no-liftoff
+// Flags: --no-wasm-lazy-compilation
 
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
@@ -174,7 +174,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 (function GlobalsArePrivateBetweenClones() {
   print(arguments.callee.name);
   var builder = new WasmModuleBuilder();
-  builder.addGlobal(kWasmI32, true);
+  builder.addGlobal(kWasmI32, true, false);
   builder.addFunction("read", kSig_i_v)
     .addBody([
       kExprGlobalGet, 0])
@@ -220,7 +220,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       .exportAs("main");
 
     builder.setTableBounds(kTableSize, kTableSize);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(0), [f1.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(0), [f1.index]);
     builder.addExportOfKind("table", kExternalTable, 0);
 
     return new WebAssembly.Module(builder.toBuffer());
@@ -241,7 +241,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
     .exportAs("main");
 
   builder.addImportedTable("z", "table", kTableSize, kTableSize);
-  builder.addActiveElementSegment(0, WasmInitExpr.I32Const(1), [f2.index]);
+  builder.addActiveElementSegment(0, wasmI32Const(1), [f2.index]);
   var m2_bytes = builder.toBuffer();
   var m2 = new WebAssembly.Module(m2_bytes);
 

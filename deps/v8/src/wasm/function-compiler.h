@@ -13,7 +13,7 @@
 
 #include "src/codegen/assembler.h"
 #include "src/codegen/code-desc.h"
-#include "src/trap-handler/trap-handler.h"
+#include "src/codegen/compiler.h"
 #include "src/wasm/compilation-environment.h"
 #include "src/wasm/function-body-decoder.h"
 #include "src/wasm/wasm-limits.h"
@@ -33,6 +33,31 @@ class WasmCode;
 class WasmEngine;
 struct WasmFunction;
 
+// Stores assumptions that a Wasm compilation job made while executing,
+// so they can be checked for continued validity when the job finishes.
+class AssumptionsJournal {
+ public:
+  AssumptionsJournal() = default;
+
+  void RecordAssumption(uint32_t func_index, WellKnownImport status) {
+    imports_.push_back(std::make_pair(func_index, status));
+  }
+
+  const std::vector<std::pair<uint32_t, WellKnownImport>>& import_statuses() {
+    return imports_;
+  }
+
+  bool empty() const { return imports_.empty(); }
+
+ private:
+  // This is not particularly efficient, but it's probably good enough.
+  // For most compilations, this won't hold any entries. If it does
+  // hold entries, their number is expected to be small, because most
+  // functions don't call many imports, and many imports won't be
+  // specially recognized.
+  std::vector<std::pair<uint32_t, WellKnownImport>> imports_;
+};
+
 struct WasmCompilationResult {
  public:
   MOVE_ONLY_WITH_DEFAULT_CONSTRUCTORS(WasmCompilationResult);
@@ -44,28 +69,31 @@ struct WasmCompilationResult {
 
   bool succeeded() const { return code_desc.buffer != nullptr; }
   bool failed() const { return !succeeded(); }
-  operator bool() const { return succeeded(); }
+  explicit operator bool() const { return succeeded(); }
 
   CodeDesc code_desc;
   std::unique_ptr<AssemblerBuffer> instr_buffer;
   uint32_t frame_slot_count = 0;
   uint32_t tagged_parameter_slots = 0;
-  base::OwnedVector<byte> source_positions;
-  base::OwnedVector<byte> protected_instructions_data;
+  base::OwnedVector<uint8_t> source_positions;
+  base::OwnedVector<uint8_t> inlining_positions;
+  base::OwnedVector<uint8_t> protected_instructions_data;
+  std::unique_ptr<AssumptionsJournal> assumptions;
   int func_index = kAnonymousFuncIndex;
   ExecutionTier requested_tier;
   ExecutionTier result_tier;
   Kind kind = kFunction;
-  ForDebugging for_debugging = kNoDebugging;
-  int feedback_vector_slots = 0;
+  ForDebugging for_debugging = kNotForDebugging;
+  bool frame_has_feedback_slot = false;
 };
 
 class V8_EXPORT_PRIVATE WasmCompilationUnit final {
  public:
-  static ExecutionTier GetBaselineExecutionTier(const WasmModule*);
-
   WasmCompilationUnit(int index, ExecutionTier tier, ForDebugging for_debugging)
-      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {}
+      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {
+    DCHECK_IMPLIES(for_debugging != ForDebugging::kNotForDebugging,
+                   tier_ == ExecutionTier::kLiftoff);
+  }
 
   WasmCompilationResult ExecuteCompilation(CompilationEnv*,
                                            const WireBytesStorage*, Counters*,
@@ -75,7 +103,7 @@ class V8_EXPORT_PRIVATE WasmCompilationUnit final {
   ForDebugging for_debugging() const { return for_debugging_; }
   int func_index() const { return func_index_; }
 
-  static void CompileWasmFunction(Isolate*, NativeModule*,
+  static void CompileWasmFunction(Counters*, NativeModule*,
                                   WasmFeatures* detected, const WasmFunction*,
                                   ExecutionTier);
 
@@ -95,18 +123,14 @@ class V8_EXPORT_PRIVATE WasmCompilationUnit final {
 // {WasmCompilationUnit} should be trivially copyable and small enough so we can
 // efficiently pass it by value.
 ASSERT_TRIVIALLY_COPYABLE(WasmCompilationUnit);
-STATIC_ASSERT(sizeof(WasmCompilationUnit) <= 2 * kSystemPointerSize);
+static_assert(sizeof(WasmCompilationUnit) <= 2 * kSystemPointerSize);
 
 class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
  public:
-  // A flag to mark whether the compilation unit can skip the compilation
-  // and return the builtin (generic) wrapper, when available.
-  enum AllowGeneric : bool { kAllowGeneric = true, kDontAllowGeneric = false };
-
   JSToWasmWrapperCompilationUnit(Isolate* isolate, const FunctionSig* sig,
+                                 uint32_t canonical_sig_index,
                                  const wasm::WasmModule* module, bool is_import,
-                                 const WasmFeatures& enabled_features,
-                                 AllowGeneric allow_generic);
+                                 WasmFeatures enabled_features);
   ~JSToWasmWrapperCompilationUnit();
 
   Isolate* isolate() const { return isolate_; }
@@ -116,30 +140,39 @@ class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
 
   bool is_import() const { return is_import_; }
   const FunctionSig* sig() const { return sig_; }
+  uint32_t canonical_sig_index() const { return canonical_sig_index_; }
 
   // Run a compilation unit synchronously.
   static Handle<Code> CompileJSToWasmWrapper(Isolate* isolate,
                                              const FunctionSig* sig,
+                                             uint32_t canonical_sig_index,
                                              const WasmModule* module,
                                              bool is_import);
-
-  // Run a compilation unit synchronously, but ask for the specific
-  // wrapper.
-  static Handle<Code> CompileSpecificJSToWasmWrapper(Isolate* isolate,
-                                                     const FunctionSig* sig,
-                                                     const WasmModule* module);
 
  private:
   // Wrapper compilation is bound to an isolate. Concurrent accesses to the
   // isolate (during the "Execute" phase) must be audited carefully, i.e. we
   // should only access immutable information (like the root table). The isolate
   // is guaranteed to be alive when this unit executes.
-  Isolate* isolate_;
-  bool is_import_;
-  const FunctionSig* sig_;
-  bool use_generic_wrapper_;
-  std::unique_ptr<TurbofanCompilationJob> job_;
+  Isolate* const isolate_;
+  const bool is_import_;
+  const FunctionSig* const sig_;
+  uint32_t const canonical_sig_index_;
+  std::unique_ptr<OptimizedCompilationJob> const job_;
 };
+
+inline bool CanUseGenericJsToWasmWrapper(const WasmModule* module,
+                                         const FunctionSig* sig) {
+#if (V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_IA32 || \
+     V8_TARGET_ARCH_ARM)
+  // We don't use the generic wrapper for asm.js, because it creates invalid
+  // stack traces.
+  return !is_asmjs_module(module) && v8_flags.wasm_generic_wrapper &&
+         IsJSCompatibleSignature(sig);
+#else
+  return false;
+#endif
+}
 
 }  // namespace wasm
 }  // namespace internal

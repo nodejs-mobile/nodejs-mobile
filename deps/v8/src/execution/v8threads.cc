@@ -52,16 +52,8 @@ void Locker::Initialize(v8::Isolate* isolate) {
 
 bool Locker::IsLocked(v8::Isolate* isolate) {
   DCHECK_NOT_NULL(isolate);
-  i::Isolate* internal_isolate = reinterpret_cast<i::Isolate*>(isolate);
-  return internal_isolate->thread_manager()->IsLockedByCurrentThread();
-}
-
-// static
-bool Locker::IsActive() { return WasEverUsed(); }
-
-// static
-bool Locker::WasEverUsed() {
-  return base::Relaxed_Load(&g_locker_was_ever_used_) != 0;
+  i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate);
+  return i_isolate->thread_manager()->IsLockedByCurrentThread();
 }
 
 Locker::~Locker() {
@@ -132,6 +124,10 @@ bool ThreadManager::RestoreThread() {
     InitThread(access);
     return false;
   }
+  // In case multi-cage pointer compression mode is enabled ensure that
+  // current thread's cage base values are properly initialized.
+  PtrComprCageAccessScope ptr_compr_cage_access_scope(isolate_);
+
   ThreadState* state = per_thread->thread_state();
   char* from = state->data();
   from = isolate_->handle_scope_implementer()->RestoreThread(from);
@@ -282,8 +278,15 @@ void ThreadManager::EagerlyArchiveThread() {
 }
 
 void ThreadManager::FreeThreadResources() {
-  DCHECK(!isolate_->has_pending_exception());
-  DCHECK(!isolate_->external_caught_exception());
+#ifdef DEBUG
+  // This method might be called on a thread that's not bound to any Isolate
+  // and thus pointer compression schemes might have cage base value unset.
+  // Read-only roots accessors contain type DCHECKs which require access to
+  // V8 heap in order to check the object type. So, allow heap access here
+  // to let the checks work.
+  PtrComprCageAccessScope ptr_compr_cage_access_scope(isolate_);
+#endif  // DEBUG
+  DCHECK(!isolate_->has_exception());
   DCHECK_NULL(isolate_->try_catch_handler());
   isolate_->handle_scope_implementer()->FreeThreadResources();
   isolate_->FreeThreadResources();

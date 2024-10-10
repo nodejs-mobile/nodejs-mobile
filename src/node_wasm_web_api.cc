@@ -28,7 +28,6 @@ Local<Function> WasmStreamingObject::Initialize(Environment* env) {
 
   Isolate* isolate = env->isolate();
   Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
-  t->Inherit(BaseObject::GetConstructorTemplate(env));
   t->InstanceTemplate()->SetInternalFieldCount(
       WasmStreamingObject::kInternalFieldCount);
 
@@ -82,7 +81,7 @@ void WasmStreamingObject::New(const FunctionCallbackInfo<Value>& args) {
 
 void WasmStreamingObject::SetURL(const FunctionCallbackInfo<Value>& args) {
   WasmStreamingObject* obj;
-  ASSIGN_OR_RETURN_UNWRAP(&obj, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&obj, args.This());
   CHECK(obj->streaming_);
 
   CHECK_EQ(args.Length(), 1);
@@ -93,7 +92,7 @@ void WasmStreamingObject::SetURL(const FunctionCallbackInfo<Value>& args) {
 
 void WasmStreamingObject::Push(const FunctionCallbackInfo<Value>& args) {
   WasmStreamingObject* obj;
-  ASSIGN_OR_RETURN_UNWRAP(&obj, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&obj, args.This());
   CHECK(obj->streaming_);
 
   CHECK_EQ(args.Length(), 1);
@@ -129,7 +128,7 @@ void WasmStreamingObject::Push(const FunctionCallbackInfo<Value>& args) {
 
 void WasmStreamingObject::Finish(const FunctionCallbackInfo<Value>& args) {
   WasmStreamingObject* obj;
-  ASSIGN_OR_RETURN_UNWRAP(&obj, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&obj, args.This());
   CHECK(obj->streaming_);
 
   CHECK_EQ(args.Length(), 0);
@@ -138,7 +137,7 @@ void WasmStreamingObject::Finish(const FunctionCallbackInfo<Value>& args) {
 
 void WasmStreamingObject::Abort(const FunctionCallbackInfo<Value>& args) {
   WasmStreamingObject* obj;
-  ASSIGN_OR_RETURN_UNWRAP(&obj, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&obj, args.This());
   CHECK(obj->streaming_);
 
   CHECK_EQ(args.Length(), 1);

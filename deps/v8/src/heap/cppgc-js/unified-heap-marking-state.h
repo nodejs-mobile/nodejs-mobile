@@ -6,6 +6,7 @@
 #define V8_HEAP_CPPGC_JS_UNIFIED_HEAP_MARKING_STATE_H_
 
 #include "include/v8-cppgc.h"
+#include "src/handles/traced-handles.h"
 #include "src/heap/mark-compact.h"
 #include "src/heap/marking-worklist.h"
 
@@ -17,7 +18,8 @@ namespace internal {
 // mode, the expectation is that no non-null `TracedReferenceBase` is found.
 class UnifiedHeapMarkingState final {
  public:
-  UnifiedHeapMarkingState(Heap*, MarkingWorklists::Local*);
+  UnifiedHeapMarkingState(Heap*, MarkingWorklists::Local*,
+                          cppgc::internal::CollectionType);
 
   UnifiedHeapMarkingState(const UnifiedHeapMarkingState&) = delete;
   UnifiedHeapMarkingState& operator=(const UnifiedHeapMarkingState&) = delete;
@@ -25,12 +27,16 @@ class UnifiedHeapMarkingState final {
   void Update(MarkingWorklists::Local*);
 
   V8_INLINE void MarkAndPush(const TracedReferenceBase&);
+  V8_INLINE bool ShouldMarkObject(Tagged<HeapObject> object) const;
 
  private:
   Heap* const heap_;
-  MarkCompactCollector::MarkingState* const marking_state_;
+  const bool has_shared_space_;
+  const bool is_shared_space_isolate_;
+  MarkingState* const marking_state_;
   MarkingWorklists::Local* local_marking_worklist_ = nullptr;
   const bool track_retaining_path_;
+  const TracedHandles::MarkMode mark_mode_;
 };
 
 }  // namespace internal

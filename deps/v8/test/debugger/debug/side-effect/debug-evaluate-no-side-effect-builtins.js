@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --no-enable-one-shot-optimization
+// Flags: --harmony-array-grouping
 
 Debug = debug.Debug
 
@@ -50,6 +50,8 @@ function listener(event, exec_state, event_data, data) {
     success([1, 2], `Object.values({a:1, b:2})`);
     success(["a", 1, "b", 2], `Object.entries({a:1, b:2}).flat()`);
     success(["a", "b"], `Object.keys({a:1, b:2})`);
+    success(
+        '{"1":[1],"2":[2]}', `JSON.stringify(Object.groupBy([1,2], x => x))`);
 
     fail(`Object.assign({}, {})`);
     fail(`Object.defineProperties({}, [{p:{value:3}}])`);
@@ -77,7 +79,8 @@ function listener(event, exec_state, event_data, data) {
     fail(`Array.of(1, 2, 3)`);
     var function_param = [
       "flatMap", "forEach", "every", "some", "reduce", "reduceRight", "find",
-      "filter", "map", "findIndex", "findLast", "findLastIndex"
+      "filter", "map", "findIndex", "findLast", "findLastIndex", "group",
+      "groupToMap"
     ];
     var fails = ["pop", "push", "reverse", "shift", "unshift", "splice",
       "sort", "copyWithin", "fill"];
@@ -238,6 +241,9 @@ function listener(event, exec_state, event_data, data) {
     fail(`Reflect.preventExtensions(object)`);
     fail(`Reflect.set(object, "great", "expectations")`);
     fail(`Reflect.setPrototypeOf(object, Array.prototype)`);
+
+    // Test some Map functions
+    success('[1]', `JSON.stringify(Map.groupBy([1,2], x => x).get(1))`);
   } catch (e) {
     exception = e;
     print(e, e.stack);

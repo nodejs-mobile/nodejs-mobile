@@ -4,29 +4,21 @@
 
 #include <vector>
 
-#include "src/codegen/compiler.h"
 #include "src/common/globals.h"
 #include "src/debug/debug-coverage.h"
-#include "src/debug/debug-evaluate.h"
-#include "src/debug/debug-frames.h"
 #include "src/debug/debug-scopes.h"
 #include "src/debug/debug.h"
 #include "src/debug/liveedit.h"
-#include "src/deoptimizer/deoptimizer.h"
-#include "src/execution/arguments-inl.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
-#include "src/interpreter/bytecode-array-iterator.h"
 #include "src/interpreter/bytecodes.h"
 #include "src/interpreter/interpreter.h"
-#include "src/logging/counters.h"
-#include "src/objects/debug-objects-inl.h"
-#include "src/objects/heap-object-inl.h"
 #include "src/objects/js-array-buffer-inl.h"
 #include "src/objects/js-collection-inl.h"
 #include "src/objects/js-generator-inl.h"
 #include "src/objects/js-promise-inl.h"
+#include "src/objects/js-weak-refs-inl.h"
 #include "src/runtime/runtime-utils.h"
 #include "src/runtime/runtime.h"
 #include "src/snapshot/embedded/embedded-data.h"
@@ -56,10 +48,18 @@ RUNTIME_FUNCTION_RETURN_PAIR(Runtime_DebugBreakOnBytecode) {
   isolate->debug()->set_return_value(*value);
 
   // Get the top-most JavaScript frame.
-  JavaScriptFrameIterator it(isolate);
+  JavaScriptStackFrameIterator it(isolate);
   if (isolate->debug_execution_mode() == DebugInfo::kBreakpoints) {
     isolate->debug()->Break(it.frame(),
                             handle(it.frame()->function(), isolate));
+  }
+
+  // If the user requested to restart a frame, there is no need
+  // to get the return value or check the bytecode for side-effects.
+  if (isolate->debug()->IsRestartFrameScheduled()) {
+    Tagged<Object> exception = isolate->TerminateExecution();
+    return MakePair(exception,
+                    Smi::FromInt(static_cast<uint8_t>(Bytecode::kIllegal)));
   }
 
   // Return the handler from the original bytecode array.
@@ -75,10 +75,10 @@ RUNTIME_FUNCTION_RETURN_PAIR(Runtime_DebugBreakOnBytecode) {
 
   // Make sure to only access these objects after the side effect check, as the
   // check can allocate on failure.
-  SharedFunctionInfo shared = interpreted_frame->function().shared();
-  BytecodeArray bytecode_array = shared.GetBytecodeArray(isolate);
+  Tagged<SharedFunctionInfo> shared = interpreted_frame->function()->shared();
+  Tagged<BytecodeArray> bytecode_array = shared->GetBytecodeArray(isolate);
   int bytecode_offset = interpreted_frame->GetBytecodeOffset();
-  Bytecode bytecode = Bytecodes::FromByte(bytecode_array.get(bytecode_offset));
+  Bytecode bytecode = Bytecodes::FromByte(bytecode_array->get(bytecode_offset));
 
   if (Bytecodes::Returns(bytecode)) {
     // If we are returning (or suspending), reset the bytecode array on the
@@ -100,8 +100,8 @@ RUNTIME_FUNCTION_RETURN_PAIR(Runtime_DebugBreakOnBytecode) {
     return MakePair(ReadOnlyRoots(isolate).exception(),
                     Smi::FromInt(static_cast<uint8_t>(bytecode)));
   }
-  Object interrupt_object = isolate->stack_guard()->HandleInterrupts();
-  if (interrupt_object.IsException(isolate)) {
+  Tagged<Object> interrupt_object = isolate->stack_guard()->HandleInterrupts();
+  if (IsException(interrupt_object, isolate)) {
     return MakePair(interrupt_object,
                     Smi::FromInt(static_cast<uint8_t>(bytecode)));
   }
@@ -113,13 +113,11 @@ RUNTIME_FUNCTION(Runtime_DebugBreakAtEntry) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   Handle<JSFunction> function = args.at<JSFunction>(0);
-  USE(function);
 
-  DCHECK(function->shared().HasDebugInfo());
-  DCHECK(function->shared().GetDebugInfo().BreakAtEntry());
+  DCHECK(function->shared()->BreakAtEntry(isolate));
 
   // Get the top-most JavaScript frame. This is the debug target function.
-  JavaScriptFrameIterator it(isolate);
+  JavaScriptStackFrameIterator it(isolate);
   DCHECK_EQ(*function, it.frame()->function());
   // Check whether the next JS frame is closer than the last API entry.
   // if yes, then the call to the debug target came from JavaScript. Otherwise,
@@ -140,6 +138,9 @@ RUNTIME_FUNCTION(Runtime_HandleDebuggerStatement) {
     isolate->debug()->HandleDebugBreak(
         kIgnoreIfTopFrameBlackboxed,
         v8::debug::BreakReasons({v8::debug::BreakReason::kDebuggerStatement}));
+    if (isolate->debug()->IsRestartFrameScheduled()) {
+      return isolate->TerminateExecution();
+    }
   }
   return isolate->stack_guard()->HandleInterrupts();
 }
@@ -163,7 +164,7 @@ template <class IteratorType>
 static Handle<ArrayList> AddIteratorInternalProperties(
     Isolate* isolate, Handle<ArrayList> result, Handle<IteratorType> iterator) {
   const char* kind = nullptr;
-  switch (iterator->map().instance_type()) {
+  switch (iterator->map()->instance_type()) {
     case JS_MAP_KEY_ITERATOR_TYPE:
       kind = "keys";
       break;
@@ -198,14 +199,20 @@ static Handle<ArrayList> AddIteratorInternalProperties(
 
 MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
                                                     Handle<Object> object) {
-  auto result = ArrayList::New(isolate, 8 * 2);
-  if (object->IsJSObject()) {
+  Handle<ArrayList> result = ArrayList::New(isolate, 8 * 2);
+  if (IsJSObject(*object)) {
     PrototypeIterator iter(isolate, Handle<JSObject>::cast(object),
                            kStartAtReceiver);
     if (iter.HasAccess()) {
       iter.Advance();
       Handle<Object> prototype = PrototypeIterator::GetCurrent(iter);
-      if (!prototype->IsNull(isolate)) {
+      if (!iter.IsAtEnd() && iter.HasAccess() && IsJSGlobalProxy(*object)) {
+        // Skip JSGlobalObject as the [[Prototype]].
+        DCHECK(IsJSGlobalObject(*prototype));
+        iter.Advance();
+        prototype = PrototypeIterator::GetCurrent(iter);
+      }
+      if (!IsNull(*prototype, isolate)) {
         result = ArrayList::Add(
             isolate, result,
             isolate->factory()->NewStringFromStaticChars("[[Prototype]]"),
@@ -213,7 +220,7 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
       }
     }
   }
-  if (object->IsJSBoundFunction()) {
+  if (IsJSBoundFunction(*object)) {
     Handle<JSBoundFunction> function = Handle<JSBoundFunction>::cast(object);
 
     result = ArrayList::Add(
@@ -230,13 +237,13 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
         isolate->factory()->NewJSArrayWithElements(
             isolate->factory()->CopyFixedArray(
                 handle(function->bound_arguments(), isolate))));
-  } else if (object->IsJSMapIterator()) {
+  } else if (IsJSMapIterator(*object)) {
     Handle<JSMapIterator> iterator = Handle<JSMapIterator>::cast(object);
     result = AddIteratorInternalProperties(isolate, result, iterator);
-  } else if (object->IsJSSetIterator()) {
+  } else if (IsJSSetIterator(*object)) {
     Handle<JSSetIterator> iterator = Handle<JSSetIterator>::cast(object);
     result = AddIteratorInternalProperties(isolate, result, iterator);
-  } else if (object->IsJSGeneratorObject()) {
+  } else if (IsJSGeneratorObject(*object)) {
     Handle<JSGeneratorObject> generator =
         Handle<JSGeneratorObject>::cast(object);
 
@@ -261,7 +268,7 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
         isolate, result,
         isolate->factory()->NewStringFromAsciiChecked("[[GeneratorReceiver]]"),
         handle(generator->receiver(), isolate));
-  } else if (object->IsJSPromise()) {
+  } else if (IsJSPromise(*object)) {
     Handle<JSPromise> promise = Handle<JSPromise>::cast(object);
 
     result = ArrayList::Add(
@@ -275,7 +282,7 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
         promise->status() == Promise::kPending
             ? isolate->factory()->undefined_value()
             : handle(promise->result(), isolate));
-  } else if (object->IsJSProxy()) {
+  } else if (IsJSProxy(*object)) {
     Handle<JSProxy> js_proxy = Handle<JSProxy>::cast(object);
 
     result = ArrayList::Add(
@@ -290,7 +297,7 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
         isolate, result,
         isolate->factory()->NewStringFromAsciiChecked("[[IsRevoked]]"),
         isolate->factory()->ToBoolean(js_proxy->IsRevoked()));
-  } else if (object->IsJSPrimitiveWrapper()) {
+  } else if (IsJSPrimitiveWrapper(*object)) {
     Handle<JSPrimitiveWrapper> js_value =
         Handle<JSPrimitiveWrapper>::cast(object);
 
@@ -298,7 +305,14 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
         isolate, result,
         isolate->factory()->NewStringFromAsciiChecked("[[PrimitiveValue]]"),
         handle(js_value->value(), isolate));
-  } else if (object->IsJSArrayBuffer()) {
+  } else if (IsJSWeakRef(*object)) {
+    Handle<JSWeakRef> js_weak_ref = Handle<JSWeakRef>::cast(object);
+
+    result = ArrayList::Add(
+        isolate, result,
+        isolate->factory()->NewStringFromAsciiChecked("[[WeakRefTarget]]"),
+        handle(js_weak_ref->target(), isolate));
+  } else if (IsJSArrayBuffer(*object)) {
     Handle<JSArrayBuffer> js_array_buffer = Handle<JSArrayBuffer>::cast(object);
     if (js_array_buffer->was_detached()) {
       // Mark a detached JSArrayBuffer and such and don't even try to
@@ -310,30 +324,21 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
           isolate->factory()->true_value());
     } else {
       const size_t byte_length = js_array_buffer->byte_length();
-      static const ExternalArrayType kTypes[] = {
-          kExternalInt8Array,
-          kExternalUint8Array,
-          kExternalInt16Array,
-          kExternalInt32Array,
-      };
-      for (auto type : kTypes) {
-        switch (type) {
-#define TYPED_ARRAY_CASE(Type, type, TYPE, ctype)                           \
-  case kExternal##Type##Array: {                                            \
-    if ((byte_length % sizeof(ctype)) != 0) continue;                       \
-    result = ArrayList::Add(                                                \
-        isolate, result,                                                    \
-        isolate->factory()->NewStringFromStaticChars("[[" #Type "Array]]"), \
-        isolate->factory()->NewJSTypedArray(kExternal##Type##Array,         \
-                                            js_array_buffer, 0,             \
-                                            byte_length / sizeof(ctype)));  \
-    break;                                                                  \
-  }
-          TYPED_ARRAYS(TYPED_ARRAY_CASE)
-#undef TYPED_ARRAY_CASE
-        default:
-          UNREACHABLE();
-        }
+      static_assert(JSTypedArray::kMaxByteLength ==
+                    JSArrayBuffer::kMaxByteLength);
+      using DataView = std::tuple<const char*, ExternalArrayType, size_t>;
+      for (auto [name, type, elem_size] :
+           {DataView{"[[Int8Array]]", kExternalInt8Array, 1},
+            DataView{"[[Uint8Array]]", kExternalUint8Array, 1},
+            DataView{"[[Int16Array]]", kExternalInt16Array, 2},
+            DataView{"[[Int32Array]]", kExternalInt32Array, 4}}) {
+        if ((byte_length % elem_size) != 0) continue;
+        size_t length = byte_length / elem_size;
+        result =
+            ArrayList::Add(isolate, result,
+                           isolate->factory()->NewStringFromAsciiChecked(name),
+                           isolate->factory()->NewJSTypedArray(
+                               type, js_array_buffer, 0, length));
       }
       result =
           ArrayList::Add(isolate, result,
@@ -355,7 +360,7 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
           isolate->factory()->array_buffer_wasm_memory_symbol();
       Handle<Object> memory_object =
           JSObject::GetDataProperty(isolate, js_array_buffer, memory_symbol);
-      if (!memory_object->IsUndefined(isolate)) {
+      if (!IsUndefined(*memory_object, isolate)) {
         result = ArrayList::Add(isolate, result,
                                 isolate->factory()->NewStringFromAsciiChecked(
                                     "[[WebAssemblyMemory]]"),
@@ -363,26 +368,26 @@ MaybeHandle<JSArray> Runtime::GetInternalProperties(Isolate* isolate,
       }
     }
 #if V8_ENABLE_WEBASSEMBLY
-  } else if (object->IsWasmInstanceObject()) {
+  } else if (IsWasmInstanceObject(*object)) {
     result = AddWasmInstanceObjectInternalProperties(
         isolate, result, Handle<WasmInstanceObject>::cast(object));
-  } else if (object->IsWasmModuleObject()) {
+  } else if (IsWasmModuleObject(*object)) {
     result = AddWasmModuleObjectInternalProperties(
         isolate, result, Handle<WasmModuleObject>::cast(object));
-  } else if (object->IsWasmTableObject()) {
+  } else if (IsWasmTableObject(*object)) {
     result = AddWasmTableObjectInternalProperties(
         isolate, result, Handle<WasmTableObject>::cast(object));
 #endif  // V8_ENABLE_WEBASSEMBLY
   }
   return isolate->factory()->NewJSArrayWithElements(
-      ArrayList::Elements(isolate, result), PACKED_ELEMENTS);
+      ArrayList::ToFixedArray(isolate, result), PACKED_ELEMENTS);
 }
 
 RUNTIME_FUNCTION(Runtime_GetGeneratorScopeCount) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
 
-  if (!args[0].IsJSGeneratorObject()) return Smi::zero();
+  if (!IsJSGeneratorObject(args[0])) return Smi::zero();
 
   // Check arguments.
   Handle<JSGeneratorObject> gen = args.at<JSGeneratorObject>(0);
@@ -405,7 +410,7 @@ RUNTIME_FUNCTION(Runtime_GetGeneratorScopeDetails) {
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
 
-  if (!args[0].IsJSGeneratorObject()) {
+  if (!IsJSGeneratorObject(args[0])) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
@@ -473,7 +478,7 @@ RUNTIME_FUNCTION(Runtime_GetBreakLocations) {
   // Find the number of break points
   Handle<Object> break_locations =
       Debug::GetSourceBreakLocations(isolate, shared);
-  if (break_locations->IsUndefined(isolate)) {
+  if (IsUndefined(*break_locations, isolate)) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
   // Return array as JS array
@@ -529,9 +534,9 @@ RUNTIME_FUNCTION(Runtime_FunctionGetInferredName) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
 
-  Object f = args[0];
-  if (f.IsJSFunction()) {
-    return JSFunction::cast(f).shared().inferred_name();
+  Tagged<Object> f = args[0];
+  if (IsJSFunction(f)) {
+    return JSFunction::cast(f)->shared()->inferred_name();
   }
   return ReadOnlyRoots(isolate).empty_string();
 }
@@ -542,7 +547,7 @@ RUNTIME_FUNCTION(Runtime_FunctionGetInferredName) {
 RUNTIME_FUNCTION(Runtime_CollectGarbage) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
-  isolate->heap()->PreciseCollectAllGarbage(Heap::kNoGCFlags,
+  isolate->heap()->PreciseCollectAllGarbage(GCFlag::kNoFlags,
                                             GarbageCollectionReason::kRuntime);
   return ReadOnlyRoots(isolate).undefined_value();
 }
@@ -553,7 +558,7 @@ int ScriptLinePosition(Handle<Script> script, int line) {
   if (line < 0) return -1;
 
 #if V8_ENABLE_WEBASSEMBLY
-  if (script->type() == Script::TYPE_WASM) {
+  if (script->type() == Script::Type::kWasm) {
     // Wasm positions are relative to the start of the module.
     return 0;
   }
@@ -561,14 +566,14 @@ int ScriptLinePosition(Handle<Script> script, int line) {
 
   Script::InitLineEnds(script->GetIsolate(), script);
 
-  FixedArray line_ends_array = FixedArray::cast(script->line_ends());
-  const int line_count = line_ends_array.length();
+  Tagged<FixedArray> line_ends_array = FixedArray::cast(script->line_ends());
+  const int line_count = line_ends_array->length();
   DCHECK_LT(0, line_count);
 
   if (line == 0) return 0;
   // If line == line_count, we return the first position beyond the last line.
   if (line > line_count) return -1;
-  return Smi::ToInt(line_ends_array.get(line - 1)) + 1;
+  return Smi::ToInt(line_ends_array->get(line - 1)) + 1;
 }
 
 int ScriptLinePositionWithOffset(Handle<Script> script, int line, int offset) {
@@ -578,7 +583,8 @@ int ScriptLinePositionWithOffset(Handle<Script> script, int line, int offset) {
     return ScriptLinePosition(script, line) + offset;
 
   Script::PositionInfo info;
-  if (!Script::GetPositionInfo(script, offset, &info, Script::NO_OFFSET)) {
+  if (!Script::GetPositionInfo(script, offset, &info,
+                               Script::OffsetFlag::kNoOffset)) {
     return -1;
   }
 
@@ -595,7 +601,7 @@ Handle<Object> GetJSPositionInfo(Handle<Script> script, int position,
   }
 
 #if V8_ENABLE_WEBASSEMBLY
-  const bool is_wasm_script = script->type() == Script::TYPE_WASM;
+  const bool is_wasm_script = script->type() == Script::Type::kWasm;
 #else
   const bool is_wasm_script = false;
 #endif  // V8_ENABLE_WEBASSEMBLY
@@ -631,14 +637,14 @@ Handle<Object> ScriptLocationFromLine(Isolate* isolate, Handle<Script> script,
   // additionally subtracting corresponding offsets.
 
   int32_t line = 0;
-  if (!opt_line->IsNullOrUndefined(isolate)) {
-    CHECK(opt_line->IsNumber());
+  if (!IsNullOrUndefined(*opt_line, isolate)) {
+    CHECK(IsNumber(*opt_line));
     line = NumberToInt32(*opt_line) - script->line_offset();
   }
 
   int32_t column = 0;
-  if (!opt_column->IsNullOrUndefined(isolate)) {
-    CHECK(opt_column->IsNumber());
+  if (!IsNullOrUndefined(*opt_column, isolate)) {
+    CHECK(IsNumber(*opt_column));
     column = NumberToInt32(*opt_column);
     if (line == 0) column -= script->column_offset();
   }
@@ -646,16 +652,16 @@ Handle<Object> ScriptLocationFromLine(Isolate* isolate, Handle<Script> script,
   int line_position = ScriptLinePositionWithOffset(script, line, offset);
   if (line_position < 0 || column < 0) return isolate->factory()->null_value();
 
-  return GetJSPositionInfo(script, line_position + column, Script::NO_OFFSET,
-                           isolate);
+  return GetJSPositionInfo(script, line_position + column,
+                           Script::OffsetFlag::kNoOffset, isolate);
 }
 
 // Slow traversal over all scripts on the heap.
 bool GetScriptById(Isolate* isolate, int needle, Handle<Script>* result) {
   Script::Iterator iterator(isolate);
-  for (Script script = iterator.Next(); !script.is_null();
+  for (Tagged<Script> script = iterator.Next(); !script.is_null();
        script = iterator.Next()) {
-    if (script.id() == needle) {
+    if (script->id() == needle) {
       *result = handle(script, isolate);
       return true;
     }
@@ -800,7 +806,7 @@ RUNTIME_FUNCTION(Runtime_DebugCollectCoverage) {
 
 RUNTIME_FUNCTION(Runtime_DebugTogglePreciseCoverage) {
   SealHandleScope shs(isolate);
-  bool enable = Oddball::cast(args[0]).ToBool(isolate);
+  bool enable = Boolean::cast(args[0])->ToBool(isolate);
   Coverage::SelectMode(isolate, enable ? debug::CoverageMode::kPreciseCount
                                        : debug::CoverageMode::kBestEffort);
   return ReadOnlyRoots(isolate).undefined_value();
@@ -808,7 +814,7 @@ RUNTIME_FUNCTION(Runtime_DebugTogglePreciseCoverage) {
 
 RUNTIME_FUNCTION(Runtime_DebugToggleBlockCoverage) {
   SealHandleScope shs(isolate);
-  bool enable = Oddball::cast(args[0]).ToBool(isolate);
+  bool enable = Boolean::cast(args[0])->ToBool(isolate);
   Coverage::SelectMode(isolate, enable ? debug::CoverageMode::kBlockCount
                                        : debug::CoverageMode::kBestEffort);
   return ReadOnlyRoots(isolate).undefined_value();
@@ -825,7 +831,7 @@ RUNTIME_FUNCTION(Runtime_DebugAsyncFunctionSuspended) {
   Handle<JSPromise> outer_promise = args.at<JSPromise>(1);
   Handle<JSFunction> reject_handler = args.at<JSFunction>(2);
   Handle<JSGeneratorObject> generator = args.at<JSGeneratorObject>(3);
-  bool is_predicted_as_caught = Oddball::cast(args[4]).ToBool(isolate);
+  bool is_predicted_as_caught = Boolean::cast(args[4])->ToBool(isolate);
 
   // Allocate the throwaway promise and fire the appropriate init
   // hook for the throwaway promise (passing the {promise} as its
@@ -855,9 +861,13 @@ RUNTIME_FUNCTION(Runtime_DebugAsyncFunctionSuspended) {
                         Just(ShouldThrow::kThrowOnError))
         .Check();
 
-    Object::SetProperty(
-        isolate, promise, isolate->factory()->promise_awaited_by_symbol(),
-        generator, StoreOrigin::kMaybeKeyed, Just(ShouldThrow::kThrowOnError))
+    Handle<WeakFixedArray> awaited_by_holder(
+        isolate->factory()->NewWeakFixedArray(1));
+    awaited_by_holder->set(0, MakeWeak(*generator));
+    Object::SetProperty(isolate, promise,
+                        isolate->factory()->promise_awaited_by_symbol(),
+                        awaited_by_holder, StoreOrigin::kMaybeKeyed,
+                        Just(ShouldThrow::kThrowOnError))
         .Check();
   }
 
@@ -868,7 +878,7 @@ RUNTIME_FUNCTION(Runtime_DebugPromiseThen) {
   DCHECK_EQ(1, args.length());
   HandleScope scope(isolate);
   Handle<JSReceiver> promise = args.at<JSReceiver>(0);
-  if (promise->IsJSPromise()) {
+  if (IsJSPromise(*promise)) {
     isolate->OnPromiseThen(Handle<JSPromise>::cast(promise));
   }
   return *promise;
@@ -880,10 +890,11 @@ RUNTIME_FUNCTION(Runtime_LiveEditPatchScript) {
   Handle<JSFunction> script_function = args.at<JSFunction>(0);
   Handle<String> new_source = args.at<String>(1);
 
-  Handle<Script> script(Script::cast(script_function->shared().script()),
+  Handle<Script> script(Script::cast(script_function->shared()->script()),
                         isolate);
   v8::debug::LiveEditResult result;
-  LiveEdit::PatchScript(isolate, script, new_source, false, &result);
+  LiveEdit::PatchScript(isolate, script, new_source, /* preview */ false,
+                        /* allow_top_frame_live_editing */ false, &result);
   switch (result.status) {
     case v8::debug::LiveEditResult::COMPILE_ERROR:
       return isolate->Throw(*isolate->factory()->NewStringFromAsciiChecked(
@@ -894,6 +905,9 @@ RUNTIME_FUNCTION(Runtime_LiveEditPatchScript) {
     case v8::debug::LiveEditResult::BLOCKED_BY_ACTIVE_FUNCTION:
       return isolate->Throw(*isolate->factory()->NewStringFromAsciiChecked(
           "LiveEdit failed: BLOCKED_BY_ACTIVE_FUNCTION"));
+    case v8::debug::LiveEditResult::BLOCKED_BY_TOP_LEVEL_ES_MODULE_CHANGE:
+      return isolate->Throw(*isolate->factory()->NewStringFromAsciiChecked(
+          "LiveEdit failed: BLOCKED_BY_TOP_LEVEL_ES_MODULE_CHANGE"));
     case v8::debug::LiveEditResult::OK:
       return ReadOnlyRoots(isolate).undefined_value();
   }
@@ -907,12 +921,18 @@ RUNTIME_FUNCTION(Runtime_ProfileCreateSnapshotDataBlob) {
   // Used only by the test/memory/Memory.json benchmark. This creates a snapshot
   // blob and outputs various statistics around it.
 
-  DCHECK(FLAG_profile_deserialization && FLAG_serialization_statistics);
+  DCHECK(v8_flags.profile_deserialization && v8_flags.serialization_statistics);
 
   DisableEmbeddedBlobRefcounting();
 
+  static constexpr char* kNoEmbeddedSource = nullptr;
+  // We use this flag to tell the serializer not to finalize/seal RO space -
+  // this already happened after deserializing the main Isolate.
+  static constexpr Snapshot::SerializerFlags kSerializerFlags =
+      Snapshot::SerializerFlag::kAllowActiveIsolateForTesting;
   v8::StartupData blob = CreateSnapshotDataBlobInternal(
-      v8::SnapshotCreator::FunctionCodeHandling::kClear, nullptr);
+      v8::SnapshotCreator::FunctionCodeHandling::kClear, kNoEmbeddedSource,
+      kSerializerFlags);
   delete[] blob.data;
 
   // Track the embedded blob size as well.

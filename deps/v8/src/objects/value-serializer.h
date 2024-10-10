@@ -30,9 +30,11 @@ class JSMap;
 class JSPrimitiveWrapper;
 class JSRegExp;
 class JSSet;
+class JSSharedArray;
 class JSSharedStruct;
 class Object;
 class Oddball;
+class SharedObjectConveyorHandles;
 class Smi;
 class WasmMemoryObject;
 class WasmModuleObject;
@@ -84,6 +86,7 @@ class ValueSerializer {
   void WriteUint64(uint64_t value);
   void WriteRawBytes(const void* source, size_t length);
   void WriteDouble(double value);
+  void WriteByte(uint8_t value);
 
   /*
    * Indicate whether to treat ArrayBufferView objects as host objects,
@@ -95,8 +98,6 @@ class ValueSerializer {
   void SetTreatArrayBufferViewsAsHostObjects(bool mode);
 
  private:
-  friend class WebSnapshotSerializer;
-
   // Managing allocations of the internal buffer.
   Maybe<bool> ExpandBuffer(size_t required_capacity);
 
@@ -108,21 +109,21 @@ class ValueSerializer {
   void WriteZigZag(T value);
   void WriteOneByteString(base::Vector<const uint8_t> chars);
   void WriteTwoByteString(base::Vector<const base::uc16> chars);
-  void WriteBigIntContents(BigInt bigint);
+  void WriteBigIntContents(Tagged<BigInt> bigint);
   Maybe<uint8_t*> ReserveRawBytes(size_t bytes);
 
   // Writing V8 objects of various kinds.
-  void WriteOddball(Oddball oddball);
-  void WriteSmi(Smi smi);
-  void WriteHeapNumber(HeapNumber number);
-  void WriteBigInt(BigInt bigint);
+  void WriteOddball(Tagged<Oddball> oddball);
+  void WriteSmi(Tagged<Smi> smi);
+  void WriteHeapNumber(Tagged<HeapNumber> number);
+  void WriteBigInt(Tagged<BigInt> bigint);
   void WriteString(Handle<String> string);
   Maybe<bool> WriteJSReceiver(Handle<JSReceiver> receiver)
       V8_WARN_UNUSED_RESULT;
   Maybe<bool> WriteJSObject(Handle<JSObject> object) V8_WARN_UNUSED_RESULT;
   Maybe<bool> WriteJSObjectSlow(Handle<JSObject> object) V8_WARN_UNUSED_RESULT;
   Maybe<bool> WriteJSArray(Handle<JSArray> array) V8_WARN_UNUSED_RESULT;
-  void WriteJSDate(JSDate date);
+  void WriteJSDate(Tagged<JSDate> date);
   Maybe<bool> WriteJSPrimitiveWrapper(Handle<JSPrimitiveWrapper> value)
       V8_WARN_UNUSED_RESULT;
   void WriteJSRegExp(Handle<JSRegExp> regexp);
@@ -130,8 +131,10 @@ class ValueSerializer {
   Maybe<bool> WriteJSSet(Handle<JSSet> map) V8_WARN_UNUSED_RESULT;
   Maybe<bool> WriteJSArrayBuffer(Handle<JSArrayBuffer> array_buffer)
       V8_WARN_UNUSED_RESULT;
-  Maybe<bool> WriteJSArrayBufferView(JSArrayBufferView array_buffer);
+  Maybe<bool> WriteJSArrayBufferView(Tagged<JSArrayBufferView> array_buffer);
   Maybe<bool> WriteJSError(Handle<JSObject> error) V8_WARN_UNUSED_RESULT;
+  Maybe<bool> WriteJSSharedArray(Handle<JSSharedArray> shared_array)
+      V8_WARN_UNUSED_RESULT;
   Maybe<bool> WriteJSSharedStruct(Handle<JSSharedStruct> shared_struct)
       V8_WARN_UNUSED_RESULT;
 #if V8_ENABLE_WEBASSEMBLY
@@ -152,6 +155,8 @@ class ValueSerializer {
   Maybe<uint32_t> WriteJSObjectPropertiesSlow(
       Handle<JSObject> object, Handle<FixedArray> keys) V8_WARN_UNUSED_RESULT;
 
+  Maybe<bool> IsHostObject(Handle<JSObject> object);
+
   /*
    * Asks the delegate to handle an error that occurred during data cloning, by
    * throwing an exception appropriate for the host.
@@ -169,7 +174,7 @@ class ValueSerializer {
   uint8_t* buffer_ = nullptr;
   size_t buffer_size_ = 0;
   size_t buffer_capacity_ = 0;
-  const bool supports_shared_values_;
+  bool has_custom_host_objects_ = false;
   bool treat_array_buffer_views_as_host_objects_ = false;
   bool out_of_memory_ = false;
   Zone zone_;
@@ -182,6 +187,9 @@ class ValueSerializer {
 
   // A similar map, for transferred array buffers.
   IdentityMap<uint32_t, ZoneAllocationPolicy> array_buffer_transfer_map_;
+
+  // The conveyor used to keep shared objects alive.
+  SharedObjectConveyorHandles* shared_object_conveyor_ = nullptr;
 };
 
 /*
@@ -239,10 +247,9 @@ class ValueDeserializer {
   bool ReadUint64(uint64_t* value) V8_WARN_UNUSED_RESULT;
   bool ReadDouble(double* value) V8_WARN_UNUSED_RESULT;
   bool ReadRawBytes(size_t length, const void** data) V8_WARN_UNUSED_RESULT;
+  bool ReadByte(uint8_t* value) V8_WARN_UNUSED_RESULT;
 
  private:
-  friend class WebSnapshotDeserializer;
-
   // Reading the wire format.
   Maybe<SerializationTag> PeekTag() const V8_WARN_UNUSED_RESULT;
   void ConsumeTag(SerializationTag peeked_tag);
@@ -289,15 +296,15 @@ class ValueDeserializer {
   MaybeHandle<JSRegExp> ReadJSRegExp() V8_WARN_UNUSED_RESULT;
   MaybeHandle<JSMap> ReadJSMap() V8_WARN_UNUSED_RESULT;
   MaybeHandle<JSSet> ReadJSSet() V8_WARN_UNUSED_RESULT;
-  MaybeHandle<JSArrayBuffer> ReadJSArrayBuffer(bool is_shared)
-      V8_WARN_UNUSED_RESULT;
+  MaybeHandle<JSArrayBuffer> ReadJSArrayBuffer(
+      bool is_shared, bool is_resizable) V8_WARN_UNUSED_RESULT;
   MaybeHandle<JSArrayBuffer> ReadTransferredJSArrayBuffer()
       V8_WARN_UNUSED_RESULT;
   MaybeHandle<JSArrayBufferView> ReadJSArrayBufferView(
       Handle<JSArrayBuffer> buffer) V8_WARN_UNUSED_RESULT;
-  bool ValidateAndSetJSArrayBufferViewFlags(
-      JSArrayBufferView view, JSArrayBuffer buffer,
-      uint32_t serialized_flags) V8_WARN_UNUSED_RESULT;
+  bool ValidateJSArrayBufferViewFlags(
+      Tagged<JSArrayBuffer> buffer, uint32_t serialized_flags,
+      bool& is_length_tracking, bool& is_backed_by_rab) V8_WARN_UNUSED_RESULT;
   MaybeHandle<Object> ReadJSError() V8_WARN_UNUSED_RESULT;
 #if V8_ENABLE_WEBASSEMBLY
   MaybeHandle<JSObject> ReadWasmModuleTransfer() V8_WARN_UNUSED_RESULT;
@@ -323,7 +330,6 @@ class ValueDeserializer {
   v8::ValueDeserializer::Delegate* const delegate_;
   const uint8_t* position_;
   const uint8_t* const end_;
-  const bool supports_shared_values_;
   uint32_t version_ = 0;
   uint32_t next_id_ = 0;
   bool version_13_broken_data_mode_ = false;
@@ -332,6 +338,9 @@ class ValueDeserializer {
   // Always global handles.
   Handle<FixedArray> id_map_;
   MaybeHandle<SimpleNumberDictionary> array_buffer_transfer_map_;
+
+  // The conveyor used to keep shared objects alive.
+  const SharedObjectConveyorHandles* shared_object_conveyor_ = nullptr;
 };
 
 }  // namespace internal

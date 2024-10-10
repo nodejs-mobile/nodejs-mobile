@@ -53,19 +53,27 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
                                            OFFSET_OF(LocalIsolate, heap_));
   }
 
-  bool is_main_thread() { return heap()->is_main_thread(); }
+  bool is_main_thread() const { return heap()->is_main_thread(); }
 
   LocalHeap* heap() { return &heap_; }
+  const LocalHeap* heap() const { return &heap_; }
 
   inline Address cage_base() const;
   inline Address code_cage_base() const;
   inline ReadOnlyHeap* read_only_heap() const;
-  inline Object root(RootIndex index) const;
+  inline Tagged<Object> root(RootIndex index) const;
   inline Handle<Object> root_handle(RootIndex index) const;
+
+  base::RandomNumberGenerator* fuzzer_rng() const {
+    return isolate_->fuzzer_rng();
+  }
 
   StringTable* string_table() const { return isolate_->string_table(); }
   base::SharedMutex* internalized_string_access() {
     return isolate_->internalized_string_access();
+  }
+  base::SharedMutex* shared_function_info_access() {
+    return isolate_->shared_function_info_access();
   }
   const AstStringConstants* ast_string_constants() {
     return isolate_->ast_string_constants();
@@ -73,10 +81,14 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
   LazyCompileDispatcher* lazy_compile_dispatcher() {
     return isolate_->lazy_compile_dispatcher();
   }
-  Logger* main_thread_logger() {
+  V8FileLogger* main_thread_logger() {
     // TODO(leszeks): This is needed for logging in ParseInfo. Figure out a way
     // to use the LocalLogger for this instead.
-    return isolate_->logger();
+    return isolate_->v8_file_logger();
+  }
+
+  bool is_precise_binary_code_coverage() const {
+    return isolate_->is_precise_binary_code_coverage();
   }
 
   v8::internal::LocalFactory* factory() {
@@ -87,10 +99,12 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
 
   AccountingAllocator* allocator() { return isolate_->allocator(); }
 
-  bool has_pending_exception() const { return false; }
+  bool has_exception() const { return false; }
+  bool serializer_enabled() const { return isolate_->serializer_enabled(); }
 
   void RegisterDeserializerStarted();
   void RegisterDeserializerFinished();
+  bool has_active_deserializer() const;
 
   template <typename T>
   Handle<T> Throw(Handle<Object> exception) {
@@ -101,13 +115,13 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
   }
 
   int GetNextScriptId();
-#if V8_SFI_HAS_UNIQUE_ID
-  int GetNextUniqueSharedFunctionInfoId();
-#endif  // V8_SFI_HAS_UNIQUE_ID
+  uint32_t GetAndIncNextUniqueSfiId() {
+    return isolate_->GetAndIncNextUniqueSfiId();
+  }
 
-  bool is_collecting_type_profile() const;
-
-  LocalLogger* logger() const { return logger_.get(); }
+  // TODO(cbruni): rename this back to logger() once the V8FileLogger
+  // refactoring is completed.
+  LocalLogger* v8_file_logger() const { return logger_.get(); }
   ThreadId thread_id() const { return thread_id_; }
   Address stack_limit() const { return stack_limit_; }
 #ifdef V8_RUNTIME_CALL_STATS
@@ -119,8 +133,6 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
     if (!bigint_processor_) InitializeBigIntProcessor();
     return bigint_processor_;
   }
-
-  bool is_main_thread() const { return heap_.is_main_thread(); }
 
   // AsIsolate is only allowed on the main-thread.
   Isolate* AsIsolate() {
@@ -134,9 +146,17 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
   // only constructor.
   Isolate* GetMainThreadIsolateUnsafe() const { return isolate_; }
 
-  Object* pending_message_address() {
+  const v8::StartupData* snapshot_blob() const {
+    return isolate_->snapshot_blob();
+  }
+  Tagged<Object>* pending_message_address() {
     return isolate_->pending_message_address();
   }
+
+  int NextOptimizationId() { return isolate_->NextOptimizationId(); }
+
+  template <typename Callback>
+  V8_INLINE void BlockMainThreadWhileParked(Callback callback);
 
 #ifdef V8_INTL_SUPPORT
   // WARNING: This might be out-of-sync with the main-thread.
@@ -146,6 +166,10 @@ class V8_EXPORT_PRIVATE LocalIsolate final : private HiddenLocalFactory {
  private:
   friend class v8::internal::LocalFactory;
   friend class LocalIsolateFactory;
+  friend class IsolateForSandbox;
+
+  // See IsolateForSandbox.
+  Isolate* ForSandbox() { return isolate_; }
 
   void InitializeBigIntProcessor();
 

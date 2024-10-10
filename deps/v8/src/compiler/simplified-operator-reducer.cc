@@ -12,7 +12,6 @@
 #include "src/compiler/opcodes.h"
 #include "src/compiler/operator-properties.h"
 #include "src/compiler/simplified-operator.h"
-#include "src/compiler/type-cache.h"
 #include "src/numbers/conversions-inl.h"
 
 namespace v8 {
@@ -66,7 +65,7 @@ Reduction SimplifiedOperatorReducer::Reduce(Node* node) {
       HeapObjectMatcher m(node->InputAt(0));
       if (m.HasResolvedValue()) {
         base::Optional<bool> maybe_result =
-            m.Ref(broker()).TryGetBooleanValue();
+            m.Ref(broker()).TryGetBooleanValue(broker());
         if (maybe_result.has_value()) return ReplaceInt32(*maybe_result);
       }
       if (m.IsChangeBitToTagged()) return Replace(m.InputAt(0));
@@ -258,6 +257,7 @@ Reduction SimplifiedOperatorReducer::Reduce(Node* node) {
                 node->ReplaceInput(0, n.left().node());
                 node->ReplaceInput(1, jsgraph()->Int32Constant(val));
                 RelaxEffectsAndControls(checked_int32_add);
+                checked_int32_add->Kill();
                 return Changed(node);
               }
             }
@@ -300,12 +300,12 @@ Reduction SimplifiedOperatorReducer::ReplaceInt32(int32_t value) {
 
 
 Reduction SimplifiedOperatorReducer::ReplaceNumber(double value) {
-  return Replace(jsgraph()->Constant(value));
+  return Replace(jsgraph()->ConstantNoHole(value));
 }
 
 
 Reduction SimplifiedOperatorReducer::ReplaceNumber(int32_t value) {
-  return Replace(jsgraph()->Constant(value));
+  return Replace(jsgraph()->ConstantNoHole(value));
 }
 
 Factory* SimplifiedOperatorReducer::factory() const {

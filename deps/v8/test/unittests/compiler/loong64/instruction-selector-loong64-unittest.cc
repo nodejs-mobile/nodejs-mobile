@@ -175,35 +175,35 @@ const MachInst1 kAddSubOneInstructions[] = {
 // ----------------------------------------------------------------------------
 
 const IntCmp kCmpInstructions[] = {
-    {{&RawMachineAssembler::WordEqual, "WordEqual", kLoong64Cmp,
+    {{&RawMachineAssembler::WordEqual, "WordEqual", kLoong64Cmp64,
       MachineType::Int64()},
      1U},
-    {{&RawMachineAssembler::WordNotEqual, "WordNotEqual", kLoong64Cmp,
+    {{&RawMachineAssembler::WordNotEqual, "WordNotEqual", kLoong64Cmp64,
       MachineType::Int64()},
      1U},
-    {{&RawMachineAssembler::Word32Equal, "Word32Equal", kLoong64Cmp,
+    {{&RawMachineAssembler::Word32Equal, "Word32Equal", kLoong64Cmp32,
       MachineType::Int32()},
      1U},
-    {{&RawMachineAssembler::Word32NotEqual, "Word32NotEqual", kLoong64Cmp,
+    {{&RawMachineAssembler::Word32NotEqual, "Word32NotEqual", kLoong64Cmp32,
       MachineType::Int32()},
      1U},
-    {{&RawMachineAssembler::Int32LessThan, "Int32LessThan", kLoong64Cmp,
+    {{&RawMachineAssembler::Int32LessThan, "Int32LessThan", kLoong64Cmp32,
       MachineType::Int32()},
      1U},
     {{&RawMachineAssembler::Int32LessThanOrEqual, "Int32LessThanOrEqual",
-      kLoong64Cmp, MachineType::Int32()},
+      kLoong64Cmp32, MachineType::Int32()},
      1U},
-    {{&RawMachineAssembler::Int32GreaterThan, "Int32GreaterThan", kLoong64Cmp,
+    {{&RawMachineAssembler::Int32GreaterThan, "Int32GreaterThan", kLoong64Cmp32,
       MachineType::Int32()},
      1U},
     {{&RawMachineAssembler::Int32GreaterThanOrEqual, "Int32GreaterThanOrEqual",
-      kLoong64Cmp, MachineType::Int32()},
+      kLoong64Cmp32, MachineType::Int32()},
      1U},
-    {{&RawMachineAssembler::Uint32LessThan, "Uint32LessThan", kLoong64Cmp,
+    {{&RawMachineAssembler::Uint32LessThan, "Uint32LessThan", kLoong64Cmp32,
       MachineType::Uint32()},
      1U},
     {{&RawMachineAssembler::Uint32LessThanOrEqual, "Uint32LessThanOrEqual",
-      kLoong64Cmp, MachineType::Uint32()},
+      kLoong64Cmp32, MachineType::Uint32()},
      1U}};
 
 // ----------------------------------------------------------------------------
@@ -235,16 +235,16 @@ const Conversion kConversionInstructions[] = {
 
 // LOONG64 instructions that clear the top 32 bits of the destination.
 const MachInst2 kCanElideChangeUint32ToUint64[] = {
-    {&RawMachineAssembler::Word32Equal, "Word32Equal", kLoong64Cmp,
+    {&RawMachineAssembler::Word32Equal, "Word32Equal", kLoong64Cmp32,
      MachineType::Uint32()},
-    {&RawMachineAssembler::Int32LessThan, "Int32LessThan", kLoong64Cmp,
+    {&RawMachineAssembler::Int32LessThan, "Int32LessThan", kLoong64Cmp32,
      MachineType::Uint32()},
     {&RawMachineAssembler::Int32LessThanOrEqual, "Int32LessThanOrEqual",
-     kLoong64Cmp, MachineType::Uint32()},
-    {&RawMachineAssembler::Uint32LessThan, "Uint32LessThan", kLoong64Cmp,
+     kLoong64Cmp32, MachineType::Uint32()},
+    {&RawMachineAssembler::Uint32LessThan, "Uint32LessThan", kLoong64Cmp32,
      MachineType::Uint32()},
     {&RawMachineAssembler::Uint32LessThanOrEqual, "Uint32LessThanOrEqual",
-     kLoong64Cmp, MachineType::Uint32()},
+     kLoong64Cmp32, MachineType::Uint32()},
 };
 
 }  // namespace
@@ -1266,12 +1266,21 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, LoadWithImmediateIndex) {
     StreamBuilder m(this, memacc.type, MachineType::Pointer());
     m.Return(m.Load(memacc.type, m.Parameter(0), m.Int32Constant(index)));
     Stream s = m.Build();
+    MachineRepresentation rep_type = memacc.type.representation();
     ASSERT_EQ(1U, s.size());
     EXPECT_EQ(memacc.load_opcode, s[0]->arch_opcode());
-    EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(2U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    if (((rep_type == MachineRepresentation::kWord64 ||
+          rep_type == MachineRepresentation::kWord32) &&
+         is_int16(index) && ((index & 0b11) == 0)) ||
+        is_int12(index)) {
+      EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
+      ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
+      EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    } else {
+      EXPECT_EQ(kMode_MRR, s[0]->addressing_mode());
+      ASSERT_EQ(InstructionOperand::UNALLOCATED, s[0]->InputAt(1)->kind());
+    }
     ASSERT_EQ(1U, s[0]->OutputCount());
     EXPECT_TRUE((s.*memacc.val_predicate)(s[0]->Output()));
   }
@@ -1290,12 +1299,21 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreWithImmediateIndex) {
             m.Int32Constant(index), m.Parameter(1), kNoWriteBarrier);
     m.Return(m.Int32Constant(0));
     Stream s = m.Build();
+    MachineRepresentation rep_type = memacc.type.representation();
     ASSERT_EQ(1U, s.size());
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
-    EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    if (((rep_type == MachineRepresentation::kWord64 ||
+          rep_type == MachineRepresentation::kWord32) &&
+         is_int16(index) && ((index & 0b11) == 0)) ||
+        is_int12(index)) {
+      EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
+      ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
+      EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    } else {
+      EXPECT_EQ(kMode_MRR, s[0]->addressing_mode());
+      ASSERT_EQ(InstructionOperand::UNALLOCATED, s[0]->InputAt(1)->kind());
+    }
     EXPECT_EQ(0U, s[0]->OutputCount());
   }
 }
@@ -1308,12 +1326,21 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreZero) {
             m.Int32Constant(index), m.Int32Constant(0), kNoWriteBarrier);
     m.Return(m.Int32Constant(0));
     Stream s = m.Build();
+    MachineRepresentation rep_type = memacc.type.representation();
     ASSERT_EQ(1U, s.size());
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
-    EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    if (((rep_type == MachineRepresentation::kWord64 ||
+          rep_type == MachineRepresentation::kWord32) &&
+         is_int16(index) && ((index & 0b11) == 0)) ||
+        is_int12(index)) {
+      ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
+      EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
+      EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    } else {
+      ASSERT_EQ(InstructionOperand::UNALLOCATED, s[0]->InputAt(1)->kind());
+      EXPECT_EQ(kMode_MRR, s[0]->addressing_mode());
+    }
     ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(2)->kind());
     EXPECT_EQ(0, s.ToInt64(s[0]->InputAt(2)));
     EXPECT_EQ(0U, s[0]->OutputCount());
@@ -1378,7 +1405,7 @@ TEST_F(InstructionSelectorTest, Word32EqualWithZero) {
     m.Return(m.Word32Equal(m.Parameter(0), m.Int32Constant(0)));
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kLoong64Cmp, s[0]->arch_opcode());
+    EXPECT_EQ(kLoong64Cmp32, s[0]->arch_opcode());
     EXPECT_EQ(kMode_None, s[0]->addressing_mode());
     ASSERT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
@@ -1390,7 +1417,7 @@ TEST_F(InstructionSelectorTest, Word32EqualWithZero) {
     m.Return(m.Word32Equal(m.Int32Constant(0), m.Parameter(0)));
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kLoong64Cmp, s[0]->arch_opcode());
+    EXPECT_EQ(kLoong64Cmp32, s[0]->arch_opcode());
     EXPECT_EQ(kMode_None, s[0]->addressing_mode());
     ASSERT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
@@ -1405,7 +1432,7 @@ TEST_F(InstructionSelectorTest, Word64EqualWithZero) {
     m.Return(m.Word64Equal(m.Parameter(0), m.Int64Constant(0)));
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kLoong64Cmp, s[0]->arch_opcode());
+    EXPECT_EQ(kLoong64Cmp64, s[0]->arch_opcode());
     EXPECT_EQ(kMode_None, s[0]->addressing_mode());
     ASSERT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
@@ -1417,7 +1444,7 @@ TEST_F(InstructionSelectorTest, Word64EqualWithZero) {
     m.Return(m.Word64Equal(m.Int32Constant(0), m.Parameter(0)));
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kLoong64Cmp, s[0]->arch_opcode());
+    EXPECT_EQ(kLoong64Cmp64, s[0]->arch_opcode());
     EXPECT_EQ(kMode_None, s[0]->addressing_mode());
     ASSERT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());

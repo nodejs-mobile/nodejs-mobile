@@ -8,82 +8,47 @@
 #include "include/v8config.h"
 #include "src/heap/cppgc/gc-info-table.h"
 
-namespace cppgc {
-namespace internal {
+namespace cppgc::internal {
 
 namespace {
 
-HeapObjectName GetHiddenName(const void*) {
+HeapObjectName GetHiddenName(const void*, HeapObjectNameForUnnamedObject) {
   return {NameProvider::kHiddenName, true};
 }
 
 }  // namespace
 
 // static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexPolymorphic(
+GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndex(
     std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
     FinalizationCallback finalization_callback, NameCallback name_callback) {
   return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
       registered_index,
-      {finalization_callback, trace_callback, name_callback, true});
+      GCInfo(finalization_callback, trace_callback, name_callback));
 }
 
 // static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexPolymorphic(
+GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndex(
     std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
     FinalizationCallback finalization_callback) {
   return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
       registered_index,
-      {finalization_callback, trace_callback, GetHiddenName, true});
+      GCInfo(finalization_callback, trace_callback, GetHiddenName));
 }
 
 // static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexPolymorphic(
+GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndex(
     std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
     NameCallback name_callback) {
   return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index, {nullptr, trace_callback, name_callback, true});
+      registered_index, GCInfo(nullptr, trace_callback, name_callback));
 }
 
 // static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexPolymorphic(
+GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndex(
     std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback) {
   return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index, {nullptr, trace_callback, GetHiddenName, true});
+      registered_index, GCInfo(nullptr, trace_callback, GetHiddenName));
 }
 
-// static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexNonPolymorphic(
-    std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
-    FinalizationCallback finalization_callback, NameCallback name_callback) {
-  return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index,
-      {finalization_callback, trace_callback, name_callback, false});
-}
-
-// static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexNonPolymorphic(
-    std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
-    FinalizationCallback finalization_callback) {
-  return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index,
-      {finalization_callback, trace_callback, GetHiddenName, false});
-}
-
-// static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexNonPolymorphic(
-    std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback,
-    NameCallback name_callback) {
-  return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index, {nullptr, trace_callback, name_callback, false});
-}
-
-// static
-GCInfoIndex EnsureGCInfoIndexTrait::EnsureGCInfoIndexNonPolymorphic(
-    std::atomic<GCInfoIndex>& registered_index, TraceCallback trace_callback) {
-  return GlobalGCInfoTable::GetMutable().RegisterNewGCInfo(
-      registered_index, {nullptr, trace_callback, GetHiddenName, false});
-}
-
-}  // namespace internal
-}  // namespace cppgc
+}  // namespace cppgc::internal

@@ -8,13 +8,9 @@
 #include <memory>
 #include <utility>
 
-#include "src/codegen/code-stub-assembler.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/swiss-name-dictionary-inl.h"
 #include "test/cctest/cctest.h"
-#include "test/cctest/compiler/code-assembler-tester.h"
-#include "test/cctest/compiler/function-tester.h"
 
 namespace v8 {
 namespace internal {
@@ -203,7 +199,7 @@ class TestSequence {
       CHECK_EQ(*key, data->get(0));
 
       if (expected_value_opt) {
-        CHECK(expected_value_opt.value()->StrictEquals(data->get(1)));
+        CHECK(Object::StrictEquals(*expected_value_opt.value(), data->get(1)));
       }
 
       if (expected_details_opt) {

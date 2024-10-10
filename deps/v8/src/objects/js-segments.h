@@ -42,14 +42,16 @@ class JSSegments : public TorqueGeneratedJSSegments<JSSegments, JSObject> {
   // ecma402 #sec-createsegmentdataobject
   V8_WARN_UNUSED_RESULT static MaybeHandle<Object> CreateSegmentDataObject(
       Isolate* isolate, JSSegmenter::Granularity granularity,
-      icu::BreakIterator* break_iterator, const icu::UnicodeString& string,
-      int32_t start_index, int32_t end_index);
+      icu::BreakIterator* break_iterator, Handle<String> input_string,
+      const icu::UnicodeString& unicode_string, int32_t start_index,
+      int32_t end_index);
 
   Handle<String> GranularityAsString(Isolate* isolate) const;
 
   // SegmentIterator accessors.
-  DECL_ACCESSORS(icu_break_iterator, Managed<icu::BreakIterator>)
-  DECL_ACCESSORS(unicode_string, Managed<icu::UnicodeString>)
+  DECL_ACCESSORS(icu_break_iterator, Tagged<Managed<icu::BreakIterator>>)
+  DECL_ACCESSORS(raw_string, Tagged<String>)
+  DECL_ACCESSORS(unicode_string, Tagged<Managed<icu::UnicodeString>>)
 
   DECL_PRINTER(JSSegments)
 
@@ -59,9 +61,9 @@ class JSSegments : public TorqueGeneratedJSSegments<JSSegments, JSObject> {
   // Bit positions in |flags|.
   DEFINE_TORQUE_GENERATED_JS_SEGMENT_ITERATOR_FLAGS()
 
-  STATIC_ASSERT(JSSegmenter::Granularity::GRAPHEME <= GranularityBits::kMax);
-  STATIC_ASSERT(JSSegmenter::Granularity::WORD <= GranularityBits::kMax);
-  STATIC_ASSERT(JSSegmenter::Granularity::SENTENCE <= GranularityBits::kMax);
+  static_assert(JSSegmenter::Granularity::GRAPHEME <= GranularityBits::kMax);
+  static_assert(JSSegmenter::Granularity::WORD <= GranularityBits::kMax);
+  static_assert(JSSegmenter::Granularity::SENTENCE <= GranularityBits::kMax);
 
   TQ_OBJECT_CONSTRUCTORS(JSSegments)
 };

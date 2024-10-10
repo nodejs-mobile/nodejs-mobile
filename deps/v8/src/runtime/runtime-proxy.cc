@@ -2,14 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/runtime/runtime-utils.h"
-
 #include "src/execution/arguments-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/heap/factory.h"
 #include "src/heap/heap-inl.h"  // For ToBoolean. TODO(jkummerow): Drop.
-#include "src/logging/counters.h"
-#include "src/objects/elements.h"
 #include "src/objects/objects-inl.h"
 
 namespace v8 {
@@ -18,22 +14,22 @@ namespace internal {
 RUNTIME_FUNCTION(Runtime_IsJSProxy) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
-  Object obj = args[0];
-  return isolate->heap()->ToBoolean(obj.IsJSProxy());
+  Tagged<Object> obj = args[0];
+  return isolate->heap()->ToBoolean(IsJSProxy(obj));
 }
 
 RUNTIME_FUNCTION(Runtime_JSProxyGetHandler) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
   auto proxy = JSProxy::cast(args[0]);
-  return proxy.handler();
+  return proxy->handler();
 }
 
 RUNTIME_FUNCTION(Runtime_JSProxyGetTarget) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
   auto proxy = JSProxy::cast(args[0]);
-  return proxy.target();
+  return proxy->target();
 }
 
 RUNTIME_FUNCTION(Runtime_GetPropertyWithReceiver) {
@@ -55,7 +51,7 @@ RUNTIME_FUNCTION(Runtime_GetPropertyWithReceiver) {
   bool success = false;
   PropertyKey lookup_key(isolate, key, &success);
   if (!success) {
-    DCHECK(isolate->has_pending_exception());
+    DCHECK(isolate->has_exception());
     return ReadOnlyRoots(isolate).exception();
   }
   LookupIterator it(isolate, receiver, lookup_key, holder);
@@ -75,7 +71,7 @@ RUNTIME_FUNCTION(Runtime_SetPropertyWithReceiver) {
   bool success = false;
   PropertyKey lookup_key(isolate, key, &success);
   if (!success) {
-    DCHECK(isolate->has_pending_exception());
+    DCHECK(isolate->has_exception());
     return ReadOnlyRoots(isolate).exception();
   }
   LookupIterator it(isolate, receiver, lookup_key, holder);

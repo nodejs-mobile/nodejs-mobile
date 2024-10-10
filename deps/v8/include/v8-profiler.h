@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "cppgc/common.h"          // NOLINT(build/include_directory)
 #include "v8-local-handle.h"       // NOLINT(build/include_directory)
 #include "v8-message.h"            // NOLINT(build/include_directory)
 #include "v8-persistent-handle.h"  // NOLINT(build/include_directory)
@@ -24,7 +25,7 @@ enum class EmbedderStateTag : uint8_t;
 class HeapGraphNode;
 struct HeapStatsUpdate;
 class Object;
-enum StateTag : int;
+enum StateTag : uint16_t;
 
 using NativeObject = void*;
 using SnapshotObjectId = uint32_t;
@@ -175,6 +176,32 @@ class V8_EXPORT CpuProfileNode {
   static const int kNoColumnNumberInfo = Message::kNoColumnInfo;
 };
 
+/**
+ * An interface for exporting data from V8, using "push" model.
+ */
+class V8_EXPORT OutputStream {
+ public:
+  enum WriteResult { kContinue = 0, kAbort = 1 };
+  virtual ~OutputStream() = default;
+  /** Notify about the end of stream. */
+  virtual void EndOfStream() = 0;
+  /** Get preferred output chunk size. Called only once. */
+  virtual int GetChunkSize() { return 1024; }
+  /**
+   * Writes the next chunk of snapshot data into the stream. Writing
+   * can be stopped by returning kAbort as function result. EndOfStream
+   * will not be called in case writing was aborted.
+   */
+  virtual WriteResult WriteAsciiChunk(char* data, int size) = 0;
+  /**
+   * Writes the next chunk of heap stats data into the stream. Writing
+   * can be stopped by returning kAbort as function result. EndOfStream
+   * will not be called in case writing was aborted.
+   */
+  virtual WriteResult WriteHeapStatsChunk(HeapStatsUpdate* data, int count) {
+    return kAbort;
+  }
+};
 
 /**
  * CpuProfile contains a CPU profile in a form of top-down call tree
@@ -182,6 +209,9 @@ class V8_EXPORT CpuProfileNode {
  */
 class V8_EXPORT CpuProfile {
  public:
+  enum SerializationFormat {
+    kJSON = 0  // See format description near 'Serialize' method.
+  };
   /** Returns CPU profile title. */
   Local<String> GetTitle() const;
 
@@ -235,6 +265,25 @@ class V8_EXPORT CpuProfile {
    * All pointers to nodes previously returned become invalid.
    */
   void Delete();
+
+  /**
+   * Prepare a serialized representation of the profile. The result
+   * is written into the stream provided in chunks of specified size.
+   *
+   * For the JSON format, heap contents are represented as an object
+   * with the following structure:
+   *
+   *  {
+   *    nodes: [nodes array],
+   *    startTime: number,
+   *    endTime: number
+   *    samples: [strings array]
+   *    timeDeltas: [numbers array]
+   *  }
+   *
+   */
+  void Serialize(OutputStream* stream,
+                 SerializationFormat format = kJSON) const;
 };
 
 enum CpuProfilingMode {
@@ -331,6 +380,9 @@ class V8_EXPORT CpuProfilingOptions {
       unsigned max_samples = kNoSampleLimit, int sampling_interval_us = 0,
       MaybeLocal<Context> filter_context = MaybeLocal<Context>());
 
+  CpuProfilingOptions(CpuProfilingOptions&&) = default;
+  CpuProfilingOptions& operator=(CpuProfilingOptions&&) = default;
+
   CpuProfilingMode mode() const { return mode_; }
   unsigned max_samples() const { return max_samples_; }
   int sampling_interval_us() const { return sampling_interval_us_; }
@@ -344,7 +396,7 @@ class V8_EXPORT CpuProfilingOptions {
   CpuProfilingMode mode_;
   unsigned max_samples_;
   int sampling_interval_us_;
-  CopyablePersistentTraits<Context>::CopyablePersistent filter_context_;
+  Global<Context> filter_context_;
 };
 
 /**
@@ -542,7 +594,9 @@ class V8_EXPORT HeapGraphNode {
     kConsString = 10,    // Concatenated string. A pair of pointers to strings.
     kSlicedString = 11,  // Sliced string. A fragment of another string.
     kSymbol = 12,        // A Symbol (ES6).
-    kBigInt = 13         // BigInt.
+    kBigInt = 13,        // BigInt.
+    kObjectShape = 14,   // Internal data used for tracking the shapes (or
+                         // "hidden classes") of JS objects.
   };
 
   /** Returns node type (see HeapGraphNode::Type). */
@@ -569,37 +623,6 @@ class V8_EXPORT HeapGraphNode {
 
   /** Retrieves a child by index. */
   const HeapGraphEdge* GetChild(int index) const;
-};
-
-
-/**
- * An interface for exporting data from V8, using "push" model.
- */
-class V8_EXPORT OutputStream {
- public:
-  enum WriteResult {
-    kContinue = 0,
-    kAbort = 1
-  };
-  virtual ~OutputStream() = default;
-  /** Notify about the end of stream. */
-  virtual void EndOfStream() = 0;
-  /** Get preferred output chunk size. Called only once. */
-  virtual int GetChunkSize() { return 1024; }
-  /**
-   * Writes the next chunk of snapshot data into the stream. Writing
-   * can be stopped by returning kAbort as function result. EndOfStream
-   * will not be called in case writing was aborted.
-   */
-  virtual WriteResult WriteAsciiChunk(char* data, int size) = 0;
-  /**
-   * Writes the next chunk of heap stats data into the stream. Writing
-   * can be stopped by returning kAbort as function result. EndOfStream
-   * will not be called in case writing was aborted.
-   */
-  virtual WriteResult WriteHeapStatsChunk(HeapStatsUpdate* data, int count) {
-    return kAbort;
-  }
 };
 
 /**
@@ -860,6 +883,15 @@ class V8_EXPORT EmbedderGraph {
      */
     virtual Detachedness GetDetachedness() { return Detachedness::kUnknown; }
 
+    /**
+     * Returns the address of the object in the embedder heap, or nullptr to not
+     * specify the address. If this address is provided, then V8 can generate
+     * consistent IDs for objects across subsequent heap snapshots, which allows
+     * devtools to determine which objects were retained from one snapshot to
+     * the next. This value is used only if GetNativeObject returns nullptr.
+     */
+    virtual const void* GetAddress() { return nullptr; }
+
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
   };
@@ -889,15 +921,27 @@ class V8_EXPORT EmbedderGraph {
   virtual ~EmbedderGraph() = default;
 };
 
+class QueryObjectPredicate {
+ public:
+  virtual ~QueryObjectPredicate() = default;
+  virtual bool Filter(v8::Local<v8::Object> object) = 0;
+};
+
 /**
  * Interface for controlling heap profiling. Instance of the
  * profiler can be retrieved using v8::Isolate::GetHeapProfiler.
  */
 class V8_EXPORT HeapProfiler {
  public:
+  void QueryObjects(v8::Local<v8::Context> context,
+                    QueryObjectPredicate* predicate,
+                    std::vector<v8::Global<v8::Object>>* objects);
+
   enum SamplingFlags {
     kSamplingNoFlags = 0,
     kSamplingForceGC = 1 << 0,
+    kSamplingIncludeObjectsCollectedByMajorGC = 1 << 1,
+    kSamplingIncludeObjectsCollectedByMinorGC = 1 << 2,
   };
 
   /**
@@ -975,14 +1019,76 @@ class V8_EXPORT HeapProfiler {
     virtual ~ObjectNameResolver() = default;
   };
 
+  enum class HeapSnapshotMode {
+    /**
+     * Heap snapshot for regular developers.
+     */
+    kRegular,
+    /**
+     * Heap snapshot is exposing internals that may be useful for experts.
+     */
+    kExposeInternals,
+  };
+
+  enum class NumericsMode {
+    /**
+     * Numeric values are hidden as they are values of the corresponding
+     * objects.
+     */
+    kHideNumericValues,
+    /**
+     * Numeric values are exposed in artificial fields.
+     */
+    kExposeNumericValues
+  };
+
+  struct HeapSnapshotOptions final {
+    // Manually define default constructor here to be able to use it in
+    // `TakeSnapshot()` below.
+    // NOLINTNEXTLINE
+    HeapSnapshotOptions() {}
+
+    /**
+     * The control used to report intermediate progress to.
+     */
+    ActivityControl* control = nullptr;
+    /**
+     * The resolver used by the snapshot generator to get names for V8 objects.
+     */
+    ObjectNameResolver* global_object_name_resolver = nullptr;
+    /**
+     * Mode for taking the snapshot, see `HeapSnapshotMode`.
+     */
+    HeapSnapshotMode snapshot_mode = HeapSnapshotMode::kRegular;
+    /**
+     * Mode for dealing with numeric values, see `NumericsMode`.
+     */
+    NumericsMode numerics_mode = NumericsMode::kHideNumericValues;
+    /**
+     * Whether stack is considered as a root set.
+     */
+    cppgc::EmbedderStackState stack_state =
+        cppgc::EmbedderStackState::kMayContainHeapPointers;
+  };
+
   /**
-   * Takes a heap snapshot and returns it.
+   * Takes a heap snapshot.
+   *
+   * \returns the snapshot.
    */
   const HeapSnapshot* TakeHeapSnapshot(
-      ActivityControl* control = nullptr,
+      const HeapSnapshotOptions& options = HeapSnapshotOptions());
+
+  /**
+   * Takes a heap snapshot. See `HeapSnapshotOptions` for details on the
+   * parameters.
+   *
+   * \returns the snapshot.
+   */
+  const HeapSnapshot* TakeHeapSnapshot(
+      ActivityControl* control,
       ObjectNameResolver* global_object_name_resolver = nullptr,
-      bool treat_global_objects_as_roots = true,
-      bool capture_numeric_value = false);
+      bool hide_internals = true, bool capture_numeric_value = false);
 
   /**
    * Starts tracking of heap objects population statistics. After calling
@@ -1035,10 +1141,8 @@ class V8_EXPORT HeapProfiler {
    * |stack_depth| parameter controls the maximum number of stack frames to be
    * captured on each allocation.
    *
-   * NOTE: This is a proof-of-concept at this point. Right now we only sample
-   * newspace allocations. Support for paged space allocation (e.g. pre-tenured
-   * objects, large objects, code objects, etc.) and native allocations
-   * doesn't exist yet, but is anticipated in the future.
+   * NOTE: Support for native allocations doesn't exist yet, but is anticipated
+   * in the future.
    *
    * Objects allocated before the sampling is started will not be included in
    * the profile.
@@ -1101,18 +1205,18 @@ struct HeapStatsUpdate {
   uint32_t size;  // New value of size field for the interval with this index.
 };
 
-#define CODE_EVENTS_LIST(V) \
-  V(Builtin)                \
-  V(Callback)               \
-  V(Eval)                   \
-  V(Function)               \
-  V(InterpretedFunction)    \
-  V(Handler)                \
-  V(BytecodeHandler)        \
-  V(LazyCompile)            \
-  V(RegExp)                 \
-  V(Script)                 \
-  V(Stub)                   \
+#define CODE_EVENTS_LIST(V)                          \
+  V(Builtin)                                         \
+  V(Callback)                                        \
+  V(Eval)                                            \
+  V(Function)                                        \
+  V(InterpretedFunction)                             \
+  V(Handler)                                         \
+  V(BytecodeHandler)                                 \
+  V(LazyCompile) /* Unused, use kFunction instead */ \
+  V(RegExp)                                          \
+  V(Script)                                          \
+  V(Stub)                                            \
   V(Relocation)
 
 /**

@@ -15,17 +15,13 @@
 #include "src/common/globals.h"
 #include "src/execution/local-isolate.h"
 #include "src/heap/parked-scope.h"
-#include "src/init/bootstrapper.h"
 #include "src/init/setup-isolate.h"
 #include "src/interpreter/bytecode-generator.h"
 #include "src/interpreter/bytecodes.h"
 #include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/shared-function-info.h"
-#include "src/objects/slots.h"
-#include "src/objects/visitors.h"
 #include "src/parsing/parse-info.h"
-#include "src/snapshot/snapshot.h"
 #include "src/utils/ostreams.h"
 
 namespace v8 {
@@ -115,19 +111,19 @@ Builtin BuiltinIndexFromBytecode(Bytecode bytecode,
 
 }  // namespace
 
-CodeT Interpreter::GetBytecodeHandler(Bytecode bytecode,
-                                      OperandScale operand_scale) {
+Tagged<Code> Interpreter::GetBytecodeHandler(Bytecode bytecode,
+                                             OperandScale operand_scale) {
   Builtin builtin = BuiltinIndexFromBytecode(bytecode, operand_scale);
   return isolate_->builtins()->code(builtin);
 }
 
 void Interpreter::SetBytecodeHandler(Bytecode bytecode,
                                      OperandScale operand_scale,
-                                     CodeT handler) {
-  DCHECK(handler.is_off_heap_trampoline());
-  DCHECK(handler.kind() == CodeKind::BYTECODE_HANDLER);
+                                     Tagged<Code> handler) {
+  DCHECK(!handler->has_instruction_stream());
+  DCHECK(handler->kind() == CodeKind::BYTECODE_HANDLER);
   size_t index = GetDispatchTableIndex(bytecode, operand_scale);
-  dispatch_table_[index] = handler.InstructionStart();
+  dispatch_table_[index] = handler->instruction_start();
 }
 
 // static
@@ -143,7 +139,7 @@ namespace {
 
 void MaybePrintAst(ParseInfo* parse_info,
                    UnoptimizedCompilationInfo* compilation_info) {
-  if (!FLAG_print_ast) return;
+  if (!v8_flags.print_ast) return;
 
   StdoutStream os;
   std::unique_ptr<char[]> name = compilation_info->literal()->GetDebugName();
@@ -157,15 +153,15 @@ void MaybePrintAst(ParseInfo* parse_info,
 }
 
 bool ShouldPrintBytecode(Handle<SharedFunctionInfo> shared) {
-  if (!FLAG_print_bytecode) return false;
+  if (!v8_flags.print_bytecode) return false;
 
   // Checks whether function passed the filter.
   if (shared->is_toplevel()) {
     base::Vector<const char> filter =
-        base::CStrVector(FLAG_print_bytecode_filter);
-    return (filter.length() == 0) || (filter.length() == 1 && filter[0] == '*');
+        base::CStrVector(v8_flags.print_bytecode_filter);
+    return filter.empty() || (filter.length() == 1 && filter[0] == '*');
   } else {
-    return shared->PassesFilter(FLAG_print_bytecode_filter);
+    return shared->PassesFilter(v8_flags.print_bytecode_filter);
   }
 }
 
@@ -199,7 +195,7 @@ InterpreterCompilationJob::Status InterpreterCompilationJob::ExecuteJobImpl() {
     MaybePrintAst(parse_info(), compilation_info());
   }
 
-  ParkedScope parked_scope(local_isolate_);
+  ParkedScopeIfOnBackground parked_scope(local_isolate_);
 
   generator()->GenerateBytecode(stack_limit());
 
@@ -231,10 +227,10 @@ void InterpreterCompilationJob::CheckAndPrintBytecodeMismatch(
     } else {
       std::cerr << "anonymous";
     }
-    Object script_name = script->GetNameOrSourceURL();
-    if (script_name.IsString()) {
+    Tagged<Object> script_name = script->GetNameOrSourceURL();
+    if (IsString(script_name)) {
       std::cerr << " ";
-      String::cast(script_name).PrintUC16(std::cerr);
+      String::cast(script_name)->PrintUC16(std::cerr);
       std::cerr << ":" << parse_info()->literal()->start_position();
     }
 #endif
@@ -280,7 +276,7 @@ InterpreterCompilationJob::Status InterpreterCompilationJob::DoFinalizeJobImpl(
 
   if (compilation_info()->SourcePositionRecordingMode() ==
       SourcePositionTableBuilder::RecordingMode::RECORD_SOURCE_POSITIONS) {
-    Handle<ByteArray> source_position_table =
+    Handle<TrustedByteArray> source_position_table =
         generator()->FinalizeSourcePositionTable(isolate);
     bytecodes->set_source_position_table(*source_position_table, kReleaseStore);
   }
@@ -345,16 +341,15 @@ void Interpreter::Initialize() {
 
   // Set the interpreter entry trampoline entry point now that builtins are
   // initialized.
-  Handle<CodeT> code = BUILTIN_CODE(isolate_, InterpreterEntryTrampoline);
+  Handle<Code> code = BUILTIN_CODE(isolate_, InterpreterEntryTrampoline);
   DCHECK(builtins->is_initialized());
-  DCHECK(code->is_off_heap_trampoline() ||
-         isolate_->heap()->IsImmovable(FromCodeT(*code)));
-  interpreter_entry_trampoline_instruction_start_ = code->InstructionStart();
+  DCHECK(!code->has_instruction_stream());
+  interpreter_entry_trampoline_instruction_start_ = code->instruction_start();
 
   // Initialize the dispatch table.
   ForEachBytecode([=](Bytecode bytecode, OperandScale operand_scale) {
     Builtin builtin = BuiltinIndexFromBytecode(bytecode, operand_scale);
-    CodeT handler = builtins->code(builtin);
+    Tagged<Code> handler = builtins->code(builtin);
     if (Bytecodes::BytecodeHasHandler(bytecode, operand_scale)) {
 #ifdef DEBUG
       std::string builtin_name(Builtins::name(builtin));
@@ -374,13 +369,6 @@ void Interpreter::Initialize() {
 
 bool Interpreter::IsDispatchTableInitialized() const {
   return dispatch_table_[0] != kNullAddress;
-}
-
-const char* Interpreter::LookupNameOfBytecodeHandler(const Code code) {
-  if (code.kind() == CodeKind::BYTECODE_HANDLER) {
-    return Builtins::name(code.builtin_id());
-  }
-  return nullptr;
 }
 
 uintptr_t Interpreter::GetDispatchCounter(Bytecode from, Bytecode to) const {

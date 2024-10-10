@@ -73,14 +73,12 @@ class TestCase(testcase.D8TestCase):
 
   def _get_files_params(self):
     files = [
-      os.path.join(self.suite.root, f) for f in [
-        'assert.js',
-        'utils.js',
-        self.path + self._get_suffix(),
-      ]
+      self.suite.root / 'assert.js',
+      self.suite.root / 'utils.js',
+      self.suite.root / self.path_js,
     ]
 
-    if self._test_config.isolates:
+    if self.test_config.isolates:
       files += ['--isolate'] + files
     return files
 
@@ -91,8 +89,4 @@ class TestCase(testcase.D8TestCase):
     return ['--allow-natives-syntax']
 
   def _get_source_path(self):
-    return os.path.join(self.suite.root, self.path + self._get_suffix())
-
-
-def GetSuite(*args, **kwargs):
-  return TestSuite(*args, **kwargs)
+    return self.suite.root / self.path_js

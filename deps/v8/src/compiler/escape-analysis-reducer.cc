@@ -8,7 +8,6 @@
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/operation-typer.h"
 #include "src/compiler/simplified-operator.h"
-#include "src/compiler/type-cache.h"
 #include "src/execution/frame-constants.h"
 
 namespace v8 {
@@ -16,9 +15,9 @@ namespace internal {
 namespace compiler {
 
 #ifdef DEBUG
-#define TRACE(...)                                    \
-  do {                                                \
-    if (FLAG_trace_turbo_escape) PrintF(__VA_ARGS__); \
+#define TRACE(...)                                        \
+  do {                                                    \
+    if (v8_flags.trace_turbo_escape) PrintF(__VA_ARGS__); \
   } while (false)
 #else
 #define TRACE(...)
@@ -126,19 +125,21 @@ Reduction EscapeAnalysisReducer::Reduce(Node* node) {
 // occurrences of virtual objects.
 class Deduplicator {
  public:
-  explicit Deduplicator(Zone* zone) : is_duplicate_(zone) {}
+  explicit Deduplicator(Zone* zone) : zone_(zone) {}
   bool SeenBefore(const VirtualObject* vobject) {
-    VirtualObject::Id id = vobject->id();
-    if (id >= is_duplicate_.size()) {
-      is_duplicate_.resize(id + 1);
+    DCHECK_LE(vobject->id(), std::numeric_limits<int>::max());
+    int id = static_cast<int>(vobject->id());
+    if (id >= is_duplicate_.length()) {
+      is_duplicate_.Resize(id + 1, zone_);
     }
-    bool is_duplicate = is_duplicate_[id];
-    is_duplicate_[id] = true;
+    bool is_duplicate = is_duplicate_.Contains(id);
+    is_duplicate_.Add(id);
     return is_duplicate;
   }
 
  private:
-  ZoneVector<bool> is_duplicate_;
+  Zone* zone_;
+  BitVector is_duplicate_;
 };
 
 void EscapeAnalysisReducer::ReduceFrameStateInputs(Node* node) {
@@ -304,12 +305,12 @@ void EscapeAnalysisReducer::Finalize() {
           case IrOpcode::kLoadElement: {
             Node* index = NodeProperties::GetValueInput(load, 1);
             Node* formal_parameter_count =
-                jsgraph()->Constant(params.formal_parameter_count());
+                jsgraph()->ConstantNoHole(params.formal_parameter_count());
             NodeProperties::SetType(
                 formal_parameter_count,
                 Type::Constant(params.formal_parameter_count(),
                                jsgraph()->graph()->zone()));
-            Node* offset_to_first_elem = jsgraph()->Constant(
+            Node* offset_to_first_elem = jsgraph()->ConstantNoHole(
                 CommonFrameConstants::kFixedSlotCountAboveFp);
             if (!NodeProperties::IsTyped(offset_to_first_elem)) {
               NodeProperties::SetType(
@@ -373,7 +374,7 @@ NodeHashCache::Constructor::Constructor(NodeHashCache* cache,
                                         const Operator* op, int input_count,
                                         Node** inputs, Type type)
     : node_cache_(cache), from_(nullptr) {
-  if (node_cache_->temp_nodes_.size() > 0) {
+  if (!node_cache_->temp_nodes_.empty()) {
     tmp_ = node_cache_->temp_nodes_.back();
     node_cache_->temp_nodes_.pop_back();
     int tmp_input_count = tmp_->InputCount();

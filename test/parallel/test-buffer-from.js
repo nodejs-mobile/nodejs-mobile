@@ -40,7 +40,7 @@ deepStrictEqual(
   { valueOf() { return null; } },
   { valueOf() { return undefined; } },
   { valueOf: null },
-  Object.create(null),
+  { __proto__: null },
   new Number(true),
   new MyBadPrimitive(),
   Symbol(),
@@ -139,3 +139,6 @@ throws(() => {
     code: 'ERR_OUT_OF_RANGE',
   })
 );
+
+// Invalid encoding is allowed
+Buffer.from('asd', 1);

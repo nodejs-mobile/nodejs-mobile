@@ -7,11 +7,15 @@
 #include <iomanip>
 
 #include "src/compiler/js-heap-broker.h"
-#include "src/handles/handles-inl.h"
+#include "src/numbers/conversions-inl.h"
+#include "src/objects/elements-kind.h"
 #include "src/objects/instance-type.h"
-#include "src/objects/objects-inl.h"
 #include "src/objects/turbofan-types.h"
 #include "src/utils/ostreams.h"
+
+#ifdef V8_ENABLE_WEBASSEMBLY
+#include "src/wasm/wasm-subtyping.h"
+#endif
 
 namespace v8 {
 namespace internal {
@@ -132,55 +136,62 @@ Type::bitset Type::BitsetLub() const {
   }
   if (IsRange()) return AsRange()->Lub();
   if (IsTuple()) return BitsetType::kOtherInternal;
+#if V8_ENABLE_WEBASSEMBLY
+  if (IsWasm()) return static_cast<const WasmType*>(ToTypeBase())->Lub();
+#endif
   UNREACHABLE();
 }
 
 // TODO(neis): Once the broker mode kDisabled is gone, change the input type to
 // MapRef and get rid of the HeapObjectType class.
 template <typename MapRefLike>
-Type::bitset BitsetType::Lub(const MapRefLike& map) {
+Type::bitset BitsetType::Lub(MapRefLike map, JSHeapBroker* broker) {
   switch (map.instance_type()) {
-    case CONS_STRING_TYPE:
+    case CONS_TWO_BYTE_STRING_TYPE:
     case CONS_ONE_BYTE_STRING_TYPE:
-    case THIN_STRING_TYPE:
+    case THIN_TWO_BYTE_STRING_TYPE:
     case THIN_ONE_BYTE_STRING_TYPE:
-    case SLICED_STRING_TYPE:
+    case SLICED_TWO_BYTE_STRING_TYPE:
     case SLICED_ONE_BYTE_STRING_TYPE:
-    case EXTERNAL_STRING_TYPE:
+    case EXTERNAL_TWO_BYTE_STRING_TYPE:
     case EXTERNAL_ONE_BYTE_STRING_TYPE:
-    case UNCACHED_EXTERNAL_STRING_TYPE:
+    case UNCACHED_EXTERNAL_TWO_BYTE_STRING_TYPE:
     case UNCACHED_EXTERNAL_ONE_BYTE_STRING_TYPE:
-    case STRING_TYPE:
-    case ONE_BYTE_STRING_TYPE:
+    case SEQ_TWO_BYTE_STRING_TYPE:
+    case SEQ_ONE_BYTE_STRING_TYPE:
+    case SHARED_SEQ_TWO_BYTE_STRING_TYPE:
+    case SHARED_SEQ_ONE_BYTE_STRING_TYPE:
+    case SHARED_EXTERNAL_TWO_BYTE_STRING_TYPE:
+    case SHARED_EXTERNAL_ONE_BYTE_STRING_TYPE:
+    case SHARED_UNCACHED_EXTERNAL_TWO_BYTE_STRING_TYPE:
+    case SHARED_UNCACHED_EXTERNAL_ONE_BYTE_STRING_TYPE:
       return kString;
-    case EXTERNAL_INTERNALIZED_STRING_TYPE:
-    case EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE:
-    case UNCACHED_EXTERNAL_INTERNALIZED_STRING_TYPE:
-    case UNCACHED_EXTERNAL_ONE_BYTE_INTERNALIZED_STRING_TYPE:
-    case INTERNALIZED_STRING_TYPE:
-    case ONE_BYTE_INTERNALIZED_STRING_TYPE:
+    case EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE:
+    case EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE:
+    case UNCACHED_EXTERNAL_INTERNALIZED_TWO_BYTE_STRING_TYPE:
+    case UNCACHED_EXTERNAL_INTERNALIZED_ONE_BYTE_STRING_TYPE:
+    case INTERNALIZED_TWO_BYTE_STRING_TYPE:
+    case INTERNALIZED_ONE_BYTE_STRING_TYPE:
       return kInternalizedString;
     case SYMBOL_TYPE:
       return kSymbol;
     case BIGINT_TYPE:
       return kBigInt;
     case ODDBALL_TYPE:
-      switch (map.oddball_type()) {
+      switch (map.oddball_type(broker)) {
         case OddballType::kNone:
           break;
-        case OddballType::kHole:
-          return kHole;
         case OddballType::kBoolean:
           return kBoolean;
         case OddballType::kNull:
           return kNull;
         case OddballType::kUndefined:
           return kUndefined;
-        case OddballType::kUninitialized:
-        case OddballType::kOther:
-          // TODO(neis): We should add a kOtherOddball type.
-          return kOtherInternal;
       }
+      UNREACHABLE();
+    case HOLE_TYPE:
+      // Holes have a single map and we should have distinguished them earlier
+      // by pointer comparison on the value.
       UNREACHABLE();
     case HEAP_NUMBER_TYPE:
       return kNumber;
@@ -216,7 +227,16 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
       return kOtherObject;
     case JS_ARRAY_TYPE:
       return kArray;
-    case JS_PRIMITIVE_WRAPPER_TYPE:
+    case JS_PRIMITIVE_WRAPPER_TYPE: {
+      DCHECK(!map.is_callable());
+      DCHECK(!map.is_undetectable());
+      auto elements_kind = map.elements_kind();
+      if (elements_kind == ElementsKind::FAST_STRING_WRAPPER_ELEMENTS ||
+          elements_kind == ElementsKind::SLOW_STRING_WRAPPER_ELEMENTS) {
+        return kStringWrapper;
+      }
+      return kOtherObject;
+    }
     case JS_MESSAGE_OBJECT_TYPE:
     case JS_DATE_TYPE:
 #ifdef V8_INTL_SUPPORT
@@ -224,6 +244,7 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case JS_COLLATOR_TYPE:
     case JS_DATE_TIME_FORMAT_TYPE:
     case JS_DISPLAY_NAMES_TYPE:
+    case JS_DURATION_FORMAT_TYPE:
     case JS_LIST_FORMAT_TYPE:
     case JS_LOCALE_TYPE:
     case JS_NUMBER_FORMAT_TYPE:
@@ -244,6 +265,7 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case JS_REG_EXP_STRING_ITERATOR_TYPE:
     case JS_TYPED_ARRAY_TYPE:
     case JS_DATA_VIEW_TYPE:
+    case JS_RAB_GSAB_DATA_VIEW_TYPE:
     case JS_SET_TYPE:
     case JS_MAP_TYPE:
     case JS_SET_KEY_VALUE_ITERATOR_TYPE:
@@ -253,13 +275,22 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case JS_MAP_VALUE_ITERATOR_TYPE:
     case JS_STRING_ITERATOR_TYPE:
     case JS_ASYNC_FROM_SYNC_ITERATOR_TYPE:
+    case JS_ITERATOR_MAP_HELPER_TYPE:
+    case JS_ITERATOR_FILTER_HELPER_TYPE:
+    case JS_ITERATOR_TAKE_HELPER_TYPE:
+    case JS_ITERATOR_DROP_HELPER_TYPE:
+    case JS_ITERATOR_FLAT_MAP_HELPER_TYPE:
+    case JS_VALID_ITERATOR_WRAPPER_TYPE:
     case JS_FINALIZATION_REGISTRY_TYPE:
     case JS_WEAK_MAP_TYPE:
     case JS_WEAK_REF_TYPE:
     case JS_WEAK_SET_TYPE:
     case JS_PROMISE_TYPE:
     case JS_SHADOW_REALM_TYPE:
+    case JS_SHARED_ARRAY_TYPE:
     case JS_SHARED_STRUCT_TYPE:
+    case JS_ATOMICS_CONDITION_TYPE:
+    case JS_ATOMICS_MUTEX_TYPE:
     case JS_TEMPORAL_CALENDAR_TYPE:
     case JS_TEMPORAL_DURATION_TYPE:
     case JS_TEMPORAL_INSTANT_TYPE:
@@ -270,22 +301,27 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case JS_TEMPORAL_PLAIN_YEAR_MONTH_TYPE:
     case JS_TEMPORAL_TIME_ZONE_TYPE:
     case JS_TEMPORAL_ZONED_DATE_TIME_TYPE:
+    case JS_RAW_JSON_TYPE:
 #if V8_ENABLE_WEBASSEMBLY
-    case WASM_ARRAY_TYPE:
     case WASM_GLOBAL_OBJECT_TYPE:
     case WASM_INSTANCE_OBJECT_TYPE:
     case WASM_MEMORY_OBJECT_TYPE:
     case WASM_MODULE_OBJECT_TYPE:
-    case WASM_STRUCT_TYPE:
     case WASM_SUSPENDER_OBJECT_TYPE:
     case WASM_TABLE_OBJECT_TYPE:
     case WASM_TAG_OBJECT_TYPE:
+    case WASM_EXCEPTION_PACKAGE_TYPE:
     case WASM_VALUE_OBJECT_TYPE:
 #endif  // V8_ENABLE_WEBASSEMBLY
     case WEAK_CELL_TYPE:
       DCHECK(!map.is_callable());
       DCHECK(!map.is_undetectable());
       return kOtherObject;
+#if V8_ENABLE_WEBASSEMBLY
+    case WASM_STRUCT_TYPE:
+    case WASM_ARRAY_TYPE:
+      return kWasmObject;
+#endif  // V8_ENABLE_WEBASSEMBLY
     case JS_BOUND_FUNCTION_TYPE:
       DCHECK(!map.is_undetectable());
       return kBoundFunction;
@@ -317,6 +353,7 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case ACCESSOR_PAIR_TYPE:
     case EMBEDDER_DATA_ARRAY_TYPE:
     case FIXED_ARRAY_TYPE:
+    case CLASS_BOILERPLATE_TYPE:
     case PROPERTY_DESCRIPTOR_OBJECT_TYPE:
     case HASH_TABLE_TYPE:
     case ORDERED_HASH_MAP_TYPE:
@@ -356,9 +393,10 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
     case SCRIPT_CONTEXT_TYPE:
     case WITH_CONTEXT_TYPE:
     case SCRIPT_TYPE:
+    case INSTRUCTION_STREAM_TYPE:
     case CODE_TYPE:
-    case CODE_DATA_CONTAINER_TYPE:
     case PROPERTY_CELL_TYPE:
+    case CONST_TRACKING_LET_CELL_TYPE:
     case SOURCE_TEXT_MODULE_TYPE:
     case SOURCE_TEXT_MODULE_INFO_ENTRY_TYPE:
     case SYNTHETIC_MODULE_TYPE:
@@ -381,7 +419,7 @@ Type::bitset BitsetType::Lub(const MapRefLike& map) {
 }
 
 // Explicit instantiation.
-template Type::bitset BitsetType::Lub<MapRef>(const MapRef& map);
+template Type::bitset BitsetType::Lub<MapRef>(MapRef map, JSHeapBroker* broker);
 
 Type::bitset BitsetType::Lub(double value) {
   DisallowGarbageCollection no_gc;
@@ -497,7 +535,7 @@ bool OtherNumberConstantType::IsOtherNumberConstant(double value) {
 }
 
 HeapConstantType::HeapConstantType(BitsetType::bitset bitset,
-                                   const HeapObjectRef& heap_ref)
+                                   HeapObjectRef heap_ref)
     : TypeBase(kHeapConstant), bitset_(bitset), heap_ref_(heap_ref) {}
 
 Handle<HeapObject> HeapConstantType::Value() const {
@@ -571,6 +609,16 @@ bool Type::SlowIs(Type that) const {
     return this->IsRange() && Contains(that.AsRange(), this->AsRange());
   }
   if (this->IsRange()) return false;
+
+#ifdef V8_ENABLE_WEBASSEMBLY
+  if (this->IsWasm()) {
+    if (!that.IsWasm()) return false;
+    wasm::TypeInModule this_type = this->AsWasm();
+    wasm::TypeInModule that_type = that.AsWasm();
+    return wasm::IsSubtypeOf(this_type.type, that_type.type, this_type.module,
+                             that_type.module);
+  }
+#endif
 
   return this->SimplyEquals(that);
 }
@@ -867,6 +915,10 @@ Type Type::Constant(JSHeapBroker* broker, Handle<i::Object> value, Zone* zone) {
   // consider having the graph store ObjectRefs or ObjectData pointer instead,
   // which would make new ref construction here unnecessary.
   ObjectRef ref = MakeRefAssumeMemoryFence(broker, value);
+  return Constant(broker, ref, zone);
+}
+
+Type Type::Constant(JSHeapBroker* broker, ObjectRef ref, Zone* zone) {
   if (ref.IsSmi()) {
     return Constant(static_cast<double>(ref.AsSmi()), zone);
   }
@@ -876,7 +928,14 @@ Type Type::Constant(JSHeapBroker* broker, Handle<i::Object> value, Zone* zone) {
   if (ref.IsString() && !ref.IsInternalizedString()) {
     return Type::String();
   }
-  return HeapConstant(ref.AsHeapObject(), zone);
+  if (ref.IsJSPrimitiveWrapper() &&
+      ref.AsJSPrimitiveWrapper().IsStringWrapper(broker)) {
+    return Type::StringWrapper();
+  }
+  if (ref.HoleType() != HoleType::kNone) {
+    return Type::Hole();
+  }
+  return HeapConstant(ref.AsHeapObject(), broker, zone);
 }
 
 Type Type::Union(Type type1, Type type2, Zone* zone) {
@@ -1062,6 +1121,10 @@ void Type::PrintTo(std::ostream& os) const {
       os << type_i;
     }
     os << ">";
+#ifdef V8_ENABLE_WEBASSEMBLY
+  } else if (this->IsWasm()) {
+    os << "Wasm:" << this->AsWasm().type.name();
+#endif
   } else {
     UNREACHABLE();
   }
@@ -1097,16 +1160,25 @@ Type Type::Tuple(Type first, Type second, Type third, Zone* zone) {
   return FromTypeBase(tuple);
 }
 
+Type Type::Tuple(Type first, Type second, Zone* zone) {
+  TupleType* tuple = TupleType::New(2, zone);
+  tuple->InitElement(0, first);
+  tuple->InitElement(1, second);
+  return FromTypeBase(tuple);
+}
+
 // static
 Type Type::OtherNumberConstant(double value, Zone* zone) {
   return FromTypeBase(OtherNumberConstantType::New(value, zone));
 }
 
 // static
-Type Type::HeapConstant(const HeapObjectRef& value, Zone* zone) {
+Type Type::HeapConstant(HeapObjectRef value, JSHeapBroker* broker, Zone* zone) {
   DCHECK(!value.IsHeapNumber());
+  DCHECK_EQ(value.HoleType(), HoleType::kNone);
   DCHECK_IMPLIES(value.IsString(), value.IsInternalizedString());
-  BitsetType::bitset bitset = BitsetType::Lub(value.GetHeapObjectType());
+  BitsetType::bitset bitset =
+      BitsetType::Lub(value.GetHeapObjectType(broker), broker);
   if (Type(bitset).IsSingleton()) return Type(bitset);
   return HeapConstantType::New(value, bitset, zone);
 }
@@ -1146,6 +1218,25 @@ const UnionType* Type::AsUnion() const {
   return static_cast<const UnionType*>(ToTypeBase());
 }
 
+#ifdef V8_ENABLE_WEBASSEMBLY
+// static
+Type Type::Wasm(wasm::ValueType value_type, const wasm::WasmModule* module,
+                Zone* zone) {
+  return FromTypeBase(WasmType::New(value_type, module, zone));
+}
+
+// static
+Type Type::Wasm(wasm::TypeInModule type_in_module, Zone* zone) {
+  return Wasm(type_in_module.type, type_in_module.module, zone);
+}
+
+wasm::TypeInModule Type::AsWasm() const {
+  DCHECK(IsKind(TypeBase::kWasm));
+  auto wasm_type = static_cast<const WasmType*>(ToTypeBase());
+  return {wasm_type->value_type(), wasm_type->module()};
+}
+#endif
+
 std::ostream& operator<<(std::ostream& os, Type type) {
   type.PrintTo(os);
   return os;
@@ -1183,10 +1274,10 @@ Handle<TurbofanType> Type::AllocateOnHeap(Factory* factory) {
 }
 
 #define VERIFY_TORQUE_LOW_BITSET_AGREEMENT(Name, _)           \
-  STATIC_ASSERT(static_cast<uint32_t>(BitsetType::k##Name) == \
+  static_assert(static_cast<uint32_t>(BitsetType::k##Name) == \
                 static_cast<uint32_t>(TurbofanTypeLowBits::k##Name));
 #define VERIFY_TORQUE_HIGH_BITSET_AGREEMENT(Name, _)                     \
-  STATIC_ASSERT(static_cast<uint32_t>(                                   \
+  static_assert(static_cast<uint32_t>(                                   \
                     static_cast<uint64_t>(BitsetType::k##Name) >> 32) == \
                 static_cast<uint32_t>(TurbofanTypeHighBits::k##Name));
 INTERNAL_BITSET_TYPE_LIST(VERIFY_TORQUE_LOW_BITSET_AGREEMENT)

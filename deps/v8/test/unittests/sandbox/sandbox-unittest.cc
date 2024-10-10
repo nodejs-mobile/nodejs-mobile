@@ -9,7 +9,7 @@
 #include "src/base/virtual-address-space.h"
 #include "test/unittests/test-utils.h"
 
-#ifdef V8_SANDBOX_IS_AVAILABLE
+#ifdef V8_ENABLE_SANDBOX
 
 namespace v8 {
 namespace internal {
@@ -20,11 +20,10 @@ TEST(SandboxTest, Initialization) {
   Sandbox sandbox;
 
   EXPECT_FALSE(sandbox.is_initialized());
-  EXPECT_FALSE(sandbox.is_disabled());
   EXPECT_FALSE(sandbox.is_partially_reserved());
   EXPECT_EQ(sandbox.size(), 0UL);
 
-  EXPECT_TRUE(sandbox.Initialize(&vas));
+  sandbox.Initialize(&vas);
 
   EXPECT_TRUE(sandbox.is_initialized());
   EXPECT_NE(sandbox.base(), 0UL);
@@ -41,9 +40,9 @@ TEST(SandboxTest, InitializationWithSize) {
   if (!vas.CanAllocateSubspaces()) return;
 
   Sandbox sandbox;
-  size_t size = kSandboxMinimumSize;
+  size_t size = 8ULL * GB;
   const bool use_guard_regions = false;
-  EXPECT_TRUE(sandbox.Initialize(&vas, size, use_guard_regions));
+  sandbox.Initialize(&vas, size, use_guard_regions);
 
   EXPECT_TRUE(sandbox.is_initialized());
   EXPECT_FALSE(sandbox.is_partially_reserved());
@@ -52,7 +51,7 @@ TEST(SandboxTest, InitializationWithSize) {
   sandbox.TearDown();
 }
 
-TEST(SandboxTest, PartiallyReservedSandboxInitialization) {
+TEST(SandboxTest, PartiallyReservedSandbox) {
   base::VirtualAddressSpace vas;
   Sandbox sandbox;
   // Total size of the sandbox.
@@ -67,6 +66,12 @@ TEST(SandboxTest, PartiallyReservedSandboxInitialization) {
   EXPECT_TRUE(sandbox.is_partially_reserved());
   EXPECT_NE(sandbox.base(), 0UL);
   EXPECT_EQ(sandbox.size(), size);
+  EXPECT_EQ(sandbox.reservation_size(), reserved_size);
+
+  EXPECT_FALSE(sandbox.ReservationContains(sandbox.base() - 1));
+  EXPECT_TRUE(sandbox.ReservationContains(sandbox.base()));
+  EXPECT_TRUE(sandbox.ReservationContains(sandbox.base() + reserved_size - 1));
+  EXPECT_FALSE(sandbox.ReservationContains(sandbox.base() + reserved_size));
 
   sandbox.TearDown();
 
@@ -76,32 +81,54 @@ TEST(SandboxTest, PartiallyReservedSandboxInitialization) {
 TEST(SandboxTest, Contains) {
   base::VirtualAddressSpace vas;
   Sandbox sandbox;
-  EXPECT_TRUE(sandbox.Initialize(&vas));
+  sandbox.Initialize(&vas);
 
   Address base = sandbox.base();
   size_t size = sandbox.size();
-  base::RandomNumberGenerator rng(::testing::FLAGS_gtest_random_seed);
+  base::RandomNumberGenerator rng(GTEST_FLAG_GET(random_seed));
 
   EXPECT_TRUE(sandbox.Contains(base));
   EXPECT_TRUE(sandbox.Contains(base + size - 1));
+
+  EXPECT_TRUE(sandbox.ReservationContains(base));
+  EXPECT_TRUE(sandbox.ReservationContains(base + size - 1));
+
   for (int i = 0; i < 10; i++) {
     size_t offset = rng.NextInt64() % size;
     EXPECT_TRUE(sandbox.Contains(base + offset));
+    EXPECT_TRUE(sandbox.ReservationContains(base + offset));
   }
 
   EXPECT_FALSE(sandbox.Contains(base - 1));
   EXPECT_FALSE(sandbox.Contains(base + size));
+
+  // ReservationContains also takes the guard regions into account.
+  EXPECT_TRUE(sandbox.ReservationContains(base - 1));
+  EXPECT_TRUE(sandbox.ReservationContains(base - kSandboxGuardRegionSize));
+  EXPECT_TRUE(sandbox.ReservationContains(base + size));
+  EXPECT_FALSE(sandbox.ReservationContains(base - kSandboxGuardRegionSize - 1));
+  EXPECT_FALSE(
+      sandbox.ReservationContains(base + size + kSandboxGuardRegionSize));
+
   for (int i = 0; i < 10; i++) {
     Address addr = rng.NextInt64();
     if (addr < base || addr >= base + size) {
       EXPECT_FALSE(sandbox.Contains(addr));
+    }
+    if (addr < base - kSandboxGuardRegionSize ||
+        addr >= base + size + kSandboxGuardRegionSize) {
+      EXPECT_FALSE(sandbox.ReservationContains(addr));
     }
   }
 
   sandbox.TearDown();
 }
 
-void TestPageAllocationInSandbox(Sandbox& sandbox) {
+TEST(SandboxTest, PageAllocation) {
+  base::VirtualAddressSpace root_vas;
+  Sandbox sandbox;
+  sandbox.Initialize(&root_vas);
+
   const size_t kAllocatinSizesInPages[] = {1, 1, 2, 3, 5, 8, 13, 21, 34};
   constexpr int kNumAllocations = arraysize(kAllocatinSizesInPages);
 
@@ -122,29 +149,6 @@ void TestPageAllocationInSandbox(Sandbox& sandbox) {
     size_t length = allocation_granularity * kAllocatinSizesInPages[i];
     vas->FreePages(allocations[i], length);
   }
-}
-
-TEST(SandboxTest, PageAllocation) {
-  base::VirtualAddressSpace vas;
-  Sandbox sandbox;
-  EXPECT_TRUE(sandbox.Initialize(&vas));
-
-  TestPageAllocationInSandbox(sandbox);
-
-  sandbox.TearDown();
-}
-
-TEST(SandboxTest, PartiallyReservedSandboxPageAllocation) {
-  base::VirtualAddressSpace vas;
-  Sandbox sandbox;
-  size_t size = kSandboxSize;
-  // Only reserve two pages so the test will allocate memory inside and outside
-  // of the reserved region.
-  size_t reserved_size = 2 * vas.allocation_granularity();
-  EXPECT_TRUE(
-      sandbox.InitializeAsPartiallyReservedSandbox(&vas, size, reserved_size));
-
-  TestPageAllocationInSandbox(sandbox);
 
   sandbox.TearDown();
 }
@@ -152,4 +156,4 @@ TEST(SandboxTest, PartiallyReservedSandboxPageAllocation) {
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_SANDBOX_IS_AVAILABLE
+#endif  // V8_ENABLE_SANDBOX

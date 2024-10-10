@@ -343,7 +343,10 @@ let workerHelpers = assertTrue.toString() + assertIsWasmSharedMemory.toString();
   assertEquals(0xACED, instance.exports.atomic_load(0));
   assertEquals(0xACED, instance.exports.atomic_load(5 * kPageSize - 4));
   // Verify bounds.
-  assertTraps(kTrapMemOutOfBounds,
+  // If an underlying platform uses traps for a bounds check,
+  // kTrapUnalignedAccess will be thrown before kTrapMemOutOfBounds.
+  // Otherwise, kTrapMemOutOfBounds will be first.
+  assertTrapsOneOf([kTrapMemOutOfBounds, kTrapUnalignedAccess],
       () => instance.exports.atomic_load(5 * kPageSize - 3));
   let obj = {memory: memory, module: module};
   assertEquals(obj.memory.buffer.byteLength, 5 * kPageSize);
@@ -358,11 +361,11 @@ let workerHelpers = assertTrue.toString() + assertIsWasmSharedMemory.toString();
   assertTrue(0xACED === instance.exports.atomic_load(5 * kPageSize - 4));
   assertTrue(0xACED === instance.exports.atomic_load(15 * kPageSize - 4));
   assertTrue(0xACED === instance.exports.atomic_load(17 * kPageSize - 4));
-  assertTraps(kTrapMemOutOfBounds,
+  assertTrapsOneOf([kTrapMemOutOfBounds, kTrapUnalignedAccess],
       () => instance.exports.atomic_load(19 * kPageSize - 3));
   assertEquals(19, memory.grow(6));
   assertEquals(obj.memory.buffer.byteLength, 25 * kPageSize);
-  assertTraps(kTrapMemOutOfBounds,
+  assertTrapsOneOf([kTrapMemOutOfBounds, kTrapUnalignedAccess],
       () => instance.exports.atomic_load(25 * kPageSize - 3));
 })();
 
@@ -409,7 +412,7 @@ let workerHelpers = assertTrue.toString() + assertIsWasmSharedMemory.toString();
       kExprLoop, kWasmVoid,
         ...wasmI32Const(sync_index),
         ...wasmI32Const(sync_value),
-        kAtomicPrefix, kExprI32AtomicStore, 0, 0,
+        kAtomicPrefix, kExprI32AtomicStore, 2, 0,
         kExprMemorySize, 0, kExprLocalTee, 0,
         kExprI32Const, initial_size,
         kExprI32Eq,
@@ -420,11 +423,11 @@ let workerHelpers = assertTrue.toString() + assertIsWasmSharedMemory.toString();
 
   builder.addFunction("setter", kSig_v_ii)
       .addBody([kExprLocalGet, 0, kExprLocalGet, 1,
-                kAtomicPrefix, kExprI32AtomicStore, 0, 0])
+                kAtomicPrefix, kExprI32AtomicStore, 2, 0])
       .exportFunc();
 
   builder.addFunction("getter", kSig_i_i)
-      .addBody([kExprLocalGet, 0, kAtomicPrefix, kExprI32AtomicLoad, 0, 0])
+      .addBody([kExprLocalGet, 0, kAtomicPrefix, kExprI32AtomicLoad, 2, 0])
       .exportFunc();
 
   let module = new WebAssembly.Module(builder.toBuffer());

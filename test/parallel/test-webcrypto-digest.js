@@ -7,7 +7,7 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const { Buffer } = require('buffer');
-const { subtle } = require('crypto').webcrypto;
+const { subtle } = globalThis.crypto;
 const { createHash } = require('crypto');
 
 const kTests = [
@@ -156,7 +156,7 @@ async function testDigest(size, name) {
     Object.keys(kDigestedData).forEach((alg) => {
       const upCase = alg.toUpperCase();
       const downCase = alg.toLowerCase();
-      const mixedCase = upCase.substr(0, 1) + downCase.substr(1);
+      const mixedCase = upCase.slice(0, 1) + downCase.slice(1);
 
       variations.push(testDigest(size, upCase));
       variations.push(testDigest(size, downCase));
