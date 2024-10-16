@@ -681,7 +681,7 @@
           ['clang==1', {
             'xcode_settings': {
               'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-              'CLANG_CXX_LANGUAGE_STANDARD': 'gnu++17',  # -std=gnu++17
+              'CLANG_CXX_LANGUAGE_STANDARD': 'gnu++20',  # -std=gnu++20
               'CLANG_CXX_LIBRARY': 'libc++',
             },
           }],
@@ -750,7 +750,7 @@
           ['clang==1', {
             'xcode_settings': {
               'GCC_VERSION': 'com.apple.compilers.llvm.clang.1_0',
-              'CLANG_CXX_LANGUAGE_STANDARD': 'gnu++17',  # -std=gnu++17
+              'CLANG_CXX_LANGUAGE_STANDARD': 'gnu++20',  # -std=gnu++20
               'CLANG_CXX_LIBRARY': 'libc++',
             },
           }],
