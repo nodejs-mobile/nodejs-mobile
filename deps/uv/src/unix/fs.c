@@ -968,7 +968,7 @@ static ssize_t uv__fs_sendfile(uv_fs_t* req) {
 // nodejs-mobile patch: add `!TARGET_OS_IPHONE`
 #elif (defined(__APPLE__) && !TARGET_OS_IPHONE) || \
       defined(__DragonFly__)       || \
-      defined(__FreeBSD__)         || \
+      defined(__FreeBSD__)
   {
     off_t len;
     ssize_t r;
