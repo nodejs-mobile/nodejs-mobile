@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --expose-gc --experimental-wasm-gc
+// Flags: --allow-natives-syntax --expose-gc
 
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
@@ -38,10 +38,10 @@ var instance = (function () {
       ...wasmI32Const(7), ...wasmI32Const(9), ...wasmI32Const(11),
       ...wasmI32Const(13),
       // Two structs (i.e. actual tagged pointers).
-      ...wasmI32Const(20), kGCPrefix, kExprRttCanon, struct_index,
-      kGCPrefix, kExprStructNewWithRtt, struct_index,
-      ...wasmI32Const(22), kGCPrefix, kExprRttCanon, struct_index,
-      kGCPrefix, kExprStructNewWithRtt, struct_index,
+      ...wasmI32Const(20),
+      kGCPrefix, kExprStructNew, struct_index,
+      ...wasmI32Const(22),
+      kGCPrefix, kExprStructNew, struct_index,
       kExprCallFunction, many_params.index,
     ])
     .exportFunc();

@@ -4,6 +4,7 @@
 #include "debug_utils-inl.h"
 #include "env-inl.h"
 #include "memory_tracker-inl.h"
+#include "ncrypto.h"
 #include "threadpoolwork-inl.h"
 #include "v8.h"
 
@@ -13,9 +14,10 @@ namespace node {
 
 using v8::FunctionCallbackInfo;
 using v8::Int32;
-using v8::Just;
+using v8::JustVoid;
 using v8::Local;
 using v8::Maybe;
+using v8::MaybeLocal;
 using v8::Object;
 using v8::Uint32;
 using v8::Value;
@@ -30,7 +32,7 @@ namespace crypto {
 //   6. Private Type
 //   7. Cipher
 //   8. Passphrase
-Maybe<bool> NidKeyPairGenTraits::AdditionalConfig(
+Maybe<void> NidKeyPairGenTraits::AdditionalConfig(
     CryptoJobMode mode,
     const FunctionCallbackInfo<Value>& args,
     unsigned int* offset,
@@ -40,7 +42,7 @@ Maybe<bool> NidKeyPairGenTraits::AdditionalConfig(
 
   *offset += 1;
 
-  return Just(true);
+  return JustVoid();
 }
 
 EVPKeyCtxPointer NidKeyPairGenTraits::Setup(NidKeyPairGenConfig* params) {
@@ -53,47 +55,38 @@ EVPKeyCtxPointer NidKeyPairGenTraits::Setup(NidKeyPairGenConfig* params) {
 }
 
 void SecretKeyGenConfig::MemoryInfo(MemoryTracker* tracker) const {
-  if (out != nullptr)
-    tracker->TrackFieldWithSize("out", length);
+  if (out) tracker->TrackFieldWithSize("out", length);
 }
 
-Maybe<bool> SecretKeyGenTraits::AdditionalConfig(
+Maybe<void> SecretKeyGenTraits::AdditionalConfig(
     CryptoJobMode mode,
     const FunctionCallbackInfo<Value>& args,
     unsigned int* offset,
     SecretKeyGenConfig* params) {
   CHECK(args[*offset]->IsUint32());
   uint32_t bits = args[*offset].As<Uint32>()->Value();
-  static_assert(std::numeric_limits<decltype(bits)>::max() / CHAR_BIT <=
-                INT_MAX);
   params->length = bits / CHAR_BIT;
   *offset += 1;
-  return Just(true);
+  return JustVoid();
 }
 
-KeyGenJobStatus SecretKeyGenTraits::DoKeyGen(
-    Environment* env,
-    SecretKeyGenConfig* params) {
-  CHECK_LE(params->length, INT_MAX);
-  params->out = MallocOpenSSL<char>(params->length);
-  if (CSPRNG(reinterpret_cast<unsigned char*>(params->out),
-             params->length).is_err()) {
-    OPENSSL_clear_free(params->out, params->length);
-    params->out = nullptr;
-    params->length = 0;
+KeyGenJobStatus SecretKeyGenTraits::DoKeyGen(Environment* env,
+                                             SecretKeyGenConfig* params) {
+  ByteSource::Builder bytes(params->length);
+  if (!ncrypto::CSPRNG(bytes.data<unsigned char>(), params->length))
     return KeyGenJobStatus::FAILED;
-  }
+  params->out = std::move(bytes).release();
   return KeyGenJobStatus::OK;
 }
 
-Maybe<bool> SecretKeyGenTraits::EncodeKey(
-    Environment* env,
-    SecretKeyGenConfig* params,
-    Local<Value>* result) {
-  ByteSource out = ByteSource::Allocated(params->out, params->length);
-  std::shared_ptr<KeyObjectData> data =
-      KeyObjectData::CreateSecret(std::move(out));
-  return Just(KeyObjectHandle::Create(env, data).ToLocal(result));
+MaybeLocal<Value> SecretKeyGenTraits::EncodeKey(Environment* env,
+                                                SecretKeyGenConfig* params) {
+  auto data = KeyObjectData::CreateSecret(std::move(params->out));
+  Local<Value> ret;
+  if (!KeyObjectHandle::Create(env, data).ToLocal(&ret)) {
+    return MaybeLocal<Value>();
+  }
+  return ret;
 }
 
 namespace Keygen {

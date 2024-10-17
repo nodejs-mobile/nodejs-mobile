@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/codegen/cpu-features.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/swiss-name-dictionary-inl.h"
-#include "test/cctest/compiler/code-assembler-tester.h"
 #include "test/cctest/compiler/function-tester.h"
 #include "test/cctest/test-swiss-name-dictionary-infra.h"
 #include "test/cctest/test-swiss-name-dictionary-shared-tests.h"
+#include "test/common/code-assembler-tester.h"
 
 namespace v8 {
 namespace internal {
@@ -134,8 +134,8 @@ void CSATestRunner::Add(Handle<Name> key, Handle<Object> value,
       SwissNameDictionary::Add(isolate_, reference_, key, value, details);
 
   Handle<Smi> details_smi = handle(details.AsSmi(), isolate_);
-  Handle<Oddball> success =
-      add_ft_.CallChecked<Oddball>(table, key, value, details_smi);
+  Handle<Boolean> success =
+      add_ft_.CallChecked<Boolean>(table, key, value, details_smi);
 
   if (*success == roots.false_value()) {
     // |add_ft_| does not resize and indicates the need to do so by returning
@@ -155,7 +155,7 @@ void CSATestRunner::Allocate(Handle<Smi> capacity) {
   // We must handle |capacity| == 0 specially, because
   // AllocateSwissNameDictionary (just like AllocateNameDictionary) always
   // returns a non-zero sized table.
-  if (capacity->value() == 0) {
+  if ((*capacity).value() == 0) {
     table = ReadOnlyRoots(isolate_).empty_swiss_property_dictionary_handle();
   } else {
     table = allocate_ft_.CallChecked<SwissNameDictionary>(capacity);
@@ -165,11 +165,11 @@ void CSATestRunner::Allocate(Handle<Smi> capacity) {
 }
 
 InternalIndex CSATestRunner::FindEntry(Handle<Name> key) {
-  Handle<Smi> index = find_entry_ft_.CallChecked<Smi>(table, key);
-  if (index->value() == SwissNameDictionary::kNotFoundSentinel) {
+  Tagged<Smi> index = *find_entry_ft_.CallChecked<Smi>(table, key);
+  if (index.value() == SwissNameDictionary::kNotFoundSentinel) {
     return InternalIndex::NotFound();
   } else {
-    return InternalIndex(index->value());
+    return InternalIndex(index.value());
   }
 }
 
@@ -266,11 +266,11 @@ Handle<Code> CSATestRunner::create_find_entry(Isolate* isolate) {
   // TODO(v8:11330): Remove once CSA implementation has a fallback for
   // non-SSSE3/AVX configurations.
   if (!IsEnabled()) {
-    return FromCodeT(isolate->builtins()->code_handle(Builtin::kIllegal),
-                     isolate);
+    return isolate->builtins()->code_handle(Builtin::kIllegal);
   }
-  STATIC_ASSERT(kFindEntryParams == 2);  // (table, key)
-  compiler::CodeAssemblerTester asm_tester(isolate, kFindEntryParams + 1);
+  static_assert(kFindEntryParams == 2);  // (table, key)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kFindEntryParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -292,8 +292,9 @@ Handle<Code> CSATestRunner::create_find_entry(Isolate* isolate) {
 }
 
 Handle<Code> CSATestRunner::create_get_data(Isolate* isolate) {
-  STATIC_ASSERT(kGetDataParams == 2);  // (table, entry)
-  compiler::CodeAssemblerTester asm_tester(isolate, kGetDataParams + 1);
+  static_assert(kGetDataParams == 2);  // (table, entry)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kGetDataParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -315,8 +316,9 @@ Handle<Code> CSATestRunner::create_get_data(Isolate* isolate) {
 }
 
 Handle<Code> CSATestRunner::create_put(Isolate* isolate) {
-  STATIC_ASSERT(kPutParams == 4);  // (table, entry, value, details)
-  compiler::CodeAssemblerTester asm_tester(isolate, kPutParams + 1);
+  static_assert(kPutParams == 4);  // (table, entry, value, details)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kPutParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -339,11 +341,11 @@ Handle<Code> CSATestRunner::create_delete(Isolate* isolate) {
   // TODO(v8:11330): Remove once CSA implementation has a fallback for
   // non-SSSE3/AVX configurations.
   if (!IsEnabled()) {
-    return FromCodeT(isolate->builtins()->code_handle(Builtin::kIllegal),
-                     isolate);
+    return isolate->builtins()->code_handle(Builtin::kIllegal);
   }
-  STATIC_ASSERT(kDeleteParams == 2);  // (table, entry)
-  compiler::CodeAssemblerTester asm_tester(isolate, kDeleteParams + 1);
+  static_assert(kDeleteParams == 2);  // (table, entry)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kDeleteParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -365,11 +367,11 @@ Handle<Code> CSATestRunner::create_add(Isolate* isolate) {
   // TODO(v8:11330): Remove once CSA implementation has a fallback for
   // non-SSSE3/AVX configurations.
   if (!IsEnabled()) {
-    return FromCodeT(isolate->builtins()->code_handle(Builtin::kIllegal),
-                     isolate);
+    return isolate->builtins()->code_handle(Builtin::kIllegal);
   }
-  STATIC_ASSERT(kAddParams == 4);  // (table, key, value, details)
-  compiler::CodeAssemblerTester asm_tester(isolate, kAddParams + 1);
+  static_assert(kAddParams == 4);  // (table, key, value, details)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kAddParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -392,8 +394,9 @@ Handle<Code> CSATestRunner::create_add(Isolate* isolate) {
 }
 
 Handle<Code> CSATestRunner::create_allocate(Isolate* isolate) {
-  STATIC_ASSERT(kAllocateParams == 1);  // (capacity)
-  compiler::CodeAssemblerTester asm_tester(isolate, kAllocateParams + 1);
+  static_assert(kAllocateParams == 1);  // (capacity)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kAllocateParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<IntPtrT> capacity = m.SmiToIntPtr(m.Parameter<Smi>(1));
@@ -407,8 +410,9 @@ Handle<Code> CSATestRunner::create_allocate(Isolate* isolate) {
 }
 
 Handle<Code> CSATestRunner::create_get_counts(Isolate* isolate) {
-  STATIC_ASSERT(kGetCountsParams == 1);  // (table)
-  compiler::CodeAssemblerTester asm_tester(isolate, kGetCountsParams + 1);
+  static_assert(kGetCountsParams == 1);  // (table)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kGetCountsParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);
@@ -440,8 +444,9 @@ Handle<Code> CSATestRunner::create_get_counts(Isolate* isolate) {
 }
 
 Handle<Code> CSATestRunner::create_copy(Isolate* isolate) {
-  STATIC_ASSERT(kCopyParams == 1);  // (table)
-  compiler::CodeAssemblerTester asm_tester(isolate, kCopyParams + 1);
+  static_assert(kCopyParams == 1);  // (table)
+  compiler::CodeAssemblerTester asm_tester(isolate,
+                                           JSParameterCount(kCopyParams));
   CodeStubAssembler m(asm_tester.state());
   {
     TNode<SwissNameDictionary> table = m.Parameter<SwissNameDictionary>(1);

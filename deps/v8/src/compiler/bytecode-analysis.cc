@@ -106,48 +106,38 @@ template <Bytecode bytecode, OperandType operand_type, size_t i>
 void UpdateInLivenessForOutOperand(
     BytecodeLivenessState* in_liveness,
     const interpreter::BytecodeArrayIterator& iterator) {
-  switch (operand_type) {
-    case OperandType::kRegOut: {
-      Register r = iterator.GetRegisterOperand(i);
-      if (!r.is_parameter()) {
-        in_liveness->MarkRegisterDead(r.index());
-      }
-      break;
+  if constexpr (operand_type == OperandType::kRegOut) {
+    Register r = iterator.GetRegisterOperand(i);
+    if (!r.is_parameter()) {
+      in_liveness->MarkRegisterDead(r.index());
     }
-    case OperandType::kRegOutList: {
-      Register r = iterator.GetRegisterOperand(i);
-      uint32_t reg_count = iterator.GetRegisterCountOperand(i + 1);
-      if (!r.is_parameter()) {
-        for (uint32_t j = 0; j < reg_count; ++j) {
-          DCHECK(!Register(r.index() + j).is_parameter());
-          in_liveness->MarkRegisterDead(r.index() + j);
-        }
+  } else if constexpr (operand_type == OperandType::kRegOutList) {
+    Register r = iterator.GetRegisterOperand(i);
+    uint32_t reg_count = iterator.GetRegisterCountOperand(i + 1);
+    if (!r.is_parameter()) {
+      for (uint32_t j = 0; j < reg_count; ++j) {
+        DCHECK(!Register(r.index() + j).is_parameter());
+        in_liveness->MarkRegisterDead(r.index() + j);
       }
-      break;
     }
-    case OperandType::kRegOutPair: {
-      Register r = iterator.GetRegisterOperand(i);
-      if (!r.is_parameter()) {
-        DCHECK(!Register(r.index() + 1).is_parameter());
-        in_liveness->MarkRegisterDead(r.index());
-        in_liveness->MarkRegisterDead(r.index() + 1);
-      }
-      break;
+  } else if constexpr (operand_type == OperandType::kRegOutPair) {
+    Register r = iterator.GetRegisterOperand(i);
+    if (!r.is_parameter()) {
+      DCHECK(!Register(r.index() + 1).is_parameter());
+      in_liveness->MarkRegisterDead(r.index());
+      in_liveness->MarkRegisterDead(r.index() + 1);
     }
-    case OperandType::kRegOutTriple: {
-      Register r = iterator.GetRegisterOperand(i);
-      if (!r.is_parameter()) {
-        DCHECK(!Register(r.index() + 1).is_parameter());
-        DCHECK(!Register(r.index() + 2).is_parameter());
-        in_liveness->MarkRegisterDead(r.index());
-        in_liveness->MarkRegisterDead(r.index() + 1);
-        in_liveness->MarkRegisterDead(r.index() + 2);
-      }
-      break;
+  } else if constexpr (operand_type == OperandType::kRegOutTriple) {
+    Register r = iterator.GetRegisterOperand(i);
+    if (!r.is_parameter()) {
+      DCHECK(!Register(r.index() + 1).is_parameter());
+      DCHECK(!Register(r.index() + 2).is_parameter());
+      in_liveness->MarkRegisterDead(r.index());
+      in_liveness->MarkRegisterDead(r.index() + 1);
+      in_liveness->MarkRegisterDead(r.index() + 2);
     }
-    default:
-      DCHECK(!Bytecodes::IsRegisterOutputOperandType(operand_type));
-      break;
+  } else {
+    DCHECK(!Bytecodes::IsRegisterOutputOperandType(operand_type));
   }
 }
 
@@ -155,37 +145,29 @@ template <Bytecode bytecode, OperandType operand_type, size_t i>
 void UpdateInLivenessForInOperand(
     BytecodeLivenessState* in_liveness,
     const interpreter::BytecodeArrayIterator& iterator) {
-  switch (operand_type) {
-    case OperandType::kReg: {
-      Register r = iterator.GetRegisterOperand(i);
-      if (!r.is_parameter()) {
-        in_liveness->MarkRegisterLive(r.index());
-      }
-      break;
+  if constexpr (operand_type == OperandType::kReg) {
+    Register r = iterator.GetRegisterOperand(i);
+    if (!r.is_parameter()) {
+      in_liveness->MarkRegisterLive(r.index());
     }
-    case OperandType::kRegPair: {
-      Register r = iterator.GetRegisterOperand(i);
-      if (!r.is_parameter()) {
-        DCHECK(!Register(r.index() + 1).is_parameter());
-        in_liveness->MarkRegisterLive(r.index());
-        in_liveness->MarkRegisterLive(r.index() + 1);
-      }
-      break;
+  } else if constexpr (operand_type == OperandType::kRegPair) {
+    Register r = iterator.GetRegisterOperand(i);
+    if (!r.is_parameter()) {
+      DCHECK(!Register(r.index() + 1).is_parameter());
+      in_liveness->MarkRegisterLive(r.index());
+      in_liveness->MarkRegisterLive(r.index() + 1);
     }
-    case OperandType::kRegList: {
-      Register r = iterator.GetRegisterOperand(i);
-      uint32_t reg_count = iterator.GetRegisterCountOperand(i + 1);
-      if (!r.is_parameter()) {
-        for (uint32_t j = 0; j < reg_count; ++j) {
-          DCHECK(!interpreter::Register(r.index() + j).is_parameter());
-          in_liveness->MarkRegisterLive(r.index() + j);
-        }
+  } else if constexpr (operand_type == OperandType::kRegList) {
+    Register r = iterator.GetRegisterOperand(i);
+    uint32_t reg_count = iterator.GetRegisterCountOperand(i + 1);
+    if (!r.is_parameter()) {
+      for (uint32_t j = 0; j < reg_count; ++j) {
+        DCHECK(!interpreter::Register(r.index() + j).is_parameter());
+        in_liveness->MarkRegisterLive(r.index() + j);
       }
-      break;
     }
-    default:
-      DCHECK(!Bytecodes::IsRegisterInputOperandType(operand_type));
-      break;
+  } else {
+    DCHECK(!Bytecodes::IsRegisterInputOperandType(operand_type));
   }
 }
 
@@ -195,32 +177,35 @@ void UpdateInLiveness(BytecodeLivenessState* in_liveness,
                       const interpreter::BytecodeArrayIterator& iterator,
                       std::index_sequence<operand_index...>) {
   // Special case Suspend and Resume to just pass through liveness.
-  if (bytecode == Bytecode::kSuspendGenerator) {
+  if constexpr (bytecode == Bytecode::kSuspendGenerator) {
     // The generator object has to be live.
     in_liveness->MarkRegisterLive(iterator.GetRegisterOperand(0).index());
     // Suspend additionally reads and returns the accumulator
     DCHECK(Bytecodes::ReadsAccumulator(bytecode));
     in_liveness->MarkAccumulatorLive();
     return;
-  }
-  if (bytecode == Bytecode::kResumeGenerator) {
+  } else if constexpr (bytecode == Bytecode::kResumeGenerator) {
     // The generator object has to be live.
     in_liveness->MarkRegisterLive(iterator.GetRegisterOperand(0).index());
     return;
   }
 
-  if (BytecodeOperands::WritesAccumulator(implicit_register_use)) {
+  // Otherwise, walk all accumulator and register writes and reads.
+  if constexpr (BytecodeOperands::WritesAccumulator(implicit_register_use)) {
     in_liveness->MarkAccumulatorDead();
   }
+  DCHECK_IMPLIES(BytecodeOperands::ClobbersAccumulator(implicit_register_use),
+                 !in_liveness->AccumulatorIsLive());
   (UpdateInLivenessForOutOperand<bytecode, operand_types, operand_index>(
        in_liveness, iterator),
    ...);
 
-  if (Bytecodes::WritesImplicitRegister(bytecode)) {
+  if constexpr (BytecodeOperands::WritesImplicitRegister(
+                    implicit_register_use)) {
     in_liveness->MarkRegisterDead(Register::FromShortStar(bytecode).index());
   }
 
-  if (BytecodeOperands::ReadsAccumulator(implicit_register_use)) {
+  if constexpr (BytecodeOperands::ReadsAccumulator(implicit_register_use)) {
     in_liveness->MarkAccumulatorLive();
   }
   (UpdateInLivenessForInOperand<bytecode, operand_types, operand_index>(
@@ -237,6 +222,7 @@ void UpdateInLiveness(BytecodeLivenessState* in_liveness,
       std::make_index_sequence<sizeof...(operand_types)>());
 }
 
+#ifdef DEBUG
 void UpdateInLiveness(Bytecode bytecode, BytecodeLivenessState* in_liveness,
                       const interpreter::BytecodeArrayIterator& iterator) {
   switch (bytecode) {
@@ -248,6 +234,7 @@ void UpdateInLiveness(Bytecode bytecode, BytecodeLivenessState* in_liveness,
 #undef BYTECODE_UPDATE_IN_LIVENESS
   }
 }
+#endif  // DEBUG
 
 template <bool IsFirstUpdate = false>
 void EnsureOutLivenessIsNotAlias(
@@ -283,6 +270,25 @@ void UpdateOutLiveness(BytecodeLiveness& liveness,
     DCHECK_NOT_NULL(next_bytecode_in_liveness);
     if (IsFirstUpdate) {
       liveness.out = next_bytecode_in_liveness;
+    } else {
+      liveness.out->Union(*next_bytecode_in_liveness);
+    }
+    return;
+  }
+
+  // Special case SwitchOnGeneratorState to ignore resume liveness, since that's
+  // a pass through. Instead, just consider the fallthrough live, plus the
+  // generator register itself for the resumes.
+  if (bytecode == Bytecode::kSwitchOnGeneratorState) {
+    DCHECK_NOT_NULL(next_bytecode_in_liveness);
+    if (IsFirstUpdate) {
+      // The generator register won't be live in the fallthrough, so copy the
+      // liveness and make it live here.
+      int generator_reg_index = iterator.GetRegisterOperand(0).index();
+      DCHECK(!next_bytecode_in_liveness->RegisterIsLive(generator_reg_index));
+      liveness.out =
+          zone->New<BytecodeLivenessState>(*next_bytecode_in_liveness, zone);
+      liveness.out->MarkRegisterLive(generator_reg_index);
     } else {
       liveness.out->Union(*next_bytecode_in_liveness);
     }
@@ -464,7 +470,6 @@ void BytecodeAnalysis::Analyze() {
   loop_stack_.push({-1, nullptr});
 
   BytecodeLivenessState* next_bytecode_in_liveness = nullptr;
-  int generator_switch_index = -1;
   int osr_loop_end_offset = osr_bailout_id_.ToInt();
   DCHECK_EQ(osr_loop_end_offset < 0, osr_bailout_id_.IsNone());
 
@@ -479,10 +484,7 @@ void BytecodeAnalysis::Analyze() {
     Bytecode bytecode = iterator.current_bytecode();
     int current_offset = iterator.current_offset();
 
-    if (bytecode == Bytecode::kSwitchOnGeneratorState) {
-      DCHECK_EQ(generator_switch_index, -1);
-      generator_switch_index = iterator.current_index();
-    } else if (bytecode == Bytecode::kJumpLoop) {
+    if (bytecode == Bytecode::kJumpLoop) {
       // Every byte up to and including the last byte within the backwards jump
       // instruction is considered part of the loop, set loop end accordingly.
       int loop_end = current_offset + iterator.current_bytecode_size();
@@ -529,12 +531,20 @@ void BytecodeAnalysis::Analyze() {
             ResumeJumpTarget::Leaf(suspend_id, resume_offset));
       }
 
+      if (bytecode == Bytecode::kResumeGenerator) {
+        current_loop_info->mark_resumable();
+      }
+
       // If we've reached the header of the loop, pop it off the stack.
       if (current_offset == current_loop.header_offset) {
         loop_stack_.pop();
         if (loop_stack_.size() > 1) {
           // If there is still an outer loop, propagate inner loop assignments.
           LoopInfo* parent_loop_info = loop_stack_.top().loop_info;
+
+          if (current_loop_info->resumable()) {
+            parent_loop_info->mark_resumable();
+          }
 
           parent_loop_info->assignments().Union(
               current_loop_info->assignments());
@@ -584,6 +594,19 @@ void BytecodeAnalysis::Analyze() {
       int resume_offset = current_offset + iterator.current_bytecode_size();
       resume_jump_targets_.push_back(
           ResumeJumpTarget::Leaf(suspend_id, resume_offset));
+    }
+
+    if (loop_stack_.size() > 1) {
+      auto& loop = loop_stack_.top();
+      if (Bytecodes::IsCallOrConstruct(bytecode)) {
+        loop.loop_info->mark_non_trivial();
+      } else if (Bytecodes::IsUnconditionalJump(bytecode) &&
+                 bytecode != Bytecode::kJumpLoop) {
+        int target = iterator.GetJumpTargetOffset();
+        if (target < loop.loop_info->loop_end()) {
+          loop.loop_info->mark_non_trivial();
+        }
+      }
     }
 
     if (analyze_liveness_) {
@@ -661,50 +684,8 @@ void BytecodeAnalysis::Analyze() {
                       liveness_map(), zone());
   }
 
-  // Process the generator switch statement separately, once the loops are done.
-  // This has to be a separate pass because the generator switch can jump into
-  // the middle of loops (and is the only kind of jump that can jump across a
-  // loop header).
-  if (generator_switch_index != -1) {
-    iterator.GoToIndex(generator_switch_index);
-    DCHECK_EQ(iterator.current_bytecode(), Bytecode::kSwitchOnGeneratorState);
-
-    int current_offset = iterator.current_offset();
-    BytecodeLiveness& switch_liveness =
-        liveness_map().GetLiveness(current_offset);
-
-    bool any_changed = false;
-    for (interpreter::JumpTableTargetOffset entry :
-         iterator.GetJumpTableTargetOffsets()) {
-      if (switch_liveness.out->UnionIsChanged(
-              *liveness_map().GetInLiveness(entry.target_offset))) {
-        any_changed = true;
-      }
-    }
-
-    // If the switch liveness changed, we have to propagate it up the remaining
-    // bytecodes before it.
-    if (any_changed) {
-      switch_liveness.in->CopyFrom(*switch_liveness.out);
-      UpdateInLiveness(Bytecode::kSwitchOnGeneratorState, switch_liveness.in,
-                       iterator);
-      next_bytecode_in_liveness = switch_liveness.in;
-      for (--iterator; iterator.IsValid(); --iterator) {
-        Bytecode bytecode = iterator.current_bytecode();
-        BytecodeLiveness& liveness =
-            liveness_map().GetLiveness(iterator.current_offset());
-
-        // There shouldn't be any more loops.
-        DCHECK_NE(bytecode, Bytecode::kJumpLoop);
-
-        UpdateLiveness(bytecode, liveness, &next_bytecode_in_liveness, iterator,
-                       bytecode_array(), liveness_map(), zone());
-      }
-    }
-  }
-
   DCHECK(analyze_liveness_);
-  if (FLAG_trace_environment_liveness) {
+  if (v8_flags.trace_environment_liveness) {
     StdoutStream of;
     PrintLivenessTo(of);
   }
@@ -722,11 +703,16 @@ void BytecodeAnalysis::PushLoop(int loop_header, int loop_end) {
 
   end_to_header_.insert({loop_end, loop_header});
   auto it = header_to_info_.insert(
-      {loop_header, LoopInfo(parent_offset, bytecode_array_->parameter_count(),
+      {loop_header, LoopInfo(parent_offset, loop_header, loop_end,
+                             bytecode_array_->parameter_count(),
                              bytecode_array_->register_count(), zone_)});
   // Get the loop info pointer from the output of insert.
   LoopInfo* loop_info = &it.first->second;
 
+  if (loop_stack_.top().loop_info) {
+    loop_stack_.top().loop_info->mark_not_innermost();
+    loop_stack_.top().loop_info->mark_non_trivial();
+  }
   loop_stack_.push({loop_header, loop_info});
 }
 
@@ -765,6 +751,13 @@ int BytecodeAnalysis::GetLoopOffsetFor(int offset) const {
   DCHECK(header_to_info_.upper_bound(offset) != header_to_info_.end());
 
   return header_to_info_.upper_bound(offset)->second.parent_offset();
+}
+
+int BytecodeAnalysis::GetLoopEndOffsetForInnermost(int header_offset) const {
+  DCHECK(GetLoopInfoFor(header_offset).innermost());
+  auto loop_end_to_header = end_to_header_.upper_bound(header_offset + 1);
+  DCHECK_EQ(loop_end_to_header->second, header_offset);
+  return loop_end_to_header->first;
 }
 
 const LoopInfo& BytecodeAnalysis::GetLoopInfoFor(int header_offset) const {

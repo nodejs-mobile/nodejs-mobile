@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-eh --allow-natives-syntax
+// Flags: --allow-natives-syntax
 
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 d8.file.execute("test/mjsunit/wasm/exceptions-utils.js");
@@ -19,7 +19,8 @@ d8.file.execute("test/mjsunit/wasm/exceptions-utils.js");
       ]).exportFunc();
   let instance = builder.instantiate();
 
-  assertWasmThrows(instance, except, [null], () => instance.exports.throw_null());
+  assertWasmThrows(instance, except, [null],
+                   () => instance.exports.throw_null());
 })();
 
 // Test throwing/catching the null-ref value.
@@ -66,10 +67,14 @@ d8.file.execute("test/mjsunit/wasm/exceptions-utils.js");
   let instance = builder.instantiate();
   let o = new Object();
 
-  assertWasmThrows(instance, except, [o], () => instance.exports.throw_param(o));
-  assertWasmThrows(instance, except, [1], () => instance.exports.throw_param(1));
-  assertWasmThrows(instance, except, [2.3], () => instance.exports.throw_param(2.3));
-  assertWasmThrows(instance, except, ["str"], () => instance.exports.throw_param("str"));
+  assertWasmThrows(instance, except, [o],
+                   () => instance.exports.throw_param(o));
+  assertWasmThrows(instance, except, [1],
+                   () => instance.exports.throw_param(1));
+  assertWasmThrows(instance, except, [2.3],
+                   () => instance.exports.throw_param(2.3));
+  assertWasmThrows(instance, except, ["str"],
+                   () => instance.exports.throw_param("str"));
 })();
 
 // Test throwing/catching the reference type value.

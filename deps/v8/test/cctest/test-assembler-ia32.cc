@@ -33,12 +33,10 @@
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/deoptimizer/deoptimizer.h"
-#include "src/diagnostics/disassembler.h"
+#include "src/execution/simulator.h"
 #include "src/heap/factory.h"
-#include "src/init/v8.h"
 #include "src/utils/ostreams.h"
 #include "test/cctest/cctest.h"
-#include "test/common/assembler-tester.h"
 
 namespace v8 {
 namespace internal {
@@ -54,7 +52,7 @@ TEST(AssemblerIa320) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -68,9 +66,9 @@ TEST(AssemblerIa320) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F2>::FromCode(*code);
+  auto f = GeneratedCode<F2>::FromCode(isolate, *code);
   auto res = f.Call(3, 4);
   ::printf("f() = %d\n", res);
   CHECK_EQ(7, res);
@@ -82,7 +80,7 @@ TEST(AssemblerIa321) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
   Label L, C;
@@ -106,9 +104,9 @@ TEST(AssemblerIa321) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   int res = f.Call(100);
   ::printf("f() = %d\n", res);
   CHECK_EQ(5050, res);
@@ -120,7 +118,7 @@ TEST(AssemblerIa322) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
   Label L, C;
@@ -140,7 +138,6 @@ TEST(AssemblerIa322) {
 
   // some relocated stuff here, not executed
   __ mov(eax, isolate->factory()->true_value());
-  __ jmp(kNullAddress, RelocInfo::RUNTIME_ENTRY);
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
@@ -148,9 +145,9 @@ TEST(AssemblerIa322) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   int res = f.Call(10);
   ::printf("f() = %d\n", res);
   CHECK_EQ(3628800, res);
@@ -164,7 +161,7 @@ TEST(AssemblerIa323) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -177,9 +174,9 @@ TEST(AssemblerIa323) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F3>::FromCode(*code);
+  auto f = GeneratedCode<F3>::FromCode(isolate, *code);
   int res = f.Call(-3.1415f);
   ::printf("f() = %d\n", res);
   CHECK_EQ(-3, res);
@@ -193,7 +190,7 @@ TEST(AssemblerIa324) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -206,9 +203,9 @@ TEST(AssemblerIa324) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F4>::FromCode(*code);
+  auto f = GeneratedCode<F4>::FromCode(isolate, *code);
   int res = f.Call(2.718281828);
   ::printf("f() = %d\n", res);
   CHECK_EQ(2, res);
@@ -221,7 +218,7 @@ TEST(AssemblerIa325) {
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -232,7 +229,7 @@ TEST(AssemblerIa325) {
   assm.GetCode(isolate, &desc);
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   int res = f.Call();
   CHECK_EQ(42, res);
 }
@@ -244,7 +241,7 @@ TEST(AssemblerIa326) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -267,9 +264,9 @@ TEST(AssemblerIa326) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F5>::FromCode(*code);
+  auto f = GeneratedCode<F5>::FromCode(isolate, *code);
   double res = f.Call(2.2, 1.1);
   ::printf("f() = %f\n", res);
   CHECK(2.29 < res && res < 2.31);
@@ -282,7 +279,7 @@ TEST(AssemblerIa328) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
   __ mov(eax, Operand(esp, 4));
@@ -299,9 +296,9 @@ TEST(AssemblerIa328) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F6>::FromCode(*code);
+  auto f = GeneratedCode<F6>::FromCode(isolate, *code);
   double res = f.Call(12);
 
   ::printf("f() = %f\n", res);
@@ -327,7 +324,7 @@ TEST(AssemblerMultiByteNop) {
   CcTest::InitializeVM();
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[1024];
+  uint8_t buffer[1024];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   __ push(ebx);
@@ -380,9 +377,9 @@ TEST(AssemblerMultiByteNop) {
   assm.GetCode(isolate, &desc);
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-  CHECK(code->IsCode());
+  CHECK(IsCode(*code));
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   int res = f.Call();
   CHECK_EQ(42, res);
 }
@@ -391,16 +388,17 @@ TEST(AssemblerMultiByteNop) {
 #ifdef __GNUC__
 #define ELEMENT_COUNT 4u
 
-void DoSSE2(const v8::FunctionCallbackInfo<v8::Value>& args) {
+void DoSSE2(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  CHECK(i::ValidateCallbackInfo(info));
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
   v8::Local<v8::Context> context = CcTest::isolate()->GetCurrentContext();
 
-  CHECK(args[0]->IsArray());
-  v8::Local<v8::Array> vec = v8::Local<v8::Array>::Cast(args[0]);
+  CHECK(info[0]->IsArray());
+  v8::Local<v8::Array> vec = v8::Local<v8::Array>::Cast(info[0]);
   CHECK_EQ(ELEMENT_COUNT, vec->Length());
 
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   Assembler assm(AssemblerOptions{},
                  ExternalAssemblerBuffer(buffer, sizeof buffer));
 
@@ -432,11 +430,10 @@ void DoSSE2(const v8::FunctionCallbackInfo<v8::Value>& args) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   int res = f.Call();
-  args.GetReturnValue().Set(v8::Integer::New(CcTest::isolate(), res));
+  info.GetReturnValue().Set(v8::Integer::New(CcTest::isolate(), res));
 }
-
 
 TEST(StackAlignmentForSSE2) {
   CcTest::InitializeVM();
@@ -465,7 +462,7 @@ TEST(StackAlignmentForSSE2) {
     v8_vec->Set(env.local(), i, v8_num(vec[i])).FromJust();
   }
 
-  v8::Local<v8::Value> args[] = { v8_vec };
+  v8::Local<v8::Value> args[] = {v8_vec};
   v8::Local<v8::Value> result =
       foo->Call(env.local(), global_object, 1, args).ToLocalChecked();
 
@@ -483,7 +480,7 @@ TEST(AssemblerIa32Extractps) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   { CpuFeatureScope fscope41(&assm, SSE4_1);
@@ -498,10 +495,10 @@ TEST(AssemblerIa32Extractps) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F4>::FromCode(*code);
+  auto f = GeneratedCode<F4>::FromCode(isolate, *code);
   uint64_t value1 = 0x1234'5678'8765'4321;
   CHECK_EQ(0x12345678, f.Call(base::uint64_to_double(value1)));
   uint64_t value2 = 0x8765'4321'1234'5678;
@@ -515,7 +512,7 @@ TEST(AssemblerIa32SSE) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -538,10 +535,10 @@ TEST(AssemblerIa32SSE) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F8>::FromCode(*code);
+  auto f = GeneratedCode<F8>::FromCode(isolate, *code);
   CHECK_EQ(2, f.Call(1.0, 2.0));
 }
 
@@ -551,7 +548,7 @@ TEST(AssemblerIa32SSE3) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -571,10 +568,10 @@ TEST(AssemblerIa32SSE3) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F8>::FromCode(*code);
+  auto f = GeneratedCode<F8>::FromCode(isolate, *code);
   CHECK_EQ(4, f.Call(1.0, 2.0));
 }
 
@@ -585,7 +582,7 @@ TEST(AssemblerX64FMA_sd) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[1024];
+  uint8_t buffer[1024];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -799,10 +796,10 @@ TEST(AssemblerX64FMA_sd) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F9>::FromCode(*code);
+  auto f = GeneratedCode<F9>::FromCode(isolate, *code);
   CHECK_EQ(
       0, f.Call(0.000092662107262076, -2.460774966188315, -1.0958787393627414));
 }
@@ -814,7 +811,7 @@ TEST(AssemblerX64FMA_ss) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[1024];
+  uint8_t buffer[1024];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -1028,10 +1025,10 @@ TEST(AssemblerX64FMA_ss) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F10>::FromCode(*code);
+  auto f = GeneratedCode<F10>::FromCode(isolate, *code);
   CHECK_EQ(0, f.Call(9.26621069e-05f, -2.4607749f, -1.09587872f));
 }
 
@@ -1042,7 +1039,7 @@ TEST(AssemblerIa32BMI1) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[1024];
+  uint8_t buffer[1024];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -1136,10 +1133,10 @@ TEST(AssemblerIa32BMI1) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   CHECK_EQ(0, f.Call());
 }
 
@@ -1150,7 +1147,7 @@ TEST(AssemblerIa32LZCNT) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -1184,10 +1181,10 @@ TEST(AssemblerIa32LZCNT) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   CHECK_EQ(0, f.Call());
 }
 
@@ -1198,7 +1195,7 @@ TEST(AssemblerIa32POPCNT) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -1232,10 +1229,10 @@ TEST(AssemblerIa32POPCNT) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   CHECK_EQ(0, f.Call());
 }
 
@@ -1246,7 +1243,7 @@ TEST(AssemblerIa32BMI2) {
 
   Isolate* isolate = reinterpret_cast<Isolate*>(CcTest::isolate());
   HandleScope scope(isolate);
-  v8::internal::byte buffer[2048];
+  uint8_t buffer[2048];
   MacroAssembler assm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
   {
@@ -1378,10 +1375,10 @@ TEST(AssemblerIa32BMI2) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   CHECK_EQ(0, f.Call());
 }
 
@@ -1422,9 +1419,9 @@ TEST(AssemblerIa32JumpTables1) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   for (int i = 0; i < kNumCases; ++i) {
     int res = f.Call(i);
     ::printf("f(%d) = %d\n", i, res);
@@ -1470,9 +1467,9 @@ TEST(AssemblerIa32JumpTables2) {
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   for (int i = 0; i < kNumCases; ++i) {
     int res = f.Call(i);
     ::printf("f(%d) = %d\n", i, res);
@@ -1514,21 +1511,21 @@ TEST(Regress621926) {
 
 #ifdef OBJECT_PRINT
   StdoutStream os;
-  code->Print(os);
+  Print(*code, os);
 #endif
 
-  auto f = GeneratedCode<F0>::FromCode(*code);
+  auto f = GeneratedCode<F0>::FromCode(isolate, *code);
   CHECK_EQ(1, f.Call());
 }
 
 TEST(DeoptExitSizeIsFixed) {
   Isolate* isolate = CcTest::i_isolate();
   HandleScope handles(isolate);
-  v8::internal::byte buffer[256];
+  uint8_t buffer[256];
   MacroAssembler masm(isolate, v8::internal::CodeObjectRequired::kYes,
                       ExternalAssemblerBuffer(buffer, sizeof(buffer)));
 
-  STATIC_ASSERT(static_cast<int>(kFirstDeoptimizeKind) == 0);
+  static_assert(static_cast<int>(kFirstDeoptimizeKind) == 0);
   for (int i = 0; i < kDeoptimizeKindCount; i++) {
     DeoptimizeKind kind = static_cast<DeoptimizeKind>(i);
     Label before_exit;

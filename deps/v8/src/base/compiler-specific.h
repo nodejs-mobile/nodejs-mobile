@@ -98,10 +98,10 @@
 // do not support adding noexcept to default members.
 // Disabled on MSVC because constructors of standard containers are not noexcept
 // there.
-#if ((!defined(V8_CC_GNU) && !defined(V8_CC_MSVC) &&                      \
-      !defined(V8_TARGET_ARCH_MIPS) && !defined(V8_TARGET_ARCH_MIPS64) && \
-      !defined(V8_TARGET_ARCH_PPC) && !defined(V8_TARGET_ARCH_PPC64) &&   \
-      !defined(V8_TARGET_ARCH_RISCV64)) ||                                \
+#if ((!defined(V8_CC_GNU) && !defined(V8_CC_MSVC) &&                        \
+      !defined(V8_TARGET_ARCH_MIPS64) && !defined(V8_TARGET_ARCH_PPC) &&    \
+      !defined(V8_TARGET_ARCH_PPC64) && !defined(V8_TARGET_ARCH_RISCV64) && \
+      !defined(V8_TARGET_ARCH_RISCV32)) ||                                  \
      (defined(__clang__) && __cplusplus > 201300L))
 #define V8_NOEXCEPT noexcept
 #else
@@ -133,6 +133,13 @@
 #define ALIGNAS(byte_alignment) __declspec(align(byte_alignment))
 #else
 #define ALIGNAS(byte_alignment) __attribute__((aligned(byte_alignment)))
+#endif
+
+// Forces the linker to not GC the section corresponding to the symbol.
+#if V8_HAS_ATTRIBUTE_USED && V8_HAS_ATTRIBUTE_RETAIN
+#define V8_DONT_STRIP_SYMBOL __attribute__((used, retain))
+#else
+#define V8_DONT_STRIP_SYMBOL
 #endif
 
 #endif  // V8_BASE_COMPILER_SPECIFIC_H_

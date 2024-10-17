@@ -7,14 +7,13 @@
 #include "include/v8-object.h"
 #include "include/v8-template.h"
 #include "src/api/api.h"
+#include "src/objects/js-array-inl.h"
 #include "src/objects/objects-inl.h"
 #include "src/runtime/runtime.h"
 #include "test/unittests/test-utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace v8 {
-namespace internal {
-namespace {
+namespace v8::internal {
 
 using RuntimeTest = TestWithContext;
 
@@ -56,6 +55,24 @@ TEST_F(RuntimeTest, DoesNotReturnPrototypeWhenInacessible) {
   EXPECT_EQ(0u, result->Length());
 }
 
-}  // namespace
-}  // namespace internal
-}  // namespace v8
+#if V8_ENABLE_WEBASSEMBLY
+TEST_F(RuntimeTest, WasmTableWithoutInstance) {
+  uint32_t initial = 1u;
+  bool has_maximum = false;
+  uint32_t maximum = std::numeric_limits<uint32_t>::max();
+  Handle<WasmTableObject> table = WasmTableObject::New(
+      i_isolate(), Handle<WasmInstanceObject>(), wasm::kWasmAnyRef, initial,
+      has_maximum, maximum, i_isolate()->factory()->null_value());
+  MaybeHandle<JSArray> result =
+      Runtime::GetInternalProperties(i_isolate(), table);
+  ASSERT_FALSE(result.is_null());
+  // ["[[Prototype]]", <map>, "[[Entries]]", <entries>]
+  ASSERT_EQ(4, result.ToHandleChecked()->elements()->length());
+  Handle<Object> entries =
+      Object::GetElement(i_isolate(), result.ToHandleChecked(), 3)
+          .ToHandleChecked();
+  EXPECT_EQ(1, JSArray::cast(*entries)->elements()->length());
+}
+#endif
+
+}  // namespace v8::internal

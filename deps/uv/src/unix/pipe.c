@@ -30,6 +30,19 @@
 #include <stdlib.h>
 
 
+/* Does the file path contain embedded nul bytes? */
+static int includes_nul(const char *s, size_t n) {
+  if (n == 0)
+    return 0;
+#ifdef __linux__
+  /* Accept abstract socket namespace path ("\0/virtual/path"). */
+  s++;
+  n--;
+#endif
+  return NULL != memchr(s, '\0', n);
+}
+
+
 int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle, int ipc) {
   uv__stream_init(loop, (uv_stream_t*)handle, UV_NAMED_PIPE);
   handle->shutdown_req = NULL;
@@ -41,26 +54,63 @@ int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle, int ipc) {
 
 
 int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
+  return uv_pipe_bind2(handle, name, strlen(name), 0);
+}
+
+
+int uv_pipe_bind2(uv_pipe_t* handle,
+                  const char* name,
+                  size_t namelen,
+                  unsigned int flags) {
   struct sockaddr_un saddr;
-  const char* pipe_fname;
+  char* pipe_fname;
   int sockfd;
   int err;
+  socklen_t addrlen;
 
   pipe_fname = NULL;
+
+  if (flags & ~UV_PIPE_NO_TRUNCATE)
+    return UV_EINVAL;
+
+  if (name == NULL)
+    return UV_EINVAL;
+
+  if (namelen == 0)
+    return UV_EINVAL;
+
+  if (includes_nul(name, namelen))
+    return UV_EINVAL;
+
+  if (flags & UV_PIPE_NO_TRUNCATE)
+    if (namelen > sizeof(saddr.sun_path))
+      return UV_EINVAL;
+
+  /* Truncate long paths. Documented behavior. */
+  if (namelen > sizeof(saddr.sun_path))
+    namelen = sizeof(saddr.sun_path);
 
   /* Already bound? */
   if (uv__stream_fd(handle) >= 0)
     return UV_EINVAL;
-  if (uv__is_closing(handle)) {
-    return UV_EINVAL;
-  }
-  /* Make a copy of the file name, it outlives this function's scope. */
-  pipe_fname = uv__strdup(name);
-  if (pipe_fname == NULL)
-    return UV_ENOMEM;
 
-  /* We've got a copy, don't touch the original any more. */
-  name = NULL;
+  if (uv__is_closing(handle))
+    return UV_EINVAL;
+
+  /* Make a copy of the file path unless it is an abstract socket.
+   * We unlink the file later but abstract sockets disappear
+   * automatically since they're not real file system entities.
+   */
+  if (*name == '\0') {
+    addrlen = offsetof(struct sockaddr_un, sun_path) + namelen;
+  } else {
+    pipe_fname = uv__malloc(namelen + 1);
+    if (pipe_fname == NULL)
+      return UV_ENOMEM;
+    memcpy(pipe_fname, name, namelen);
+    pipe_fname[namelen] = '\0';
+    addrlen = sizeof saddr;
+  }
 
   err = uv__socket(AF_UNIX, SOCK_STREAM, 0);
   if (err < 0)
@@ -68,10 +118,10 @@ int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
   sockfd = err;
 
   memset(&saddr, 0, sizeof saddr);
-  uv__strscpy(saddr.sun_path, pipe_fname, sizeof(saddr.sun_path));
+  memcpy(&saddr.sun_path, name, namelen);
   saddr.sun_family = AF_UNIX;
 
-  if (bind(sockfd, (struct sockaddr*)&saddr, sizeof saddr)) {
+  if (bind(sockfd, (struct sockaddr*)&saddr, addrlen)) {
     err = UV__ERR(errno);
     /* Convert ENOENT to EACCES for compatibility with Windows. */
     if (err == UV_ENOENT)
@@ -83,12 +133,12 @@ int uv_pipe_bind(uv_pipe_t* handle, const char* name) {
 
   /* Success. */
   handle->flags |= UV_HANDLE_BOUND;
-  handle->pipe_fname = pipe_fname; /* Is a strdup'ed copy. */
+  handle->pipe_fname = pipe_fname; /* NULL or a copy of |name| */
   handle->io_watcher.fd = sockfd;
   return 0;
 
 err_socket:
-  uv__free((void*)pipe_fname);
+  uv__free(pipe_fname);
   return err;
 }
 
@@ -176,10 +226,56 @@ void uv_pipe_connect(uv_connect_t* req,
                     uv_pipe_t* handle,
                     const char* name,
                     uv_connect_cb cb) {
+  int err;
+
+  err = uv_pipe_connect2(req, handle, name, strlen(name), 0, cb);
+
+  if (err) {
+    handle->delayed_error = err;
+    handle->connect_req = req;
+
+    uv__req_init(handle->loop, req, UV_CONNECT);
+    req->handle = (uv_stream_t*) handle;
+    req->cb = cb;
+    uv__queue_init(&req->queue);
+
+    /* Force callback to run on next tick in case of error. */
+    uv__io_feed(handle->loop, &handle->io_watcher);
+  }
+}
+
+
+int uv_pipe_connect2(uv_connect_t* req,
+                     uv_pipe_t* handle,
+                     const char* name,
+                     size_t namelen,
+                     unsigned int flags,
+                     uv_connect_cb cb) {
   struct sockaddr_un saddr;
   int new_sock;
   int err;
   int r;
+  socklen_t addrlen;
+
+  if (flags & ~UV_PIPE_NO_TRUNCATE)
+    return UV_EINVAL;
+
+  if (name == NULL)
+    return UV_EINVAL;
+
+  if (namelen == 0)
+    return UV_EINVAL;
+
+  if (includes_nul(name, namelen))
+    return UV_EINVAL;
+
+  if (flags & UV_PIPE_NO_TRUNCATE)
+    if (namelen > sizeof(saddr.sun_path))
+      return UV_EINVAL;
+
+  /* Truncate long paths. Documented behavior. */
+  if (namelen > sizeof(saddr.sun_path))
+    namelen = sizeof(saddr.sun_path);
 
   new_sock = (uv__stream_fd(handle) == -1);
 
@@ -191,12 +287,16 @@ void uv_pipe_connect(uv_connect_t* req,
   }
 
   memset(&saddr, 0, sizeof saddr);
-  uv__strscpy(saddr.sun_path, name, sizeof(saddr.sun_path));
+  memcpy(&saddr.sun_path, name, namelen);
   saddr.sun_family = AF_UNIX;
 
+  if (*name == '\0')
+    addrlen = offsetof(struct sockaddr_un, sun_path) + namelen;
+  else
+    addrlen = sizeof saddr;
+
   do {
-    r = connect(uv__stream_fd(handle),
-                (struct sockaddr*)&saddr, sizeof saddr);
+    r = connect(uv__stream_fd(handle), (struct sockaddr*)&saddr, addrlen);
   }
   while (r == -1 && errno == EINTR);
 
@@ -228,14 +328,15 @@ out:
   handle->connect_req = req;
 
   uv__req_init(handle->loop, req, UV_CONNECT);
-  req->handle = (uv_stream_t*)handle;
+  req->handle = (uv_stream_t*) handle;
   req->cb = cb;
-  QUEUE_INIT(&req->queue);
+  uv__queue_init(&req->queue);
 
   /* Force callback to run on next tick in case of error. */
   if (err)
     uv__io_feed(handle->loop, &handle->io_watcher);
 
+  return 0;
 }
 
 
@@ -357,7 +458,7 @@ int uv_pipe_chmod(uv_pipe_t* handle, int mode) {
   }
 
   /* stat must be used as fstat has a bug on Darwin */
-  if (stat(name_buffer, &pipe_stat) == -1) {
+  if (uv__stat(name_buffer, &pipe_stat) == -1) {
     uv__free(name_buffer);
     return -errno;
   }

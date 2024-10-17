@@ -26,7 +26,7 @@ tmpdir.refresh();
 
 let dirc = 0;
 function nextdir() {
-  return join(tmpdir.path, `copy_${++dirc}`);
+  return tmpdir.resolve(`copy_${++dirc}`);
 }
 
 // Synchronous implementation of copy.
@@ -119,6 +119,22 @@ function nextdir() {
   assert(stat.isFile());
 }
 
+// It overrides target directory with what symlink points to, when dereference is true.
+{
+  const src = nextdir();
+  const symlink = nextdir();
+  const dest = nextdir();
+  mkdirSync(src, mustNotMutateObjectDeep({ recursive: true }));
+  writeFileSync(join(src, 'foo.js'), 'foo', 'utf8');
+  symlinkSync(src, symlink);
+
+  mkdirSync(dest, mustNotMutateObjectDeep({ recursive: true }));
+
+  cpSync(symlink, dest, mustNotMutateObjectDeep({ dereference: true, recursive: true }));
+  const destStat = lstatSync(dest);
+  assert(!destStat.isSymbolicLink());
+  assertDirEquivalent(src, dest);
+}
 
 // It throws error when verbatimSymlinks is not a boolean.
 {
@@ -400,6 +416,26 @@ if (!isWindows && !isIOS && !isAndroid) {
   assert.throws(
     () => cpSync(src, dest, mustNotMutateObjectDeep({ recursive: true })),
     { code: 'EEXIST' }
+  );
+}
+
+// It throws an error when attempting to copy a file with a name that is too long.
+{
+  const src = 'a'.repeat(5000);
+  const dest = nextdir();
+  assert.throws(
+    () => cpSync(src, dest),
+    { code: isWindows ? 'ENOENT' : 'ENAMETOOLONG' }
+  );
+}
+
+// It throws an error when attempting to copy a dir that does not exist.
+{
+  const src = nextdir();
+  const dest = nextdir();
+  assert.throws(
+    () => cpSync(src, dest, mustNotMutateObjectDeep({ recursive: true })),
+    { code: 'ENOENT' }
   );
 }
 

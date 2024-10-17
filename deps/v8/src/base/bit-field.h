@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+
 #include "src/base/macros.h"
 
 namespace v8 {
@@ -22,13 +24,14 @@ namespace base {
 template <class T, int shift, int size, class U = uint32_t>
 class BitField final {
  public:
-  STATIC_ASSERT(std::is_unsigned<U>::value);
-  STATIC_ASSERT(shift < 8 * sizeof(U));  // Otherwise shifts by {shift} are UB.
-  STATIC_ASSERT(size < 8 * sizeof(U));   // Otherwise shifts by {size} are UB.
-  STATIC_ASSERT(shift + size <= 8 * sizeof(U));
-  STATIC_ASSERT(size > 0);
+  static_assert(std::is_unsigned<U>::value);
+  static_assert(shift < 8 * sizeof(U));  // Otherwise shifts by {shift} are UB.
+  static_assert(size < 8 * sizeof(U));   // Otherwise shifts by {size} are UB.
+  static_assert(shift + size <= 8 * sizeof(U));
+  static_assert(size > 0);
 
   using FieldType = T;
+  using BaseType = U;
 
   // A type U mask of bit field.  To use all bits of a type U of x bits
   // in a bitfield without compiler warnings we have to compute 2^x
@@ -62,7 +65,7 @@ class BitField final {
   }
 
   // Returns a type U with the bit field value updated.
-  static constexpr U update(U previous, T value) {
+  V8_NODISCARD static constexpr U update(U previous, T value) {
     return (previous & ~kMask) | encode(value);
   }
 
@@ -70,6 +73,24 @@ class BitField final {
   static constexpr T decode(U value) {
     return static_cast<T>((value & kMask) >> kShift);
   }
+};
+
+// ----------------------------------------------------------------------------
+// BitFieldUnion can be used to combine two linear BitFields.
+// So far only the static mask is computed. Encoding and decoding tbd.
+// Can be used for example as a quick combined check:
+//   `if (BitFieldUnion<BFA, BFB>::kMask & bitfield) ...`
+
+template <typename A, typename B>
+class BitFieldUnion final {
+ public:
+  static_assert(
+      std::is_same<typename A::BaseType, typename B::BaseType>::value);
+  static_assert((A::kMask & B::kMask) == 0);
+  static constexpr int kShift = std::min(A::kShift, B::kShift);
+  static constexpr int kMask = A::kMask | B::kMask;
+  static constexpr int kSize =
+      A::kSize + B::kSize + (std::max(A::kShift, B::kShift) - kShift);
 };
 
 template <class T, int shift, int size>

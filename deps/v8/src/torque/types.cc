@@ -37,7 +37,7 @@ Type::Type(TypeBase::Kind kind, const Type* parent,
       constexpr_version_(nullptr) {}
 
 std::string Type::ToString() const {
-  if (aliases_.size() == 0)
+  if (aliases_.empty())
     return ComputeName(ToExplicitString(), GetSpecializedFrom());
   if (aliases_.size() == 1) return *aliases_.begin();
   std::stringstream result;
@@ -70,21 +70,34 @@ std::string Type::SimpleName() const {
   return *aliases_.begin();
 }
 
-// TODO(danno): HandlifiedCppTypeName should be used universally in Torque
-// where the C++ type of a Torque object is required.
-std::string Type::HandlifiedCppTypeName() const {
-  if (IsSubtypeOf(TypeOracle::GetSmiType())) return "int";
-  if (IsSubtypeOf(TypeOracle::GetTaggedType())) {
-    return "Handle<" + UnhandlifiedCppTypeName() + ">";
-  } else {
-    return UnhandlifiedCppTypeName();
+std::string Type::GetHandleTypeName(HandleKind kind,
+                                    const std::string& type_name) const {
+  switch (kind) {
+    case HandleKind::kIndirect:
+      return "Handle<" + type_name + ">";
+    case HandleKind::kDirect:
+      return "DirectHandle<" + type_name + ">";
   }
 }
 
-std::string Type::UnhandlifiedCppTypeName() const {
+// TODO(danno): HandlifiedCppTypeName should be used universally in Torque
+// where the C++ type of a Torque object is required.
+std::string Type::HandlifiedCppTypeName(HandleKind kind) const {
   if (IsSubtypeOf(TypeOracle::GetSmiType())) return "int";
-  if (this == TypeOracle::GetObjectType()) return "Object";
-  return GetConstexprGeneratedTypeName();
+  if (IsSubtypeOf(TypeOracle::GetTaggedType())) {
+    return GetHandleTypeName(kind, GetConstexprGeneratedTypeName());
+  } else {
+    return GetConstexprGeneratedTypeName();
+  }
+}
+
+std::string Type::TagglifiedCppTypeName() const {
+  if (IsSubtypeOf(TypeOracle::GetSmiType())) return "int";
+  if (IsSubtypeOf(TypeOracle::GetTaggedType())) {
+    return "Tagged<" + GetConstexprGeneratedTypeName() + ">";
+  } else {
+    return GetConstexprGeneratedTypeName();
+  }
 }
 
 bool Type::IsSubtypeOf(const Type* supertype) const {
@@ -306,7 +319,7 @@ void UnionType::Subtract(const Type* t) {
       ++it;
     }
   }
-  if (types_.size() == 0) types_.insert(TypeOracle::GetNeverType());
+  if (types_.empty()) types_.insert(TypeOracle::GetNeverType());
   RecomputeParent();
 }
 
@@ -562,7 +575,9 @@ std::vector<Field> ClassType::ComputeHeaderFields() const {
   std::vector<Field> result;
   for (Field& field : ComputeAllFields()) {
     if (field.index) break;
-    DCHECK(*field.offset < header_size());
+    // The header is allowed to end with an optional padding field of size 0.
+    DCHECK(std::get<0>(field.GetFieldSizeInformation()) == 0 ||
+           *field.offset < header_size());
     result.push_back(std::move(field));
   }
   return result;
@@ -572,7 +587,9 @@ std::vector<Field> ClassType::ComputeArrayFields() const {
   std::vector<Field> result;
   for (Field& field : ComputeAllFields()) {
     if (!field.index) {
-      DCHECK(*field.offset < header_size());
+      // The header is allowed to end with an optional padding field of size 0.
+      DCHECK(std::get<0>(field.GetFieldSizeInformation()) == 0 ||
+             *field.offset < header_size());
       continue;
     }
     result.push_back(std::move(field));
@@ -605,6 +622,8 @@ void ComputeSlotKindsHelper(std::vector<ObjectSlotKind>* slots,
   size_t offset = start_offset;
   for (const Field& field : fields) {
     size_t field_size = std::get<0>(field.GetFieldSizeInformation());
+    // Support optional padding fields.
+    if (field_size == 0) continue;
     size_t slot_index = offset / TargetArchitecture::TaggedSize();
     // Rounding-up division to find the number of slots occupied by all the
     // fields up to and including the current one.
@@ -664,9 +683,13 @@ base::Optional<ObjectSlotKind> ClassType::ComputeArraySlotKind() const {
       .Throw();
 }
 
-bool ClassType::HasNoPointerSlots() const {
-  for (ObjectSlotKind slot : ComputeHeaderSlotKinds()) {
-    if (slot != ObjectSlotKind::kNoPointer) return false;
+bool ClassType::HasNoPointerSlotsExceptMap() const {
+  const auto header_slot_kinds = ComputeHeaderSlotKinds();
+  DCHECK_GE(header_slot_kinds.size(), 1);
+  DCHECK_EQ(ComputeHeaderFields()[0].name_and_type.type,
+            TypeOracle::GetMapType());
+  for (size_t i = 1; i < header_slot_kinds.size(); ++i) {
+    if (header_slot_kinds[i] != ObjectSlotKind::kNoPointer) return false;
   }
   if (auto slot = ComputeArraySlotKind()) {
     if (*slot != ObjectSlotKind::kNoPointer) return false;
@@ -927,8 +950,13 @@ void ClassType::GenerateSliceAccessor(size_t field_index) {
 
   Macro* macro = Declarations::DeclareMacro(macro_name, true, base::nullopt,
                                             signature, block, base::nullopt);
-  GlobalContext::EnsureInCCOutputList(TorqueMacro::cast(macro),
-                                      macro->Position().source);
+  if (this->ShouldGenerateCppObjectLayoutDefinitionAsserts()) {
+    GlobalContext::EnsureInCCDebugOutputList(TorqueMacro::cast(macro),
+                                             macro->Position().source);
+  } else {
+    GlobalContext::EnsureInCCOutputList(TorqueMacro::cast(macro),
+                                        macro->Position().source);
+  }
 }
 
 bool ClassType::HasStaticSize() const {
@@ -962,7 +990,7 @@ void PrintSignature(std::ostream& os, const Signature& sig, bool with_names) {
     os << *sig.parameter_types.types[i];
   }
   if (sig.parameter_types.var_args) {
-    if (sig.parameter_names.size()) os << ", ";
+    if (!sig.parameter_names.empty()) os << ", ";
     os << "...";
   }
   os << ")";
@@ -974,7 +1002,7 @@ void PrintSignature(std::ostream& os, const Signature& sig, bool with_names) {
   for (size_t i = 0; i < sig.labels.size(); ++i) {
     if (i > 0) os << ", ";
     os << sig.labels[i].name;
-    if (sig.labels[i].types.size() > 0) os << "(" << sig.labels[i].types << ")";
+    if (!sig.labels[i].types.empty()) os << "(" << sig.labels[i].types << ")";
   }
 }
 
@@ -1006,7 +1034,7 @@ std::ostream& operator<<(std::ostream& os, const TypeVector& types) {
 std::ostream& operator<<(std::ostream& os, const ParameterTypes& p) {
   PrintCommaSeparatedList(os, p.types);
   if (p.var_args) {
-    if (p.types.size() > 0) os << ", ";
+    if (!p.types.empty()) os << ", ";
     os << "...";
   }
   return os;
@@ -1040,7 +1068,8 @@ bool Signature::HasSameTypesAs(const Signature& other,
 namespace {
 bool FirstTypeIsContext(const std::vector<const Type*> parameter_types) {
   return !parameter_types.empty() &&
-         parameter_types[0] == TypeOracle::GetContextType();
+         (parameter_types[0] == TypeOracle::GetContextType() ||
+          parameter_types[0] == TypeOracle::GetNoContextType());
 }
 }  // namespace
 
@@ -1081,9 +1110,8 @@ VisitResult ProjectStructField(VisitResult structure,
 
 namespace {
 void AppendLoweredTypes(const Type* type, std::vector<const Type*>* result) {
-  DCHECK_NE(type, TypeOracle::GetNeverType());
   if (type->IsConstexpr()) return;
-  if (type == TypeOracle::GetVoidType()) return;
+  if (type->IsVoidOrNever()) return;
   if (base::Optional<const StructType*> s = type->StructSupertype()) {
     for (const Field& field : (*s)->fields()) {
       AppendLoweredTypes(field.name_and_type.type, result);
@@ -1156,6 +1184,10 @@ size_t AbstractType::AlignmentLog2() const {
     alignment = TargetArchitecture::RawPtrSize();
   } else if (this == TypeOracle::GetExternalPointerType()) {
     alignment = TargetArchitecture::ExternalPointerSize();
+  } else if (this == TypeOracle::GetIndirectPointerType()) {
+    alignment = TargetArchitecture::IndirectPointerSize();
+  } else if (this == TypeOracle::GetProtectedPointerType()) {
+    alignment = TargetArchitecture::ProtectedPointerSize();
   } else if (this == TypeOracle::GetVoidType()) {
     alignment = 1;
   } else if (this == TypeOracle::GetInt8Type()) {
@@ -1225,7 +1257,13 @@ base::Optional<std::tuple<size_t, std::string>> SizeOf(const Type* type) {
     size_string = "kSystemPointerSize";
   } else if (type->IsSubtypeOf(TypeOracle::GetExternalPointerType())) {
     size = TargetArchitecture::ExternalPointerSize();
-    size_string = "kExternalPointerSize";
+    size_string = "kExternalPointerSlotSize";
+  } else if (type->IsSubtypeOf(TypeOracle::GetIndirectPointerType())) {
+    size = TargetArchitecture::IndirectPointerSize();
+    size_string = "kIndirectPointerSize";
+  } else if (type->IsSubtypeOf(TypeOracle::GetProtectedPointerType())) {
+    size = TargetArchitecture::ProtectedPointerSize();
+    size_string = "kTaggedSize";
   } else if (type->IsSubtypeOf(TypeOracle::GetVoidType())) {
     size = 0;
     size_string = "0";
@@ -1313,9 +1351,9 @@ base::Optional<NameAndType> ExtractSimpleFieldArraySize(
 }
 
 std::string Type::GetRuntimeType() const {
-  if (IsSubtypeOf(TypeOracle::GetSmiType())) return "Smi";
+  if (IsSubtypeOf(TypeOracle::GetSmiType())) return "Tagged<Smi>";
   if (IsSubtypeOf(TypeOracle::GetTaggedType())) {
-    return GetGeneratedTNodeTypeName();
+    return "Tagged<" + GetGeneratedTNodeTypeName() + ">";
   }
   if (base::Optional<const StructType*> struct_type = StructSupertype()) {
     std::stringstream result;

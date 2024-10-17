@@ -13,7 +13,6 @@
 #include "src/handles/handles.h"
 #include "src/utils/boxed-float.h"
 #include "src/wasm/value-type.h"
-#include "src/zone/zone-containers.h"
 
 namespace v8 {
 namespace internal {
@@ -48,9 +47,13 @@ class Simd128 {
   FOREACH_SIMD_TYPE(DEFINE_SIMD_TYPE_SPECIFIC_METHODS)
 #undef DEFINE_SIMD_TYPE_SPECIFIC_METHODS
 
-  explicit Simd128(byte* bytes) {
+  explicit Simd128(uint8_t* bytes) {
     memcpy(static_cast<void*>(val_), reinterpret_cast<void*>(bytes),
            kSimd128Size);
+  }
+
+  bool operator==(const Simd128& other) const noexcept {
+    return memcmp(val_, other.val_, sizeof val_) == 0;
   }
 
   const uint8_t* bytes() { return val_; }
@@ -114,7 +117,8 @@ class WasmValue {
   FOREACH_PRIMITIVE_WASMVAL_TYPE(DEFINE_TYPE_SPECIFIC_METHODS)
 #undef DEFINE_TYPE_SPECIFIC_METHODS
 
-  WasmValue(byte* raw_bytes, ValueType type) : type_(type), bit_pattern_{} {
+  WasmValue(const uint8_t* raw_bytes, ValueType type)
+      : type_(type), bit_pattern_{} {
     DCHECK(type_.is_numeric());
     memcpy(bit_pattern_, raw_bytes, type.value_kind_size());
   }
@@ -143,9 +147,9 @@ class WasmValue {
                                         : type_.value_kind_size());
   }
 
-  void CopyTo(byte* to) const {
-    STATIC_ASSERT(sizeof(float) == sizeof(Float32));
-    STATIC_ASSERT(sizeof(double) == sizeof(Float64));
+  void CopyTo(uint8_t* to) const {
+    static_assert(sizeof(float) == sizeof(Float32));
+    static_assert(sizeof(double) == sizeof(Float64));
     DCHECK(type_.is_numeric());
     memcpy(to, bit_pattern_, type_.value_kind_size());
   }
@@ -193,13 +197,13 @@ class WasmValue {
       case kS128: {
         std::stringstream stream;
         stream << "0x" << std::hex;
-        for (int8_t byte : bit_pattern_) {
-          if (!(byte & 0xf0)) stream << '0';
-          stream << byte;
+        for (int8_t uint8_t : bit_pattern_) {
+          if (!(uint8_t & 0xf0)) stream << '0';
+          stream << uint8_t;
         }
         return stream.str();
       }
-      case kOptRef:
+      case kRefNull:
       case kRef:
       case kRtt:
         return "Handle [" + std::to_string(to_ref().address()) + "]";
@@ -207,6 +211,13 @@ class WasmValue {
       case kBottom:
         UNREACHABLE();
     }
+  }
+
+  bool zero_byte_representation() {
+    DCHECK(type().is_numeric());
+    uint32_t byte_count = type().value_kind_size();
+    return static_cast<uint32_t>(std::count(
+               bit_pattern_, bit_pattern_ + byte_count, 0)) == byte_count;
   }
 
  private:

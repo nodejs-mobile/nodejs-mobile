@@ -7,12 +7,10 @@ if ((!common.hasCrypto) || (!common.hasIntl)) {
 
 common.skipIfEslintMissing();
 
-const RuleTester = require('../../tools/node_modules/eslint').RuleTester;
+const RuleTester = require('../../tools/eslint/node_modules/eslint').RuleTester;
 const rule = require('../../tools/eslint-rules/avoid-prototype-pollution');
 
-new RuleTester({
-  parserOptions: { ecmaVersion: 2022 },
-})
+new RuleTester()
   .run('property-descriptor-no-prototype-pollution', rule, {
     valid: [
       'ObjectDefineProperties({}, {})',
@@ -45,6 +43,17 @@ new RuleTester({
       'ReflectDefineProperty({}, "key", { "__proto__": null })',
       'ObjectDefineProperty({}, "key", { \'__proto__\': null })',
       'ReflectDefineProperty({}, "key", { \'__proto__\': null })',
+      'async function myFn() { return { __proto__: null } }',
+      'async function myFn() { function myFn() { return {} } return { __proto__: null } }',
+      'const myFn = async function myFn() { return { __proto__: null } }',
+      'const myFn = async function () { return { __proto__: null } }',
+      'const myFn = async () => { return { __proto__: null } }',
+      'const myFn = async () => ({ __proto__: null })',
+      'function myFn() { return {} }',
+      'const myFn = function myFn() { return {} }',
+      'const myFn = function () { return {} }',
+      'const myFn = () => { return {} }',
+      'const myFn = () => ({})',
       'StringPrototypeReplace("some string", "some string", "some replacement")',
       'StringPrototypeReplaceAll("some string", "some string", "some replacement")',
       'StringPrototypeSplit("some string", "some string")',
@@ -114,19 +123,46 @@ new RuleTester({
       },
       {
         code: 'ObjectDefineProperty({}, "key", ObjectGetOwnPropertyDescriptor({}, "key"))',
-        errors: [{ message: /prototype pollution/ }],
+        errors: [{
+          message: /prototype pollution/,
+          suggestions: [{
+            desc: 'Wrap the property descriptor in a null-prototype object',
+            output: 'ObjectDefineProperty({}, "key", { __proto__: null,...ObjectGetOwnPropertyDescriptor({}, "key") })',
+          }],
+        }],
       },
       {
         code: 'ReflectDefineProperty({}, "key", ObjectGetOwnPropertyDescriptor({}, "key"))',
-        errors: [{ message: /prototype pollution/ }],
+        errors: [{
+          message: /prototype pollution/,
+          suggestions: [{
+            desc: 'Wrap the property descriptor in a null-prototype object',
+            output:
+              'ReflectDefineProperty({}, "key", { __proto__: null,...ObjectGetOwnPropertyDescriptor({}, "key") })',
+          }],
+        }],
       },
       {
         code: 'ObjectDefineProperty({}, "key", ReflectGetOwnPropertyDescriptor({}, "key"))',
-        errors: [{ message: /prototype pollution/ }],
+        errors: [{
+          message: /prototype pollution/,
+          suggestions: [{
+            desc: 'Wrap the property descriptor in a null-prototype object',
+            output:
+              'ObjectDefineProperty({}, "key", { __proto__: null,...ReflectGetOwnPropertyDescriptor({}, "key") })',
+          }],
+        }],
       },
       {
         code: 'ReflectDefineProperty({}, "key", ReflectGetOwnPropertyDescriptor({}, "key"))',
-        errors: [{ message: /prototype pollution/ }],
+        errors: [{
+          message: /prototype pollution/,
+          suggestions: [{
+            desc: 'Wrap the property descriptor in a null-prototype object',
+            output:
+              'ReflectDefineProperty({}, "key", { __proto__: null,...ReflectGetOwnPropertyDescriptor({}, "key") })',
+          }],
+        }],
       },
       {
         code: 'ObjectDefineProperty({}, "key", { __proto__: Object.prototype })',
@@ -153,8 +189,42 @@ new RuleTester({
         errors: [{ message: /null-prototype/ }],
       },
       {
+        code: 'async function myFn(){ return {} }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'async function myFn(){ async function someOtherFn() { return { __proto__: null } } return {} }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'async function myFn(){ if (true) { return {} } return { __proto__: null } }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'const myFn = async function myFn(){ return {} }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'const myFn = async function (){ return {} }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'const myFn = async () => { return {} }',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
+        code: 'const myFn = async () => ({})',
+        errors: [{ message: /null-prototype/ }],
+      },
+      {
         code: 'RegExpPrototypeTest(/some regex/, "some string")',
-        errors: [{ message: /looks up the "exec" property/ }],
+        errors: [{
+          message: /looks up the "exec" property/,
+          suggestions: [{
+            desc: 'Use RegexpPrototypeExec instead',
+            output: 'RegExpPrototypeExec(/some regex/, "some string") !== null',
+          }],
+        }],
       },
       {
         code: 'RegExpPrototypeSymbolMatch(/some regex/, "some string")',

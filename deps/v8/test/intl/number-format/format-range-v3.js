@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-intl-number-format-v3
-
 const validRanges = [[-12345, -5678], [-12345, 56789], [12345, 56789]];
 
 const nf = new Intl.NumberFormat("en", {signDisplay: "exceptZero"});
@@ -50,18 +48,16 @@ const nf = new Intl.NumberFormat("en", {signDisplay: "exceptZero"});
   // 6. If ... y is NaN, throw a RangeError exception.
   assertThrows(() => { nf[method](12, NaN) }, RangeError);
 
-  // 8. If x is greater than y, throw a RangeError exception.
-  // neither x nor y are bigint.
-  assertThrows(() => { nf[method](23, 12) }, RangeError);
+  assertDoesNotThrow(() => { nf[method](23, 12)});
   assertDoesNotThrow(() => nf[method](12, 23));
   // x is not bigint but y is.
-  assertThrows(() => { nf[method](23, 12n) }, RangeError);
+  assertDoesNotThrow(() => { nf[method](23, 12n)});
   assertDoesNotThrow(() => nf[method](12, 23n));
   // x is bigint but y is not.
-  assertThrows(() => { nf[method](23n, 12) }, RangeError);
+  assertDoesNotThrow(() => { nf[method](23n, 12)});
   assertDoesNotThrow(() => nf[method](12n, 23));
   // both x and y are bigint.
-  assertThrows(() => { nf[method](23n, 12n) }, RangeError);
+  assertDoesNotThrow(() => { nf[method](23n, 12n)});
   assertDoesNotThrow(() => nf[method](12n, 23n));
 
   validRanges.forEach(

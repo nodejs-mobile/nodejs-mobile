@@ -4,9 +4,10 @@
 
 #include "src/builtins/builtins-proxy-gen.h"
 
+#include "src/builtins/builtins-inl.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins-utils.h"
-#include "src/builtins/builtins.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/common/globals.h"
 #include "src/logging/counters.h"
 #include "src/objects/js-proxy.h"
@@ -104,7 +105,7 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
 
   // 2. If handler is null, throw a TypeError exception.
   CSA_DCHECK(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  GotoIfNot(JSAnyIsNotPrimitive(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
   CSA_DCHECK(this, IsJSReceiver(handler));
@@ -133,7 +134,7 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
   BIND(&trap_undefined);
   {
     // 6.a. Return Call(target, thisArgument, argumentsList).
-    TailCallStub(CodeFactory::Call(isolate()), context, target, argc);
+    TailCallBuiltin(Builtins::Call(), context, target, argc);
   }
 
   BIND(&throw_proxy_handler_revoked);
@@ -149,6 +150,8 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
 
   CSA_DCHECK(this, IsCallable(proxy));
 
+  PerformStackCheck(context);
+
   Label throw_proxy_handler_revoked(this, Label::kDeferred),
       trap_undefined(this), not_an_object(this, Label::kDeferred);
 
@@ -158,7 +161,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
 
   // 2. If handler is null, throw a TypeError exception.
   CSA_DCHECK(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  GotoIfNot(JSAnyIsNotPrimitive(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
   CSA_DCHECK(this, IsJSReceiver(handler));
@@ -185,7 +188,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
 
   // 9. If Type(newObj) is not Object, throw a TypeError exception.
   GotoIf(TaggedIsSmi(new_obj), &not_an_object);
-  GotoIfNot(IsJSReceiver(CAST(new_obj)), &not_an_object);
+  GotoIfNot(JSAnyIsNotPrimitive(CAST(new_obj)), &not_an_object);
 
   // 10. Return newObj.
   args.PopAndReturn(new_obj);
@@ -201,8 +204,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
     CSA_DCHECK(this, IsConstructor(CAST(target)));
 
     // 6.b. Return ? Construct(target, argumentsList, newTarget).
-    TailCallStub(CodeFactory::Construct(isolate()), context, target, new_target,
-                 argc);
+    TailCallBuiltin(Builtin::kConstruct, context, target, new_target, argc);
   }
 
   BIND(&throw_proxy_handler_revoked);

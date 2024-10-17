@@ -15,18 +15,25 @@ class WasmBuiltinsAssembler : public CodeStubAssembler {
   explicit WasmBuiltinsAssembler(compiler::CodeAssemblerState* state)
       : CodeStubAssembler(state) {}
 
-  TNode<WasmInstanceObject> LoadInstanceFromFrame();
+  TNode<WasmTrustedInstanceData> LoadInstanceDataFromFrame();
 
-  TNode<NativeContext> LoadContextFromInstance(
-      TNode<WasmInstanceObject> instance);
+  TNode<WasmTrustedInstanceData> LoadTrustedDataFromInstance(
+      TNode<WasmInstanceObject>);
 
-  TNode<FixedArray> LoadTablesFromInstance(TNode<WasmInstanceObject> instance);
+  TNode<NativeContext> LoadContextFromWasmOrJsFrame();
 
-  TNode<FixedArray> LoadInternalFunctionsFromInstance(
-      TNode<WasmInstanceObject> instance);
+  TNode<NativeContext> LoadContextFromInstanceData(
+      TNode<WasmTrustedInstanceData>);
 
-  TNode<FixedArray> LoadManagedObjectMapsFromInstance(
-      TNode<WasmInstanceObject> instance);
+  TNode<FixedArray> LoadTablesFromInstanceData(TNode<WasmTrustedInstanceData>);
+
+  TNode<FixedArray> LoadFuncRefsFromInstanceData(
+      TNode<WasmTrustedInstanceData>);
+
+  TNode<FixedArray> LoadManagedObjectMapsFromInstanceData(
+      TNode<WasmTrustedInstanceData>);
+
+  TNode<Float64T> StringToFloat64(TNode<String>);
 };
 
 }  // namespace internal

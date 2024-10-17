@@ -17,22 +17,23 @@ class WatchTestCase {
     this.field = field;
     this.shouldSkip = !shouldInclude;
   }
-  get dirPath() { return join(tmpdir.path, this.dirName); }
+  get dirPath() { return tmpdir.resolve(this.dirName); }
   get filePath() { return join(this.dirPath, this.fileName); }
 }
 
-const { isLinux, isOSX, isWindows, isAIX, isAndroid, isIOS } = common;
+// nodejs-mobile patch: add isIOS and isAndroid and this destructuring
+const { isLinux, isMacOS, isWindows, isAIX, isAndroid, isIOS } = common;
 const cases = [
   // Watch on a file should callback with a filename on supported systems
   new WatchTestCase(
-    isLinux || isOSX || isWindows || isAIX || isAndroid || isIOS,
+    isLinux || isMacOS || isWindows || isAIX || isAndroid || isIOS,
     'watch1',
     'foo',
     'filePath'
   ),
   // Watch on a directory should callback with a filename on supported systems
   new WatchTestCase(
-    isLinux || isOSX || isWindows || isAndroid,
+    isLinux || isMacOS || isWindows || isAndroid,
     'watch2',
     'bar',
     'dirPath'
@@ -42,13 +43,7 @@ const cases = [
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-for (const testCase of cases) {
-  if (testCase.shouldSkip) continue;
-  fs.mkdirSync(testCase.dirPath);
-  // Long content so it's actually flushed.
-  const content1 = Date.now() + testCase.fileName.toLowerCase().repeat(1e4);
-  fs.writeFileSync(testCase.filePath, content1);
-
+function doWatchTest(testCase) {
   let interval;
   const pathToWatch = testCase[testCase.field];
   const watcher = fs.watch(pathToWatch);
@@ -67,7 +62,8 @@ for (const testCase of cases) {
       clearInterval(interval);
       interval = null;
     }
-    if (common.isOSX || common.isIOS)
+    // nodejs-mobile patch: add isIOS
+    if (common.isMacOS || common.isIOS)
       assert.strictEqual(['rename', 'change'].includes(eventType), true);
     else
       assert.strictEqual(eventType, 'change');
@@ -86,6 +82,23 @@ for (const testCase of cases) {
     fs.writeFileSync(testCase.filePath, '');
     fs.writeFileSync(testCase.filePath, content2);
   }, 100);
+}
+
+for (const testCase of cases) {
+  if (testCase.shouldSkip) continue;
+  fs.mkdirSync(testCase.dirPath);
+  // Long content so it's actually flushed.
+  const content1 = Date.now() + testCase.fileName.toLowerCase().repeat(1e4);
+  fs.writeFileSync(testCase.filePath, content1);
+  if (common.isMacOS) {
+    // On macOS delay watcher start to avoid leaking previous events.
+    // Refs: https://github.com/libuv/libuv/pull/4503
+    setTimeout(() => {
+      doWatchTest(testCase);
+    }, common.platformTimeout(100));
+  } else {
+    doWatchTest(testCase);
+  }
 }
 
 [false, 1, {}, [], null, undefined].forEach((input) => {

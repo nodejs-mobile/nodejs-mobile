@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <fuchsia/kernel/cpp/fidl.h>
-#include <lib/fdio/directory.h>
+#include <fidl/fuchsia.kernel/cpp/fidl.h>
+#include <lib/component/incoming/cpp/protocol.h>
 #include <lib/zx/resource.h>
 #include <lib/zx/thread.h>
 #include <lib/zx/vmar.h>
@@ -24,22 +24,26 @@ static zx_handle_t g_vmex_resource = ZX_HANDLE_INVALID;
 
 static void* g_root_vmar_base = nullptr;
 
-#ifdef V8_USE_VMEX_RESOURCE
+// If VmexResource is unavailable or does not return a valid handle then
+// this will be observed as failures in vmo_replace_as_executable() calls.
 void SetVmexResource() {
   DCHECK_EQ(g_vmex_resource, ZX_HANDLE_INVALID);
-  zx::resource vmex_resource;
-  fuchsia::kernel::VmexResourceSyncPtr vmex_resource_svc;
-  zx_status_t status = fdio_service_connect(
-      "/svc/fuchsia.kernel.VmexResource",
-      vmex_resource_svc.NewRequest().TakeChannel().release());
-  DCHECK_EQ(status, ZX_OK);
-  status = vmex_resource_svc->Get(&vmex_resource);
-  USE(status);
-  DCHECK_EQ(status, ZX_OK);
-  DCHECK(vmex_resource.is_valid());
-  g_vmex_resource = vmex_resource.release();
+
+  auto vmex_resource_client =
+      component::Connect<fuchsia_kernel::VmexResource>();
+  if (vmex_resource_client.is_error()) {
+    return;
+  }
+
+  fidl::SyncClient sync_vmex_resource_client(
+      std::move(vmex_resource_client.value()));
+  auto result = sync_vmex_resource_client->Get();
+  if (result.is_error()) {
+    return;
+  }
+
+  g_vmex_resource = result->resource().release();
 }
-#endif
 
 zx_vm_option_t GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
@@ -167,8 +171,16 @@ bool SetPermissionsInternal(const zx::vmar& vmar, size_t page_size,
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % page_size);
   DCHECK_EQ(0, size % page_size);
   uint32_t prot = GetProtectionFromMemoryPermission(access);
-  return vmar.protect(prot, reinterpret_cast<uintptr_t>(address), size) ==
-         ZX_OK;
+  zx_status_t status =
+      vmar.protect(prot, reinterpret_cast<uintptr_t>(address), size);
+
+  // Any failure that's not OOM likely indicates a bug in the caller (e.g.
+  // using an invalid mapping) so attempt to catch that here to facilitate
+  // debugging of these failures. According to the documentation,
+  // zx_vmar_protect cannot return ZX_ERR_NO_MEMORY, so any error here is
+  // unexpected.
+  CHECK_EQ(status, ZX_OK);
+  return status == ZX_OK;
 }
 
 bool DiscardSystemPagesInternal(const zx::vmar& vmar, size_t page_size,
@@ -228,8 +240,8 @@ TimezoneCache* OS::CreateTimezoneCache() {
 }
 
 // static
-void OS::Initialize(bool hard_abort, const char* const gc_fake_mmap) {
-  PosixInitializeCommon(hard_abort, gc_fake_mmap);
+void OS::Initialize(AbortMode abort_mode, const char* const gc_fake_mmap) {
+  PosixInitializeCommon(abort_mode, gc_fake_mmap);
 
   // Determine base address of root VMAR.
   zx_info_vmar_t info;
@@ -238,9 +250,7 @@ void OS::Initialize(bool hard_abort, const char* const gc_fake_mmap) {
   CHECK_EQ(ZX_OK, status);
   g_root_vmar_base = reinterpret_cast<void*>(info.base);
 
-#ifdef V8_USE_VMEX_RESOURCE
   SetVmexResource();
-#endif
 }
 
 // static
@@ -282,6 +292,15 @@ void OS::Release(void* address, size_t size) { Free(address, size); }
 bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
   return SetPermissionsInternal(*zx::vmar::root_self(), CommitPageSize(),
                                 address, size, access);
+}
+
+void OS::SetDataReadOnly(void* address, size_t size) {
+  CHECK(OS::SetPermissions(address, size, MemoryPermission::kRead));
+}
+
+// static
+bool OS::RecommitPages(void* address, size_t size, MemoryPermission access) {
+  return SetPermissions(address, size, access);
 }
 
 // static
@@ -441,6 +460,11 @@ bool AddressSpaceReservation::SetPermissions(void* address, size_t size,
   DCHECK(Contains(address, size));
   return SetPermissionsInternal(*zx::unowned_vmar(vmar_), OS::CommitPageSize(),
                                 address, size, access);
+}
+
+bool AddressSpaceReservation::RecommitPages(void* address, size_t size,
+                                            OS::MemoryPermission access) {
+  return SetPermissions(address, size, access);
 }
 
 bool AddressSpaceReservation::DiscardSystemPages(void* address, size_t size) {

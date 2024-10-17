@@ -489,6 +489,9 @@ assertTrue(Object.prototype.isPrototypeOf(o2));
 var json = '{"stuff before slash\\\\stuff after slash":"whatever"}';
 TestStringify(json, JSON.parse(json));
 
+// TODO(v8:12955): JSON parse with source access will assert failed when the
+// reviver modifies the json value like this. See
+// https://github.com/tc39/proposal-json-parse-with-source/issues/35.
 
 // https://bugs.chromium.org/p/v8/issues/detail?id=3139
 
@@ -528,3 +531,44 @@ assertEquals(`[
           1,
           2
 ]`, JSON.stringify([1,2], undefined, 1000000000000000));
+
+let obj = { x: 0, y: 1 };
+let other = {};
+let called = false;
+let count = 0;
+
+obj.__defineGetter__(undefined, function() {
+  count++;
+  if (called) {
+    obj["__proto__"] = other["__lookupSetter__"];
+  } else {
+    obj["toLocaleString"] = other["__lookupSetter__"];
+    called = true;
+  }
+});
+
+assertEquals('{"x":0,"y":1}', JSON.stringify(obj));
+assertEquals(1, count);
+assertEquals('{"x":0,"y":1}', JSON.stringify(obj));
+assertEquals(2, count);
+
+function sharedConstructor(baseConstructor) {
+  class SharedTypedArray extends Object.getPrototypeOf(baseConstructor) {}
+  Object.defineProperty(SharedTypedArray, "name", {
+    value: baseConstructor.name
+  });
+  return SharedTypedArray;
+}
+sharedTypedArrayConstructors = [Float64Array].map(sharedConstructor);
+for (var __v_0 of sharedTypedArrayConstructors) {}
+var __v_1 = 0;
+var __v_2 = {
+  get: function () {
+    __v_1++;
+    return (
+      __v_0
+    );
+  },
+};
+assertEquals('[null]', JSON.stringify(Object.defineProperty([], "0", __v_2)));
+assertEquals(1, __v_1);

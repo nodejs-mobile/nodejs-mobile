@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2016 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -28,9 +28,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import operator
-from callstats_groups import RUNTIME_CALL_STATS_GROUPS
-
 import numpy
 from math import sqrt
 
@@ -383,10 +380,11 @@ def read_stats(path, domain, args):
         ('Group-Callback', re.compile(".*Callback.*")),
         ('Group-API', re.compile(".*API.*")),
         ('Group-GC-Custom', re.compile("GC_Custom_.*")),
-        ('Group-GC-Background', re.compile(".*GC.*BACKGROUND.*")),
+        ('Group-GC-Background', re.compile("GC_.*BACKGROUND.*")),
         ('Group-GC', re.compile("GC_.*|AllocateInTargetSpace")),
         ('Group-JavaScript', re.compile("JS_Execution")),
-        ('Group-Runtime', re.compile(".*"))]
+        ('Group-Runtime', re.compile(".*"))
+    ]
   with open(path, "rt") as f:
     # Process the whole file and sum repeating entries.
     entries = { 'Sum': {'time': 0, 'count': 0} }

@@ -88,9 +88,64 @@ Threads
 
     .. versionadded:: 1.26.0
 
+.. c:function:: int uv_thread_setaffinity(uv_thread_t* tid, char* cpumask, char* oldmask, size_t mask_size)
+
+    Sets the specified thread's affinity to cpumask, which is specified in
+    bytes. Optionally returning the previous affinity setting in oldmask.
+    On Unix, uses :man:`pthread_getaffinity_np(3)` to get the affinity setting
+    and maps the cpu_set_t to bytes in oldmask. Then maps the bytes in cpumask
+    to a cpu_set_t and uses :man:`pthread_setaffinity_np(3)`. On Windows, maps
+    the bytes in cpumask to a bitmask and uses SetThreadAffinityMask() which
+    returns the previous affinity setting.
+
+    The mask_size specifies the number of entries (bytes) in cpumask / oldmask,
+    and must be greater-than-or-equal-to :c:func:`uv_cpumask_size`.
+
+    .. note::
+        Thread affinity setting is not atomic on Windows. Unsupported on macOS.
+
+    .. versionadded:: 1.45.0
+
+.. c:function:: int uv_thread_getaffinity(uv_thread_t* tid, char* cpumask, size_t mask_size)
+
+    Gets the specified thread's affinity setting. On Unix, this maps the
+    cpu_set_t returned by :man:`pthread_getaffinity_np(3)` to bytes in cpumask.
+
+    The mask_size specifies the number of entries (bytes) in cpumask,
+    and must be greater-than-or-equal-to :c:func:`uv_cpumask_size`.
+
+    .. note::
+        Thread affinity getting is not atomic on Windows. Unsupported on macOS.
+
+    .. versionadded:: 1.45.0
+
+.. c:function:: int uv_thread_getcpu(void)
+
+    Gets the CPU number on which the calling thread is running.
+
+    .. note::
+        Currently only implemented on Windows, Linux and FreeBSD.
+
+    .. versionadded:: 1.45.0
+
 .. c:function:: uv_thread_t uv_thread_self(void)
 .. c:function:: int uv_thread_join(uv_thread_t *tid)
 .. c:function:: int uv_thread_equal(const uv_thread_t* t1, const uv_thread_t* t2)
+
+.. c:function:: int uv_thread_setpriority(uv_thread_t tid, int priority)
+    If the function succeeds, the return value is 0.
+    If the function fails, the return value is less than zero.
+    Sets the scheduling priority of the thread specified by tid. It requires elevated
+    privilege to set specific priorities on some platforms.
+    The priority can be set to the following constants. UV_THREAD_PRIORITY_HIGHEST, 
+    UV_THREAD_PRIORITY_ABOVE_NORMAL, UV_THREAD_PRIORITY_NORMAL, 
+    UV_THREAD_PRIORITY_BELOW_NORMAL, UV_THREAD_PRIORITY_LOWEST.
+.. c:function:: int uv_thread_getpriority(uv_thread_t tid, int* priority)
+    If the function succeeds, the return value is 0.
+    If the function fails, the return value is less than zero.
+    Retrieves the scheduling priority of the thread specified by tid. The value in the
+    output parameter priority is platform dependent.
+    For Linux, when schedule policy is SCHED_OTHER (default), priority is 0.
 
 Thread-local storage
 ^^^^^^^^^^^^^^^^^^^^

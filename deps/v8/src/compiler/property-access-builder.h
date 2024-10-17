@@ -10,7 +10,6 @@
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/node.h"
 #include "src/handles/handles.h"
-#include "src/objects/map.h"
 #include "src/zone/zone-containers.h"
 
 namespace v8 {
@@ -28,9 +27,8 @@ struct FieldAccess;
 
 class PropertyAccessBuilder {
  public:
-  PropertyAccessBuilder(JSGraph* jsgraph, JSHeapBroker* broker,
-                        CompilationDependencies* dependencies)
-      : jsgraph_(jsgraph), broker_(broker), dependencies_(dependencies) {}
+  PropertyAccessBuilder(JSGraph* jsgraph, JSHeapBroker* broker)
+      : jsgraph_(jsgraph), broker_(broker) {}
 
   // Builds the appropriate string check if the maps are only string
   // maps.
@@ -48,8 +46,7 @@ class PropertyAccessBuilder {
 
   // Builds the actual load for data-field and data-constant-field
   // properties (without heap-object or map checks).
-  Node* BuildLoadDataField(NameRef const& name,
-                           PropertyAccessInfo const& access_info,
+  Node* BuildLoadDataField(NameRef name, PropertyAccessInfo const& access_info,
                            Node* lookup_start_object, Node** effect,
                            Node** control);
 
@@ -65,13 +62,15 @@ class PropertyAccessBuilder {
  private:
   JSGraph* jsgraph() const { return jsgraph_; }
   JSHeapBroker* broker() const { return broker_; }
-  CompilationDependencies* dependencies() const { return dependencies_; }
+  CompilationDependencies* dependencies() const {
+    return broker_->dependencies();
+  }
   Graph* graph() const;
   Isolate* isolate() const;
   CommonOperatorBuilder* common() const;
   SimplifiedOperatorBuilder* simplified() const;
 
-  Node* TryFoldLoadConstantDataField(NameRef const& name,
+  Node* TryFoldLoadConstantDataField(NameRef name,
                                      PropertyAccessInfo const& access_info,
                                      Node* lookup_start_object);
   // Returns a node with the holder for the property access described by
@@ -79,13 +78,12 @@ class PropertyAccessBuilder {
   Node* ResolveHolder(PropertyAccessInfo const& access_info,
                       Node* lookup_start_object);
 
-  Node* BuildLoadDataField(NameRef const& name, Node* holder,
-                           FieldAccess& field_access, bool is_inobject,
+  Node* BuildLoadDataField(NameRef name, Node* holder,
+                           FieldAccess&& field_access, bool is_inobject,
                            Node** effect, Node** control);
 
   JSGraph* jsgraph_;
   JSHeapBroker* broker_;
-  CompilationDependencies* dependencies_;
 };
 
 bool HasOnlyStringMaps(JSHeapBroker* broker, ZoneVector<MapRef> const& maps);
