@@ -702,7 +702,7 @@
             'xcode_settings': {
               'SDKROOT': '',
               'IPHONEOS_DEPLOYMENT_TARGET': '',
-              'MACOSX_DEPLOYMENT_TARGET': '10.10',
+              'MACOSX_DEPLOYMENT_TARGET': '11.0',
             },
             'conditions':[
               ['target_arch=="arm64" and host_arch != "arm64"', {
