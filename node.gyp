@@ -1382,7 +1382,6 @@
         [ 'node_shared_libuv=="false"', {
           'dependencies': [ 'deps/uv/uv.gyp:libuv#host' ],
         }],
-        # nodejs-mobile patch: add ios
         [ 'OS in "linux mac ios"', {
           'defines': ['NODE_JS2C_USE_STRING_LITERALS'],
         }],
@@ -1395,6 +1394,32 @@
               '-g', '-O0'
             ],
           },
+        }],
+        [ 'OS=="ios"', {
+          'target_conditions': [
+            ['_toolset=="host"', {
+              'xcode_settings': {
+                'SDKROOT': 'macosx',
+                'MACOSX_DEPLOYMENT_TARGET': '10.15',
+                'IPHONEOS_DEPLOYMENT_TARGET': '',
+                'ENABLE_BITCODE': 'NO',
+              },
+              'cflags!': [
+                '-miphoneos-version-min=14.0',
+                '-fembed-bitcode',
+              ],
+              'cflags': [
+                '-mmacosx-version-min=10.15',
+              ],
+              'ldflags!': [
+                '-miphoneos-version-min=14.0',
+                '-fembed-bitcode',
+              ],
+              'ldflags': [
+                '-mmacosx-version-min=10.15',
+              ],
+            }],
+          ],
         }],
       ]
     },

@@ -18,39 +18,40 @@ XCODE_PROJECT_PATH='tools/ios-framework/NodeMobile.xcodeproj/project.pbxproj'
 
 declare -a outputs_common=(
     "libada.a"
-    "libbase64.a"
     "libbrotli.a"
     "libcares.a"
-    "libgtest_main.a"
     "libgtest.a"
+    "libgtest_main.a"
     "libhistogram.a"
     "libllhttp.a"
+    "libnbytes.a"
+    "libncrypto.a"
     "libnghttp2.a"
     "libnghttp3.a"
     "libngtcp2.a"
     "libnode.a"
     "libopenssl.a"
+    "libsimdjson.a"
     "libsimdutf.a"
+    "libsqlite.a"
+    "libtorque_base.a"
     "libuv.a"
     "libuvwasi.a"
+    "libv8_abseil.a"
     "libv8_base_without_compiler.a"
     "libv8_compiler.a"
+    "libv8_init.a"
     "libv8_initializers.a"
     "libv8_libbase.a"
     "libv8_libplatform.a"
     "libv8_snapshot.a"
+    "libv8_turboshaft.a"
     "libv8_zlib.a"
     "libzlib.a"
 )
 declare -a outputs_x64_only=(
-    "libbase64_avx.a"
-    "libbase64_avx2.a"
-    "libbase64_sse41.a"
-    "libbase64_sse42.a"
-    "libbase64_ssse3.a"
 )
 declare -a outputs_arm64_only=(
-    "libbase64_neon64.a"
     "libzlib_inflate_chunk_simd.a"
 )
 

@@ -215,18 +215,17 @@ CompileCacheEntry* CompileCacheHandler::GetOrInsert(
     return loaded->second.get();
   }
 
+  // If the code hash mismatches, the code has changed, discard the stale entry
+  // and create a new one.
   auto emplaced =
       compiler_cache_store_.emplace(key, std::make_unique<CompileCacheEntry>());
   auto* result = emplaced.first->second.get();
 
-  std::u8string cache_filename_u8 =
-      (compile_cache_dir_ / Uint32ToHex(key)).u8string();
   result->code_hash = code_hash;
   result->code_size = code_utf8.length();
   result->cache_key = key;
   result->cache_filename =
-      std::string(cache_filename_u8.begin(), cache_filename_u8.end()) +
-      ".cache";
+      compile_cache_dir_ / std::filesystem::path(Uint32ToHex(key));
   result->source_filename = filename_utf8.ToString();
   result->cache = nullptr;
   result->type = type;
@@ -358,49 +357,46 @@ CompileCacheHandler::CompileCacheHandler(Environment* env)
 
 // Directory structure:
 // - Compile cache directory (from NODE_COMPILE_CACHE)
-//   - $NODE_VERION-$ARCH-$CACHE_DATA_VERSION_TAG-$UID
+//   - $NODE_VERSION-$ARCH-$CACHE_DATA_VERSION_TAG-$UID
 //     - $FILENAME_AND_MODULE_TYPE_HASH.cache: a hash of filename + module type
 CompileCacheEnableResult CompileCacheHandler::Enable(Environment* env,
                                                      const std::string& dir) {
   std::string cache_tag = GetCacheVersionTag();
   std::string absolute_cache_dir_base = PathResolve(env, {dir});
-  std::filesystem::path cache_dir_with_tag =
-      std::filesystem::path(absolute_cache_dir_base) / cache_tag;
-  std::u8string cache_dir_with_tag_u8 = cache_dir_with_tag.u8string();
-  std::string cache_dir_with_tag_str(cache_dir_with_tag_u8.begin(),
-                                     cache_dir_with_tag_u8.end());
+  std::string cache_dir_with_tag =
+      absolute_cache_dir_base + kPathSeparator + cache_tag;
   CompileCacheEnableResult result;
   Debug("[compile cache] resolved path %s + %s -> %s\n",
         dir,
         cache_tag,
-        cache_dir_with_tag_str);
+        cache_dir_with_tag);
 
-  if (UNLIKELY(!env->permission()->is_granted(
+  if (!env->permission()->is_granted(
           env,
           permission::PermissionScope::kFileSystemWrite,
-          cache_dir_with_tag_str))) {
+          cache_dir_with_tag)) [[unlikely]] {
     result.message = "Skipping compile cache because write permission for " +
-                     cache_dir_with_tag_str + " is not granted";
+                     cache_dir_with_tag + " is not granted";
     result.status = CompileCacheEnableStatus::FAILED;
     return result;
   }
 
-  if (UNLIKELY(!env->permission()->is_granted(
+  if (!env->permission()->is_granted(
           env,
           permission::PermissionScope::kFileSystemRead,
-          cache_dir_with_tag_str))) {
+          cache_dir_with_tag)) [[unlikely]] {
     result.message = "Skipping compile cache because read permission for " +
-                     cache_dir_with_tag_str + " is not granted";
+                     cache_dir_with_tag + " is not granted";
     result.status = CompileCacheEnableStatus::FAILED;
     return result;
   }
 
   fs::FSReqWrapSync req_wrap;
   int err = fs::MKDirpSync(
-      nullptr, &(req_wrap.req), cache_dir_with_tag_str, 0777, nullptr);
+      nullptr, &(req_wrap.req), cache_dir_with_tag, 0777, nullptr);
   if (is_debug_) {
     Debug("[compile cache] creating cache directory %s...%s\n",
-          cache_dir_with_tag_str,
+          cache_dir_with_tag,
           err < 0 ? uv_strerror(err) : "success");
   }
   if (err != 0 && err != UV_EEXIST) {
@@ -410,11 +406,9 @@ CompileCacheEnableResult CompileCacheHandler::Enable(Environment* env,
     return result;
   }
 
-  compile_cache_dir_str_ = absolute_cache_dir_base;
   result.cache_directory = absolute_cache_dir_base;
   compile_cache_dir_ = cache_dir_with_tag;
   result.status = CompileCacheEnableStatus::ENABLED;
   return result;
 }
-
 }  // namespace node

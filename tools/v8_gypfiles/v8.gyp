@@ -2408,6 +2408,12 @@
         '<(ABSEIL_ROOT)/absl/crc/internal/crc_memcpy_fallback.cc',
         '<(ABSEIL_ROOT)/absl/crc/internal/crc_memcpy_x86_arm_combined.cc',
         '<(ABSEIL_ROOT)/absl/crc/internal/crc_x86_arm_combined.cc',
+        # nodejs-mobile patch: this needed for ios's arm64-simulator because 
+        # echo | xcrun --sdk iphonesimulator clang -arch arm64 -dM -E - | grep ARM_FEATURE
+        # will enable this define ABSL_CRC_INTERNAL_HAVE_ARM_SIMD
+        # so classes CrcNonTemporalMemcpyEngine and CrcNonTemporalMemcpyAVXEngine 
+        # must be fully implemented
+        '<(ABSEIL_ROOT)/absl/crc/internal/crc_non_temporal_memcpy.cc',
         '<(ABSEIL_ROOT)/absl/debugging/internal/address_is_readable.h',
         '<(ABSEIL_ROOT)/absl/debugging/internal/address_is_readable.cc',
         '<(ABSEIL_ROOT)/absl/debugging/internal/demangle.h',

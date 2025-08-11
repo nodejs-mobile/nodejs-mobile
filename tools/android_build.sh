@@ -27,6 +27,13 @@ BUILD_ARCH() {
   make clean
   rm -rf android-toolchain/
 
+   # Add special flags for arm64 to fix CRC32 SIMD crash
+  if [ "$TARGET_ARCH" == "arm64" ]; then
+    export CFLAGS="$CFLAGS -march=armv8-a+crc+aes"
+    export CXXFLAGS="$CXXFLAGS -march=armv8-a+crc+aes"
+    echo "[INFO] Injected -march=armv8-a+crc+aes for arm64"
+  fi
+
   # Compile
   eval '"./android-configure" "$ANDROID_NDK_PATH" $ANDROID_SDK_VERSION $TARGET_ARCH'
   make -j $(getconf _NPROCESSORS_ONLN)

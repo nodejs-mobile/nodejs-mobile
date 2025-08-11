@@ -28,8 +28,12 @@
 #endif
 
 // pthread_jit_write_protect is only available on arm64 Mac.
+
+// nodejs-mobile patch: disable V8_HAS_PTHREAD_JIT_WRITE_PROTECT 
+// for ios's arm64-simulator and x64-simulator. and 'embedtest' from node.gyp as well.
+// this removes SetJitWriteProtected forward declaration from build
 #if defined(V8_HOST_ARCH_ARM64) && \
-    (defined(V8_OS_MACOS) || (defined(V8_OS_IOS) && TARGET_OS_SIMULATOR))
+    (defined(V8_OS_MACOS) )
 #define V8_HAS_PTHREAD_JIT_WRITE_PROTECT 1
 #else
 #define V8_HAS_PTHREAD_JIT_WRITE_PROTECT 0
