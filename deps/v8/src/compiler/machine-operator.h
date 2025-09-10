@@ -5,6 +5,8 @@
 #ifndef V8_COMPILER_MACHINE_OPERATOR_H_
 #define V8_COMPILER_MACHINE_OPERATOR_H_
 
+#include <optional>
+
 #include "src/base/compiler-specific.h"
 #include "src/base/enum-set.h"
 #include "src/base/flags.h"
@@ -44,7 +46,6 @@ class OptionalOperator final {
   const Operator* const op_;
 };
 
-
 // A Load needs a MachineType.
 using LoadRepresentation = MachineType;
 
@@ -56,15 +57,18 @@ V8_EXPORT_PRIVATE LoadRepresentation LoadRepresentationOf(Operator const*)
 class AtomicLoadParameters final {
  public:
   AtomicLoadParameters(LoadRepresentation representation,
-                       AtomicMemoryOrder order)
-      : representation_(representation), order_(order) {}
+                       AtomicMemoryOrder order,
+                       MemoryAccessKind kind = MemoryAccessKind::kNormal)
+      : representation_(representation), order_(order), kind_(kind) {}
 
   LoadRepresentation representation() const { return representation_; }
   AtomicMemoryOrder order() const { return order_; }
+  MemoryAccessKind kind() const { return kind_; }
 
  private:
   LoadRepresentation representation_;
   AtomicMemoryOrder order_;
+  MemoryAccessKind kind_;
 };
 
 V8_EXPORT_PRIVATE bool operator==(AtomicLoadParameters, AtomicLoadParameters);
@@ -77,29 +81,62 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, AtomicLoadParameters);
 V8_EXPORT_PRIVATE AtomicLoadParameters AtomicLoadParametersOf(Operator const*)
     V8_WARN_UNUSED_RESULT;
 
-enum class MemoryAccessKind {
-  kNormal,
-  kUnaligned,
-  kProtected,
+class AtomicOpParameters final {
+ public:
+  AtomicOpParameters(MachineType type,
+                      MemoryAccessKind kind = MemoryAccessKind::kNormal)
+      : type_(type), kind_(kind) {}
+
+  MachineType type() const { return type_; }
+  MemoryAccessKind kind() const { return kind_; }
+
+ private:
+  MachineType type_;
+  MemoryAccessKind kind_;
 };
 
-size_t hash_value(MemoryAccessKind);
+V8_EXPORT_PRIVATE bool operator==(AtomicOpParameters, AtomicOpParameters);
+bool operator!=(AtomicOpParameters, AtomicOpParameters);
 
-V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, MemoryAccessKind);
+size_t hash_value(AtomicOpParameters);
+
+V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, AtomicOpParameters);
+
+V8_EXPORT_PRIVATE AtomicOpParameters AtomicOpParametersOf(Operator const*)
+    V8_WARN_UNUSED_RESULT;
 
 enum class LoadTransformation {
+  // 128-bit LoadSplats must be first.
   kS128Load8Splat,
   kS128Load16Splat,
   kS128Load32Splat,
   kS128Load64Splat,
+  kFirst128Splat = kS128Load8Splat,
+  kLast128Splat = kS128Load64Splat,
+  // 128-bit LoadExtend.
   kS128Load8x8S,
   kS128Load8x8U,
   kS128Load16x4S,
   kS128Load16x4U,
   kS128Load32x2S,
   kS128Load32x2U,
+  kFirst128Extend = kS128Load8x8S,
+  kLast128Extend = kS128Load32x2U,
   kS128Load32Zero,
   kS128Load64Zero,
+  // 256-bit transformations must be last.
+  kS256Load8Splat,
+  kS256Load16Splat,
+  kS256Load32Splat,
+  kS256Load64Splat,
+  kS256Load8x16S,
+  kS256Load8x16U,
+  kS256Load8x8U,
+  kS256Load16x8S,
+  kS256Load16x8U,
+  kS256Load32x4S,
+  kS256Load32x4U,
+  kFirst256Transform = kS256Load8Splat
 };
 
 size_t hash_value(LoadTransformation);
@@ -152,6 +189,14 @@ class StoreRepresentation final {
   WriteBarrierKind write_barrier_kind_;
 };
 
+struct StorePairRepresentation final
+    : public std::pair<StoreRepresentation, StoreRepresentation> {
+  StorePairRepresentation(StoreRepresentation first, StoreRepresentation second)
+      : std::pair<StoreRepresentation, StoreRepresentation>(first, second) {}
+  friend std::ostream& operator<<(std::ostream& out,
+                                  const StorePairRepresentation rep);
+};
+
 V8_EXPORT_PRIVATE bool operator==(StoreRepresentation, StoreRepresentation);
 bool operator!=(StoreRepresentation, StoreRepresentation);
 
@@ -162,14 +207,18 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, StoreRepresentation);
 V8_EXPORT_PRIVATE StoreRepresentation const& StoreRepresentationOf(
     Operator const*) V8_WARN_UNUSED_RESULT;
 
+V8_EXPORT_PRIVATE StorePairRepresentation const& StorePairRepresentationOf(
+    Operator const*) V8_WARN_UNUSED_RESULT;
+
 // A Word(32|64)AtomicStore needs both a StoreRepresentation and a memory order.
 class AtomicStoreParameters final {
  public:
   AtomicStoreParameters(MachineRepresentation representation,
                         WriteBarrierKind write_barrier_kind,
-                        AtomicMemoryOrder order)
+                        AtomicMemoryOrder order,
+                        MemoryAccessKind kind = MemoryAccessKind::kNormal)
       : store_representation_(representation, write_barrier_kind),
-        order_(order) {}
+        order_(order), kind_(kind) {}
 
   MachineRepresentation representation() const {
     return store_representation_.representation();
@@ -178,6 +227,7 @@ class AtomicStoreParameters final {
     return store_representation_.write_barrier_kind();
   }
   AtomicMemoryOrder order() const { return order_; }
+  MemoryAccessKind kind() const { return kind_; }
 
   StoreRepresentation store_representation() const {
     return store_representation_;
@@ -186,6 +236,7 @@ class AtomicStoreParameters final {
  private:
   StoreRepresentation store_representation_;
   AtomicMemoryOrder order_;
+  MemoryAccessKind kind_;
 };
 
 V8_EXPORT_PRIVATE bool operator==(AtomicStoreParameters, AtomicStoreParameters);
@@ -218,15 +269,17 @@ V8_EXPORT_PRIVATE StoreLaneParameters const& StoreLaneParametersOf(
 
 class StackSlotRepresentation final {
  public:
-  StackSlotRepresentation(int size, int alignment)
-      : size_(size), alignment_(alignment) {}
+  StackSlotRepresentation(int size, int alignment, bool is_tagged)
+      : size_(size), alignment_(alignment), is_tagged_(is_tagged) {}
 
   int size() const { return size_; }
   int alignment() const { return alignment_; }
+  bool is_tagged() const { return is_tagged_; }
 
  private:
   int size_;
   int alignment_;
+  bool is_tagged_;
 };
 
 V8_EXPORT_PRIVATE bool operator==(StackSlotRepresentation,
@@ -243,31 +296,58 @@ V8_EXPORT_PRIVATE StackSlotRepresentation const& StackSlotRepresentationOf(
 
 MachineType AtomicOpType(Operator const* op) V8_WARN_UNUSED_RESULT;
 
-class S128ImmediateParameter {
+template <const int simd_size = kSimd128Size,
+          typename = std::enable_if_t<simd_size == kSimd128Size ||
+                                      simd_size == kSimd256Size>>
+class SimdImmediateParameter {
  public:
-  explicit S128ImmediateParameter(const uint8_t immediate[16]) {
-    std::copy(immediate, immediate + 16, immediate_.begin());
+  explicit SimdImmediateParameter(const uint8_t immediate[simd_size]) {
+    std::copy(immediate, immediate + simd_size, immediate_.begin());
   }
-  S128ImmediateParameter() = default;
-  const std::array<uint8_t, 16>& immediate() const { return immediate_; }
+  SimdImmediateParameter() = default;
+  const std::array<uint8_t, simd_size>& immediate() const { return immediate_; }
   const uint8_t* data() const { return immediate_.data(); }
   uint8_t operator[](int x) const { return immediate_[x]; }
 
  private:
-  std::array<uint8_t, 16> immediate_;
+  std::array<uint8_t, simd_size> immediate_;
 };
 
-V8_EXPORT_PRIVATE bool operator==(S128ImmediateParameter const& lhs,
-                                  S128ImmediateParameter const& rhs);
-bool operator!=(S128ImmediateParameter const& lhs,
-                S128ImmediateParameter const& rhs);
+using S128ImmediateParameter = SimdImmediateParameter<kSimd128Size>;
+using S256ImmediateParameter = SimdImmediateParameter<kSimd256Size>;
 
-size_t hash_value(S128ImmediateParameter const& p);
+template <const int simd_size>
+V8_EXPORT_PRIVATE inline bool operator==(
+    SimdImmediateParameter<simd_size> const& lhs,
+    SimdImmediateParameter<simd_size> const& rhs) {
+  return (lhs.immediate() == rhs.immediate());
+}
 
-V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&,
-                                           S128ImmediateParameter const&);
+template <const int simd_size>
+bool operator!=(SimdImmediateParameter<simd_size> const& lhs,
+                SimdImmediateParameter<simd_size> const& rhs) {
+  return !(lhs == rhs);
+}
+
+template <const int simd_size>
+size_t hash_value(SimdImmediateParameter<simd_size> const& p) {
+  return base::hash_range(p.immediate().begin(), p.immediate().end());
+}
+
+template <const int simd_size>
+V8_EXPORT_PRIVATE inline std::ostream& operator<<(
+    std::ostream& os, SimdImmediateParameter<simd_size> const& p) {
+  for (int i = 0; i < simd_size; i++) {
+    const char* separator = (i < simd_size - 1) ? "," : "";
+    os << static_cast<uint32_t>(p[i]) << separator;
+  }
+  return os;
+}
 
 V8_EXPORT_PRIVATE S128ImmediateParameter const& S128ImmediateParameterOf(
+    Operator const* op) V8_WARN_UNUSED_RESULT;
+
+V8_EXPORT_PRIVATE S256ImmediateParameter const& S256ImmediateParameterOf(
     Operator const* op) V8_WARN_UNUSED_RESULT;
 
 StackCheckKind StackCheckKindOf(Operator const* op) V8_WARN_UNUSED_RESULT;
@@ -329,6 +409,9 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
     kSatConversionIsSafe = 1u << 26,
     kWord32Select = 1u << 27,
     kWord64Select = 1u << 28,
+    kLoadStorePairs = 1u << 29,
+    kFloat16 = 1u << 30,
+    kFloat16RawBitsConversion = 1u << 31,
     kAllOptionalOps =
         kFloat32RoundDown | kFloat64RoundDown | kFloat32RoundUp |
         kFloat64RoundUp | kFloat32RoundTruncate | kFloat64RoundTruncate |
@@ -337,7 +420,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
         kWord64Popcnt | kWord32ReverseBits | kWord64ReverseBits |
         kInt32AbsWithOverflow | kInt64AbsWithOverflow | kWord32Rol |
         kWord64Rol | kWord64RolLowerable | kSatConversionIsSafe |
-        kFloat32Select | kFloat64Select | kWord32Select | kWord64Select
+        kFloat32Select | kFloat64Select | kWord32Select | kWord64Select |
+        kLoadStorePairs | kFloat16 | kFloat16RawBitsConversion
   };
   using Flags = base::Flags<Flag, unsigned>;
 
@@ -410,7 +494,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* Comment(const char* msg);
   const Operator* AbortCSADcheck();
   const Operator* DebugBreak();
-  const Operator* UnsafePointerAdd();
 
   const Operator* Word32And();
   const Operator* Word32Or();
@@ -446,6 +529,13 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // saturating conversion rounding towards 0. Otherwise, we have to manually
   // generate the correct value if a saturating conversion is requested.
   bool SatConversionIsSafe() const { return flags_ & kSatConversionIsSafe; }
+
+  // Return true if the target suppoerts performing a pair of loads/stores in
+  // a single operation.
+  bool SupportsLoadStorePairs() const {
+    return !v8_flags.enable_unconditional_write_barriers &&
+           (flags_ & kLoadStorePairs);
+  }
 
   const Operator* Word64And();
   const Operator* Word64Or();
@@ -505,6 +595,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* Int64Sub();
   const Operator* Int64SubWithOverflow();
   const Operator* Int64Mul();
+  const Operator* Int64MulHigh();
+  const Operator* Int64MulWithOverflow();
   const Operator* Int64Div();
   const Operator* Int64Mod();
   const Operator* Int64LessThan();
@@ -513,6 +605,7 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* Uint64LessThan();
   const Operator* Uint64LessThanOrEqual();
   const Operator* Uint64Mod();
+  const Operator* Uint64MulHigh();
 
   // This operator reinterprets the bits of a tagged pointer as a word.
   const Operator* BitcastTaggedToWord();
@@ -525,8 +618,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // Note, that it's illegal to "look" at the pointer bits of non-smi values.
   const Operator* BitcastTaggedToWordForTagAndSmiBits();
 
-  // This operator reinterprets the bits of a tagged MaybeObject pointer as
-  // word.
+  // This operator reinterprets the bits of a tagged Tagged<MaybeObject> pointer
+  // as word.
   const Operator* BitcastMaybeObjectToWord();
 
   // This operator reinterprets the bits of a word as tagged pointer.
@@ -560,6 +653,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* TryTruncateFloat64ToInt64();
   const Operator* TryTruncateFloat32ToUint64();
   const Operator* TryTruncateFloat64ToUint64();
+  const Operator* TryTruncateFloat64ToInt32();
+  const Operator* TryTruncateFloat64ToUint32();
   const Operator* ChangeInt32ToFloat64();
   const Operator* BitcastWord32ToWord64();
   const Operator* ChangeInt32ToInt64();
@@ -570,6 +665,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // These operators truncate or round numbers, both changing the representation
   // of the number and mapping multiple input values onto the same output value.
   const Operator* TruncateFloat64ToFloat32();
+  const OptionalOperator ChangeFloat16RawBitsToFloat64();
+  const OptionalOperator TruncateFloat64ToFloat16RawBits();
   const Operator* TruncateInt64ToInt32();
   const Operator* RoundFloat64ToInt32();
   const Operator* RoundInt32ToFloat32();
@@ -620,7 +717,7 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* Float64LessThan();
   const Operator* Float64LessThanOrEqual();
 
-  // Floating point min/max complying to EcmaScript 6 (double-precision).
+  // Floating point min/max complying to ECMAScript 6 (double-precision).
   const Operator* Float64Max();
   const Operator* Float64Min();
   // Floating point min/max complying to WebAssembly (single-precision).
@@ -695,6 +792,12 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // Identity for any input that is not signalling NaN.
   const Operator* Float64SilenceNaN();
 
+  // SIMD operators also used outside of Wasm (e.g. swisstable).
+  const Operator* I8x16Splat();
+  const Operator* I8x16Eq();
+  const Operator* I8x16BitMask();
+
+#if V8_ENABLE_WEBASSEMBLY
   // SIMD operators.
   const Operator* F64x2Splat();
   const Operator* F64x2Abs();
@@ -732,8 +835,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* F32x4Abs();
   const Operator* F32x4Neg();
   const Operator* F32x4Sqrt();
-  const Operator* F32x4RecipApprox();
-  const Operator* F32x4RecipSqrtApprox();
   const Operator* F32x4Add();
   const Operator* F32x4Sub();
   const Operator* F32x4Mul();
@@ -753,6 +854,38 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* F32x4Trunc();
   const Operator* F32x4NearestInt();
   const Operator* F32x4DemoteF64x2Zero();
+
+  const Operator* F16x8Splat();
+  const Operator* F16x8ExtractLane(int32_t);
+  const Operator* F16x8ReplaceLane(int32_t);
+  const Operator* F16x8Abs();
+  const Operator* F16x8Neg();
+  const Operator* F16x8Sqrt();
+  const Operator* F16x8Ceil();
+  const Operator* F16x8Floor();
+  const Operator* F16x8Trunc();
+  const Operator* F16x8NearestInt();
+  const Operator* F16x8Add();
+  const Operator* F16x8Sub();
+  const Operator* F16x8Mul();
+  const Operator* F16x8Div();
+  const Operator* F16x8Min();
+  const Operator* F16x8Max();
+  const Operator* F16x8Pmin();
+  const Operator* F16x8Pmax();
+  const Operator* F16x8Eq();
+  const Operator* F16x8Ne();
+  const Operator* F16x8Lt();
+  const Operator* F16x8Le();
+  const Operator* F16x8SConvertI16x8();
+  const Operator* F16x8UConvertI16x8();
+  const Operator* I16x8SConvertF16x8();
+  const Operator* I16x8UConvertF16x8();
+  const Operator* F32x4PromoteLowF16x8();
+  const Operator* F16x8DemoteF32x4Zero();
+  const Operator* F16x8DemoteF64x2Zero();
+  const Operator* F16x8Qfma();
+  const Operator* F16x8Qfms();
 
   const Operator* I64x2Splat();
   const Operator* I64x2SplatI32Pair();
@@ -863,7 +996,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* I16x8ExtAddPairwiseI8x16S();
   const Operator* I16x8ExtAddPairwiseI8x16U();
 
-  const Operator* I8x16Splat();
   const Operator* I8x16ExtractLaneU(int32_t);
   const Operator* I8x16ExtractLaneS(int32_t);
   const Operator* I8x16ReplaceLane(int32_t);
@@ -877,7 +1009,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* I8x16SubSatS();
   const Operator* I8x16MinS();
   const Operator* I8x16MaxS();
-  const Operator* I8x16Eq();
   const Operator* I8x16Ne();
   const Operator* I8x16GtS();
   const Operator* I8x16GeS();
@@ -893,7 +1024,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* I8x16RoundingAverageU();
   const Operator* I8x16Popcnt();
   const Operator* I8x16Abs();
-  const Operator* I8x16BitMask();
 
   const Operator* S128Const(const uint8_t value[16]);
 
@@ -906,6 +1036,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* S128AndNot();
 
   const Operator* I8x16Swizzle(bool relaxed = false);
+  // Helper for turboshaft/recreate-schedule.cc.
+  const Operator* I8x16RelaxedSwizzle() { return I8x16Swizzle(true); }
   const Operator* I8x16Shuffle(const uint8_t shuffle[16]);
 
   const Operator* V128AnyTrue();
@@ -927,11 +1059,171 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* I32x4RelaxedTruncF32x4U();
   const Operator* I32x4RelaxedTruncF64x2SZero();
   const Operator* I32x4RelaxedTruncF64x2UZero();
+  const Operator* I16x8RelaxedQ15MulRS();
+  const Operator* I16x8DotI8x16I7x16S();
+  const Operator* I32x4DotI8x16I7x16AddS();
 
-  // load [base + index]
-  const Operator* Load(LoadRepresentation rep);
-  const Operator* LoadImmutable(LoadRepresentation rep);
-  const Operator* ProtectedLoad(LoadRepresentation rep);
+  // SIMD256
+  const Operator* F64x4Min();
+  const Operator* F64x4Max();
+  const Operator* F64x4Add();
+  const Operator* F64x4Abs();
+  const Operator* F64x4Neg();
+  const Operator* F64x4Sqrt();
+  const Operator* F32x8Abs();
+  const Operator* F32x8Neg();
+  const Operator* F32x8Sqrt();
+  const Operator* F32x8Add();
+  const Operator* I64x4Add();
+  const Operator* I32x8Add();
+  const Operator* I16x16Add();
+  const Operator* I8x32Add();
+  const Operator* F64x4Sub();
+  const Operator* F32x8Sub();
+  const Operator* I64x4Sub();
+  const Operator* I32x8Sub();
+  const Operator* I16x16Sub();
+  const Operator* I8x32Sub();
+  const Operator* F64x4Mul();
+  const Operator* F32x8Mul();
+  const Operator* I64x4Mul();
+  const Operator* I32x8Mul();
+  const Operator* I16x16Mul();
+  const Operator* F64x4Div();
+  const Operator* F32x8Div();
+  const Operator* I16x16AddSatS();
+  const Operator* I8x32AddSatS();
+  const Operator* I16x16AddSatU();
+  const Operator* I8x32AddSatU();
+  const Operator* I16x16SubSatS();
+  const Operator* I8x32SubSatS();
+  const Operator* I16x16SubSatU();
+  const Operator* I8x32SubSatU();
+  const Operator* F32x8Min();
+  const Operator* F32x8Max();
+  const Operator* F32x8Pmin();
+  const Operator* F32x8Pmax();
+  const Operator* F32x8Eq();
+  const Operator* F64x4Eq();
+  const Operator* I64x4Eq();
+  const Operator* I32x8Eq();
+  const Operator* I16x16Eq();
+  const Operator* I8x32Eq();
+  const Operator* F32x8Ne();
+  const Operator* F64x4Ne();
+  const Operator* I64x4GtS();
+  const Operator* I32x8GtS();
+  const Operator* I16x16GtS();
+  const Operator* I8x32GtS();
+  const Operator* F64x4Lt();
+  const Operator* F32x8Lt();
+  const Operator* F64x4Le();
+  const Operator* F32x8Le();
+  const Operator* I32x8MinS();
+  const Operator* I16x16MinS();
+  const Operator* I8x32MinS();
+  const Operator* I32x8MinU();
+  const Operator* I16x16MinU();
+  const Operator* I8x32MinU();
+  const Operator* I32x8MaxS();
+  const Operator* I16x16MaxS();
+  const Operator* I8x32MaxS();
+  const Operator* I32x8MaxU();
+  const Operator* I16x16MaxU();
+  const Operator* I8x32MaxU();
+  const Operator* I64x4Ne();
+  const Operator* I64x4GeS();
+  const Operator* I32x8Ne();
+  const Operator* I32x8GtU();
+  const Operator* I32x8GeS();
+  const Operator* I32x8GeU();
+  const Operator* I16x16Ne();
+  const Operator* I16x16GtU();
+  const Operator* I16x16GeS();
+  const Operator* I16x16GeU();
+  const Operator* I8x32Ne();
+  const Operator* I8x32GtU();
+  const Operator* I8x32GeS();
+  const Operator* I8x32GeU();
+  const Operator* I32x8SConvertF32x8();
+  const Operator* I32x8UConvertF32x8();
+  const Operator* F64x4ConvertI32x4S();
+  const Operator* F32x8SConvertI32x8();
+  const Operator* F32x8UConvertI32x8();
+  const Operator* F32x4DemoteF64x4();
+  const Operator* I64x4SConvertI32x4();
+  const Operator* I64x4UConvertI32x4();
+  const Operator* I32x8SConvertI16x8();
+  const Operator* I32x8UConvertI16x8();
+  const Operator* I16x16SConvertI8x16();
+  const Operator* I16x16UConvertI8x16();
+  const Operator* I16x16SConvertI32x8();
+  const Operator* I16x16UConvertI32x8();
+  const Operator* I8x32SConvertI16x16();
+  const Operator* I8x32UConvertI16x16();
+  const Operator* I32x8Neg();
+  const Operator* I32x8Abs();
+  const Operator* I16x16Neg();
+  const Operator* I16x16Abs();
+  const Operator* I8x32Neg();
+  const Operator* I8x32Abs();
+  const Operator* I64x4Shl();
+  const Operator* I64x4ShrU();
+  const Operator* I32x8Shl();
+  const Operator* I32x8ShrS();
+  const Operator* I32x8ShrU();
+  const Operator* I16x16Shl();
+  const Operator* I16x16ShrS();
+  const Operator* I16x16ShrU();
+  const Operator* I32x8DotI16x16S();
+  const Operator* I16x16RoundingAverageU();
+  const Operator* I8x32RoundingAverageU();
+  const Operator* I64x4ExtMulI32x4S();
+  const Operator* I64x4ExtMulI32x4U();
+  const Operator* I32x8ExtMulI16x8S();
+  const Operator* I32x8ExtMulI16x8U();
+  const Operator* I16x16ExtMulI8x16S();
+  const Operator* I16x16ExtMulI8x16U();
+  const Operator* I32x8ExtAddPairwiseI16x16S();
+  const Operator* I32x8ExtAddPairwiseI16x16U();
+  const Operator* I16x16ExtAddPairwiseI8x32S();
+  const Operator* I16x16ExtAddPairwiseI8x32U();
+  const Operator* ExtractF128(int32_t lane_index);
+  const Operator* I64x4Splat();
+  const Operator* I32x8Splat();
+  const Operator* I16x16Splat();
+  const Operator* I8x32Splat();
+  const Operator* F64x4Pmin();
+  const Operator* F64x4Pmax();
+  const Operator* F64x4Splat();
+  const Operator* F32x8Splat();
+  const Operator* I8x32Shuffle(const uint8_t shuffle[32]);
+
+  const Operator* S256Const(const uint8_t value[32]);
+  const Operator* S256Zero();
+  const Operator* S256And();
+  const Operator* S256Or();
+  const Operator* S256Xor();
+  const Operator* S256Not();
+  const Operator* S256Select();
+  const Operator* S256AndNot();
+  // 256-bit relaxed SIMD
+  const Operator* F32x8Qfma();
+  const Operator* F32x8Qfms();
+  const Operator* F64x4Qfma();
+  const Operator* F64x4Qfms();
+  const Operator* I64x4RelaxedLaneSelect();
+  const Operator* I32x8RelaxedLaneSelect();
+  const Operator* I16x16RelaxedLaneSelect();
+  const Operator* I8x32RelaxedLaneSelect();
+  const Operator* I32x8DotI8x32I7x32AddS();
+  const Operator* I16x16DotI8x32I7x32S();
+  const Operator* F32x8RelaxedMin();
+  const Operator* F32x8RelaxedMax();
+  const Operator* F64x4RelaxedMin();
+  const Operator* F64x4RelaxedMax();
+  const Operator* I32x8RelaxedTruncF32x8S();
+  const Operator* I32x8RelaxedTruncF32x8U();
 
   const Operator* LoadTransform(MemoryAccessKind kind,
                                 LoadTransformation transform);
@@ -940,13 +1232,27 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* LoadLane(MemoryAccessKind kind, LoadRepresentation rep,
                            uint8_t laneidx);
 
-  // store [base + index], value
-  const Operator* Store(StoreRepresentation rep);
-  const Operator* ProtectedStore(MachineRepresentation rep);
-
   // SIMD store: store a specified lane of value into [base + index].
   const Operator* StoreLane(MemoryAccessKind kind, MachineRepresentation rep,
                             uint8_t laneidx);
+
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+  const Operator* TraceInstruction(uint32_t markid);
+
+  // load [base + index]
+  const Operator* Load(LoadRepresentation rep);
+  const Operator* LoadImmutable(LoadRepresentation rep);
+  const Operator* ProtectedLoad(LoadRepresentation rep);
+  const Operator* LoadTrapOnNull(LoadRepresentation rep);
+
+  // store [base + index], value
+  const Operator* Store(StoreRepresentation rep);
+  std::optional<const Operator*> TryStorePair(StoreRepresentation rep1,
+                                              StoreRepresentation rep2);
+  const Operator* StoreIndirectPointer(WriteBarrierKind write_barrier_kind);
+  const Operator* ProtectedStore(MachineRepresentation rep);
+  const Operator* StoreTrapOnNull(StoreRepresentation rep);
 
   // unaligned load [base + index]
   const Operator* UnalignedLoad(LoadRepresentation rep);
@@ -954,12 +1260,23 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // unaligned store [base + index], value
   const Operator* UnalignedStore(UnalignedStoreRepresentation rep);
 
-  const Operator* StackSlot(int size, int alignment = 0);
+  const Operator* StackSlot(int size, int alignment = 0,
+                            bool is_tagged = false);
   const Operator* StackSlot(MachineRepresentation rep, int alignment = 0);
+
+  // Note: Only use this operator to:
+  // - Load from a constant offset.
+  // - Store to a constant offset with {kNoWriteBarrier}.
+  // These are the only usages supported by the instruction selector.
+  const Operator* LoadRootRegister();
 
   // Access to the machine stack.
   const Operator* LoadFramePointer();
   const Operator* LoadParentFramePointer();
+#if V8_ENABLE_WEBASSEMBLY
+  const Operator* LoadStackPointer();
+  const Operator* SetStackPointer();
+#endif
 
   // Compares: stack_pointer [- offset] > value. The offset is optionally
   // applied for kFunctionEntry stack checks.
@@ -970,8 +1287,7 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // Runtime::kStackGuardWithGap call.
   const Operator* LoadStackCheckOffset();
 
-  // Memory barrier.
-  const Operator* MemBarrier();
+  const Operator* MemoryBarrier(AtomicMemoryOrder order);
 
   // atomic-load [base + index]
   const Operator* Word32AtomicLoad(AtomicLoadParameters params);
@@ -982,33 +1298,33 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // atomic-store [base + index], value
   const Operator* Word64AtomicStore(AtomicStoreParameters params);
   // atomic-exchange [base + index], value
-  const Operator* Word32AtomicExchange(MachineType type);
+  const Operator* Word32AtomicExchange(AtomicOpParameters params);
   // atomic-exchange [base + index], value
-  const Operator* Word64AtomicExchange(MachineType type);
+  const Operator* Word64AtomicExchange(AtomicOpParameters params);
   // atomic-compare-exchange [base + index], old_value, new_value
-  const Operator* Word32AtomicCompareExchange(MachineType type);
+  const Operator* Word32AtomicCompareExchange(AtomicOpParameters params);
   // atomic-compare-exchange [base + index], old_value, new_value
-  const Operator* Word64AtomicCompareExchange(MachineType type);
+  const Operator* Word64AtomicCompareExchange(AtomicOpParameters params);
   // atomic-add [base + index], value
-  const Operator* Word32AtomicAdd(MachineType type);
+  const Operator* Word32AtomicAdd(AtomicOpParameters params);
   // atomic-sub [base + index], value
-  const Operator* Word32AtomicSub(MachineType type);
+  const Operator* Word32AtomicSub(AtomicOpParameters params);
   // atomic-and [base + index], value
-  const Operator* Word32AtomicAnd(MachineType type);
+  const Operator* Word32AtomicAnd(AtomicOpParameters params);
   // atomic-or [base + index], value
-  const Operator* Word32AtomicOr(MachineType type);
+  const Operator* Word32AtomicOr(AtomicOpParameters params);
   // atomic-xor [base + index], value
-  const Operator* Word32AtomicXor(MachineType type);
+  const Operator* Word32AtomicXor(AtomicOpParameters params);
   // atomic-add [base + index], value
-  const Operator* Word64AtomicAdd(MachineType type);
+  const Operator* Word64AtomicAdd(AtomicOpParameters params);
   // atomic-sub [base + index], value
-  const Operator* Word64AtomicSub(MachineType type);
+  const Operator* Word64AtomicSub(AtomicOpParameters params);
   // atomic-and [base + index], value
-  const Operator* Word64AtomicAnd(MachineType type);
+  const Operator* Word64AtomicAnd(AtomicOpParameters params);
   // atomic-or [base + index], value
-  const Operator* Word64AtomicOr(MachineType type);
+  const Operator* Word64AtomicOr(AtomicOpParameters params);
   // atomic-xor [base + index], value
-  const Operator* Word64AtomicXor(MachineType type);
+  const Operator* Word64AtomicXor(AtomicOpParameters params);
   // atomic-pair-load [base + index]
   const Operator* Word32AtomicPairLoad(AtomicMemoryOrder order);
   // atomic-pair-sub [base + index], value_high, value-low
@@ -1076,6 +1392,10 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   }
   const Operator* WordSarShiftOutZeros() {
     return WordSar(ShiftKind::kShiftOutZeros);
+  }
+
+  const Operator* TaggedEqual() {
+    return COMPRESS_POINTERS_BOOL ? Word32Equal() : WordEqual();
   }
 
  private:

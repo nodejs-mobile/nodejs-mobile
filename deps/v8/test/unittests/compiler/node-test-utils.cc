@@ -11,8 +11,6 @@
 #include "src/compiler/node-properties.h"
 #include "src/compiler/simplified-operator.h"
 #include "src/handles/handles-inl.h"
-#include "src/objects/objects-inl.h"
-#include "src/objects/objects.h"
 
 using testing::_;
 using testing::MakeMatcher;
@@ -23,7 +21,8 @@ using testing::StringMatchResultListener;
 namespace v8 {
 namespace internal {
 
-bool operator==(Handle<HeapObject> const& lhs, Handle<HeapObject> const& rhs) {
+bool operator==(DirectHandle<HeapObject> const& lhs,
+                DirectHandle<HeapObject> const& rhs) {
   return lhs.is_identical_to(rhs);
 }
 
@@ -2265,6 +2264,7 @@ IS_BINOP_MATCHER(Int64Add)
 IS_BINOP_MATCHER(Int64Div)
 IS_BINOP_MATCHER(Int64Sub)
 IS_BINOP_MATCHER(Int64Mul)
+IS_BINOP_MATCHER(Int64MulHigh)
 IS_BINOP_MATCHER(Int64LessThan)
 IS_BINOP_MATCHER(Uint64LessThan)
 IS_BINOP_MATCHER(JSAdd)

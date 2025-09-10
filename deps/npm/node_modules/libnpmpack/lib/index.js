@@ -3,16 +3,16 @@
 const pacote = require('pacote')
 const npa = require('npm-package-arg')
 const runScript = require('@npmcli/run-script')
-const path = require('path')
+const path = require('node:path')
 const Arborist = require('@npmcli/arborist')
-const { writeFile } = require('fs/promises')
+const { writeFile } = require('node:fs/promises')
 
 module.exports = pack
 async function pack (spec = 'file:.', opts = {}) {
   // gets spec
   spec = npa(spec)
 
-  const manifest = await pacote.manifest(spec, opts)
+  const manifest = await pacote.manifest(spec, { ...opts, Arborist })
 
   const stdio = opts.foregroundScripts ? 'inherit' : 'pipe'
 

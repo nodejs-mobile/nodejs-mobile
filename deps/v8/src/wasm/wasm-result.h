@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_WASM_WASM_RESULT_H_
+#define V8_WASM_WASM_RESULT_H_
+
 #if !V8_ENABLE_WEBASSEMBLY
 #error This header should only be included if WebAssembly is enabled.
 #endif  // !V8_ENABLE_WEBASSEMBLY
-
-#ifndef V8_WASM_WASM_RESULT_H_
-#define V8_WASM_WASM_RESULT_H_
 
 #include <cstdarg>
 #include <memory>
@@ -21,10 +21,6 @@
 namespace v8 {
 namespace internal {
 
-class Isolate;
-template <typename T>
-class Handle;
-
 namespace wasm {
 
 class V8_EXPORT_PRIVATE WasmError {
@@ -33,22 +29,26 @@ class V8_EXPORT_PRIVATE WasmError {
 
   WasmError(uint32_t offset, std::string message)
       : offset_(offset), message_(std::move(message)) {
-    // The error message must not be empty, otherwise {empty()} would be true.
+    DCHECK_NE(kNoErrorOffset, offset);
     DCHECK(!message_.empty());
   }
 
   PRINTF_FORMAT(3, 4)
   WasmError(uint32_t offset, const char* format, ...) : offset_(offset) {
+    DCHECK_NE(kNoErrorOffset, offset);
     va_list args;
     va_start(args, format);
     message_ = FormatError(format, args);
     va_end(args);
-    // The error message must not be empty, otherwise {empty()} would be true.
     DCHECK(!message_.empty());
   }
 
-  bool empty() const { return message_.empty(); }
-  bool has_error() const { return !message_.empty(); }
+  bool has_error() const {
+    DCHECK_EQ(offset_ == kNoErrorOffset, message_.empty());
+    return offset_ != kNoErrorOffset;
+  }
+
+  operator bool() const { return has_error(); }
 
   uint32_t offset() const { return offset_; }
   const std::string& message() const& { return message_; }
@@ -58,7 +58,8 @@ class V8_EXPORT_PRIVATE WasmError {
   static std::string FormatError(const char* format, va_list args);
 
  private:
-  uint32_t offset_ = 0;
+  static constexpr uint32_t kNoErrorOffset = kMaxUInt32;
+  uint32_t offset_ = kNoErrorOffset;
   std::string message_;
 };
 
@@ -66,27 +67,36 @@ class V8_EXPORT_PRIVATE WasmError {
 template <typename T>
 class Result {
  public:
+  static_assert(!std::is_same<T, WasmError>::value);
+  static_assert(!std::is_reference<T>::value,
+                "Holding a reference in a Result looks like a mistake; remove "
+                "this assertion if you know what you are doing");
+
   Result() = default;
+  // Allow moving.
+  Result(Result<T>&&) = default;
+  Result& operator=(Result<T>&&) = default;
+  // Disallow copying.
+  Result& operator=(const Result<T>&) = delete;
   Result(const Result&) = delete;
-  Result& operator=(const Result&) = delete;
 
-  template <typename S>
-  explicit Result(S&& value) : value_(std::forward<S>(value)) {}
-
-  template <typename S>
-  Result(Result<S>&& other) V8_NOEXCEPT : value_(std::move(other.value_)),
-                                          error_(std::move(other.error_)) {}
+  // Construct a Result from anything that can be used to construct a T value.
+  template <typename U>
+  explicit Result(U&& value) : value_(std::forward<U>(value)) {}
 
   explicit Result(WasmError error) : error_(std::move(error)) {}
 
-  template <typename S>
-  Result& operator=(Result<S>&& other) V8_NOEXCEPT {
-    value_ = std::move(other.value_);
-    error_ = std::move(other.error_);
-    return *this;
+  // Implicitly convert a Result<T> to Result<U> if T implicitly converts to U.
+  // Only provide that for r-value references (i.e. temporary objects) though,
+  // to be used if passing or returning a result by value.
+  template <typename U>
+  operator Result<U>() const&&
+    requires(std::is_assignable_v<U, T &&>)
+  {
+    return ok() ? Result<U>{std::move(value_)} : Result<U>{error_};
   }
 
-  bool ok() const { return error_.empty(); }
+  bool ok() const { return !failed(); }
   bool failed() const { return error_.has_error(); }
   const WasmError& error() const& { return error_; }
   WasmError&& error() && { return std::move(error_); }
@@ -105,9 +115,6 @@ class Result {
   }
 
  private:
-  template <typename S>
-  friend class Result;
-
   T value_ = T{};
   WasmError error_;
 };
@@ -117,8 +124,7 @@ class V8_EXPORT_PRIVATE ErrorThrower {
  public:
   ErrorThrower(Isolate* isolate, const char* context)
       : isolate_(isolate), context_(context) {}
-  // Explicitly allow move-construction. Disallow copy.
-  ErrorThrower(ErrorThrower&& other) V8_NOEXCEPT;
+  // Disallow copy.
   ErrorThrower(const ErrorThrower&) = delete;
   ErrorThrower& operator=(const ErrorThrower&) = delete;
   ~ErrorThrower();
@@ -135,7 +141,7 @@ class V8_EXPORT_PRIVATE ErrorThrower {
   }
 
   // Create and return exception object.
-  V8_WARN_UNUSED_RESULT Handle<Object> Reify();
+  V8_WARN_UNUSED_RESULT DirectHandle<JSObject> Reify();
 
   // Reset any error which was set on this thrower.
   void Reset();
@@ -145,6 +151,8 @@ class V8_EXPORT_PRIVATE ErrorThrower {
   const char* error_msg() { return error_msg_.c_str(); }
 
   Isolate* isolate() const { return isolate_; }
+
+  constexpr const char* context_name() const { return context_; }
 
  private:
   enum ErrorType {
@@ -163,28 +171,14 @@ class V8_EXPORT_PRIVATE ErrorThrower {
 
   void Format(ErrorType error_type_, const char* fmt, va_list);
 
-  Isolate* isolate_;
-  const char* context_;
+  Isolate* const isolate_;
+  const char* const context_;
   ErrorType error_type_ = kNone;
   std::string error_msg_;
 
   // ErrorThrower should always be stack-allocated, since it constitutes a scope
   // (things happen in the destructor).
   DISALLOW_NEW_AND_DELETE()
-};
-
-// Like an ErrorThrower, but turns all pending exceptions into scheduled
-// exceptions when going out of scope. Use this in API methods.
-// Note that pending exceptions are not necessarily created by the ErrorThrower,
-// but e.g. by the wasm start function. There might also be a scheduled
-// exception, created by another API call (e.g. v8::Object::Get). But there
-// should never be both pending and scheduled exceptions.
-class V8_EXPORT_PRIVATE ScheduledErrorThrower : public ErrorThrower {
- public:
-  ScheduledErrorThrower(i::Isolate* isolate, const char* context)
-      : ErrorThrower(isolate, context) {}
-
-  ~ScheduledErrorThrower();
 };
 
 // Use {nullptr_t} as data value to indicate that this only stores the error,

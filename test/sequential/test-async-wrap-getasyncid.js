@@ -12,8 +12,6 @@ const providers = { ...internalBinding('async_wrap').Providers };
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const { getSystemErrorName } = require('util');
-// eslint-disable-next-line no-unused-vars
-const path = require('path');
 
 // Make sure that all Providers are tested.
 {
@@ -49,8 +47,6 @@ const path = require('path');
     delete providers.WORKER;
     // TODO(danbev): Test for these
     delete providers.JSUDPWRAP;
-    if (!common.isMainThread)
-      delete providers.INSPECTORJSBINDING;
     delete providers.KEYPAIRGENREQUEST;
     delete providers.KEYGENREQUEST;
     delete providers.KEYEXPORTREQUEST;
@@ -65,11 +61,17 @@ const path = require('path');
     delete providers.ELDHISTOGRAM;
     delete providers.SIGINTWATCHDOG;
     delete providers.WORKERHEAPSNAPSHOT;
-    delete providers.FIXEDSIZEBLOBCOPY;
+    delete providers.WORKERHEAPSTATISTICS;
+    delete providers.BLOBREADER;
     delete providers.RANDOMPRIMEREQUEST;
     delete providers.CHECKPRIMEREQUEST;
     delete providers.QUIC_LOGSTREAM;
     delete providers.QUIC_PACKET;
+    delete providers.QUIC_UDP;
+    delete providers.QUIC_ENDPOINT;
+    delete providers.QUIC_SESSION;
+    delete providers.QUIC_STREAM;
+    delete providers.LOCKS;
 
     if (common.isIOS) {
       // These providers are not tested on iOS.
@@ -169,7 +171,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   req.oncomplete = () => { };
 
   testInitialized(req, 'FSReqCallback');
-  binding.access(path.toNamespacedPath('../'), fs.F_OK, req);
+  binding.access(path.toNamespacedPath('../'), fs.constants.F_OK, req);
 
   const StatWatcher = binding.StatWatcher;
   testInitialized(new StatWatcher(), 'StatWatcher');
@@ -319,13 +321,6 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   req.oncomplete = () => handle.close();
   handle.send(req, [Buffer.alloc(1)], 1, req.port, req.address, true);
   testInitialized(req, 'SendWrap');
-}
-
-if (process.features.inspector && common.isMainThread) {
-  const binding = internalBinding('inspector');
-  const handle = new binding.Connection(() => {});
-  testInitialized(handle, 'Connection');
-  handle.disconnect();
 }
 
 // PROVIDER_HEAPDUMP

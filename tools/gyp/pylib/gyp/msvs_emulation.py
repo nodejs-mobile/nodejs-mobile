@@ -7,15 +7,15 @@ This module helps emulate Visual Studio 2008 behavior on top of other
 build systems, primarily ninja.
 """
 
-import collections
 import os
 import re
 import subprocess
 import sys
+from collections import namedtuple
 
-from gyp.common import OrderedSet
 import gyp.MSVSUtil
 import gyp.MSVSVersion
+from gyp.common import OrderedSet
 
 windows_quoter_regex = re.compile(r'(\\*)"')
 
@@ -93,7 +93,7 @@ def _AddPrefix(element, prefix):
     if element is None:
         return element
     # Note, not Iterable because we don't want to handle strings like that.
-    if isinstance(element, list) or isinstance(element, tuple):
+    if isinstance(element, (list, tuple)):
         return [prefix + e for e in element]
     else:
         return prefix + element
@@ -105,7 +105,7 @@ def _DoRemapping(element, map):
     if map is not None and element is not None:
         if not callable(map):
             map = map.get  # Assume it's a dict, otherwise a callable to do the remap.
-        if isinstance(element, list) or isinstance(element, tuple):
+        if isinstance(element, (list, tuple)):
             element = filter(None, [map(elem) for elem in element])
         else:
             element = map(element)
@@ -117,7 +117,7 @@ def _AppendOrReturn(append, element):
     then add |element| to it, adding each item in |element| if it's a list or
     tuple."""
     if append is not None and element is not None:
-        if isinstance(element, list) or isinstance(element, tuple):
+        if isinstance(element, (list, tuple)):
             append.extend(element)
         else:
             append.append(element)
@@ -183,7 +183,7 @@ def ExtractSharedMSVSSystemIncludes(configs, generator_flags):
     expanded_system_includes = OrderedSet(
         [ExpandMacros(include, env) for include in all_system_includes]
     )
-    if any(["$" in include for include in expanded_system_includes]):
+    if any("$" in include for include in expanded_system_includes):
         # Some path relies on target-specific variables, bail.
         return None
 
@@ -247,18 +247,13 @@ class MsvsSettings:
         the target type.
         """
         ext = self.spec.get("product_extension", None)
-        if ext:
-            return ext
-        return gyp.MSVSUtil.TARGET_TYPE_EXT.get(self.spec["type"], "")
+        return ext or gyp.MSVSUtil.TARGET_TYPE_EXT.get(self.spec["type"], "")
 
     def GetVSMacroEnv(self, base_to_build=None, config=None):
         """Get a dict of variables mapping internal VS macro names to their gyp
         equivalents."""
         target_arch = self.GetArch(config)
-        if target_arch == "x86":
-            target_platform = "Win32"
-        else:
-            target_platform = target_arch
+        target_platform = "Win32" if target_arch == "x86" else target_arch
         target_name = self.spec.get("product_prefix", "") + self.spec.get(
             "product_name", self.spec["target_name"]
         )
@@ -628,8 +623,7 @@ class MsvsSettings:
     def _GetDefFileAsLdflags(self, ldflags, gyp_to_build_path):
         """.def files get implicitly converted to a ModuleDefinitionFile for the
         linker in the VS generator. Emulate that behaviour here."""
-        def_file = self.GetDefFile(gyp_to_build_path)
-        if def_file:
+        if def_file := self.GetDefFile(gyp_to_build_path):
             ldflags.append('/DEF:"%s"' % def_file)
 
     def GetPGDName(self, config, expand_special):
@@ -677,14 +671,11 @@ class MsvsSettings:
         )
         ld("DelayLoadDLLs", prefix="/DELAYLOAD:")
         ld("TreatLinkerWarningAsErrors", prefix="/WX", map={"true": "", "false": ":NO"})
-        out = self.GetOutputName(config, expand_special)
-        if out:
+        if out := self.GetOutputName(config, expand_special):
             ldflags.append("/OUT:" + out)
-        pdb = self.GetPDBName(config, expand_special, output_name + ".pdb")
-        if pdb:
+        if pdb := self.GetPDBName(config, expand_special, output_name + ".pdb"):
             ldflags.append("/PDB:" + pdb)
-        pgd = self.GetPGDName(config, expand_special)
-        if pgd:
+        if pgd := self.GetPGDName(config, expand_special):
             ldflags.append("/PGD:" + pgd)
         map_file = self.GetMapFileName(config, expand_special)
         ld("GenerateMapFile", map={"true": "/MAP:" + map_file if map_file else "/MAP"})
@@ -738,10 +729,7 @@ class MsvsSettings:
         # TODO(scottmg): This should sort of be somewhere else (not really a flag).
         ld("AdditionalDependencies", prefix="")
 
-        if self.GetArch(config) == "x86":
-            safeseh_default = "true"
-        else:
-            safeseh_default = None
+        safeseh_default = "true" if self.GetArch(config) == "x86" else None
         ld(
             "ImageHasSafeExceptionHandlers",
             map={"false": ":NO", "true": ""},
@@ -836,17 +824,15 @@ class MsvsSettings:
                 ("VCLinkerTool", "UACUIAccess"), config, default="false"
             )
 
-            inner = """
+            level = execution_level_map[execution_level]
+            inner = f"""
 <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
   <security>
     <requestedPrivileges>
-      <requestedExecutionLevel level='{}' uiAccess='{}' />
+      <requestedExecutionLevel level='{level}' uiAccess='{ui_access}' />
     </requestedPrivileges>
   </security>
-</trustInfo>""".format(
-                execution_level_map[execution_level],
-                ui_access,
-            )
+</trustInfo>"""
         else:
             inner = ""
 
@@ -941,7 +927,7 @@ class MsvsSettings:
         )
         return cmd
 
-    RuleShellFlags = collections.namedtuple("RuleShellFlags", ["cygwin", "quote"])
+    RuleShellFlags = namedtuple("RuleShellFlags", ["cygwin", "quote"])  # noqa: PYI024
 
     def GetRuleShellFlags(self, rule):
         """Return RuleShellFlags about how the given rule should be run. This
@@ -960,15 +946,12 @@ class MsvsSettings:
 
     def _HasExplicitRuleForExtension(self, spec, extension):
         """Determine if there's an explicit rule for a particular extension."""
-        for rule in spec.get("rules", []):
-            if rule["extension"] == extension:
-                return True
-        return False
+        return any(rule["extension"] == extension for rule in spec.get("rules", []))
 
     def _HasExplicitIdlActions(self, spec):
         """Determine if an action should not run midl for .idl files."""
         return any(
-            [action.get("explicit_idl_action", 0) for action in spec.get("actions", [])]
+            action.get("explicit_idl_action", 0) for action in spec.get("actions", [])
         )
 
     def HasExplicitIdlRulesOrActions(self, spec):

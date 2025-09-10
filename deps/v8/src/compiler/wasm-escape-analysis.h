@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_COMPILER_WASM_ESCAPE_ANALYSIS_H_
+#define V8_COMPILER_WASM_ESCAPE_ANALYSIS_H_
+
 #if !V8_ENABLE_WEBASSEMBLY
 #error This header should only be included if WebAssembly is enabled.
 #endif  // !V8_ENABLE_WEBASSEMBLY
-
-#ifndef V8_COMPILER_WASM_ESCAPE_ANALYSIS_H_
-#define V8_COMPILER_WASM_ESCAPE_ANALYSIS_H_
 
 #include "src/compiler/graph-reducer.h"
 
@@ -17,9 +17,8 @@ namespace compiler {
 
 class MachineGraph;
 
-// Eliminate allocated objects which are only assigned to.
-// Current restrictions: Does not work for arrays (until they are also allocated
-// with AllocateRaw). Does not work if the allocated object is passed to a phi.
+// Eliminate allocated objects with no uses other than as store targets.
+// Future work: Also exclude phis and renamings from uses.
 class WasmEscapeAnalysis final : public AdvancedReducer {
  public:
   WasmEscapeAnalysis(Editor* editor, MachineGraph* mcgraph)

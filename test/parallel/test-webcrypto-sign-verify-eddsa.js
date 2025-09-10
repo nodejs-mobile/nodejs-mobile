@@ -6,7 +6,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { subtle } = require('crypto').webcrypto;
+const { subtle } = globalThis.crypto;
 
 const vectors = require('../fixtures/crypto/eddsa')();
 
@@ -241,10 +241,10 @@ async function testSign({ name,
       await subtle.verify({ name: 'Ed448', context: Buffer.alloc(0) }, publicKey, sig, vector.data), true);
 
     await assert.rejects(subtle.sign({ name: 'Ed448', context: Buffer.alloc(1) }, privateKey, vector.data), {
-      message: /Non zero-length context is not yet supported/
+      message: /Non zero-length context is not supported/
     });
     await assert.rejects(subtle.verify({ name: 'Ed448', context: Buffer.alloc(1) }, publicKey, sig, vector.data), {
-      message: /Non zero-length context is not yet supported/
+      message: /Non zero-length context is not supported/
     });
   }).then(common.mustCall());
 }

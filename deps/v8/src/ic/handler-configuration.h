@@ -33,7 +33,7 @@ enum class WasmValueType {
   kS128,
 
   kRef,
-  kOptRef,
+  kRefNull,
 
   kNumTypes
 };
@@ -43,8 +43,6 @@ enum class WasmValueType {
 // TODO(ishell): move to load-handler.h
 class LoadHandler final : public DataHandler {
  public:
-  DECL_CAST(LoadHandler)
-
   DECL_PRINTER(LoadHandler)
   DECL_VERIFIER(LoadHandler)
 
@@ -55,10 +53,9 @@ class LoadHandler final : public DataHandler {
     kGlobal,
     kField,
     kConstantFromPrototype,
-    kAccessor,
+    kAccessorFromPrototype,
     kNativeDataProperty,
     kApiGetter,
-    kApiGetterHolderIsPrototype,
     kInterceptor,
     kSlow,
     kProxy,
@@ -80,14 +77,14 @@ class LoadHandler final : public DataHandler {
       DoAccessCheckOnLookupStartObjectBits::Next<bool, 1>;
 
   //
-  // Encoding when KindBits contains kAccessor or kNativeDataProperty.
+  // Encoding when KindBits contains kNativeDataProperty.
   //
 
   // Index of a value entry in the descriptor array.
   using DescriptorBits =
       LookupOnLookupStartObjectBits::Next<unsigned, kDescriptorIndexBitCount>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(DescriptorBits::kLastUsedBit < kSmiValueSize);
+  static_assert(DescriptorBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kField.
@@ -103,7 +100,7 @@ class LoadHandler final : public DataHandler {
   using FieldIndexBits =
       IsDoubleBits::Next<unsigned, kDescriptorIndexBitCount + 1>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(FieldIndexBits::kLastUsedBit < kSmiValueSize);
+  static_assert(FieldIndexBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kField and IsWasmStructBits is 1.
@@ -111,7 +108,7 @@ class LoadHandler final : public DataHandler {
   using WasmFieldTypeBits = IsWasmStructBits::Next<WasmValueType, 4>;
   using WasmFieldOffsetBits = WasmFieldTypeBits::Next<unsigned, 20>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(WasmFieldOffsetBits::kLastUsedBit < kSmiValueSize);
+  static_assert(WasmFieldOffsetBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kElement or kIndexedString.
@@ -127,17 +124,17 @@ class LoadHandler final : public DataHandler {
   // Encoding when KindBits contains kElement and IsWasmArrayBits is 0.
   //
   using IsJsArrayBits = IsWasmArrayBits::Next<bool, 1>;
-  using ConvertHoleBits = IsJsArrayBits::Next<bool, 1>;
-  using ElementsKindBits = ConvertHoleBits::Next<ElementsKind, 8>;
+  using AllowHandlingHole = IsJsArrayBits::Next<bool, 1>;
+  using ElementsKindBits = AllowHandlingHole::Next<ElementsKind, 8>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(ElementsKindBits::kLastUsedBit < kSmiValueSize);
+  static_assert(ElementsKindBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kElement and IsWasmArrayBits is 1.
   //
   using WasmArrayTypeBits = IsWasmArrayBits::Next<WasmValueType, 4>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(WasmArrayTypeBits::kLastUsedBit < kSmiValueSize);
+  static_assert(WasmArrayTypeBits::kLastUsedBit < kSmiValueSize);
 
   //
   // Encoding when KindBits contains kModuleExport.
@@ -145,10 +142,10 @@ class LoadHandler final : public DataHandler {
   using ExportsIndexBits = LookupOnLookupStartObjectBits::Next<
       unsigned,
       kSmiValueSize - LookupOnLookupStartObjectBits::kLastUsedBit - 1>;
-  STATIC_ASSERT(ExportsIndexBits::kLastUsedBit < kSmiValueSize);
+  static_assert(ExportsIndexBits::kLastUsedBit < kSmiValueSize);
 
   // Decodes kind from Smi-handler.
-  static inline Kind GetHandlerKind(Smi smi_handler);
+  static inline Kind GetHandlerKind(Tagged<Smi> smi_handler);
 
   // Creates a Smi-handler for loading a property from a slow object.
   static inline Handle<Smi> LoadNormal(Isolate* isolate);
@@ -160,7 +157,7 @@ class LoadHandler final : public DataHandler {
   // interceptor.
   static inline Handle<Smi> LoadInterceptor(Isolate* isolate);
 
-  // Creates a Smi-handler for loading a property from a object.
+  // Creates a Smi-handler for loading a property from an object.
   static inline Handle<Smi> LoadSlow(Isolate* isolate);
 
   // Creates a Smi-handler for loading a field from fast object.
@@ -171,7 +168,7 @@ class LoadHandler final : public DataHandler {
   static inline Handle<Smi> LoadConstantFromPrototype(Isolate* isolate);
 
   // Creates a Smi-handler for calling a getter on a fast object.
-  static inline Handle<Smi> LoadAccessor(Isolate* isolate, int descriptor);
+  static inline DirectHandle<Smi> LoadAccessorFromPrototype(Isolate* isolate);
 
   // Creates a Smi-handler for calling a getter on a proxy.
   static inline Handle<Smi> LoadProxy(Isolate* isolate);
@@ -181,34 +178,34 @@ class LoadHandler final : public DataHandler {
                                                    int descriptor);
 
   // Creates a Smi-handler for calling a native getter on a fast object.
-  static inline Handle<Smi> LoadApiGetter(Isolate* isolate,
-                                          bool holder_is_receiver);
+  static inline Handle<Smi> LoadApiGetter(Isolate* isolate);
 
   // Creates a Smi-handler for loading a Module export.
   // |index| is the index to the "value" slot in the Module's "exports"
   // dictionary.
   static inline Handle<Smi> LoadModuleExport(Isolate* isolate, int index);
 
-  static inline Handle<Smi> LoadWasmStructField(Isolate* isolate,
-                                                WasmValueType type, int offset);
-  static inline Handle<Smi> LoadWasmArrayElement(Isolate* isolate,
-                                                 WasmValueType type);
+  static inline DirectHandle<Smi> LoadWasmStructField(Isolate* isolate,
+                                                      WasmValueType type,
+                                                      int offset);
+  static inline DirectHandle<Smi> LoadWasmArrayElement(Isolate* isolate,
+                                                       WasmValueType type);
 
   // Creates a data handler that represents a load of a non-existent property.
   // {holder} is the object from which the property is loaded. If no holder is
   // needed (e.g., for "nonexistent"), null_value() may be passed in.
   static Handle<Object> LoadFullChain(Isolate* isolate,
-                                      Handle<Map> receiver_map,
-                                      const MaybeObjectHandle& holder,
+                                      DirectHandle<Map> receiver_map,
+                                      const MaybeObjectDirectHandle& holder,
                                       Handle<Smi> smi_handler);
 
   // Creates a data handler that represents a prototype chain check followed
   // by given Smi-handler that encoded a load from the holder.
   static Handle<Object> LoadFromPrototype(
-      Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
-      MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
-      MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
+      Isolate* isolate, DirectHandle<Map> receiver_map,
+      DirectHandle<JSReceiver> holder, Tagged<Smi> smi_handler,
+      MaybeObjectDirectHandle maybe_data1 = MaybeObjectDirectHandle(),
+      MaybeObjectDirectHandle maybe_data2 = MaybeObjectDirectHandle());
 
   // Creates a Smi-handler for loading a non-existent property. Works only as
   // a part of prototype chain check.
@@ -217,7 +214,6 @@ class LoadHandler final : public DataHandler {
   // Creates a Smi-handler for loading an element.
   static inline Handle<Smi> LoadElement(Isolate* isolate,
                                         ElementsKind elements_kind,
-                                        bool convert_hole_to_undefined,
                                         bool is_js_array,
                                         KeyedAccessLoadMode load_mode);
 
@@ -226,10 +222,15 @@ class LoadHandler final : public DataHandler {
                                               KeyedAccessLoadMode load_mode);
 
   // Decodes the KeyedAccessLoadMode from a {handler}.
-  static KeyedAccessLoadMode GetKeyedAccessLoadMode(MaybeObject handler);
+  static KeyedAccessLoadMode GetKeyedAccessLoadMode(
+      Tagged<MaybeObject> handler);
+
+  // Returns true iff the handler can be used in the "holder != lookup start
+  // object" case.
+  static bool CanHandleHolderNotLookupStart(Tagged<Object> handler);
 
 #if defined(OBJECT_PRINT)
-  static void PrintHandler(Object handler, std::ostream& os);
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
 #endif  // defined(OBJECT_PRINT)
 
   OBJECT_CONSTRUCTORS(LoadHandler, DataHandler);
@@ -240,19 +241,16 @@ class LoadHandler final : public DataHandler {
 // TODO(ishell): move to store-handler.h
 class StoreHandler final : public DataHandler {
  public:
-  DECL_CAST(StoreHandler)
-
   DECL_PRINTER(StoreHandler)
   DECL_VERIFIER(StoreHandler)
 
   enum class Kind {
     kField,
     kConstField,
-    kAccessor,
+    kAccessorFromPrototype,
     kNativeDataProperty,
     kSharedStructField,
     kApiSetter,
-    kApiSetterHolderIsPrototype,
     kGlobalProxy,
     kNormal,
     kInterceptor,
@@ -294,7 +292,7 @@ class StoreHandler final : public DataHandler {
   using FieldIndexBits =
       RepresentationBits::Next<unsigned, kDescriptorIndexBitCount + 1>;
   // Make sure we don't overflow the smi.
-  STATIC_ASSERT(FieldIndexBits::kLastUsedBit < kSmiValueSize);
+  static_assert(FieldIndexBits::kLastUsedBit < kSmiValueSize);
 
   // Creates a Smi-handler for storing a field to fast object.
   static inline Handle<Smi> StoreField(Isolate* isolate, int descriptor,
@@ -320,33 +318,34 @@ class StoreHandler final : public DataHandler {
                                                     int descriptor);
 
   // Creates a Smi-handler for calling a setter on a fast object.
-  static inline Handle<Smi> StoreAccessor(Isolate* isolate, int descriptor);
+  static inline DirectHandle<Smi> StoreAccessorFromPrototype(Isolate* isolate);
 
   // Creates a Smi-handler for calling a native setter on a fast object.
-  static inline Handle<Smi> StoreApiSetter(Isolate* isolate,
-                                           bool holder_is_receiver);
+  static inline DirectHandle<Smi> StoreApiSetter(Isolate* isolate);
 
   static Handle<Object> StoreThroughPrototype(
-      Isolate* isolate, Handle<Map> receiver_map, Handle<JSReceiver> holder,
-      Handle<Smi> smi_handler,
-      MaybeObjectHandle maybe_data1 = MaybeObjectHandle(),
-      MaybeObjectHandle maybe_data2 = MaybeObjectHandle());
+      Isolate* isolate, DirectHandle<Map> receiver_map,
+      DirectHandle<JSReceiver> holder, Tagged<Smi> smi_handler,
+      MaybeObjectDirectHandle maybe_data1 = MaybeObjectDirectHandle(),
+      MaybeObjectDirectHandle maybe_data2 = MaybeObjectDirectHandle());
 
   static Handle<Object> StoreElementTransition(
-      Isolate* isolate, Handle<Map> receiver_map, Handle<Map> transition,
-      KeyedAccessStoreMode store_mode,
-      MaybeHandle<Object> prev_validity_cell = MaybeHandle<Object>());
+      Isolate* isolate, DirectHandle<Map> receiver_map,
+      DirectHandle<Map> transition, KeyedAccessStoreMode store_mode,
+      MaybeDirectHandle<UnionOf<Smi, Cell>> prev_validity_cell =
+          kNullMaybeHandle);
 
-  static Handle<Object> StoreProxy(Isolate* isolate, Handle<Map> receiver_map,
+  static Handle<Object> StoreProxy(Isolate* isolate,
+                                   DirectHandle<Map> receiver_map,
                                    Handle<JSProxy> proxy,
-                                   Handle<JSReceiver> receiver);
+                                   DirectHandle<JSReceiver> receiver);
 
   // Creates a handler for storing a property to the property cell of a global
   // object.
   static MaybeObjectHandle StoreGlobal(Handle<PropertyCell> cell);
 
   // Creates a Smi-handler for storing a property to a global proxy object.
-  static inline Handle<Smi> StoreGlobalProxy(Isolate* isolate);
+  static inline DirectHandle<Smi> StoreGlobalProxy(Isolate* isolate);
 
   // Creates a Smi-handler for storing a property to a slow object.
   static inline Handle<Smi> StoreNormal(Isolate* isolate);
@@ -354,24 +353,28 @@ class StoreHandler final : public DataHandler {
   // Creates a Smi-handler for storing a property to an interceptor.
   static inline Handle<Smi> StoreInterceptor(Isolate* isolate);
 
-  static inline Builtin StoreSloppyArgumentsBuiltin(KeyedAccessStoreMode mode);
-  static inline Builtin StoreFastElementBuiltin(KeyedAccessStoreMode mode);
-  static inline Builtin ElementsTransitionAndStoreBuiltin(
-      KeyedAccessStoreMode mode);
+  static inline Handle<Code> StoreSloppyArgumentsBuiltin(
+      Isolate* isolate, KeyedAccessStoreMode mode);
+  static inline Handle<Code> StoreFastElementBuiltin(Isolate* isolate,
+                                                     KeyedAccessStoreMode mode);
+  static inline DirectHandle<Code> ElementsTransitionAndStoreBuiltin(
+      Isolate* isolate, KeyedAccessStoreMode mode);
 
   // Creates a Smi-handler for storing a property.
   static inline Handle<Smi> StoreSlow(
-      Isolate* isolate, KeyedAccessStoreMode store_mode = STANDARD_STORE);
+      Isolate* isolate,
+      KeyedAccessStoreMode store_mode = KeyedAccessStoreMode::kInBounds);
 
   // Creates a Smi-handler for storing a property on a proxy.
   static inline Handle<Smi> StoreProxy(Isolate* isolate);
-  static inline Smi StoreProxy();
+  static inline Tagged<Smi> StoreProxy();
 
   // Decodes the KeyedAccessStoreMode from a {handler}.
-  static KeyedAccessStoreMode GetKeyedAccessStoreMode(MaybeObject handler);
+  static KeyedAccessStoreMode GetKeyedAccessStoreMode(
+      Tagged<MaybeObject> handler);
 
 #if defined(OBJECT_PRINT)
-  static void PrintHandler(Object handler, std::ostream& os);
+  static void PrintHandler(Tagged<Object> handler, std::ostream& os);
 #endif  // defined(OBJECT_PRINT)
 
  private:

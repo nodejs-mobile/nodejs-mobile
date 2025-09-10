@@ -10,6 +10,7 @@
 #include "include/cppgc/cross-thread-persistent.h"
 #include "include/cppgc/persistent.h"
 #include "src/base/platform/platform.h"
+#include "src/heap/cppgc/heap-base.h"
 #include "src/heap/cppgc/platform.h"
 #include "src/heap/cppgc/process-heap.h"
 
@@ -76,20 +77,20 @@ void PersistentRegionBase::RefillFreeList() {
 }
 
 PersistentNode* PersistentRegionBase::RefillFreeListAndAllocateNode(
-    void* owner, TraceCallback trace) {
+    void* owner, TraceRootCallback trace) {
   RefillFreeList();
   auto* node = TryAllocateNodeFromFreeList(owner, trace);
   CPPGC_DCHECK(node);
   return node;
 }
 
-void PersistentRegionBase::Trace(Visitor* visitor) {
+void PersistentRegionBase::Iterate(RootVisitor& root_visitor) {
   free_list_head_ = nullptr;
   for (auto& slots : nodes_) {
     bool is_empty = true;
     for (auto& node : *slots) {
       if (node.IsUsed()) {
-        node.Trace(visitor);
+        node.Trace(root_visitor);
         is_empty = false;
       } else {
         node.InitializeAsFreeNode(free_list_head_);
@@ -111,28 +112,22 @@ void PersistentRegionBase::Trace(Visitor* visitor) {
                nodes_.end());
 }
 
-PersistentRegion::PersistentRegion(const FatalOutOfMemoryHandler& oom_handler)
-    : PersistentRegionBase(oom_handler),
-      creation_thread_id_(v8::base::OS::GetCurrentThreadId()) {
-  USE(creation_thread_id_);
-}
-
 bool PersistentRegion::IsCreationThread() {
-  return creation_thread_id_ == v8::base::OS::GetCurrentThreadId();
+  return heap_.CurrentThreadIsHeapThread();
 }
 
 PersistentRegionLock::PersistentRegionLock() {
-  g_process_mutex.Pointer()->Lock();
+  ProcessGlobalLock::Lock<
+      ProcessGlobalLock::Reason::kForCrossThreadHandleCreation>();
 }
 
 PersistentRegionLock::~PersistentRegionLock() {
-  g_process_mutex.Pointer()->Unlock();
+  ProcessGlobalLock::Unlock<
+      ProcessGlobalLock::Reason::kForCrossThreadHandleCreation>();
 }
 
 // static
-void PersistentRegionLock::AssertLocked() {
-  return g_process_mutex.Pointer()->AssertHeld();
-}
+void PersistentRegionLock::AssertLocked() { ProcessGlobalLock::AssertHeld(); }
 
 CrossThreadPersistentRegion::CrossThreadPersistentRegion(
     const FatalOutOfMemoryHandler& oom_handler)
@@ -145,9 +140,9 @@ CrossThreadPersistentRegion::~CrossThreadPersistentRegion() {
   // PersistentRegionBase destructor will be a noop.
 }
 
-void CrossThreadPersistentRegion::Trace(Visitor* visitor) {
+void CrossThreadPersistentRegion::Iterate(RootVisitor& root_visitor) {
   PersistentRegionLock::AssertLocked();
-  PersistentRegionBase::Trace(visitor);
+  PersistentRegionBase::Iterate(root_visitor);
 }
 
 size_t CrossThreadPersistentRegion::NodesInUse() const {

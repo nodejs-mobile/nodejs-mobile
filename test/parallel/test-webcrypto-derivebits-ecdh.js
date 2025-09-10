@@ -6,8 +6,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { webcrypto } = require('crypto');
-const { subtle } = webcrypto;
+const { subtle } = globalThis.crypto;
 
 const kTests = [
   {
@@ -124,6 +123,16 @@ async function prepareKeys() {
       }
 
       {
+        // Default length
+        const bits = await subtle.deriveBits({
+          name: 'ECDH',
+          public: publicKey
+        }, privateKey);
+
+        assert.strictEqual(Buffer.from(bits).toString('hex'), result);
+      }
+
+      {
         // Short Result
         const bits = await subtle.deriveBits({
           name: 'ECDH',
@@ -152,9 +161,11 @@ async function prepareKeys() {
           public: publicKey
         }, privateKey, 8 * size - 11);
 
-        assert.strictEqual(
-          Buffer.from(bits).toString('hex'),
-          result.slice(0, -2));
+        const expected = Buffer.from(result.slice(0, -2), 'hex');
+        expected[size - 2] = expected[size - 2] & 0b11111000;
+        assert.deepStrictEqual(
+          Buffer.from(bits),
+          expected);
       }
     }));
 
@@ -191,7 +202,7 @@ async function prepareKeys() {
           public: keys['P-384'].publicKey
         },
         keys['P-521'].privateKey,
-        8 * keys['P-521'].size),
+        8 * keys['P-384'].size),
       { message: /Named curve mismatch/ });
   }
 
@@ -207,7 +218,7 @@ async function prepareKeys() {
       name: 'ECDH',
       public: publicKey
     }, keys['P-521'].privateKey, null), {
-      message: /Keys must be ECDH, X25519, or X448 keys/
+      message: 'algorithm.public must be an ECDH key'
     });
   }
 
@@ -251,7 +262,7 @@ async function prepareKeys() {
 
   {
     // Public is a secret key
-    const keyData = webcrypto.getRandomValues(new Uint8Array(32));
+    const keyData = globalThis.crypto.getRandomValues(new Uint8Array(32));
     const key = await subtle.importKey(
       'raw',
       keyData,

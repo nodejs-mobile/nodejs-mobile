@@ -17,7 +17,7 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerLOONG64
   RegExpMacroAssemblerLOONG64(Isolate* isolate, Zone* zone, Mode mode,
                               int registers_to_save);
   ~RegExpMacroAssemblerLOONG64() override;
-  int stack_limit_slack() override;
+  int stack_limit_slack_slot_count() override;
   void AdvanceCurrentPosition(int by) override;
   void AdvanceRegister(int reg, int by) override;
   void Backtrack() override;
@@ -52,14 +52,18 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerLOONG64
   bool CheckCharacterNotInRangeArray(const ZoneList<CharacterRange>* ranges,
                                      Label* on_not_in_range) override;
   void CheckBitInTable(Handle<ByteArray> table, Label* on_bit_set) override;
+  void SkipUntilBitInTable(int cp_offset, Handle<ByteArray> table,
+                           Handle<ByteArray> nibble_table,
+                           int advance_by) override;
 
   // Checks whether the given offset from the current position is before
   // the end of the string.
   void CheckPosition(int cp_offset, Label* on_outside_input) override;
-  bool CheckSpecialCharacterClass(StandardCharacterSet type,
-                                  Label* on_no_match) override;
+  bool CheckSpecialClassRanges(StandardCharacterSet type,
+                               Label* on_no_match) override;
   void Fail() override;
-  Handle<HeapObject> GetCode(Handle<String> source) override;
+  DirectHandle<HeapObject> GetCode(DirectHandle<String> source,
+                                   RegExpFlags flags) override;
   void GoTo(Label* label) override;
   void IfRegisterGE(int reg, int comparand, Label* if_ge) override;
   void IfRegisterLT(int reg, int comparand, Label* if_lt) override;
@@ -87,63 +91,84 @@ class V8_EXPORT_PRIVATE RegExpMacroAssemblerLOONG64
   // returning.
   // {raw_code} is an Address because this is called via ExternalReference.
   static int64_t CheckStackGuardState(Address* return_address, Address raw_code,
-                                      Address re_frame);
+                                      Address re_frame, uintptr_t extra_space);
 
   void print_regexp_frame_constants();
 
  private:
   // Offsets from frame_pointer() of function parameters and stored registers.
-  static const int kFramePointer = 0;
+  static constexpr int kFramePointerOffset = 0;
 
   // Above the frame pointer - Stored registers and stack passed parameters.
-  static const int kStoredRegisters = kFramePointer;
+  static constexpr int kStoredRegistersOffset = kFramePointerOffset;
   // Return address (stored from link register, read into pc on return).
 
   // TODO(plind): This 9 - is 8 s-regs (s0..s7) plus fp.
 
-  static const int kReturnAddress = kStoredRegisters + 9 * kSystemPointerSize;
+  static constexpr int kReturnAddressOffset =
+      kStoredRegistersOffset + 9 * kSystemPointerSize;
   // Stack frame header.
-  static const int kStackFrameHeader = kReturnAddress;
+  static constexpr int kStackFrameHeaderOffset = kReturnAddressOffset;
 
   // Below the frame pointer.
+  static constexpr int kFrameTypeOffset =
+      kFramePointerOffset - kSystemPointerSize;
+  static_assert(kFrameTypeOffset ==
+                CommonFrameConstants::kContextOrFrameTypeOffset);
+
   // Register parameters stored by setup code.
-  static const int kIsolate = kFramePointer - kSystemPointerSize;
-  static const int kDirectCall = kIsolate - kSystemPointerSize;
-  static const int kNumOutputRegisters = kDirectCall - kSystemPointerSize;
-  static const int kRegisterOutput = kNumOutputRegisters - kSystemPointerSize;
-  static const int kInputEnd = kRegisterOutput - kSystemPointerSize;
-  static const int kInputStart = kInputEnd - kSystemPointerSize;
-  static const int kStartIndex = kInputStart - kSystemPointerSize;
-  static const int kInputString = kStartIndex - kSystemPointerSize;
+  static constexpr int kIsolateOffset = kFrameTypeOffset - kSystemPointerSize;
+  static constexpr int kDirectCallOffset = kIsolateOffset - kSystemPointerSize;
+  static constexpr int kNumOutputRegistersOffset =
+      kDirectCallOffset - kSystemPointerSize;
+  static constexpr int kRegisterOutputOffset =
+      kNumOutputRegistersOffset - kSystemPointerSize;
+
+  // Register parameters stored by setup code.
+  static constexpr int kInputEndOffset =
+      kRegisterOutputOffset - kSystemPointerSize;
+  static constexpr int kInputStartOffset = kInputEndOffset - kSystemPointerSize;
+  static constexpr int kStartIndexOffset =
+      kInputStartOffset - kSystemPointerSize;
+  static constexpr int kInputStringOffset =
+      kStartIndexOffset - kSystemPointerSize;
   // When adding local variables remember to push space for them in
   // the frame in GetCode.
-  static const int kSuccessfulCaptures = kInputString - kSystemPointerSize;
-  static const int kStringStartMinusOne =
-      kSuccessfulCaptures - kSystemPointerSize;
-  static const int kBacktrackCount = kStringStartMinusOne - kSystemPointerSize;
+  static constexpr int kSuccessfulCapturesOffset =
+      kInputStringOffset - kSystemPointerSize;
+  static constexpr int kStringStartMinusOneOffset =
+      kSuccessfulCapturesOffset - kSystemPointerSize;
+  static constexpr int kBacktrackCountOffset =
+      kStringStartMinusOneOffset - kSystemPointerSize;
   // Stores the initial value of the regexp stack pointer in a
   // position-independent representation (in case the regexp stack grows and
   // thus moves).
-  static const int kRegExpStackBasePointer =
-      kBacktrackCount - kSystemPointerSize;
+  static constexpr int kRegExpStackBasePointerOffset =
+      kBacktrackCountOffset - kSystemPointerSize;
 
   // First register address. Following registers are below it on the stack.
-  static const int kRegisterZero = kRegExpStackBasePointer - kSystemPointerSize;
+  static constexpr int kRegisterZeroOffset =
+      kRegExpStackBasePointerOffset - kSystemPointerSize;
 
   // Initial size of code buffer.
-  static const int kRegExpCodeSize = 1024;
+  static constexpr int kInitialBufferSize = 1024;
 
   void PushCallerSavedRegisters();
   void PopCallerSavedRegisters();
+
+  void CallCFunctionFromIrregexpCode(ExternalReference function,
+                                     int num_arguments);
 
   // Check whether preemption has been requested.
   void CheckPreemption();
 
   // Check whether we are exceeding the stack limit on the backtrack stack.
   void CheckStackLimit();
+  void AssertAboveStackLimitMinusSlack();
 
   // Generate a call to CheckStackGuardState.
-  void CallCheckStackGuardState(Register scratch);
+  void CallCheckStackGuardState(Register scratch,
+                                Operand extra_space = Operand(0));
   void CallIsCharacterInRangeArray(const ZoneList<CharacterRange>* ranges);
 
   // The ebp-relative location of a regexp register.

@@ -10,6 +10,7 @@
 #include "src/base/page-allocator.h"
 #include "src/base/platform/platform.h"
 #include "src/heap/cppgc/gc-info-table.h"
+#include "src/heap/cppgc/platform.h"
 #include "test/unittests/heap/cppgc/tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -18,11 +19,12 @@ namespace internal {
 
 namespace {
 
-constexpr GCInfo GetEmptyGCInfo() { return {nullptr, nullptr, nullptr, false}; }
+constexpr GCInfo GetEmptyGCInfo() { return {nullptr, nullptr, nullptr}; }
 
 class GCInfoTableTest : public ::testing::Test {
  public:
-  GCInfoTableTest() : table_(std::make_unique<GCInfoTable>(&page_allocator_)) {}
+  GCInfoTableTest()
+      : table_(std::make_unique<GCInfoTable>(page_allocator_, oom_handler_)) {}
 
   GCInfoIndex RegisterNewGCInfoForTesting(const GCInfo& info) {
     // Unused registered index will result in registering a new index.
@@ -35,6 +37,7 @@ class GCInfoTableTest : public ::testing::Test {
 
  private:
   v8::base::PageAllocator page_allocator_;
+  FatalOutOfMemoryHandler oom_handler_;
   std::unique_ptr<GCInfoTable> table_;
 };
 
@@ -242,15 +245,48 @@ static_assert(std::is_same<typename internal::GCInfoFolding<
 class TypeWithCustomFinalizationMethodAtBase
     : public GarbageCollected<TypeWithCustomFinalizationMethodAtBase> {
  public:
-  void FinalizeGarbageCollectedObject() {}
-  void Trace(Visitor*) const {}
+  explicit TypeWithCustomFinalizationMethodAtBase(bool is_child = false)
+      : is_child_(is_child) {}
+
+  void FinalizeGarbageCollectedObject();
+  void Trace(Visitor* v) const;
+
+  void TraceAfterDispatch(Visitor* v) const {}
+
+ protected:
+  const bool is_child_;
 
  private:
   std::unique_ptr<Dummy> non_trivially_destructible_;
 };
 
 class ChildOfTypeWithCustomFinalizationMethodAtBase
-    : public TypeWithCustomFinalizationMethodAtBase {};
+    : public TypeWithCustomFinalizationMethodAtBase {
+ public:
+  ChildOfTypeWithCustomFinalizationMethodAtBase()
+      : TypeWithCustomFinalizationMethodAtBase(true) {}
+  void TraceAfterDispatch(Visitor* v) const {
+    TypeWithCustomFinalizationMethodAtBase::TraceAfterDispatch(v);
+  }
+};
+
+void TypeWithCustomFinalizationMethodAtBase::FinalizeGarbageCollectedObject() {
+  if (is_child_) {
+    static_cast<const ChildOfTypeWithCustomFinalizationMethodAtBase*>(this)
+        ->~ChildOfTypeWithCustomFinalizationMethodAtBase();
+  } else {
+    this->~TypeWithCustomFinalizationMethodAtBase();
+  }
+}
+
+void TypeWithCustomFinalizationMethodAtBase::Trace(Visitor* v) const {
+  if (is_child_) {
+    static_cast<const ChildOfTypeWithCustomFinalizationMethodAtBase*>(this)
+        ->TraceAfterDispatch(v);
+  } else {
+    TraceAfterDispatch(v);
+  }
+}
 
 static_assert(
     !std::has_virtual_destructor<TypeWithCustomFinalizationMethodAtBase>::value,

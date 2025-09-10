@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/node.h"
+#include "src/compiler/turbofan-graph.h"
 #include "test/unittests/test-utils.h"
 
 namespace v8 {
@@ -38,19 +38,17 @@ class LinkageTailCall : public TestWithZone {
       if (locations->GetReturn(i).IsCallerFrameSlot()) stack_returns++;
     }
     return zone()->New<CallDescriptor>(
-        CallDescriptor::kCallCodeObject, MachineType::AnyTagged(),
+        CallDescriptor::kCallCodeObject, kDefaultCodeEntrypointTag,
+        MachineType::AnyTagged(),
         LinkageLocation::ForAnyRegister(MachineType::Pointer()),
         locations,  // location_sig
         stack_arguments,
-        Operator::kNoProperties,   // properties
-        kNoCalleeSaved,            // callee-saved
-        kNoCalleeSavedFp,          // callee-saved fp
-        CallDescriptor::kNoFlags,  // flags,
-        "", StackArgumentOrder::kDefault,
-#if V8_ENABLE_WEBASSEMBLY
-        nullptr,  // wasm function sig
-#endif
-        RegList{},  // allocatable_registers
+        Operator::kNoProperties,           // properties
+        kNoCalleeSaved,                    // callee-saved
+        kNoCalleeSavedFp,                  // callee-saved fp
+        CallDescriptor::kNoFlags,          // flags,
+        "", StackArgumentOrder::kDefault,  // --
+        RegList{},                         // allocatable_registers
         stack_returns);
   }
 

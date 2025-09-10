@@ -10,6 +10,7 @@
 #include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/objects.h"
 #include "src/objects/slots.h"
+#include "src/sandbox/check.h"
 #include "src/tracing/trace-event.h"
 #include "src/utils/allocation.h"
 
@@ -38,12 +39,12 @@ class Arguments {
   class ChangeValueScope {
    public:
     inline ChangeValueScope(Isolate* isolate, Arguments* args, int index,
-                            Object value);
-    ~ChangeValueScope() { *location_ = old_value_->ptr(); }
+                            Tagged<Object> value);
+    ~ChangeValueScope() { *location_ = (*old_value_).ptr(); }
 
    private:
     Address* location_;
-    Handle<Object> old_value_;
+    DirectHandle<Object> old_value_;
   };
 
   Arguments(int length, Address* arguments)
@@ -51,12 +52,14 @@ class Arguments {
     DCHECK_GE(length_, 0);
   }
 
-  V8_INLINE Object operator[](int index) const {
-    return Object(*address_of_arg_at(index));
+  V8_INLINE Tagged<Object> operator[](int index) const {
+    return Tagged<Object>(*address_of_arg_at(index));
   }
 
   template <class S = Object>
   V8_INLINE Handle<S> at(int index) const;
+
+  V8_INLINE FullObjectSlot slot_from_address_at(int index, int offset) const;
 
   V8_INLINE int smi_value_at(int index) const;
   V8_INLINE uint32_t positive_smi_value_at(int index) const;
@@ -65,12 +68,15 @@ class Arguments {
 
   V8_INLINE double number_value_at(int index) const;
 
-  V8_INLINE FullObjectSlot slot_at(int index) const {
-    return FullObjectSlot(address_of_arg_at(index));
-  }
+  V8_INLINE Handle<Object> atOrUndefined(Isolate* isolate, int index) const;
 
   V8_INLINE Address* address_of_arg_at(int index) const {
-    DCHECK_LE(static_cast<uint32_t>(index), static_cast<uint32_t>(length_));
+    // Corruption of certain heap objects (see e.g. crbug.com/1507223) can lead
+    // to OOB arguments access, and therefore OOB stack access. This SBXCHECK
+    // defends against that.
+    // Note: "LE" is intentional: it's okay to compute the address of the
+    // first nonexistent entry.
+    SBXCHECK_LE(static_cast<uint32_t>(index), static_cast<uint32_t>(length_));
     uintptr_t offset = index * kSystemPointerSize;
     if (arguments_type == ArgumentsType::kJS) {
       offset = (length_ - index - 1) * kSystemPointerSize;
@@ -82,19 +88,6 @@ class Arguments {
   // Get the total number of arguments including the receiver.
   V8_INLINE int length() const { return static_cast<int>(length_); }
 
-  // Arguments on the stack are in reverse order (compared to an array).
-  FullObjectSlot first_slot() const {
-    int index = length() - 1;
-    if (arguments_type == ArgumentsType::kJS) index = 0;
-    return slot_at(index);
-  }
-
-  FullObjectSlot last_slot() const {
-    int index = 0;
-    if (arguments_type == ArgumentsType::kJS) index = length() - 1;
-    return slot_at(index);
-  }
-
  private:
   intptr_t length_;
   Address* arguments_;
@@ -104,7 +97,13 @@ template <ArgumentsType T>
 template <class S>
 Handle<S> Arguments<T>::at(int index) const {
   Handle<Object> obj = Handle<Object>(address_of_arg_at(index));
-  return Handle<S>::cast(obj);
+  return Cast<S>(obj);
+}
+
+template <ArgumentsType T>
+FullObjectSlot Arguments<T>::slot_from_address_at(int index, int offset) const {
+  Address* location = *reinterpret_cast<Address**>(address_of_arg_at(index));
+  return FullObjectSlot(location + offset);
 }
 
 #ifdef DEBUG
@@ -137,29 +136,35 @@ Handle<S> Arguments<T>::at(int index) const {
 
 #endif  // V8_RUNTIME_CALL_STATS
 
-#define RUNTIME_FUNCTION_RETURNS_TYPE(Type, InternalType, Convert, Name)    \
-  static V8_INLINE InternalType __RT_impl_##Name(RuntimeArguments args,     \
-                                                 Isolate* isolate);         \
-  RUNTIME_ENTRY_WITH_RCS(Type, InternalType, Convert, Name)                 \
-  Type Name(int args_length, Address* args_object, Isolate* isolate) {      \
-    DCHECK(isolate->context().is_null() || isolate->context().IsContext()); \
-    CLOBBER_DOUBLE_REGISTERS();                                             \
-    TEST_AND_CALL_RCS(Name)                                                 \
-    RuntimeArguments args(args_length, args_object);                        \
-    return Convert(__RT_impl_##Name(args, isolate));                        \
-  }                                                                         \
-                                                                            \
+#define RUNTIME_FUNCTION_RETURNS_TYPE(Type, InternalType, Convert, Name)   \
+  static V8_INLINE InternalType __RT_impl_##Name(RuntimeArguments args,    \
+                                                 Isolate* isolate);        \
+  RUNTIME_ENTRY_WITH_RCS(Type, InternalType, Convert, Name)                \
+  Type Name(int args_length, Address* args_object, Isolate* isolate) {     \
+    DCHECK(isolate->context().is_null() || IsContext(isolate->context())); \
+    CLOBBER_DOUBLE_REGISTERS();                                            \
+    TEST_AND_CALL_RCS(Name)                                                \
+    RuntimeArguments args(args_length, args_object);                       \
+    return Convert(__RT_impl_##Name(args, isolate));                       \
+  }                                                                        \
+                                                                           \
   static InternalType __RT_impl_##Name(RuntimeArguments args, Isolate* isolate)
 
-#define CONVERT_OBJECT(x) (x).ptr()
-#define CONVERT_OBJECTPAIR(x) (x)
+#ifdef DEBUG
+#define BUILTIN_CONVERT_RESULT(x) (isolate->VerifyBuiltinsResult(x)).ptr()
+#define BUILTIN_CONVERT_RESULT_PAIR(x) isolate->VerifyBuiltinsResult(x)
+#else  // DEBUG
+#define BUILTIN_CONVERT_RESULT(x) (x).ptr()
+#define BUILTIN_CONVERT_RESULT_PAIR(x) (x)
+#endif  // DEBUG
 
-#define RUNTIME_FUNCTION(Name) \
-  RUNTIME_FUNCTION_RETURNS_TYPE(Address, Object, CONVERT_OBJECT, Name)
+#define RUNTIME_FUNCTION(Name)                           \
+  RUNTIME_FUNCTION_RETURNS_TYPE(Address, Tagged<Object>, \
+                                BUILTIN_CONVERT_RESULT, Name)
 
-#define RUNTIME_FUNCTION_RETURN_PAIR(Name)                                  \
-  RUNTIME_FUNCTION_RETURNS_TYPE(ObjectPair, ObjectPair, CONVERT_OBJECTPAIR, \
-                                Name)
+#define RUNTIME_FUNCTION_RETURN_PAIR(Name)              \
+  RUNTIME_FUNCTION_RETURNS_TYPE(ObjectPair, ObjectPair, \
+                                BUILTIN_CONVERT_RESULT_PAIR, Name)
 
 }  // namespace internal
 }  // namespace v8

@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Flags: --no-stress-incremental-marking
+
 let {session, contextGroup, Protocol} = InspectorTest.start(
     'Tests weakness of edges from JSWeakRef and WeakCell.');
 
 const kNodeName = 1;
 const kNodeEdgeCount = 4;
-const kNodeSize = 7;
+const kNodeSize = 6;
 const kEdgeType = 0;
 const kEdgeName = 1;
 const kEdgeTarget = 2;

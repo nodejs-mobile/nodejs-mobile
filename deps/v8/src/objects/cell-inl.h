@@ -6,6 +6,7 @@
 #define V8_OBJECTS_CELL_INL_H_
 
 #include "src/objects/cell.h"
+// Include the non-inl header before the rest of the headers.
 
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/objects-inl.h"
@@ -20,7 +21,7 @@ namespace internal {
 
 TQ_OBJECT_CONSTRUCTORS_IMPL(Cell)
 
-DEF_RELAXED_GETTER(Cell, value, Object) {
+DEF_RELAXED_GETTER(Cell, value, Tagged<Object>) {
   return TaggedField<Object, kValueOffset>::Relaxed_Load(cage_base, *this);
 }
 

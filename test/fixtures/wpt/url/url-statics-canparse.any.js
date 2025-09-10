@@ -6,23 +6,28 @@
     "expected": false
   },
   {
-    "url": "a:b",
+    "url": "aaa:b",
     "base": undefined,
     "expected": true
   },
   {
     "url": undefined,
-    "base": "a:b",
+    "base": "aaa:b",
     "expected": false
   },
   {
-    "url": "a:/b",
+    "url": undefined,
+    "base": "https://test:test/",
+    "expected": false
+  },
+  {
+    "url": "aaa:/b",
     "base": undefined,
     "expected": true
   },
   {
     "url": undefined,
-    "base": "a:/b",
+    "base": "aaa:/b",
     "expected": true
   },
   {

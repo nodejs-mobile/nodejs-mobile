@@ -41,7 +41,7 @@ namespace internal {
   V(r12)                                        \
   V(r15)
 
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
 #else
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V) V(r14)
@@ -60,22 +60,41 @@ enum RegisterCode {
 
 class Register : public RegisterBase<Register, kRegAfterLast> {
  public:
-  bool is_byte_register() const { return code() <= 3; }
+  constexpr bool is_byte_register() const { return code() <= 3; }
   // Return the high bit of the register code as a 0 or 1.  Used often
   // when constructing the REX prefix byte.
-  int high_bit() const { return code() >> 3; }
+  constexpr int high_bit() const { return code() >> 3; }
   // Return the 3 low bits of the register code.  Used when encoding registers
   // in modR/M, SIB, and opcode bytes.
-  int low_bits() const { return code() & 0x7; }
+  constexpr int low_bits() const { return code() & 0x7; }
 
  private:
   friend class RegisterBase<Register, kRegAfterLast>;
   explicit constexpr Register(int code) : RegisterBase(code) {}
 };
 
+// Register that store tagged value. Tagged value is in compressed form when
+// pointer compression is enabled.
+class TaggedRegister {
+ public:
+  explicit TaggedRegister(Register reg) : reg_(reg) {}
+  Register reg() { return reg_; }
+
+ private:
+  Register reg_;
+};
+
 ASSERT_TRIVIALLY_COPYABLE(Register);
 static_assert(sizeof(Register) <= sizeof(int),
               "Register can efficiently be passed by value");
+
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+template <typename RegT>
+inline RegT ReassignRegister(RegT& source) {
+  RegT result = source;
+  source = RegT::no_reg();
+  return result;
+}
 
 #define DECLARE_REGISTER(R) \
   constexpr Register R = Register::from_code(kRegCode_##R);
@@ -87,17 +106,20 @@ constexpr int kNumRegs = 16;
 
 #ifdef V8_TARGET_OS_WIN
 // Windows calling convention
-constexpr Register arg_reg_1 = rcx;
-constexpr Register arg_reg_2 = rdx;
-constexpr Register arg_reg_3 = r8;
-constexpr Register arg_reg_4 = r9;
+constexpr Register kCArgRegs[] = {rcx, rdx, r8, r9};
+
+// The Windows 64 ABI always reserves spill slots on the stack for the four
+// register arguments even if the function takes fewer than four arguments.
+// These stack slots are sometimes called 'home space', sometimes 'shadow
+// store' in Microsoft documentation, see
+// https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention.
+constexpr int kWindowsHomeStackSlots = 4;
 #else
 // AMD64 calling convention
-constexpr Register arg_reg_1 = rdi;
-constexpr Register arg_reg_2 = rsi;
-constexpr Register arg_reg_3 = rdx;
-constexpr Register arg_reg_4 = rcx;
+constexpr Register kCArgRegs[] = {rdi, rsi, rdx, rcx, r8, r9};
 #endif  // V8_TARGET_OS_WIN
+
+constexpr int kRegisterPassedArguments = arraysize(kCArgRegs);
 
 #define DOUBLE_REGISTERS(V) \
   V(xmm0)                   \
@@ -203,8 +225,12 @@ static_assert(sizeof(XMMRegister) <= sizeof(int),
 class YMMRegister : public XMMRegister {
  public:
   static constexpr YMMRegister from_code(int code) {
-    DCHECK(base::IsInRange(code, 0, XMMRegister::kNumRegisters - 1));
+    V8_ASSUME(code >= 0 && code < XMMRegister::kNumRegisters);
     return YMMRegister(code);
+  }
+
+  static constexpr YMMRegister from_xmm(XMMRegister xmm) {
+    return YMMRegister(xmm.code());
   }
 
  private:
@@ -221,6 +247,8 @@ using FloatRegister = XMMRegister;
 using DoubleRegister = XMMRegister;
 
 using Simd128Register = XMMRegister;
+
+using Simd256Register = YMMRegister;
 
 #define DECLARE_REGISTER(R) \
   constexpr DoubleRegister R = DoubleRegister::from_code(kDoubleCode_##R);
@@ -239,6 +267,7 @@ DEFINE_REGISTER_NAMES(XMMRegister, DOUBLE_REGISTERS)
 DEFINE_REGISTER_NAMES(YMMRegister, YMM_REGISTERS)
 
 // Give alias names to registers for calling conventions.
+constexpr Register kStackPointerRegister = rsp;
 constexpr Register kReturnRegister0 = rax;
 constexpr Register kReturnRegister1 = rdx;
 constexpr Register kReturnRegister2 = r8;
@@ -255,25 +284,26 @@ constexpr Register kJavaScriptCallCodeStartRegister = rcx;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = rdx;
 constexpr Register kJavaScriptCallExtraArg1Register = rbx;
+constexpr Register kJavaScriptCallDispatchHandleRegister = r15;
 
 constexpr Register kRuntimeCallFunctionRegister = rbx;
 constexpr Register kRuntimeCallArgCountRegister = rax;
 constexpr Register kRuntimeCallArgvRegister = r15;
-constexpr Register kWasmInstanceRegister = rsi;
+constexpr Register kWasmImplicitArgRegister = rsi;
+constexpr Register kWasmTrapHandlerFaultAddressRegister = r10;
 
 // Default scratch register used by MacroAssembler (and other code that needs
 // a spare register). The register isn't callee save, and not used by the
 // function calling convention.
 constexpr Register kScratchRegister = r10;
 constexpr XMMRegister kScratchDoubleReg = xmm15;
+constexpr YMMRegister kScratchSimd256Reg = ymm15;
 constexpr Register kRootRegister = r13;  // callee save
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 constexpr Register kPtrComprCageBaseRegister = r14;  // callee save
 #else
-constexpr Register kPtrComprCageBaseRegister = kRootRegister;
+constexpr Register kPtrComprCageBaseRegister = no_reg;
 #endif
-
-constexpr Register kOffHeapTrampolineRegister = kScratchRegister;
 
 constexpr DoubleRegister kFPReturnRegister0 = xmm0;
 

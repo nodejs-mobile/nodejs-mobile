@@ -8,6 +8,7 @@
 exports[`test/lib/commands/config.js TAP config list --json > output matches snapshot 1`] = `
 {
   "cache": "{CACHE}",
+  "color": {COLOR},
   "json": true,
   "projectloaded": "yes",
   "userloaded": "yes",
@@ -29,7 +30,6 @@ exports[`test/lib/commands/config.js TAP config list --json > output matches sna
   "call": "",
   "cert": null,
   "cidr": null,
-  "color": {COLOR},
   "commit-hooks": true,
   "cpu": null,
   "depth": null,
@@ -74,7 +74,9 @@ exports[`test/lib/commands/config.js TAP config list --json > output matches sna
   "init-author-url": "",
   "init-license": "ISC",
   "init-module": "{CWD}/home/.npm-init.js",
+  "init-type": "commonjs",
   "init-version": "1.0.0",
+  "init-private": false,
   "init.author.email": "",
   "init.author.name": "",
   "init.author.url": "",
@@ -97,6 +99,7 @@ exports[`test/lib/commands/config.js TAP config list --json > output matches sna
   "long": false,
   "maxsockets": 15,
   "message": "%s",
+  "node-gyp": "{CWD}/node_modules/node-gyp/bin/node-gyp.js",
   "node-options": null,
   "noproxy": [
     ""
@@ -192,7 +195,7 @@ cafile = null
 call = ""
 cert = null
 cidr = null
-color = {COLOR}
+; color = {COLOR}
 commit-hooks = true
 cpu = null
 depth = null
@@ -237,6 +240,8 @@ init-author-name = ""
 init-author-url = ""
 init-license = "ISC"
 init-module = "{CWD}/home/.npm-init.js"
+init-private = false
+init-type = "commonjs"
 init-version = "1.0.0"
 init.author.email = ""
 init.author.name = ""
@@ -261,6 +266,7 @@ logs-max = 10
 ; long = false ; overridden by cli
 maxsockets = 15
 message = "%s"
+node-gyp = "{CWD}/node_modules/node-gyp/bin/node-gyp.js"
 node-options = null
 noproxy = [""]
 npm-version = "{NPM-VERSION}"
@@ -345,6 +351,7 @@ projectloaded = "yes"
 ; "cli" config from command line options
 
 cache = "{CACHE}"
+color = {COLOR}
 long = true
 `
 
@@ -355,6 +362,10 @@ globalloaded = "yes"
 
 ; "user" config from {CWD}/home/.npmrc
 
+_auth = (protected)
+//nerfdart:_auth = (protected)
+//nerfdart:auth = (protected)
+auth = (protected)
 userloaded = "yes"
 
 ; "project" config from {CWD}/prefix/.npmrc
@@ -364,6 +375,7 @@ projectloaded = "yes"
 ; "cli" config from command line options
 
 cache = "{CACHE}"
+color = {COLOR}
 
 ; node bin location = {NODE-BIN-LOCATION}
 ; node version = {NODE-VERSION}
@@ -378,6 +390,7 @@ exports[`test/lib/commands/config.js TAP config list with publishConfig global >
 ; "cli" config from command line options
 
 cache = "{CACHE}"
+color = {COLOR}
 global = true
 
 ; node bin location = {NODE-BIN-LOCATION}
@@ -393,6 +406,7 @@ exports[`test/lib/commands/config.js TAP config list with publishConfig local > 
 ; "cli" config from command line options
 
 cache = "{CACHE}"
+color = {COLOR}
 
 ; node bin location = {NODE-BIN-LOCATION}
 ; node version = {NODE-VERSION}
@@ -405,6 +419,13 @@ cache = "{CACHE}"
 ; "publishConfig" from {CWD}/prefix/package.json
 ; This set of config values will be used at publish-time.
 
-_authToken = (protected)
+//some.registry:_authToken = (protected)
+other = "not defined"
 registry = "https://some.registry"
+`
+
+exports[`test/lib/commands/config.js TAP config list with publishConfig local > warns about unknown config 1`] = `
+Array [
+  "Unknown publishConfig config /"other/". This will stop working in the next major version of npm.",
+]
 `

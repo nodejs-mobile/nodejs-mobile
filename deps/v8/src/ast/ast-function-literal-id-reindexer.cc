@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "src/ast/ast-function-literal-id-reindexer.h"
-#include "src/objects/objects-inl.h"
 
 #include "src/ast/ast.h"
 
@@ -30,6 +29,13 @@ void AstFunctionLiteralIdReindexer::VisitFunctionLiteral(FunctionLiteral* lit) {
 
   AstTraversalVisitor::VisitFunctionLiteral(lit);
   lit->set_function_literal_id(lit->function_literal_id() + delta_);
+}
+
+void AstFunctionLiteralIdReindexer::VisitCall(Call* expr) {
+  AstTraversalVisitor::VisitCall(expr);
+  if (expr->is_possibly_eval()) {
+    expr->adjust_eval_scope_info_index(delta_);
+  }
 }
 
 void AstFunctionLiteralIdReindexer::VisitClassLiteral(ClassLiteral* expr) {

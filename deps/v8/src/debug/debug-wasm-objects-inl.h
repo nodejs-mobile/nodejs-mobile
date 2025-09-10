@@ -6,6 +6,8 @@
 #define V8_DEBUG_DEBUG_WASM_OBJECTS_INL_H_
 
 #include "src/debug/debug-wasm-objects.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/objects/js-objects-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -18,10 +20,8 @@ namespace internal {
 
 OBJECT_CONSTRUCTORS_IMPL(WasmValueObject, JSObject)
 
-CAST_ACCESSOR(WasmValueObject)
-
-ACCESSORS(WasmValueObject, type, String, kTypeOffset)
-ACCESSORS(WasmValueObject, value, Object, kValueOffset)
+ACCESSORS(WasmValueObject, type, Tagged<String>, kTypeOffset)
+ACCESSORS(WasmValueObject, value, Tagged<Object>, kValueOffset)
 
 }  // namespace internal
 }  // namespace v8

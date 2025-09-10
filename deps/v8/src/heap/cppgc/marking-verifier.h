@@ -5,11 +5,12 @@
 #ifndef V8_HEAP_CPPGC_MARKING_VERIFIER_H_
 #define V8_HEAP_CPPGC_MARKING_VERIFIER_H_
 
+#include <optional>
 #include <unordered_set>
 
-#include "src/base/optional.h"
 #include "src/heap/base/stack.h"
 #include "src/heap/cppgc/heap-object-header.h"
+#include "src/heap/cppgc/heap-page.h"
 #include "src/heap/cppgc/heap-visitor.h"
 #include "src/heap/cppgc/heap.h"
 #include "src/heap/cppgc/visitor.h"
@@ -25,7 +26,7 @@ class VerificationState {
   // No parent means parent was on stack.
   bool IsParentOnStack() const { return !parent_; }
 
- private:
+ protected:
   const HeapObjectHeader* parent_ = nullptr;
 };
 
@@ -41,18 +42,25 @@ class V8_EXPORT_PRIVATE MarkingVerifierBase
   MarkingVerifierBase(const MarkingVerifierBase&) = delete;
   MarkingVerifierBase& operator=(const MarkingVerifierBase&) = delete;
 
-  void Run(Heap::Config::StackState, uintptr_t, v8::base::Optional<size_t>);
+  void Run(StackState, std::optional<size_t>);
 
  protected:
-  MarkingVerifierBase(HeapBase&, Heap::Config::CollectionType,
-                      VerificationState&, std::unique_ptr<cppgc::Visitor>);
+  MarkingVerifierBase(HeapBase&, CollectionType, VerificationState&,
+                      std::unique_ptr<cppgc::Visitor>);
 
  private:
   void VisitInConstructionConservatively(HeapObjectHeader&,
                                          TraceConservativelyCallback) final;
   void VisitPointer(const void*) final;
 
+  bool VisitNormalPage(NormalPage&);
+  bool VisitLargePage(LargePage&);
   bool VisitHeapObjectHeader(HeapObjectHeader&);
+
+  void ReportDifferences(size_t) const;
+  void ReportNormalPage(const NormalPage&, size_t) const;
+  void ReportLargePage(const LargePage&, size_t) const;
+  void ReportHeapObjectHeader(const HeapObjectHeader&) const;
 
   VerificationState& verification_state_;
   std::unique_ptr<cppgc::Visitor> visitor_;
@@ -63,12 +71,13 @@ class V8_EXPORT_PRIVATE MarkingVerifierBase
       &in_construction_objects_heap_;
   size_t verifier_found_marked_bytes_ = 0;
   bool verifier_found_marked_bytes_are_exact_ = true;
-  Heap::Config::CollectionType collection_type_;
+  CollectionType collection_type_;
+  size_t verifier_found_marked_bytes_in_pages_ = 0;
 };
 
 class V8_EXPORT_PRIVATE MarkingVerifier final : public MarkingVerifierBase {
  public:
-  MarkingVerifier(HeapBase&, Heap::Config::CollectionType);
+  MarkingVerifier(HeapBase&, CollectionType);
   ~MarkingVerifier() final = default;
 
  private:

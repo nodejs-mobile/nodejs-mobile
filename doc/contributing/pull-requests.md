@@ -34,9 +34,11 @@
 ## Dependencies
 
 Node.js has several bundled dependencies in the _deps/_ and the _tools/_
-directories that are not part of the project proper. Changes to files in those
-directories should be sent to their respective projects. Do not send a patch to
-Node.js. We cannot accept such patches.
+directories that are not part of the project proper.
+These are detailed in the [maintaining dependencies][] document.
+Changes to files in those directories should be sent
+to their respective projects.
+Do not send a patch to Node.js. We cannot accept such patches.
 
 In case of doubt, open an issue in the
 [issue tracker](https://github.com/nodejs/node/issues/) or contact one of the
@@ -51,7 +53,7 @@ help, questions, and discussions.
 development of Node.js core specifically.
 
 Node.js also has an unofficial IRC channel:
-[#Node.js](https://web.libera.chat/?channels=node.js).
+[#Node.js](https://web.libera.chat/#node.js).
 
 ## Setting up your local environment
 
@@ -70,7 +72,7 @@ it's time to create a fork.
 Fork the project [on GitHub](https://github.com/nodejs/node) and clone your fork
 locally.
 
-```text
+```bash
 git clone git@github.com:username/node.git
 cd node
 git remote add upstream https://github.com/nodejs/node.git
@@ -79,7 +81,7 @@ git fetch upstream
 
 Configure `git` so that it knows who you are:
 
-```text
+```bash
 git config user.name "J. Random User"
 git config user.email "j.random.user@example.com"
 ```
@@ -99,7 +101,7 @@ As a best practice to keep your development environment as organized as
 possible, create local branches to work within. These should also be created
 directly off of the upstream default branch.
 
-```text
+```bash
 git checkout -b my-branch -t upstream/HEAD
 ```
 
@@ -120,7 +122,7 @@ If you are modifying code, please be sure to run `make lint` (or
 code style guide.
 
 Any documentation you write (including code comments and API documentation)
-should follow the [Style Guide](../../README.md). Code samples
+should follow the [Style Guide](../../doc/README.md). Code samples
 included in the API docs will also be checked when running `make lint` (or
 `vcbuild.bat lint` on Windows). If you are adding to or deprecating an API,
 add or change the appropriate YAML documentation. Use `REPLACEME` for the
@@ -147,7 +149,7 @@ as possible within individual commits. There is no limit to the number of
 commits any single pull request may have, and many contributors find it easier
 to review changes that are split across multiple commits.
 
-```text
+```bash
 git add my/changed/files
 git commit
 ```
@@ -181,6 +183,11 @@ A good commit message should describe what changed and why.
 4. If your patch fixes an open issue, you can add a reference to it at the end
    of the log. Use the `Fixes:` prefix and the full issue URL. For other
    references use `Refs:`.
+
+   `Fixes:` and `Refs:` trailers get automatically added to your commit message
+   when the Pull Request lands as long as they are included in the
+   Pull Request's description. If the Pull Request lands in several commits,
+   by default the trailers found in the description are added to each commits.
 
    Examples:
 
@@ -217,7 +224,7 @@ As a best practice, once you have committed your changes, it is a good idea
 to use `git rebase` (not `git merge`) to synchronize your work with the main
 repository.
 
-```text
+```bash
 git fetch upstream HEAD
 git rebase FETCH_HEAD
 ```
@@ -239,7 +246,7 @@ later.
 Before submitting your changes in a pull request, always run the full Node.js
 test suite. To run the tests (including code linting) on Unix / macOS:
 
-```text
+```bash
 ./configure && make -j4 test
 ```
 
@@ -249,8 +256,8 @@ information, see
 
 And on Windows:
 
-```text
-> vcbuild test
+```powershell
+vcbuild test
 ```
 
 For some configurations, running all tests might take a long time (an hour or
@@ -263,7 +270,7 @@ Once you are sure your commits are ready to go, with passing tests and linting,
 begin the process of opening a pull request by pushing your working branch to
 your fork on GitHub.
 
-```text
+```bash
 git push origin my-branch
 ```
 
@@ -292,7 +299,7 @@ To make changes to an existing pull request, make the changes to your local
 branch, add a new commit with those changes, and push those to your fork.
 GitHub will automatically update the pull request.
 
-```text
+```bash
 git add my/changed/files
 git commit
 git push origin my-branch
@@ -301,7 +308,7 @@ git push origin my-branch
 If a git conflict arises, it is necessary to synchronize your branch with other
 changes that have landed upstream by using `git rebase`:
 
-```text
+```bash
 git fetch upstream HEAD
 git rebase FETCH_HEAD
 git push --force-with-lease origin my-branch
@@ -439,6 +446,11 @@ credit for the work they started (either by preserving their name and email
 address) in the commit log, or by using an `Author:` meta-data tag in the
 commit.
 
+If a pull request has been inactive for more than six months, add the `stalled` label
+to it. That will trigger an automation that adds a comment explaining the pull request
+may be close for inactivity, giving a heads-up to the contributor before actually
+closing it if it remains inactive.
+
 ### Approving a change
 
 Any Node.js core collaborator (any GitHub user with commit rights in the
@@ -546,8 +558,7 @@ A pull request is approved either by saying LGTM, which stands for
 "Looks Good To Me", or by using GitHub's Approve button.
 GitHub's pull request review feature can be used during the process.
 For more information, check out
-[the video tutorial](https://www.youtube.com/watch?v=HW0RPaJqm4g)
-or [the official documentation](https://help.github.com/articles/reviewing-changes-in-pull-requests/).
+[the official documentation](https://help.github.com/articles/reviewing-changes-in-pull-requests/).
 
 After you push new changes to your branch, you need to get
 approval for these new changes again, even if GitHub shows "Approved"
@@ -590,6 +601,7 @@ More than one subsystem may be valid for any particular issue or pull request.
 [guide for writing tests in Node.js]: writing-tests.md
 [hiding-a-comment]: https://help.github.com/articles/managing-disruptive-comments/#hiding-a-comment
 [https://ci.nodejs.org/]: https://ci.nodejs.org/
+[maintaining dependencies]: ./maintaining/maintaining-dependencies.md
 [nodejs/core-validate-commit]: https://github.com/nodejs/core-validate-commit/blob/main/lib/rules/subsystem.js
 [pull request template]: https://raw.githubusercontent.com/nodejs/node/HEAD/.github/PULL_REQUEST_TEMPLATE.md
 [running tests]: ../../BUILDING.md#running-tests

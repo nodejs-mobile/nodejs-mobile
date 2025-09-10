@@ -2,12 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --turbo-optimize-apply --opt
-
-// These tests do not work well if this script is run more than once (e.g.
-// --stress-opt); after a few runs the whole function is immediately compiled
-// and assertions would fail. We prevent re-runs.
-// Flags: --nostress-opt --no-always-opt
+// Flags: --allow-natives-syntax --turbo-optimize-apply --turbofan
+// Flags: --no-always-turbofan
 
 // These tests do not work well if we flush the feedback vector, which causes
 // deoptimization.
@@ -25,6 +21,7 @@
 (function () {
   "use strict";
   var log_got_interpreted = true;
+  %NeverOptimizeFunction(assertEquals);
 
   function log(a) {
     assertEquals(1, arguments.length);
@@ -57,9 +54,9 @@
   });
 
   // Now we expect the value yielded by the generator.
+  assertUnoptimized(foo);
   assertEquals(42, foo());
   assertFalse(log_got_interpreted);
-  assertUnoptimized(foo);
 
   // Recompile 'foo'.
   %PrepareFunctionForOptimization(foo);

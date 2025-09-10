@@ -9,7 +9,6 @@
 
 #include "include/v8-inspector.h"
 #include "include/v8-local-handle.h"
-#include "src/base/macros.h"
 
 namespace v8 {
 
@@ -31,8 +30,6 @@ v8::Local<v8::String> ToV8String(v8::Isolate*, const std::vector<uint16_t>&);
 v8::Local<v8::String> ToV8String(v8::Isolate*, const v8_inspector::StringView&);
 
 std::vector<uint16_t> ToVector(v8::Isolate*, v8::Local<v8::String>);
-
-std::vector<uint16_t> ToVector(const v8_inspector::StringView&);
 
 }  // namespace internal
 }  // namespace v8

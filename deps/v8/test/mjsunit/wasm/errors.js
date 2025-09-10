@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --allow-natives-syntax
+// Flags: --allow-natives-syntax
 
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
@@ -69,7 +69,7 @@ function assertConversionError(bytes, imports, msg) {
         b.addExplicitSection([kCodeSectionCode, 2, 1, 0]);
         return b.toBuffer();
       })(),
-      error('expected local decls count @+22'));
+      error('reached end while decoding local decls count @+22'));
   assertCompileError(
       builder().addFunction('f', kSig_i_v).end().toBuffer(),
       f_error('function body must end with "end" opcode @+24'));
@@ -82,13 +82,13 @@ function assertConversionError(bytes, imports, msg) {
   ]).end().toBuffer(), f_error('invalid local index: 0 @+24'));
   assertCompileError(
       builder().addStart(0).toBuffer(),
-      'start function index 0 out of bounds (0 entries) @+10');
+      'function index 0 out of bounds (0 entries) @+10');
 })();
 
 function import_error(index, module, func, msg) {
-  let full_msg = 'Import #' + index + ' module=\"' + module + '\"';
-  if (func !== undefined) full_msg += ' function=\"' + func + '\"';
-  return full_msg + ' error: ' + msg;
+  let full_msg = 'Import #' + index + ' \"' + module + '\"';
+  if (func !== undefined) full_msg += ' \"' + func + '\"';
+  return full_msg + ': ' + msg;
 }
 
 (function TestTypeError() {

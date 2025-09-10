@@ -14,13 +14,12 @@
 #include "v8config.h"  // NOLINT(build/include_directory)
 
 namespace cppgc {
-
-class Visitor;
-
 namespace internal {
 
 class CrossThreadPersistentRegion;
 class FatalOutOfMemoryHandler;
+class HeapBase;
+class RootVisitor;
 
 // PersistentNode represents a variant of two states:
 // 1) traceable node with a back pointer to the Persistent object;
@@ -32,7 +31,7 @@ class PersistentNode final {
   PersistentNode(const PersistentNode&) = delete;
   PersistentNode& operator=(const PersistentNode&) = delete;
 
-  void InitializeAsUsedNode(void* owner, TraceCallback trace) {
+  void InitializeAsUsedNode(void* owner, TraceRootCallback trace) {
     CPPGC_DCHECK(trace);
     owner_ = owner;
     trace_ = trace;
@@ -53,9 +52,9 @@ class PersistentNode final {
     return next_;
   }
 
-  void Trace(Visitor* visitor) const {
+  void Trace(RootVisitor& root_visitor) const {
     CPPGC_DCHECK(IsUsed());
-    trace_(visitor, owner_);
+    trace_(root_visitor, owner_);
   }
 
   bool IsUsed() const { return trace_; }
@@ -73,7 +72,7 @@ class PersistentNode final {
     void* owner_ = nullptr;
     PersistentNode* next_;
   };
-  TraceCallback trace_ = nullptr;
+  TraceRootCallback trace_ = nullptr;
 };
 
 class V8_EXPORT PersistentRegionBase {
@@ -86,7 +85,7 @@ class V8_EXPORT PersistentRegionBase {
   PersistentRegionBase(const PersistentRegionBase&) = delete;
   PersistentRegionBase& operator=(const PersistentRegionBase&) = delete;
 
-  void Trace(Visitor*);
+  void Iterate(RootVisitor&);
 
   size_t NodesInUse() const;
 
@@ -96,7 +95,7 @@ class V8_EXPORT PersistentRegionBase {
   explicit PersistentRegionBase(const FatalOutOfMemoryHandler& oom_handler);
 
   PersistentNode* TryAllocateNodeFromFreeList(void* owner,
-                                              TraceCallback trace) {
+                                              TraceRootCallback trace) {
     PersistentNode* node = nullptr;
     if (V8_LIKELY(free_list_head_)) {
       node = free_list_head_;
@@ -118,7 +117,7 @@ class V8_EXPORT PersistentRegionBase {
   }
 
   PersistentNode* RefillFreeListAndAllocateNode(void* owner,
-                                                TraceCallback trace);
+                                                TraceRootCallback trace);
 
  private:
   template <typename PersistentBaseClass>
@@ -135,17 +134,21 @@ class V8_EXPORT PersistentRegionBase {
 };
 
 // Variant of PersistentRegionBase that checks whether the allocation and
-// freeing happens only on the thread that created the region.
+// freeing happens only on the thread that created the heap.
 class V8_EXPORT PersistentRegion final : public PersistentRegionBase {
  public:
-  explicit PersistentRegion(const FatalOutOfMemoryHandler&);
+  V8_INLINE PersistentRegion(const HeapBase& heap,
+                             const FatalOutOfMemoryHandler& oom_handler)
+      : PersistentRegionBase(oom_handler), heap_(heap) {
+    CPPGC_DCHECK(IsCreationThread());
+  }
   // Clears Persistent fields to avoid stale pointers after heap teardown.
   ~PersistentRegion() = default;
 
   PersistentRegion(const PersistentRegion&) = delete;
   PersistentRegion& operator=(const PersistentRegion&) = delete;
 
-  V8_INLINE PersistentNode* AllocateNode(void* owner, TraceCallback trace) {
+  V8_INLINE PersistentNode* AllocateNode(void* owner, TraceRootCallback trace) {
     CPPGC_DCHECK(IsCreationThread());
     auto* node = TryAllocateNodeFromFreeList(owner, trace);
     if (V8_LIKELY(node)) return node;
@@ -163,7 +166,7 @@ class V8_EXPORT PersistentRegion final : public PersistentRegionBase {
  private:
   bool IsCreationThread();
 
-  int creation_thread_id_;
+  const HeapBase& heap_;
 };
 
 // CrossThreadPersistent uses PersistentRegionBase but protects it using this
@@ -189,7 +192,7 @@ class V8_EXPORT CrossThreadPersistentRegion final
   CrossThreadPersistentRegion& operator=(const CrossThreadPersistentRegion&) =
       delete;
 
-  V8_INLINE PersistentNode* AllocateNode(void* owner, TraceCallback trace) {
+  V8_INLINE PersistentNode* AllocateNode(void* owner, TraceRootCallback trace) {
     PersistentRegionLock::AssertLocked();
     auto* node = TryAllocateNodeFromFreeList(owner, trace);
     if (V8_LIKELY(node)) return node;
@@ -202,7 +205,7 @@ class V8_EXPORT CrossThreadPersistentRegion final
     PersistentRegionBase::FreeNode(node);
   }
 
-  void Trace(Visitor*);
+  void Iterate(RootVisitor&);
 
   size_t NodesInUse() const;
 

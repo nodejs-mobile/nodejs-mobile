@@ -31,6 +31,8 @@ if (this.Intl) {
 
 // Dummy performance methods.
 assertEquals(1.2, performance.now());
+assertEquals(undefined, performance.mark("a mark"));
+assertEquals(undefined, performance.measure("a measure"));
 assertEquals([], performance.measureMemory());
 
 // Worker messages follow a predefined deterministic pattern.
@@ -106,21 +108,12 @@ testSameOptimized(expected_array, () => {
 // Realm.eval is just eval.
 assertEquals(1477662728716, Realm.eval(Realm.create(), `Date.now()`));
 
-// Test suppressions when Math.pow is optimized.
-function callPow(v) {
-  return Math.pow(v, -0.5);
-}
-%PrepareFunctionForOptimization(callPow);
-const unoptimized = callPow(6996);
-%OptimizeFunctionOnNextCall(callPow);
-assertEquals(unoptimized, callPow(6996));
-
 // Test mocked Atomics.waitAsync.
 let then_called = false;
 Atomics.waitAsync().value.then(() => {then_called = true;});
 assertEquals(true, then_called);
 
-// Test .caller access is neutered.
+// Test .caller access is neutralized.
 function callee() {
   assertEquals(null, callee.caller);
 }
@@ -128,3 +121,11 @@ function caller() {
   callee();
 }
 caller();
+
+// Neutralized APIs.
+let object = {'foo': 42}
+assertEquals(d8.serializer.serialize(object), object)
+assertEquals(d8.serializer.deserialize(object), object)
+assertEquals(d8.profiler.setOnProfileEndListener(object), object)
+assertEquals(d8.profiler.triggerSample(object), object)
+assertEquals(d8.log.getAndStop(object), object)

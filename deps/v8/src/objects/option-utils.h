@@ -5,19 +5,21 @@
 #ifndef V8_OBJECTS_OPTION_UTILS_H_
 #define V8_OBJECTS_OPTION_UTILS_H_
 
+#include "src/common/globals.h"
 #include "src/execution/isolate.h"
-#include "src/objects/objects.h"
+#include "src/objects/js-objects.h"
+#include "src/objects/string.h"
 
 namespace v8 {
 namespace internal {
 
 // ecma402/#sec-getoptionsobject and temporal/#sec-getoptionsobject
-V8_WARN_UNUSED_RESULT MaybeHandle<JSReceiver> GetOptionsObject(
-    Isolate* isolate, Handle<Object> options, const char* method_name);
+V8_WARN_UNUSED_RESULT MaybeDirectHandle<JSReceiver> GetOptionsObject(
+    Isolate* isolate, DirectHandle<Object> options, const char* method_name);
 
 // ecma402/#sec-coerceoptionstoobject
-V8_WARN_UNUSED_RESULT MaybeHandle<JSReceiver> CoerceOptionsToObject(
-    Isolate* isolate, Handle<Object> options, const char* method_name);
+V8_WARN_UNUSED_RESULT MaybeDirectHandle<JSReceiver> CoerceOptionsToObject(
+    Isolate* isolate, DirectHandle<Object> options, const char* method_name);
 
 // ECMA402 9.2.10. GetOption( options, property, type, values, fallback)
 // ecma402/#sec-getoption and temporal/#sec-getoption
@@ -35,8 +37,8 @@ V8_WARN_UNUSED_RESULT MaybeHandle<JSReceiver> CoerceOptionsToObject(
 // method_name is a string denoting the method the call from; used when
 // printing the error message.
 V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<bool> GetStringOption(
-    Isolate* isolate, Handle<JSReceiver> options, const char* property,
-    std::vector<const char*> values, const char* method_name,
+    Isolate* isolate, DirectHandle<JSReceiver> options, const char* property,
+    const std::vector<const char*>& values, const char* method_name,
     std::unique_ptr<char[]>* result);
 
 // A helper template to get string from option into a enum.
@@ -45,7 +47,7 @@ V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<bool> GetStringOption(
 // default_value will be return.
 template <typename T>
 V8_WARN_UNUSED_RESULT static Maybe<T> GetStringOption(
-    Isolate* isolate, Handle<JSReceiver> options, const char* name,
+    Isolate* isolate, DirectHandle<JSReceiver> options, const char* name,
     const char* method_name, const std::vector<const char*>& str_values,
     const std::vector<T>& enum_values, T default_value) {
   DCHECK_EQ(str_values.size(), enum_values.size());
@@ -71,42 +73,48 @@ V8_WARN_UNUSED_RESULT static Maybe<T> GetStringOption(
 // default_value will be return.
 template <typename T>
 V8_WARN_UNUSED_RESULT static Maybe<T> GetStringOrBooleanOption(
-    Isolate* isolate, Handle<JSReceiver> options, const char* property,
+    Isolate* isolate, DirectHandle<JSReceiver> options, const char* property,
     const char* method, const std::vector<const char*>& str_values,
     const std::vector<T>& enum_values, T true_value, T false_value,
     T fallback_value) {
   DCHECK_EQ(str_values.size(), enum_values.size());
-  Handle<String> property_str =
-      isolate->factory()->NewStringFromAsciiChecked(property);
+  Factory* factory = isolate->factory();
+  DirectHandle<String> property_str =
+      factory->NewStringFromAsciiChecked(property);
 
   // 1. Let value be ? Get(options, property).
-  Handle<Object> value;
+  DirectHandle<Object> value;
   ASSIGN_RETURN_ON_EXCEPTION_VALUE(
       isolate, value,
       Object::GetPropertyOrElement(isolate, options, property_str),
       Nothing<T>());
   // 2. If value is undefined, then return fallback.
-  if (value->IsUndefined(isolate)) {
+  if (IsUndefined(*value, isolate)) {
     return Just(fallback_value);
   }
   // 3. If value is true, then return trueValue.
-  if (value->IsTrue(isolate)) {
+  if (IsTrue(*value, isolate)) {
     return Just(true_value);
   }
   // 4. Let valueBoolean be ToBoolean(value).
-  bool valueBoolean = value->BooleanValue(isolate);
+  bool valueBoolean = Object::BooleanValue(*value, isolate);
   // 5. If valueBoolean is false, then return valueBoolean.
   if (!valueBoolean) {
     return Just(false_value);
   }
 
-  Handle<String> value_str;
+  DirectHandle<String> value_str;
   // 6. Let value be ? ToString(value).
   ASSIGN_RETURN_ON_EXCEPTION_VALUE(
       isolate, value_str, Object::ToString(isolate, value), Nothing<T>());
-  // 7. If values does not contain an element equal to value, throw a
-  // RangeError exception.
-  // 8. Return value.
+  // 7. If value is *"true"* or *"false"*, return _fallback_.
+  if (String::Equals(isolate, value_str, factory->true_string()) ||
+      String::Equals(isolate, value_str, factory->false_string())) {
+    return Just(fallback_value);
+  }
+  // 8. If values does not contain an element equal to _value_, throw a
+  // *RangeError* exception.
+  // 9. Return value.
   value_str = String::Flatten(isolate, value_str);
   {
     DisallowGarbageCollection no_gc;
@@ -131,8 +139,7 @@ V8_WARN_UNUSED_RESULT static Maybe<T> GetStringOrBooleanOption(
   THROW_NEW_ERROR_RETURN_VALUE(
       isolate,
       NewRangeError(MessageTemplate::kValueOutOfRange, value,
-                    isolate->factory()->NewStringFromAsciiChecked(method),
-                    property_str),
+                    factory->NewStringFromAsciiChecked(method), property_str),
       Nothing<T>());
 }
 
@@ -149,17 +156,22 @@ V8_WARN_UNUSED_RESULT static Maybe<T> GetStringOrBooleanOption(
 // method_name is a string denoting the method it called from; used when
 // printing the error message.
 V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<bool> GetBoolOption(
-    Isolate* isolate, Handle<JSReceiver> options, const char* property,
+    Isolate* isolate, DirectHandle<JSReceiver> options, const char* property,
     const char* method_name, bool* result);
 
 V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<int> GetNumberOption(
-    Isolate* isolate, Handle<JSReceiver> options, Handle<String> property,
-    int min, int max, int fallback);
+    Isolate* isolate, DirectHandle<JSReceiver> options,
+    DirectHandle<String> property, int min, int max, int fallback);
+
+// #sec-getoption while type is "number"
+V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<double> GetNumberOptionAsDouble(
+    Isolate* isolate, DirectHandle<JSReceiver> options,
+    DirectHandle<String> property, double default_value);
 
 // ecma402/#sec-defaultnumberoption
 V8_EXPORT_PRIVATE V8_WARN_UNUSED_RESULT Maybe<int> DefaultNumberOption(
-    Isolate* isolate, Handle<Object> value, int min, int max, int fallback,
-    Handle<String> property);
+    Isolate* isolate, DirectHandle<Object> value, int min, int max,
+    int fallback, DirectHandle<String> property);
 
 }  // namespace internal
 }  // namespace v8

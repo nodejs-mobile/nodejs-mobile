@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/base/logging.h"
+
 #include <cstdint>
 
-#include "src/base/logging.h"
-#include "src/objects/objects.h"
 #include "src/objects/smi.h"
 #include "testing/gtest-support.h"
 
@@ -354,6 +354,15 @@ TEST(LoggingDeathTest, CheckChars) {
   ASSERT_DEATH_IF_SUPPORTED(
       ([&] { CHECK_EQ('a', 'b'); })(),
       FailureMessage("Check failed: 'a' == 'b'", "'97'", "'98'"));
+}
+
+TEST(LoggingDeathTest, Collections) {
+  std::vector<int> listA{1};
+  std::vector<int> listB{1, 2};
+
+  ASSERT_DEATH_IF_SUPPORTED(
+      ([&] { CHECK_EQ(listA, listB); })(),
+      FailureMessage("Check failed: listA == listB", "{1}", "{1,2}"));
 }
 
 }  // namespace logging_unittest

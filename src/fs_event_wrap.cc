@@ -24,6 +24,7 @@
 #include "handle_wrap.h"
 #include "node.h"
 #include "node_external_reference.h"
+#include "permission/permission.h"
 #include "string_bytes.h"
 
 namespace node {
@@ -43,6 +44,7 @@ using v8::PropertyAttribute;
 using v8::ReadOnly;
 using v8::Signature;
 using v8::String;
+using v8::TryCatch;
 using v8::Value;
 
 namespace {
@@ -146,6 +148,8 @@ void FSEventWrap::Start(const FunctionCallbackInfo<Value>& args) {
 
   BufferValue path(env->isolate(), args[0]);
   CHECK_NOT_NULL(*path);
+  THROW_IF_INSUFFICIENT_PERMISSIONS(
+      env, permission::PermissionScope::kFileSystemRead, *path);
 
   unsigned int flags = 0;
   if (args[2]->IsTrue())
@@ -214,18 +218,19 @@ void FSEventWrap::OnEvent(uv_fs_event_t* handle, const char* filename,
   };
 
   if (filename != nullptr) {
-    Local<Value> error;
-    MaybeLocal<Value> fn = StringBytes::Encode(env->isolate(),
-                                               filename,
-                                               wrap->encoding_,
-                                               &error);
+    // TODO(@jasnell): Historically, this code has failed to correctly
+    // propagate any error returned by the StringBytes::Encode method,
+    // and would instead just crash the process. That behavior is preserved
+    // here but should be looked at. Preferrably errors would be handled
+    // correctly here.
+    TryCatch try_catch(env->isolate());
+    MaybeLocal<Value> fn =
+        StringBytes::Encode(env->isolate(), filename, wrap->encoding_);
     if (fn.IsEmpty()) {
       argv[0] = Integer::New(env->isolate(), UV_EINVAL);
-      argv[2] = StringBytes::Encode(env->isolate(),
-                                    filename,
-                                    strlen(filename),
-                                    BUFFER,
-                                    &error).ToLocalChecked();
+      argv[2] = StringBytes::Encode(
+                    env->isolate(), filename, strlen(filename), BUFFER)
+                    .ToLocalChecked();
     } else {
       argv[2] = fn.ToLocalChecked();
     }

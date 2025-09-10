@@ -25,11 +25,11 @@ class CpuTraceMarkExtension : public v8::Extension {
       v8::Isolate* isolate, v8::Local<v8::String> name) override;
 
  private:
-  static void Mark(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void Mark(const v8::FunctionCallbackInfo<v8::Value>& info);
 
   static const char* BuildSource(char* buf, size_t size, const char* fun_name) {
-    base::SNPrintF(base::Vector<char>(buf, static_cast<int>(size)),
-                   "native function %s();", fun_name);
+    base::SNPrintF(base::VectorOf(buf, size), "native function %s();",
+                   fun_name);
     return buf;
   }
 

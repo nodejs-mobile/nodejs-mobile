@@ -5,16 +5,16 @@
 #ifndef V8_LOGGING_RUNTIME_CALL_STATS_H_
 #define V8_LOGGING_RUNTIME_CALL_STATS_H_
 
+#include <optional>
+
 #include "src/base/macros.h"
 
 #ifdef V8_RUNTIME_CALL_STATS
 
 #include "src/base/atomic-utils.h"
-#include "src/base/optional.h"
-#include "src/base/platform/elapsed-timer.h"
+#include "src/base/platform/platform.h"
 #include "src/base/platform/time.h"
 #include "src/builtins/builtins-definitions.h"
-#include "src/debug/debug-interface.h"
 #include "src/execution/thread-id.h"
 #include "src/init/heap-symbols.h"
 #include "src/logging/tracing-flags.h"
@@ -134,10 +134,12 @@ class RuntimeCallTimer final {
   V(AccessorPair_New)                                      \
   V(ArrayBuffer_Cast)                                      \
   V(ArrayBuffer_Detach)                                    \
+  V(ArrayBuffer_MaybeNew)                                  \
   V(ArrayBuffer_New)                                       \
   V(ArrayBuffer_NewBackingStore)                           \
   V(ArrayBuffer_BackingStore_Reallocate)                   \
   V(Array_CloneElementAt)                                  \
+  V(Array_Iterate)                                         \
   V(Array_New)                                             \
   V(BigInt64Array_New)                                     \
   V(BigInt_NewFromWords)                                   \
@@ -146,15 +148,20 @@ class RuntimeCallTimer final {
   V(BigUint64Array_New)                                    \
   V(BooleanObject_BooleanValue)                            \
   V(BooleanObject_New)                                     \
+  V(Context_DeepFreeze)                                    \
   V(Context_New)                                           \
   V(Context_NewRemoteContext)                              \
   V(DataView_New)                                          \
   V(Date_New)                                              \
-  V(Date_NumberValue)                                      \
+  V(Date_Parse)                                            \
   V(Debug_Call)                                            \
   V(debug_GetPrivateMembers)                               \
+  V(DictionaryTemplate_New)                                \
+  V(DictionaryTemplate_NewInstance)                        \
   V(Error_New)                                             \
+  V(Exception_CaptureStackTrace)                           \
   V(External_New)                                          \
+  V(Float16Array_New)                                      \
   V(Float32Array_New)                                      \
   V(Float64Array_New)                                      \
   V(Function_Call)                                         \
@@ -227,7 +234,9 @@ class RuntimeCallTimer final {
   V(Object_ToInt32)                                        \
   V(Object_ToInteger)                                      \
   V(Object_ToNumber)                                       \
+  V(Object_ToNumeric)                                      \
   V(Object_ToObject)                                       \
+  V(Object_ToPrimitive)                                    \
   V(Object_ToString)                                       \
   V(Object_ToUint32)                                       \
   V(Persistent_New)                                        \
@@ -280,6 +289,9 @@ class RuntimeCallTimer final {
   V(Uint32Array_New)                                       \
   V(Uint8Array_New)                                        \
   V(Uint8ClampedArray_New)                                 \
+  V(UnboundModuleScript_GetSourceMappingURL)               \
+  V(UnboundModuleScript_GetSourceURL)                      \
+  V(UnboundScript_GetColumnNumber)                         \
   V(UnboundScript_GetId)                                   \
   V(UnboundScript_GetLineNumber)                           \
   V(UnboundScript_GetName)                                 \
@@ -297,6 +309,7 @@ class RuntimeCallTimer final {
   V(Value_Uint32Value)                                     \
   V(WasmCompileError_New)                                  \
   V(WasmLinkError_New)                                     \
+  V(WasmSuspendError_New)                                  \
   V(WasmRuntimeError_New)                                  \
   V(WeakMap_Delete)                                        \
   V(WeakMap_Get)                                           \
@@ -307,82 +320,116 @@ class RuntimeCallTimer final {
   V(Prefix##Suffix)                                    \
   V(Prefix##Background##Suffix)
 
-#define FOR_EACH_THREAD_SPECIFIC_COUNTER(V)                                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Analyse)                          \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Eval)                             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Function)                         \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Ignition)                         \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, IgnitionFinalization)             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, RewriteReturnResult)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, ScopeAnalysis)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Script)                           \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, CompileTask)                      \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateFPRegisters)             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateSIMD128Registers)        \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateGeneralRegisters)        \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AssembleCode)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AssignSpillSlots)                \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BranchConditionDuplication)      \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BuildLiveRangeBundles)           \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BuildLiveRanges)                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BytecodeGraphBuilder)            \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, CommitAssignment)                \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ConnectRanges)                   \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ControlFlowOptimization)         \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, CSAEarlyOptimization)            \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, CSAOptimization)                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, DecideSpillingMode)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, DecompressionOptimization)       \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EarlyGraphTrimming)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EarlyOptimization)               \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EffectLinearization)             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EscapeAnalysis)                  \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, FinalizeCode)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, FrameElision)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, GenericLowering)                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Inlining)                        \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, JSWasmInlining)                  \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, JumpThreading)                   \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MidTierPopulateReferenceMaps)    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MidTierRegisterAllocator)        \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MidTierRegisterOutputDefinition) \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MidTierSpillSlotAllocator)       \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LateOptimization)                \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoadElimination)                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LocateSpillSlots)                \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoopExitElimination)             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoopPeeling)                     \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MachineOperatorOptimization)     \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MeetRegisterConstraints)         \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MemoryOptimization)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, OptimizeMoves)                   \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PopulatePointerMaps)             \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PrintGraph)                      \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ResolveControlFlow)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ResolvePhis)                     \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                  \
-                              ScheduledEffectControlLinearization)          \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ScheduledMachineLowering)        \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Scheduling)                      \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, SelectInstructions)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, SimplifiedLowering)              \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, StoreStoreElimination)           \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TraceScheduleAndVerify)          \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TypeAssertions)                  \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TypedLowering)                   \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Typer)                           \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Untyper)                         \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, VerifyGraph)                     \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmBaseOptimization)            \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmInlining)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmLoopPeeling)                 \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmLoopUnrolling)               \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmOptimization)                \
-                                                                            \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, ArrowFunctionLiteral)               \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, FunctionLiteral)                    \
-  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, Program)                            \
-  ADD_THREAD_SPECIFIC_COUNTER(V, PreParse, ArrowFunctionLiteral)            \
+#define FOR_EACH_THREAD_SPECIFIC_COUNTER(V)                                   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Analyse)                            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Eval)                               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Function)                           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Ignition)                           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, IgnitionFinalization)               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, RewriteReturnResult)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, ScopeAnalysis)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, Script)                             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Compile, CompileTask)                        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateFPRegisters)               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateSimd128Registers)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AllocateGeneralRegisters)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AssembleCode)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, AssignSpillSlots)                  \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BitcastElision)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BuildLiveRangeBundles)             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BuildLiveRanges)                   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, BytecodeGraphBuilder)              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, CommitAssignment)                  \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ConnectRanges)                     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, DecideSpillingMode)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EarlyGraphTrimming)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EarlyOptimization)                 \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, EscapeAnalysis)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, FinalizeCode)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, FrameElision)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, GenericLowering)                   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Inlining)                          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, JSWasmInlining)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, JSWasmLowering)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, JumpThreading)                     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoadElimination)                   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LocateSpillSlots)                  \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoopExitElimination)               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, LoopPeeling)                       \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PairingOptimization)               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MeetRegisterConstraints)           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, MemoryOptimization)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, OptimizeMoves)                     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PopulateReferenceMaps)             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PrintGraph)                        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, PrintTurboshaftGraph)              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ResolveControlFlow)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ResolvePhis)                       \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                    \
+                              ScheduledEffectControlLinearization)            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, ScheduledMachineLowering)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Scheduling)                        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, SelectInstructions)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, SimplifiedLowering)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, SimplifyLoops)                     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TraceScheduleAndVerify)            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftBlockInstrumentation)    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftBuildGraph)              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                    \
+                              TurboshaftCodeEliminationAndSimplification)     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftCsaBranchElimination)    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmInJSInlining)        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                    \
+                              TurboshaftCsaEarlyMachineOptimization)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftCsaLateEscapeAnalysis)   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftCsaLoadElimination)      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftCsaOptimize)             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftDebugFeatureLowering)    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                    \
+                              TurboshaftDecompressionOptimization)            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftGrowableStacks)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftInstructionSelection)    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftInt64Lowering)           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftLateOptimization)        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftLoopPeeling)             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftLoopUnrolling)           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftMachineLowering)         \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftMaglevGraphBuilding)     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize,                                    \
+                              TurboshaftSimplificationAndNormalization)       \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftOptimize)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftProfileApplication)      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftSpecialRPOScheduling)    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftStoreStoreElimination)   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftTagUntagLowering)        \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftTypeAssertions)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftTypedOptimizations)      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmDeadCodeElimination) \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmGCOptimize)          \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmOptimize)            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmDebugMemoryLowering) \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmLowering)            \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmRevec)               \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TurboshaftWasmSimd)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TypeAssertions)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, TypedLowering)                     \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Typer)                             \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, Untyper)                           \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, VerifyGraph)                       \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmBaseOptimization)              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmGCLowering)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmGCOptimization)                \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmInlining)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmLoopPeeling)                   \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmLoopUnrolling)                 \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmOptimization)                  \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmJSLowering)                    \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Optimize, WasmTyping)                        \
+                                                                              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, ArrowFunctionLiteral)                 \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, FunctionLiteral)                      \
+  ADD_THREAD_SPECIFIC_COUNTER(V, Parse, Program)                              \
+  ADD_THREAD_SPECIFIC_COUNTER(V, PreParse, ArrowFunctionLiteral)              \
   ADD_THREAD_SPECIFIC_COUNTER(V, PreParse, WithVariableResolution)
 
 #define FOR_EACH_MANUAL_COUNTER(V)             \
@@ -393,12 +440,15 @@ class RuntimeCallTimer final {
   V(BoundFunctionLengthGetter)                 \
   V(BoundFunctionNameGetter)                   \
   V(CodeGenerationFromStringsCallbacks)        \
+  V(CompileBackgroundBaseline)                 \
   V(CompileBackgroundBaselinePreVisit)         \
   V(CompileBackgroundBaselineVisit)            \
+  V(CompileBackgroundBaselineBuild)            \
   V(CompileBaseline)                           \
   V(CompileBaselineFinalization)               \
   V(CompileBaselinePreVisit)                   \
   V(CompileBaselineVisit)                      \
+  V(CompileBaselineBuild)                      \
   V(CompileCollectSourcePositions)             \
   V(CompileDeserialize)                        \
   V(CompileEnqueueOnDispatcher)                \
@@ -457,13 +507,17 @@ class RuntimeCallTimer final {
   V(NamedSetterCallback)                       \
   V(ObjectVerify)                              \
   V(Object_DeleteProperty)                     \
-  V(OptimizeBackgroundDispatcherJob)           \
+  V(OptimizeBackgroundMaglev)                  \
+  V(OptimizeBackgroundTurbofan)                \
   V(OptimizeCode)                              \
   V(OptimizeConcurrentFinalize)                \
+  V(OptimizeConcurrentFinalizeMaglev)          \
   V(OptimizeConcurrentPrepare)                 \
   V(OptimizeFinalizePipelineJob)               \
   V(OptimizeHeapBrokerInitialization)          \
   V(OptimizeNonConcurrent)                     \
+  V(OptimizeNonConcurrentMaglev)               \
+  V(OptimizeRevectorizer)                      \
   V(OptimizeSerialization)                     \
   V(OptimizeSerializeMetadata)                 \
   V(ParseEval)                                 \
@@ -479,15 +533,6 @@ class RuntimeCallTimer final {
   V(TestCounter2)                              \
   V(TestCounter3)                              \
   V(UpdateProtector)                           \
-  V(WebSnapshotDeserialize)                    \
-  V(WebSnapshotDeserialize_Arrays)             \
-  V(WebSnapshotDeserialize_Classes)            \
-  V(WebSnapshotDeserialize_Contexts)           \
-  V(WebSnapshotDeserialize_Exports)            \
-  V(WebSnapshotDeserialize_Functions)          \
-  V(WebSnapshotDeserialize_Maps)               \
-  V(WebSnapshotDeserialize_Objects)            \
-  V(WebSnapshotDeserialize_Strings)            \
   V(WrappedFunctionLengthGetter)               \
   V(WrappedFunctionNameGetter)
 
@@ -547,7 +592,7 @@ class RuntimeCallTimer final {
   V(StoreIC_StoreTransitionDH)                    \
   V(StoreInArrayLiteralIC_SlowStub)
 
-enum RuntimeCallCounterId {
+enum class RuntimeCallCounterId {
 #define CALL_RUNTIME_COUNTER(name) kGC_##name,
   FOR_EACH_GC_COUNTER(CALL_RUNTIME_COUNTER)
 #undef CALL_RUNTIME_COUNTER
@@ -557,7 +602,7 @@ enum RuntimeCallCounterId {
 #define CALL_RUNTIME_COUNTER(name, nargs, ressize) kRuntime_##name,
           FOR_EACH_INTRINSIC(CALL_RUNTIME_COUNTER)
 #undef CALL_RUNTIME_COUNTER
-#define CALL_BUILTIN_COUNTER(name) kBuiltin_##name,
+#define CALL_BUILTIN_COUNTER(name, Argc) kBuiltin_##name,
               BUILTIN_LIST_C(CALL_BUILTIN_COUNTER)
 #undef CALL_BUILTIN_COUNTER
 #define CALL_BUILTIN_COUNTER(name) kAPI_##name,
@@ -624,8 +669,9 @@ class RuntimeCallStats final {
     DCHECK(HasThreadSpecificCounterVariants(id));
     // All thread specific counters are laid out with the main thread variant
     // first followed by the background variant.
+    int idInt = static_cast<int>(id);
     return thread_type_ == kWorkerThread
-               ? static_cast<RuntimeCallCounterId>(id + 1)
+               ? static_cast<RuntimeCallCounterId>(idInt + 1)
                : id;
   }
 
@@ -677,7 +723,7 @@ class WorkerThreadRuntimeCallStats final {
  private:
   base::Mutex mutex_;
   std::vector<std::unique_ptr<RuntimeCallStats>> tables_;
-  base::Optional<base::Thread::LocalStorageKey> tls_key_;
+  std::optional<base::Thread::LocalStorageKey> tls_key_;
   // Since this is for creating worker thread runtime-call stats, record the
   // main thread ID to ensure we never create a worker RCS table for the main
   // thread.

@@ -5,14 +5,12 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
 const http2 = require('http2');
-const { inspect } = require('util');
 
 // Check if correct errors are emitted when wrong type of data is passed
 // to certain options of ClientHttp2Session request method
 
 const optionsToTest = {
   endStream: 'boolean',
-  weight: 'number',
   parent: 'number',
   exclusive: 'boolean',
   silent: 'boolean'
@@ -48,9 +46,7 @@ server.listen(0, common.mustCall(() => {
             [option]: types[type]
           }), {
             name: 'TypeError',
-            code: 'ERR_INVALID_ARG_VALUE',
-            message: `The property 'options.${option}' is invalid. ` +
-                    `Received ${inspect(types[type])}`
+            code: 'ERR_INVALID_ARG_TYPE',
           });
       });
     });

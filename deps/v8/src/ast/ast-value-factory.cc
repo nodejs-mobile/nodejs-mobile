@@ -29,14 +29,11 @@
 
 #include "src/base/hashmap-entry.h"
 #include "src/base/logging.h"
-#include "src/base/platform/wrappers.h"
 #include "src/common/globals.h"
 #include "src/heap/factory-inl.h"
 #include "src/heap/local-factory-inl.h"
-#include "src/objects/objects-inl.h"
-#include "src/objects/objects.h"
-#include "src/objects/string.h"
-#include "src/strings/char-predicates-inl.h"
+#include "src/objects/string-inl.h"
+#include "src/roots/roots.h"
 #include "src/strings/string-hasher.h"
 #include "src/utils/utils-inl.h"
 
@@ -48,14 +45,14 @@ namespace {
 // For using StringToIndex.
 class OneByteStringStream {
  public:
-  explicit OneByteStringStream(base::Vector<const byte> lb)
+  explicit OneByteStringStream(base::Vector<const uint8_t> lb)
       : literal_bytes_(lb), pos_(0) {}
 
   bool HasMore() { return pos_ < literal_bytes_.length(); }
   uint16_t GetNext() { return literal_bytes_[pos_++]; }
 
  private:
-  base::Vector<const byte> literal_bytes_;
+  base::Vector<const uint8_t> literal_bytes_;
   int pos_;
 };
 
@@ -64,7 +61,7 @@ class OneByteStringStream {
 template <typename IsolateT>
 void AstRawString::Internalize(IsolateT* isolate) {
   DCHECK(!has_string_);
-  if (literal_bytes_.length() == 0) {
+  if (literal_bytes_.empty()) {
     set_string(isolate->factory()->empty_string());
   } else if (is_one_byte()) {
     OneByteStringKey key(raw_hash_field_, literal_bytes_);
@@ -103,7 +100,7 @@ bool AstRawString::IsIntegerIndex() const {
 bool AstRawString::IsOneByteEqualTo(const char* data) const {
   if (!is_one_byte()) return false;
 
-  size_t length = static_cast<size_t>(literal_bytes_.length());
+  size_t length = literal_bytes_.size();
   if (length != strlen(data)) return false;
 
   return 0 == strncmp(reinterpret_cast<const char*>(literal_bytes_.begin()),
@@ -184,6 +181,10 @@ int AstRawString::Compare(const AstRawString* lhs, const AstRawString* rhs) {
 
   return lhs->byte_length() - rhs->byte_length();
 }
+
+#ifdef OBJECT_PRINT
+void AstRawString::Print() const { printf("%.*s", byte_length(), raw_data()); }
+#endif  // OBJECT_PRINT
 
 template <typename IsolateT>
 Handle<String> AstConsString::Allocate(IsolateT* isolate) const {
@@ -296,19 +297,23 @@ AstStringConstants::AstStringConstants(Isolate* isolate, uint64_t hash_seed)
       string_table_(),
       hash_seed_(hash_seed) {
   DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
-#define F(name, str)                                                         \
-  {                                                                          \
-    const char* data = str;                                                  \
-    base::Vector<const uint8_t> literal(                                     \
-        reinterpret_cast<const uint8_t*>(data),                              \
-        static_cast<int>(strlen(data)));                                     \
-    uint32_t raw_hash_field = StringHasher::HashSequentialString<uint8_t>(   \
-        literal.begin(), literal.length(), hash_seed_);                      \
-    name##_string_ = zone_.New<AstRawString>(true, literal, raw_hash_field); \
-    /* The Handle returned by the factory is located on the roots */         \
-    /* array, not on the temporary HandleScope, so this is safe.  */         \
-    name##_string_->set_string(isolate->factory()->name##_string());         \
-    string_table_.InsertNew(name##_string_, name##_string_->Hash());         \
+#define F(name, str)                                                  \
+  {                                                                   \
+    static const char data[] = str;                                   \
+    base::Vector<const uint8_t> literal(                              \
+        reinterpret_cast<const uint8_t*>(data),                       \
+        static_cast<int>(arraysize(data) - 1));                       \
+    IndirectHandle<String> handle = isolate->factory()->name();       \
+    uint32_t raw_hash_field = handle->raw_hash_field();               \
+    DCHECK_EQ(raw_hash_field,                                         \
+              StringHasher::HashSequentialString<uint8_t>(            \
+                  literal.begin(), literal.length(), hash_seed_));    \
+    DCHECK_EQ(literal.length(), handle->length());                    \
+    name##_ = zone_.New<AstRawString>(true, literal, raw_hash_field); \
+    /* The Handle returned by the factory is located on the roots */  \
+    /* array, not on the temporary HandleScope, so this is safe.  */  \
+    name##_->set_string(handle);                                      \
+    string_table_.InsertNew(name##_, name##_->Hash());                \
   }
   AST_STRING_CONSTANTS(F)
 #undef F
@@ -316,14 +321,11 @@ AstStringConstants::AstStringConstants(Isolate* isolate, uint64_t hash_seed)
 
 const AstRawString* AstValueFactory::GetOneByteStringInternal(
     base::Vector<const uint8_t> literal) {
-  if (literal.length() == 1 && literal[0] < kMaxOneCharStringValue) {
-    int key = literal[0];
-    if (V8_UNLIKELY(one_character_strings_[key] == nullptr)) {
-      uint32_t raw_hash_field = StringHasher::HashSequentialString<uint8_t>(
-          literal.begin(), literal.length(), hash_seed_);
-      one_character_strings_[key] = GetString(raw_hash_field, true, literal);
+  if (literal.length() == 1) {
+    uint8_t key = literal[0];
+    if (key < AstStringConstants::kMaxOneCharStringValue) {
+      return string_constants_->one_character_string(key);
     }
-    return one_character_strings_[key];
   }
   uint32_t raw_hash_field = StringHasher::HashSequentialString<uint8_t>(
       literal.begin(), literal.length(), hash_seed_);
@@ -335,14 +337,15 @@ const AstRawString* AstValueFactory::GetTwoByteStringInternal(
   uint32_t raw_hash_field = StringHasher::HashSequentialString<uint16_t>(
       literal.begin(), literal.length(), hash_seed_);
   return GetString(raw_hash_field, false,
-                   base::Vector<const byte>::cast(literal));
+                   base::Vector<const uint8_t>::cast(literal));
 }
 
 const AstRawString* AstValueFactory::GetString(
-    String literal, const SharedStringAccessGuardIfNeeded& access_guard) {
+    Tagged<String> literal,
+    const SharedStringAccessGuardIfNeeded& access_guard) {
   const AstRawString* result = nullptr;
   DisallowGarbageCollection no_gc;
-  String::FlatContent content = literal.GetFlatContent(no_gc, access_guard);
+  String::FlatContent content = literal->GetFlatContent(no_gc, access_guard);
   if (content.IsOneByte()) {
     result = GetOneByteStringInternal(content.ToOneByteVector());
   } else {
@@ -386,7 +389,7 @@ template EXPORT_TEMPLATE_DEFINE(
 
 const AstRawString* AstValueFactory::GetString(
     uint32_t raw_hash_field, bool is_one_byte,
-    base::Vector<const byte> literal_bytes) {
+    base::Vector<const uint8_t> literal_bytes) {
   // literal_bytes here points to whatever the user passed, and this is OK
   // because we use vector_compare (which checks the contents) to compare
   // against the AstRawStrings which are in the string_table_. We should not
@@ -397,10 +400,11 @@ const AstRawString* AstValueFactory::GetString(
       [&]() {
         // Copy literal contents for later comparison.
         int length = literal_bytes.length();
-        byte* new_literal_bytes = ast_raw_string_zone()->NewArray<byte>(length);
+        uint8_t* new_literal_bytes =
+            ast_raw_string_zone()->AllocateArray<uint8_t>(length);
         memcpy(new_literal_bytes, literal_bytes.begin(), length);
         AstRawString* new_string = ast_raw_string_zone()->New<AstRawString>(
-            is_one_byte, base::Vector<const byte>(new_literal_bytes, length),
+            is_one_byte, base::Vector<const uint8_t>(new_literal_bytes, length),
             raw_hash_field);
         CHECK_NOT_NULL(new_string);
         AddString(new_string);

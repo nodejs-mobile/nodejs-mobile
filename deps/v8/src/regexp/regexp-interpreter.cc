@@ -15,6 +15,7 @@
 #include "src/regexp/regexp-bytecodes.h"
 #include "src/regexp/regexp-macro-assembler.h"
 #include "src/regexp/regexp-stack.h"  // For kMaximumStackSize.
+#include "src/regexp/regexp-utils.h"
 #include "src/regexp/regexp.h"
 #include "src/strings/unicode.h"
 #include "src/utils/memcopy.h"
@@ -74,11 +75,11 @@ bool BackRefMatchesNoCase(Isolate* isolate, int from, int current, int len,
 }
 
 #ifdef DEBUG
-void MaybeTraceInterpreter(const byte* code_base, const byte* pc,
+void MaybeTraceInterpreter(const uint8_t* code_base, const uint8_t* pc,
                            int stack_depth, int current_position,
                            uint32_t current_char, int bytecode_length,
                            const char* bytecode_name) {
-  if (FLAG_trace_regexp_bytecodes) {
+  if (v8_flags.trace_regexp_bytecodes) {
     const bool printable = std::isprint(current_char);
     const char* format =
         printable
@@ -92,18 +93,17 @@ void MaybeTraceInterpreter(const byte* code_base, const byte* pc,
 }
 #endif  // DEBUG
 
-int32_t Load32Aligned(const byte* pc) {
+int32_t Load32Aligned(const uint8_t* pc) {
   DCHECK_EQ(0, reinterpret_cast<intptr_t>(pc) & 3);
   return *reinterpret_cast<const int32_t*>(pc);
 }
 
-// TODO(jgruber): Rename to Load16AlignedUnsigned.
-uint32_t Load16Aligned(const byte* pc) {
+uint32_t Load16AlignedUnsigned(const uint8_t* pc) {
   DCHECK_EQ(0, reinterpret_cast<intptr_t>(pc) & 1);
   return *reinterpret_cast<const uint16_t*>(pc);
 }
 
-int32_t Load16AlignedSigned(const byte* pc) {
+int32_t Load16AlignedSigned(const uint8_t* pc) {
   DCHECK_EQ(0, reinterpret_cast<intptr_t>(pc) & 1);
   return *reinterpret_cast<const int16_t*>(pc);
 }
@@ -136,7 +136,7 @@ class BacktrackStack {
     return (static_cast<int>(data_.size()) <= kMaxSize);
   }
   int peek() const {
-    DCHECK(!data_.empty());
+    SBXCHECK(!data_.empty());
     return data_.back();
   }
   int pop() {
@@ -147,9 +147,9 @@ class BacktrackStack {
 
   // The 'sp' is the index of the first empty element in the stack.
   int sp() const { return static_cast<int>(data_.size()); }
-  void set_sp(int new_sp) {
+  void set_sp(uint32_t new_sp) {
     DCHECK_LE(new_sp, sp());
-    data_.resize_no_init(new_sp);
+    data_.resize(new_sp);
   }
 
  private:
@@ -177,22 +177,30 @@ class InterpreterRegisters {
                        int output_register_count)
       : registers_(total_register_count),
         output_registers_(output_registers),
+        total_register_count_(total_register_count),
         output_register_count_(output_register_count) {
     // TODO(jgruber): Use int32_t consistently for registers. Currently, CSA
     // uses int32_t while runtime uses int.
-    STATIC_ASSERT(sizeof(int) == sizeof(int32_t));
-    DCHECK_GE(output_register_count, 2);  // At least 2 for the match itself.
-    DCHECK_GE(total_register_count, output_register_count);
-    DCHECK_LE(total_register_count, RegExpMacroAssembler::kMaxRegisterCount);
+    static_assert(sizeof(int) == sizeof(int32_t));
+    SBXCHECK_GE(output_register_count, 2);  // At least 2 for the match itself.
+    SBXCHECK_GE(total_register_count, output_register_count);
+    SBXCHECK_LE(total_register_count, RegExpMacroAssembler::kMaxRegisterCount);
     DCHECK_NOT_NULL(output_registers);
 
     // Initialize the output register region to -1 signifying 'no match'.
     std::memset(registers_.data(), -1,
                 output_register_count * sizeof(RegisterT));
+    USE(total_register_count_);
   }
 
-  const RegisterT& operator[](size_t index) const { return registers_[index]; }
-  RegisterT& operator[](size_t index) { return registers_[index]; }
+  const RegisterT& operator[](size_t index) const {
+    SBXCHECK_LT(index, total_register_count_);
+    return registers_[index];
+  }
+  RegisterT& operator[](size_t index) {
+    SBXCHECK_LT(index, total_register_count_);
+    return registers_[index];
+  }
 
   void CopyToOutputRegisters() {
     MemCopy(output_registers_, registers_.data(),
@@ -203,6 +211,7 @@ class InterpreterRegisters {
   static constexpr int kStaticCapacity = 64;  // Arbitrary.
   base::SmallVector<RegisterT, kStaticCapacity> registers_;
   RegisterT* const output_registers_;
+  const int total_register_count_;
   const int output_register_count_;
 };
 
@@ -229,17 +238,18 @@ IrregexpInterpreter::Result MaybeThrowStackOverflow(
 
 template <typename Char>
 void UpdateCodeAndSubjectReferences(
-    Isolate* isolate, Handle<ByteArray> code_array,
-    Handle<String> subject_string, ByteArray* code_array_out,
-    const byte** code_base_out, const byte** pc_out, String* subject_string_out,
+    Isolate* isolate, DirectHandle<TrustedByteArray> code_array,
+    DirectHandle<String> subject_string,
+    Tagged<TrustedByteArray>* code_array_out, const uint8_t** code_base_out,
+    const uint8_t** pc_out, Tagged<String>* subject_string_out,
     base::Vector<const Char>* subject_string_vector_out) {
   DisallowGarbageCollection no_gc;
 
-  if (*code_base_out != code_array->GetDataStartAddress()) {
+  if (*code_base_out != code_array->begin()) {
     *code_array_out = *code_array;
     const intptr_t pc_offset = *pc_out - *code_base_out;
     DCHECK_GT(pc_offset, 0);
-    *code_base_out = code_array->GetDataStartAddress();
+    *code_base_out = code_array->begin();
     *pc_out = *code_base_out + pc_offset;
   }
 
@@ -252,9 +262,11 @@ void UpdateCodeAndSubjectReferences(
 // necessary.
 template <typename Char>
 IrregexpInterpreter::Result HandleInterrupts(
-    Isolate* isolate, RegExp::CallOrigin call_origin, ByteArray* code_array_out,
-    String* subject_string_out, const byte** code_base_out,
-    base::Vector<const Char>* subject_string_vector_out, const byte** pc_out) {
+    Isolate* isolate, RegExp::CallOrigin call_origin,
+    Tagged<TrustedByteArray>* code_array_out,
+    Tagged<String>* subject_string_out, const uint8_t** code_base_out,
+    base::Vector<const Char>* subject_string_vector_out,
+    const uint8_t** pc_out) {
   DisallowGarbageCollection no_gc;
 
   StackLimitCheck check(isolate);
@@ -275,20 +287,20 @@ IrregexpInterpreter::Result HandleInterrupts(
     DCHECK(call_origin == RegExp::CallOrigin::kFromRuntime);
     // Prepare for possible GC.
     HandleScope handles(isolate);
-    Handle<ByteArray> code_handle(*code_array_out, isolate);
-    Handle<String> subject_handle(*subject_string_out, isolate);
+    DirectHandle<TrustedByteArray> code_handle(*code_array_out, isolate);
+    DirectHandle<String> subject_handle(*subject_string_out, isolate);
 
     if (js_has_overflowed) {
       return ThrowStackOverflow(isolate, call_origin);
     } else if (check.InterruptRequested()) {
       const bool was_one_byte =
           String::IsOneByteRepresentationUnderneath(*subject_string_out);
-      Object result;
+      Tagged<Object> result;
       {
         AllowGarbageCollection yes_gc;
         result = isolate->stack_guard()->HandleInterrupts();
       }
-      if (result.IsException(isolate)) {
+      if (IsException(result, isolate)) {
         return IrregexpInterpreter::EXCEPTION;
       }
 
@@ -309,7 +321,7 @@ IrregexpInterpreter::Result HandleInterrupts(
   return IrregexpInterpreter::SUCCESS;
 }
 
-bool CheckBitInTable(const uint32_t current_char, const byte* const table) {
+bool CheckBitInTable(const uint32_t current_char, const uint8_t* const table) {
   int mask = RegExpMacroAssembler::kTableMask;
   int b = table[(current_char & mask) >> kBitsPerByteLog2];
   int bit = (current_char & (kBitsPerByte - 1));
@@ -382,10 +394,10 @@ bool IndexIsInBounds(int index, int length) {
 
 template <typename Char>
 IrregexpInterpreter::Result RawMatch(
-    Isolate* isolate, ByteArray code_array, String subject_string,
-    base::Vector<const Char> subject, int* output_registers,
-    int output_register_count, int total_register_count, int current,
-    uint32_t current_char, RegExp::CallOrigin call_origin,
+    Isolate* isolate, Tagged<TrustedByteArray>* code_array,
+    Tagged<String>* subject_string, base::Vector<const Char> subject,
+    int* output_registers, int output_register_count, int total_register_count,
+    int current, uint32_t current_char, RegExp::CallOrigin call_origin,
     const uint32_t backtrack_limit) {
   DisallowGarbageCollection no_gc;
 
@@ -424,8 +436,8 @@ IrregexpInterpreter::Result RawMatch(
             base::bits::RoundUpToPowerOfTwo32(kRegExpBytecodeCount));
 
   // Make sure every bytecode we get by using BYTECODE_MASK is well defined.
-  STATIC_ASSERT(kRegExpBytecodeCount <= kRegExpPaddedBytecodeCount);
-  STATIC_ASSERT(kRegExpBytecodeCount + kRegExpBytecodeFillerCount ==
+  static_assert(kRegExpBytecodeCount <= kRegExpPaddedBytecodeCount);
+  static_assert(kRegExpBytecodeCount + kRegExpBytecodeFillerCount ==
                 kRegExpPaddedBytecodeCount);
 
 #define DECLARE_DISPATCH_TABLE_ENTRY(name, ...) &&BC_##name,
@@ -437,8 +449,8 @@ IrregexpInterpreter::Result RawMatch(
 
 #endif  // V8_USE_COMPUTED_GOTO
 
-  const byte* pc = code_array.GetDataStartAddress();
-  const byte* code_base = pc;
+  const uint8_t* pc = (*code_array)->begin();
+  const uint8_t* code_base = pc;
 
   InterpreterRegisters registers(total_register_count, output_registers,
                                  output_register_count);
@@ -447,13 +459,13 @@ IrregexpInterpreter::Result RawMatch(
   uint32_t backtrack_count = 0;
 
 #ifdef DEBUG
-  if (FLAG_trace_regexp_bytecodes) {
+  if (v8_flags.trace_regexp_bytecodes) {
     PrintF("\n\nStart bytecode interpreter\n\n");
   }
 #endif
 
   while (true) {
-    const byte* next_pc = pc;
+    const uint8_t* next_pc = pc;
     int32_t insn;
     int32_t next_insn;
 #if V8_USE_COMPUTED_GOTO
@@ -522,14 +534,14 @@ IrregexpInterpreter::Result RawMatch(
       DISPATCH();
     }
     BYTECODE(POP_BT) {
-      STATIC_ASSERT(JSRegExp::kNoBacktrackLimit == 0);
+      static_assert(JSRegExp::kNoBacktrackLimit == 0);
       if (++backtrack_count == backtrack_limit) {
         int return_code = LoadPacked24Signed(insn);
         return static_cast<IrregexpInterpreter::Result>(return_code);
       }
 
       IrregexpInterpreter::Result return_code =
-          HandleInterrupts(isolate, call_origin, &code_array, &subject_string,
+          HandleInterrupts(isolate, call_origin, code_array, subject_string,
                            &code_base, &subject, &pc);
       if (return_code != IrregexpInterpreter::SUCCESS) return return_code;
 
@@ -709,8 +721,8 @@ IrregexpInterpreter::Result RawMatch(
     }
     BYTECODE(MINUS_AND_CHECK_NOT_CHAR) {
       uint32_t c = LoadPacked24Unsigned(insn);
-      uint32_t minus = Load16Aligned(pc + 4);
-      uint32_t mask = Load16Aligned(pc + 6);
+      uint32_t minus = Load16AlignedUnsigned(pc + 4);
+      uint32_t mask = Load16AlignedUnsigned(pc + 6);
       if (c != ((current_char - minus) & mask)) {
         SET_PC_FROM_OFFSET(Load32Aligned(pc + 8));
       } else {
@@ -719,8 +731,8 @@ IrregexpInterpreter::Result RawMatch(
       DISPATCH();
     }
     BYTECODE(CHECK_CHAR_IN_RANGE) {
-      uint32_t from = Load16Aligned(pc + 4);
-      uint32_t to = Load16Aligned(pc + 6);
+      uint32_t from = Load16AlignedUnsigned(pc + 4);
+      uint32_t to = Load16AlignedUnsigned(pc + 6);
       if (from <= current_char && current_char <= to) {
         SET_PC_FROM_OFFSET(Load32Aligned(pc + 8));
       } else {
@@ -729,8 +741,8 @@ IrregexpInterpreter::Result RawMatch(
       DISPATCH();
     }
     BYTECODE(CHECK_CHAR_NOT_IN_RANGE) {
-      uint32_t from = Load16Aligned(pc + 4);
-      uint32_t to = Load16Aligned(pc + 6);
+      uint32_t from = Load16AlignedUnsigned(pc + 4);
+      uint32_t to = Load16AlignedUnsigned(pc + 6);
       if (from > current_char || current_char > to) {
         SET_PC_FROM_OFFSET(Load32Aligned(pc + 8));
       } else {
@@ -921,7 +933,7 @@ IrregexpInterpreter::Result RawMatch(
     BYTECODE(SKIP_UNTIL_CHAR) {
       int32_t load_offset = LoadPacked24Signed(insn);
       int32_t advance = Load16AlignedSigned(pc + 4);
-      uint32_t c = Load16Aligned(pc + 6);
+      uint32_t c = Load16AlignedUnsigned(pc + 6);
       while (IndexIsInBounds(current + load_offset, subject.length())) {
         current_char = subject[current + load_offset];
         if (c == current_char) {
@@ -936,7 +948,7 @@ IrregexpInterpreter::Result RawMatch(
     BYTECODE(SKIP_UNTIL_CHAR_AND) {
       int32_t load_offset = LoadPacked24Signed(insn);
       int32_t advance = Load16AlignedSigned(pc + 4);
-      uint16_t c = Load16Aligned(pc + 6);
+      uint16_t c = Load16AlignedUnsigned(pc + 6);
       uint32_t mask = Load32Aligned(pc + 8);
       int32_t maximum_offset = Load32Aligned(pc + 12);
       while (static_cast<uintptr_t>(current + maximum_offset) <=
@@ -954,7 +966,7 @@ IrregexpInterpreter::Result RawMatch(
     BYTECODE(SKIP_UNTIL_CHAR_POS_CHECKED) {
       int32_t load_offset = LoadPacked24Signed(insn);
       int32_t advance = Load16AlignedSigned(pc + 4);
-      uint16_t c = Load16Aligned(pc + 6);
+      uint16_t c = Load16AlignedUnsigned(pc + 6);
       int32_t maximum_offset = Load32Aligned(pc + 8);
       while (static_cast<uintptr_t>(current + maximum_offset) <=
              static_cast<uintptr_t>(subject.length())) {
@@ -970,8 +982,8 @@ IrregexpInterpreter::Result RawMatch(
     }
     BYTECODE(SKIP_UNTIL_BIT_IN_TABLE) {
       int32_t load_offset = LoadPacked24Signed(insn);
-      int32_t advance = Load16AlignedSigned(pc + 4);
-      const byte* table = pc + 8;
+      int32_t advance = Load32Aligned(pc + 4);
+      const uint8_t* table = pc + 8;
       while (IndexIsInBounds(current + load_offset, subject.length())) {
         current_char = subject[current + load_offset];
         if (CheckBitInTable(current_char, table)) {
@@ -986,8 +998,8 @@ IrregexpInterpreter::Result RawMatch(
     BYTECODE(SKIP_UNTIL_GT_OR_NOT_BIT_IN_TABLE) {
       int32_t load_offset = LoadPacked24Signed(insn);
       int32_t advance = Load16AlignedSigned(pc + 4);
-      uint16_t limit = Load16Aligned(pc + 6);
-      const byte* table = pc + 8;
+      uint16_t limit = Load16AlignedUnsigned(pc + 6);
+      const uint8_t* table = pc + 8;
       while (IndexIsInBounds(current + load_offset, subject.length())) {
         current_char = subject[current + load_offset];
         if (current_char > limit) {
@@ -1006,8 +1018,8 @@ IrregexpInterpreter::Result RawMatch(
     BYTECODE(SKIP_UNTIL_CHAR_OR_CHAR) {
       int32_t load_offset = LoadPacked24Signed(insn);
       int32_t advance = Load32Aligned(pc + 4);
-      uint16_t c = Load16Aligned(pc + 8);
-      uint16_t c2 = Load16Aligned(pc + 10);
+      uint16_t c = Load16AlignedUnsigned(pc + 8);
+      uint16_t c2 = Load16AlignedUnsigned(pc + 10);
       while (IndexIsInBounds(current + load_offset, subject.length())) {
         current_char = subject[current + load_offset];
         // The two if-statements below are split up intentionally, as combining
@@ -1053,30 +1065,78 @@ IrregexpInterpreter::Result RawMatch(
 }  // namespace
 
 // static
-IrregexpInterpreter::Result IrregexpInterpreter::Match(
-    Isolate* isolate, JSRegExp regexp, String subject_string,
-    int* output_registers, int output_register_count, int start_position,
-    RegExp::CallOrigin call_origin) {
-  if (FLAG_regexp_tier_up) regexp.TierUpTick();
+int IrregexpInterpreter::Match(Isolate* isolate,
+                               Tagged<IrRegExpData> regexp_data,
+                               Tagged<String> subject_string,
+                               int* output_registers, int output_register_count,
+                               int start_position,
+                               RegExp::CallOrigin call_origin) {
+  if (v8_flags.regexp_tier_up) regexp_data->TierUpTick();
 
+  bool is_any_unicode =
+      IsEitherUnicode(JSRegExp::AsRegExpFlags(regexp_data->flags()));
   bool is_one_byte = String::IsOneByteRepresentationUnderneath(subject_string);
-  ByteArray code_array = ByteArray::cast(regexp.bytecode(is_one_byte));
-  int total_register_count = regexp.max_register_count();
+  Tagged<TrustedByteArray> code_array = regexp_data->bytecode(is_one_byte);
+  int total_register_count = regexp_data->max_register_count();
 
-  return MatchInternal(isolate, code_array, subject_string, output_registers,
-                       output_register_count, total_register_count,
-                       start_position, call_origin, regexp.backtrack_limit());
+  // MatchInternal only supports returning a single match per call. In global
+  // mode, i.e. when output_registers has space for more than one match, we
+  // need to keep running until all matches are filled in.
+  int registers_per_match =
+      JSRegExp::RegistersForCaptureCount(regexp_data->capture_count());
+  DCHECK_LE(registers_per_match, output_register_count);
+  int number_of_matches_in_output_registers =
+      output_register_count / registers_per_match;
+
+  int backtrack_limit = regexp_data->backtrack_limit();
+
+  int num_matches = 0;
+  int* current_output_registers = output_registers;
+  for (int i = 0; i < number_of_matches_in_output_registers; i++) {
+    auto current_result = MatchInternal(
+        isolate, &code_array, &subject_string, current_output_registers,
+        registers_per_match, total_register_count, start_position, call_origin,
+        backtrack_limit);
+
+    if (current_result == SUCCESS) {
+      // Fall through.
+    } else if (current_result == FAILURE) {
+      break;
+    } else {
+      DCHECK(current_result == EXCEPTION ||
+             current_result == FALLBACK_TO_EXPERIMENTAL ||
+             current_result == RETRY);
+      return current_result;
+    }
+
+    // Found a match. Advance the index.
+
+    num_matches++;
+
+    int next_start_position = current_output_registers[1];
+    if (next_start_position == current_output_registers[0]) {
+      // Zero-length matches.
+      // TODO(jgruber): Use AdvanceStringIndex based on flat contents instead.
+      next_start_position = static_cast<int>(RegExpUtils::AdvanceStringIndex(
+          subject_string, next_start_position, is_any_unicode));
+      if (next_start_position > static_cast<int>(subject_string->length())) {
+        break;
+      }
+    }
+
+    start_position = next_start_position;
+    current_output_registers += registers_per_match;
+  }
+
+  return num_matches;
 }
 
 IrregexpInterpreter::Result IrregexpInterpreter::MatchInternal(
-    Isolate* isolate, ByteArray code_array, String subject_string,
-    int* output_registers, int output_register_count, int total_register_count,
-    int start_position, RegExp::CallOrigin call_origin,
-    uint32_t backtrack_limit) {
-  DCHECK(subject_string.IsFlat());
-
-  // TODO(chromium:1262676): Remove this CHECK once fixed.
-  CHECK(code_array.IsByteArray());
+    Isolate* isolate, Tagged<TrustedByteArray>* code_array,
+    Tagged<String>* subject_string, int* output_registers,
+    int output_register_count, int total_register_count, int start_position,
+    RegExp::CallOrigin call_origin, uint32_t backtrack_limit) {
+  DCHECK((*subject_string)->IsFlat());
 
   // Note: Heap allocation *is* allowed in two situations if calling from
   // Runtime:
@@ -1087,7 +1147,8 @@ IrregexpInterpreter::Result IrregexpInterpreter::MatchInternal(
   DisallowGarbageCollection no_gc;
 
   base::uc16 previous_char = '\n';
-  String::FlatContent subject_content = subject_string.GetFlatContent(no_gc);
+  String::FlatContent subject_content =
+      (*subject_string)->GetFlatContent(no_gc);
   // Because interrupts can result in GC and string content relocation, the
   // checksum verification in FlatContent may fail even though this code is
   // safe. See (2) above.
@@ -1116,10 +1177,10 @@ IrregexpInterpreter::Result IrregexpInterpreter::MatchInternal(
 
 // This method is called through an external reference from RegExpExecInternal
 // builtin.
-IrregexpInterpreter::Result IrregexpInterpreter::MatchForCallFromJs(
+int IrregexpInterpreter::MatchForCallFromJs(
     Address subject, int32_t start_position, Address, Address,
     int* output_registers, int32_t output_register_count,
-    RegExp::CallOrigin call_origin, Isolate* isolate, Address regexp) {
+    RegExp::CallOrigin call_origin, Isolate* isolate, Address regexp_data) {
   DCHECK_NOT_NULL(isolate);
   DCHECK_NOT_NULL(output_registers);
   DCHECK(call_origin == RegExp::CallOrigin::kFromJs);
@@ -1129,25 +1190,27 @@ IrregexpInterpreter::Result IrregexpInterpreter::MatchForCallFromJs(
   DisallowHandleAllocation no_handles;
   DisallowHandleDereference no_deref;
 
-  String subject_string = String::cast(Object(subject));
-  JSRegExp regexp_obj = JSRegExp::cast(Object(regexp));
+  Tagged<String> subject_string = Cast<String>(Tagged<Object>(subject));
+  Tagged<IrRegExpData> regexp_data_obj =
+      Cast<IrRegExpData>(Tagged<Object>(regexp_data));
 
-  if (regexp_obj.MarkedForTierUp()) {
+  if (regexp_data_obj->MarkedForTierUp()) {
     // Returning RETRY will re-enter through runtime, where actual recompilation
     // for tier-up takes place.
     return IrregexpInterpreter::RETRY;
   }
 
-  return Match(isolate, regexp_obj, subject_string, output_registers,
+  return Match(isolate, regexp_data_obj, subject_string, output_registers,
                output_register_count, start_position, call_origin);
 }
 
 #endif  // !COMPILING_IRREGEXP_FOR_EXTERNAL_EMBEDDER
 
-IrregexpInterpreter::Result IrregexpInterpreter::MatchForCallFromRuntime(
-    Isolate* isolate, Handle<JSRegExp> regexp, Handle<String> subject_string,
-    int* output_registers, int output_register_count, int start_position) {
-  return Match(isolate, *regexp, *subject_string, output_registers,
+int IrregexpInterpreter::MatchForCallFromRuntime(
+    Isolate* isolate, DirectHandle<IrRegExpData> regexp_data,
+    DirectHandle<String> subject_string, int* output_registers,
+    int output_register_count, int start_position) {
+  return Match(isolate, *regexp_data, *subject_string, output_registers,
                output_register_count, start_position,
                RegExp::CallOrigin::kFromRuntime);
 }

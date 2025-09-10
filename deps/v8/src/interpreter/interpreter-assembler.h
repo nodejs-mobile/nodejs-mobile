@@ -5,13 +5,12 @@
 #ifndef V8_INTERPRETER_INTERPRETER_ASSEMBLER_H_
 #define V8_INTERPRETER_INTERPRETER_ASSEMBLER_H_
 
-#include "src/builtins/builtins.h"
 #include "src/codegen/code-stub-assembler.h"
 #include "src/common/globals.h"
 #include "src/interpreter/bytecode-register.h"
 #include "src/interpreter/bytecodes.h"
+#include "src/objects/bytecode-array.h"
 #include "src/runtime/runtime.h"
-#include "src/utils/allocation.h"
 
 namespace v8 {
 namespace internal {
@@ -30,7 +29,10 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   TNode<Uint32T> BytecodeOperandCount(int operand_index);
   // Returns the 32-bit unsigned flag for bytecode operand |operand_index|
   // in the current bytecode.
-  TNode<Uint32T> BytecodeOperandFlag(int operand_index);
+  TNode<Uint32T> BytecodeOperandFlag8(int operand_index);
+  // Returns the 32-bit unsigned 2-byte flag for bytecode operand
+  // |operand_index| in the current bytecode.
+  TNode<Uint32T> BytecodeOperandFlag16(int operand_index);
   // Returns the 32-bit zero-extended index immediate for bytecode operand
   // |operand_index| in the current bytecode.
   TNode<Uint32T> BytecodeOperandIdxInt32(int operand_index);
@@ -73,6 +75,7 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Accumulator.
   TNode<Object> GetAccumulator();
   void SetAccumulator(TNode<Object> value);
+  void ClobberAccumulator(TNode<Object> clobber_value);
 
   // Context.
   TNode<Context> GetContext();
@@ -102,11 +105,9 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // - Resume copies only the registers from the generator, the arguments
   //   are copied by the ResumeGenerator trampoline.
   TNode<FixedArray> ExportParametersAndRegisterFile(
-      TNode<FixedArray> array, const RegListNodePair& registers,
-      TNode<Int32T> formal_parameter_count);
+      TNode<FixedArray> array, const RegListNodePair& registers);
   TNode<FixedArray> ImportRegisterFile(TNode<FixedArray> array,
-                                       const RegListNodePair& registers,
-                                       TNode<Int32T> formal_parameter_count);
+                                       const RegListNodePair& registers);
 
   // Loads from and stores to the interpreter register file.
   TNode<Object> LoadRegister(Register reg);
@@ -140,14 +141,32 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Load and untag constant at |index| in the constant pool.
   TNode<IntPtrT> LoadAndUntagConstantPoolEntry(TNode<WordT> index);
 
-  // Load the FeedbackVector for the current function. The retuned node could be
-  // undefined.
-  TNode<HeapObject> LoadFeedbackVector();
+  TNode<JSFunction> LoadFunctionClosure();
+
+  // Load the FeedbackVector for the current function. The returned node could
+  // be undefined.
+  TNode<Union<FeedbackVector, Undefined>> LoadFeedbackVector();
+
+  auto LoadFeedbackVectorOrUndefinedIfJitless() {
+#ifndef V8_JITLESS
+    return LoadFeedbackVector();
+#else
+    return UndefinedConstant();
+#endif  // V8_JITLESS
+  }
+
+  static constexpr UpdateFeedbackMode DefaultUpdateFeedbackMode() {
+#ifndef V8_JITLESS
+    return UpdateFeedbackMode::kOptionalFeedback;
+#else
+    return UpdateFeedbackMode::kNoFeedback;
+#endif  // !V8_JITLESS
+  }
 
   // Call JSFunction or Callable |function| with |args| arguments, possibly
   // including the receiver depending on |receiver_mode|. After the call returns
   // directly dispatches to the next bytecode.
-  void CallJSAndDispatch(TNode<Object> function, TNode<Context> context,
+  void CallJSAndDispatch(TNode<JSAny> function, TNode<Context> context,
                          const RegListNodePair& args,
                          ConvertReceiverMode receiver_mode);
 
@@ -156,37 +175,41 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // depending on |receiver_mode|. After the call returns directly dispatches to
   // the next bytecode.
   template <class... TArgs>
-  void CallJSAndDispatch(TNode<Object> function, TNode<Context> context,
+  void CallJSAndDispatch(TNode<JSAny> function, TNode<Context> context,
                          TNode<Word32T> arg_count,
                          ConvertReceiverMode receiver_mode, TArgs... args);
 
   // Call JSFunction or Callable |function| with |args|
   // arguments (not including receiver), and the final argument being spread.
   // After the call returns directly dispatches to the next bytecode.
-  void CallJSWithSpreadAndDispatch(TNode<Object> function,
+  void CallJSWithSpreadAndDispatch(TNode<JSAny> function,
                                    TNode<Context> context,
                                    const RegListNodePair& args,
-                                   TNode<UintPtrT> slot_id,
-                                   TNode<HeapObject> maybe_feedback_vector);
+                                   TNode<UintPtrT> slot_id);
 
   // Call constructor |target| with |args| arguments (not including receiver).
   // The |new_target| is the same as the |target| for the new keyword, but
   // differs for the super keyword.
-  TNode<Object> Construct(TNode<Object> target, TNode<Context> context,
-                          TNode<Object> new_target, const RegListNodePair& args,
-                          TNode<UintPtrT> slot_id,
-                          TNode<HeapObject> maybe_feedback_vector);
+  TNode<Object> Construct(
+      TNode<JSAny> target, TNode<Context> context, TNode<JSAny> new_target,
+      const RegListNodePair& args, TNode<UintPtrT> slot_id,
+      TNode<Union<FeedbackVector, Undefined>> maybe_feedback_vector);
 
   // Call constructor |target| with |args| arguments (not including
   // receiver). The last argument is always a spread. The |new_target| is the
   // same as the |target| for the new keyword, but differs for the super
   // keyword.
-  TNode<Object> ConstructWithSpread(TNode<Object> target,
-                                    TNode<Context> context,
-                                    TNode<Object> new_target,
+  TNode<Object> ConstructWithSpread(TNode<JSAny> target, TNode<Context> context,
+                                    TNode<JSAny> new_target,
                                     const RegListNodePair& args,
-                                    TNode<UintPtrT> slot_id,
-                                    TNode<HeapObject> maybe_feedback_vector);
+                                    TNode<UintPtrT> slot_id);
+
+  // Call constructor |target|, forwarding all arguments in the current JS
+  // frame.
+  TNode<Object> ConstructForwardAllArgs(TNode<JSAny> target,
+                                        TNode<Context> context,
+                                        TNode<JSAny> new_target,
+                                        TNode<TaggedIndex> slot_id);
 
   // Call runtime function with |args| arguments.
   template <class T = Object>
@@ -234,8 +257,19 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Updates the profiler interrupt budget for a return.
   void UpdateInterruptBudgetOnReturn();
 
-  // Returns the OSR urgency and install target from the bytecode header.
-  TNode<Int16T> LoadOsrUrgencyAndInstallTarget();
+  // Adjusts the interrupt budget by the provided weight. Returns the new
+  // budget.
+  TNode<Int32T> UpdateInterruptBudget(TNode<Int32T> weight);
+  // Decrements the bytecode array's interrupt budget by a 32-bit unsigned
+  // |weight| and calls Runtime::kInterrupt if counter reaches zero.
+  enum StackCheckBehavior {
+    kEnableStackCheck,
+    kDisableStackCheck,
+  };
+  void DecreaseInterruptBudget(TNode<Int32T> weight,
+                               StackCheckBehavior stack_check_behavior);
+
+  TNode<Int8T> LoadOsrState(TNode<FeedbackVector> feedback_vector);
 
   // Dispatch to the bytecode.
   void Dispatch();
@@ -259,12 +293,21 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   void AbortIfWordNotEqual(TNode<WordT> lhs, TNode<WordT> rhs,
                            AbortReason abort_reason);
   // Abort if |register_count| is invalid for given register file array.
-  void AbortIfRegisterCountInvalid(
-      TNode<FixedArrayBase> parameters_and_registers,
-      TNode<IntPtrT> formal_parameter_count, TNode<UintPtrT> register_count);
+  void AbortIfRegisterCountInvalid(TNode<FixedArray> parameters_and_registers,
+                                   TNode<IntPtrT> parameter_count,
+                                   TNode<UintPtrT> register_count);
 
-  // Perform OnStackReplacement.
-  void OnStackReplacement(TNode<Context> context, TNode<IntPtrT> relative_jump);
+  // Attempts to OSR.
+  enum OnStackReplacementParams {
+    kBaselineCodeIsCached,
+    kDefault,
+  };
+  void OnStackReplacement(TNode<Context> context,
+                          TNode<FeedbackVector> feedback_vector,
+                          TNode<IntPtrT> relative_jump,
+                          TNode<Int32T> loop_depth,
+                          TNode<IntPtrT> feedback_slot, TNode<Int8T> osr_state,
+                          OnStackReplacementParams params);
 
   // The BytecodeOffset() is the offset from the ByteCodeArray pointer; to
   // translate into runtime `BytecodeOffset` (defined in utils.h as the offset
@@ -285,6 +328,9 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
 
   // Load the bytecode at |bytecode_offset|.
   TNode<WordT> LoadBytecode(TNode<IntPtrT> bytecode_offset);
+
+  // Load the parameter count of the current function from its BytecodeArray.
+  TNode<IntPtrT> LoadParameterCountWithoutReceiver();
 
  private:
   // Returns a pointer to the current function's BytecodeArray object.
@@ -319,11 +365,6 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
 
   // Traces the current bytecode by calling |function_id|.
   void TraceBytecode(Runtime::FunctionId function_id);
-
-  // Updates the bytecode array's interrupt budget by a 32-bit unsigned |weight|
-  // and calls Runtime::kInterrupt if counter reaches zero. If |backward|, then
-  // the interrupt budget is decremented, otherwise it is incremented.
-  void UpdateInterruptBudget(TNode<Int32T> weight, bool backward);
 
   // Returns the offset of register |index| relative to RegisterFilePointer().
   TNode<IntPtrT> RegisterFrameOffset(TNode<IntPtrT> index);
@@ -363,10 +404,8 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // pool element.
   TNode<UintPtrT> BytecodeOperandConstantPoolIdx(int operand_index);
 
-  // Jump relative to the current bytecode by the |jump_offset|. If |backward|,
-  // then jump backward (subtract the offset), otherwise jump forward (add the
-  // offset). Helper function for Jump and JumpBackward.
-  void Jump(TNode<IntPtrT> jump_offset, bool backward);
+  // Jump to a specific bytecode offset.
+  void JumpToOffset(TNode<IntPtrT> new_bytecode_offset);
 
   // Jump forward relative to the current bytecode by |jump_offset| if the
   // |condition| is true. Helper function for JumpIfTaggedEqual and
@@ -398,7 +437,7 @@ class V8_EXPORT_PRIVATE InterpreterAssembler : public CodeStubAssembler {
   // Updates and returns BytecodeOffset() advanced by delta bytecodes.
   // Traces the exit of the current bytecode.
   TNode<IntPtrT> Advance(int delta);
-  TNode<IntPtrT> Advance(TNode<IntPtrT> delta, bool backward = false);
+  TNode<IntPtrT> Advance(TNode<IntPtrT> delta);
 
   // Look ahead for short Star and inline it in a branch, including subsequent
   // dispatch. Anything after this point can assume that the following

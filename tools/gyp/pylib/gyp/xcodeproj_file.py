@@ -74,7 +74,7 @@ layer of indirection between an XCBuildPhase and a PBXFileReference via a
 PBXBuildFile appears extraneous, but there's actually one reason for this:
 file-specific compiler flags are added to the PBXBuildFile object so as to
 allow a single file to be a member of multiple targets while having distinct
-compiler flags for each.  These flags can be modified in the Xcode applciation
+compiler flags for each.  These flags can be modified in the Xcode application
 in the "Build" tab of a File Info window.
 
 When a project is open in the Xcode application, Xcode will rewrite it.  As
@@ -137,14 +137,15 @@ Strings of class unicode are handled properly and encoded in UTF-8 when
 a project file is output.
 """
 
-import gyp.common
-from functools import cmp_to_key
 import hashlib
-from operator import attrgetter
 import posixpath
 import re
 import struct
 import sys
+from functools import cmp_to_key
+from operator import attrgetter
+
+import gyp.common
 
 
 def cmp(x, y):
@@ -182,8 +183,7 @@ def SourceTreeAndPathFromPath(input_path):
     'path'         (None, 'path')
   """
 
-    source_group_match = _path_leading_variable.match(input_path)
-    if source_group_match:
+    if source_group_match := _path_leading_variable.match(input_path):
         source_tree = source_group_match.group(1)
         output_path = source_group_match.group(3)  # This may be None.
     else:
@@ -389,8 +389,7 @@ class XCObject:
     def Hashables(self):
         hashables = [self.__class__.__name__]
 
-        name = self.Name()
-        if name is not None:
+        if (name := self.Name()) is not None:
             hashables.append(name)
 
         hashables.extend(self._hashables)
@@ -460,7 +459,7 @@ class XCObject:
             digest_int_count = hash.digest_size // 4
             digest_ints = struct.unpack(">" + "I" * digest_int_count, hash.digest())
             id_ints = [0, 0, 0]
-            for index in range(0, digest_int_count):
+            for index in range(digest_int_count):
                 id_ints[index % 3] ^= digest_ints[index]
             self.id = "%08X%08X%08X" % tuple(id_ints)
 
@@ -662,7 +661,7 @@ class XCObject:
 
     tabs is an int identifying the indentation level.  If the class'
     _should_print_single_line variable is True, tabs is ignored and the
-    key-value pair will be followed by a space insead of a newline.
+    key-value pair will be followed by a space instead of a newline.
     """
 
         if self._should_print_single_line:
@@ -781,7 +780,7 @@ class XCObject:
             # Make sure the property conforms to the schema.
             (is_list, property_type, is_strong) = self._schema[property][0:3]
             if is_list:
-                if value.__class__ != list:
+                if not isinstance(value, list):
                     raise TypeError(
                         property
                         + " of "
@@ -791,7 +790,7 @@ class XCObject:
                     )
                 for item in value:
                     if not isinstance(item, property_type) and not (
-                        isinstance(item, str) and property_type == str
+                        isinstance(item, str) and isinstance(property_type, str)
                     ):
                         # Accept unicode where str is specified.  str is treated as
                         # UTF-8-encoded.
@@ -806,7 +805,7 @@ class XCObject:
                             + item.__class__.__name__
                         )
             elif not isinstance(value, property_type) and not (
-                isinstance(value, str) and property_type == str
+                isinstance(value, str) and isinstance(property_type, str)
             ):
                 # Accept unicode where str is specified.  str is treated as
                 # UTF-8-encoded.
@@ -971,7 +970,7 @@ class XCHierarchicalElement(XCObject):
         if "path" in self._properties and "name" not in self._properties:
             path = self._properties["path"]
             name = posixpath.basename(path)
-            if name != "" and path != name:
+            if name not in ("", path):
                 self.SetProperty("name", name)
 
         if "path" in self._properties and (
@@ -1050,8 +1049,7 @@ class XCHierarchicalElement(XCObject):
         # including paths with a sourceTree, they'll still inherit their parents'
         # hashables, even though the paths aren't relative to their parents.  This
         # is not expected to be much of a problem in practice.
-        path = self.PathFromSourceTreeAndPath()
-        if path is not None:
+        if (path := self.PathFromSourceTreeAndPath()) is not None:
             components = path.split(posixpath.sep)
             for component in components:
                 hashables.append(self.__class__.__name__ + ".path")
@@ -1640,7 +1638,6 @@ class PBXVariantGroup(PBXGroup, XCFileLikeElement):
     """PBXVariantGroup is used by Xcode to represent localizations."""
 
     # No additions to the schema relative to PBXGroup.
-    pass
 
 
 # PBXReferenceProxy is also an XCFileLikeElement subclass.  It is defined below
@@ -1766,9 +1763,8 @@ class XCConfigurationList(XCObject):
             configuration_value = configuration.GetBuildSetting(key)
             if value is None:
                 value = configuration_value
-            else:
-                if value != configuration_value:
-                    raise ValueError("Variant values for " + key)
+            elif value != configuration_value:
+                raise ValueError("Variant values for " + key)
 
         return value
 
@@ -1924,14 +1920,13 @@ class XCBuildPhase(XCObject):
             # It's best when the caller provides the path.
             if isinstance(xcfilelikeelement, PBXVariantGroup):
                 paths.append(path)
+        # If the caller didn't provide a path, there can be either multiple
+        # paths (PBXVariantGroup) or one.
+        elif isinstance(xcfilelikeelement, PBXVariantGroup):
+            for variant in xcfilelikeelement._properties["children"]:
+                paths.append(variant.FullPath())
         else:
-            # If the caller didn't provide a path, there can be either multiple
-            # paths (PBXVariantGroup) or one.
-            if isinstance(xcfilelikeelement, PBXVariantGroup):
-                for variant in xcfilelikeelement._properties["children"]:
-                    paths.append(variant.FullPath())
-            else:
-                paths.append(xcfilelikeelement.FullPath())
+            paths.append(xcfilelikeelement.FullPath())
 
         # Add the paths first, because if something's going to raise, the
         # messages provided by _AddPathToDict are more useful owing to its
@@ -2111,8 +2106,7 @@ class PBXCopyFilesBuildPhase(XCBuildPhase):
     specifically, "$(DIR)/path".
     """
 
-        path_tree_match = self.path_tree_re.search(path)
-        if path_tree_match:
+        if path_tree_match := self.path_tree_re.search(path):
             path_tree = path_tree_match.group(1)
             if path_tree in self.path_tree_first_to_subfolder:
                 subfolder = self.path_tree_first_to_subfolder[path_tree]
@@ -2355,9 +2349,8 @@ class XCTarget(XCRemoteObject):
         # property was supplied, set "productName" if it is not present.  Also set
         # the "PRODUCT_NAME" build setting in each configuration, but only if
         # the setting is not present in any build configuration.
-        if "name" in self._properties:
-            if "productName" not in self._properties:
-                self.SetProperty("productName", self._properties["name"])
+        if "name" in self._properties and "productName" not in self._properties:
+            self.SetProperty("productName", self._properties["name"])
 
         if "productName" in self._properties:
             if "buildConfigurationList" in self._properties:
@@ -2547,13 +2540,12 @@ class PBXNativeTarget(XCTarget):
                         force_extension = suffix[1:]
 
                 if (
-                    self._properties["productType"]
-                    == "com.apple.product-type-bundle.unit.test"
-                    or self._properties["productType"]
-                    == "com.apple.product-type-bundle.ui-testing"
-                ):
-                    if force_extension is None:
-                        force_extension = suffix[1:]
+                    self._properties["productType"] in {
+                        "com.apple.product-type-bundle.unit.test",
+                        "com.apple.product-type-bundle.ui-testing"
+                    }
+                ) and force_extension is None:
+                    force_extension = suffix[1:]
 
                 if force_extension is not None:
                     # If it's a wrapper (bundle), set WRAPPER_EXTENSION.
@@ -2636,10 +2628,13 @@ class PBXNativeTarget(XCTarget):
             # frameworks phases, if any.
             insert_at = len(self._properties["buildPhases"])
             for index, phase in enumerate(self._properties["buildPhases"]):
-                if (
-                    isinstance(phase, PBXResourcesBuildPhase)
-                    or isinstance(phase, PBXSourcesBuildPhase)
-                    or isinstance(phase, PBXFrameworksBuildPhase)
+                if isinstance(
+                    phase,
+                    (
+                        PBXResourcesBuildPhase,
+                        PBXSourcesBuildPhase,
+                        PBXFrameworksBuildPhase,
+                    ),
                 ):
                     insert_at = index
                     break
@@ -2658,9 +2653,7 @@ class PBXNativeTarget(XCTarget):
             # phases, if any.
             insert_at = len(self._properties["buildPhases"])
             for index, phase in enumerate(self._properties["buildPhases"]):
-                if isinstance(phase, PBXSourcesBuildPhase) or isinstance(
-                    phase, PBXFrameworksBuildPhase
-                ):
+                if isinstance(phase, (PBXSourcesBuildPhase, PBXFrameworksBuildPhase)):
                     insert_at = index
                     break
 
@@ -2701,8 +2694,10 @@ class PBXNativeTarget(XCTarget):
                 other._properties["productType"] == static_library_type
                 or (
                     (
-                        other._properties["productType"] == shared_library_type
-                        or other._properties["productType"] == framework_type
+                        other._properties["productType"] in {
+                            shared_library_type,
+                            framework_type
+                        }
                     )
                     and (
                         (not other.HasBuildSetting("MACH_O_TYPE"))
@@ -2770,7 +2765,7 @@ class PBXProject(XCContainerPortal):
         self.path = path
         self._other_pbxprojects = {}
         # super
-        return XCContainerPortal.__init__(self, properties, id, parent)
+        XCContainerPortal.__init__(self, properties, id, parent)
 
     def Name(self):
         name = self.path
@@ -2990,10 +2985,10 @@ class PBXProject(XCContainerPortal):
             # Xcode seems to sort this list case-insensitively
             self._properties["projectReferences"] = sorted(
                 self._properties["projectReferences"],
-                key=lambda x: x["ProjectRef"].Name().lower
+                key=lambda x: x["ProjectRef"].Name().lower()
             )
         else:
-            # The link already exists.  Pull out the relevnt data.
+            # The link already exists.  Pull out the relevant data.
             project_ref_dict = self._other_pbxprojects[other_pbxproject]
             product_group = project_ref_dict["ProductGroup"]
             project_ref = project_ref_dict["ProjectRef"]
@@ -3016,10 +3011,10 @@ class PBXProject(XCContainerPortal):
         symroots = self._DefinedSymroots(target)
         for s in self._DefinedSymroots(target):
             if (
-                s is not None
-                and not self._IsUniqueSymrootForTarget(s)
-                or s is None
-                and not inherit_unique_symroot
+                (s is not None
+                and not self._IsUniqueSymrootForTarget(s))
+                or (s is None
+                and not inherit_unique_symroot)
             ):
                 return False
         return True if symroots else inherit_unique_symroot

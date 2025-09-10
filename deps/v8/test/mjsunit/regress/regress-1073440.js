@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --opt --allow-natives-syntax --no-always-opt
+// Flags: --turbofan --allow-natives-syntax --no-always-turbofan
 
 function foo(n) {
   try {
@@ -33,4 +33,3 @@ if (%Is64Bit()) {
 assertEquals(foo(1), 0);
 assertOptimized(foo);
 assertEquals(foo(2), 1);
-assertOptimized(foo);

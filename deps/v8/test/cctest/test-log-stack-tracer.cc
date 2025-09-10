@@ -30,14 +30,11 @@
 #include <stdlib.h>
 
 #include "include/v8-function.h"
-#include "include/v8-profiler.h"
 #include "src/api/api-inl.h"
 #include "src/base/strings.h"
-#include "src/diagnostics/disassembler.h"
 #include "src/execution/frames.h"
 #include "src/execution/isolate.h"
 #include "src/execution/vm-state-inl.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "src/profiler/tick-sample.h"
 #include "test/cctest/cctest.h"
@@ -46,10 +43,10 @@
 namespace v8 {
 namespace internal {
 
-static bool IsAddressWithinFuncCode(JSFunction function, Isolate* isolate,
-                                    void* addr) {
-  i::AbstractCode code = function.abstract_code(isolate);
-  return code.contains(isolate, reinterpret_cast<Address>(addr));
+static bool IsAddressWithinFuncCode(Tagged<JSFunction> function,
+                                    Isolate* isolate, void* addr) {
+  i::Tagged<i::AbstractCode> code = function->abstract_code(isolate);
+  return code->contains(isolate, reinterpret_cast<Address>(addr));
 }
 
 static bool IsAddressWithinFuncCode(v8::Local<v8::Context> context,
@@ -58,32 +55,36 @@ static bool IsAddressWithinFuncCode(v8::Local<v8::Context> context,
   v8::Local<v8::Value> func =
       context->Global()->Get(context, v8_str(func_name)).ToLocalChecked();
   CHECK(func->IsFunction());
-  JSFunction js_func = JSFunction::cast(*v8::Utils::OpenHandle(*func));
+  Tagged<JSFunction> js_func =
+      Cast<JSFunction>(*v8::Utils::OpenDirectHandle(*func));
   return IsAddressWithinFuncCode(js_func, isolate, addr);
 }
 
 // This C++ function is called as a constructor, to grab the frame pointer
 // from the calling function.  When this function runs, the stack contains
 // a C_Entry frame and a Construct frame above the calling function's frame.
-static void construct_call(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(args.GetIsolate());
+static void construct_call(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  CHECK(i::ValidateCallbackInfo(info));
+  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
   i::StackFrameIterator frame_iterator(isolate);
   CHECK(frame_iterator.frame()->is_exit() ||
-        frame_iterator.frame()->is_builtin_exit());
+        frame_iterator.frame()->is_builtin_exit() ||
+        frame_iterator.frame()->is_api_callback_exit());
   frame_iterator.Advance();
-  CHECK(frame_iterator.frame()->is_construct());
+  CHECK(frame_iterator.frame()->is_construct() ||
+        frame_iterator.frame()->is_fast_construct());
   frame_iterator.Advance();
   if (frame_iterator.frame()->type() == i::StackFrame::STUB) {
     // Skip over bytecode handler frame.
     frame_iterator.Advance();
   }
   i::StackFrame* calling_frame = frame_iterator.frame();
-  CHECK(calling_frame->is_java_script());
+  CHECK(calling_frame->is_javascript());
 
-  v8::Local<v8::Context> context = args.GetIsolate()->GetCurrentContext();
+  v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
 #if defined(V8_HOST_ARCH_32_BIT)
   int32_t low_bits = static_cast<int32_t>(calling_frame->fp());
-  args.This()
+  info.This()
       ->Set(context, v8_str("low_bits"), v8_num(low_bits >> 1))
       .FromJust();
 #elif defined(V8_HOST_ARCH_64_BIT)
@@ -95,14 +96,13 @@ static void construct_call(const v8::FunctionCallbackInfo<v8::Value>& args) {
   int32_t high_bits = static_cast<int32_t>(fp & kSmiValueMask);
   fp >>= kSmiValueSize - 1;
   CHECK_EQ(fp, 0);  // Ensure all the bits are successfully encoded.
-  args.This()->Set(context, v8_str("low_bits"), v8_int(low_bits)).FromJust();
-  args.This()->Set(context, v8_str("high_bits"), v8_int(high_bits)).FromJust();
+  info.This()->Set(context, v8_str("low_bits"), v8_int(low_bits)).FromJust();
+  info.This()->Set(context, v8_str("high_bits"), v8_int(high_bits)).FromJust();
 #else
 #error Host architecture is neither 32-bit nor 64-bit.
 #endif
-  args.GetReturnValue().Set(args.This());
+  info.GetReturnValue().Set(info.This());
 }
-
 
 // Use the API to create a JSFunction object that calls the above C++ function.
 void CreateFramePointerGrabberConstructor(v8::Local<v8::Context> context,
@@ -145,7 +145,7 @@ static void CreateTraceCallerFunction(v8::Local<v8::Context> context,
 // walking.
 TEST(CFromJSStackTrace) {
   // BUG(1303) Inlining of JSFuncDoTrace() in JSTrace below breaks this test.
-  i::FLAG_turbo_inlining = false;
+  i::v8_flags.turbo_inlining = false;
 
   TickSample sample;
   i::TraceExtension::InitTraceEnv(&sample);
@@ -195,7 +195,7 @@ TEST(CFromJSStackTrace) {
 TEST(PureJSStackTrace) {
   // This test does not pass with inlining enabled since inlined functions
   // don't appear in the stack trace.
-  i::FLAG_turbo_inlining = false;
+  i::v8_flags.turbo_inlining = false;
 
   TickSample sample;
   i::TraceExtension::InitTraceEnv(&sample);
@@ -240,7 +240,7 @@ TEST(PureJSStackTrace) {
                                 sample.stack[base + 1]));
 }
 
-static void CFuncDoTrace(byte dummy_param) {
+static void CFuncDoTrace(uint8_t dummy_param) {
   Address fp;
 #if V8_HAS_BUILTIN_FRAME_ADDRESS
   fp = reinterpret_cast<Address>(__builtin_frame_address(0));
@@ -253,7 +253,6 @@ static void CFuncDoTrace(byte dummy_param) {
 #endif
   i::TraceExtension::DoTrace(fp);
 }
-
 
 static int CFunc(int depth) {
   if (depth <= 0) {

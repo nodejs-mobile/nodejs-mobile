@@ -7,18 +7,20 @@
 namespace typed_array {
 const kBuiltinNameFrom: constexpr string = '%TypedArray%.from';
 
-type BuiltinsName extends int31 constexpr 'Builtin';
 const kTypedArrayPrototypeValues: constexpr BuiltinsName
     generates 'Builtin::kTypedArrayPrototypeValues';
 const kArrayPrototypeValues: constexpr BuiltinsName
     generates 'Builtin::kArrayPrototypeValues';
+const kSetPrototypeValues: constexpr BuiltinsName
+    generates 'Builtin::kSetPrototypeValues';
 
-extern builtin IterableToList(implicit context: Context)(JSAny, JSAny): JSArray;
+extern builtin IterableToList(implicit context: Context)(JSAny,
+                              JSAny): JSArray;
 
 // %TypedArray%.from ( source [ , mapfn [ , thisArg ] ] )
 // https://tc39.github.io/ecma262/#sec-%typedarray%.from
-transitioning javascript builtin
-TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
+transitioning javascript builtin TypedArrayFrom(
+    js-implicit context: NativeContext, receiver: JSAny)(
     ...arguments): JSTypedArray {
   try {
     const source: JSAny = arguments[0];
@@ -35,7 +37,7 @@ TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
     //   b. Let mapping be true.
     const mapping: bool = mapfnObj != Undefined;
     if (mapping && !Is<Callable>(mapfnObj)) deferred {
-        ThrowTypeError(MessageTemplate::kCalledNonCallable, mapfnObj);
+        ThrowCalledNonCallable(mapfnObj);
       }
 
     // We split up this builtin differently to the way it is written in the
@@ -92,7 +94,7 @@ TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
             // Check that the iterator function is exactly
             // Builtin::kArrayPrototypeValues.
             if (!TaggedEqual(
-                    iteratorFn.shared_function_info.function_data,
+                    iteratorFn.shared_function_info.untrusted_function_data,
                     SmiConstant(kArrayPrototypeValues))) {
               goto UseUserProvidedIterator;
             }
@@ -104,21 +106,39 @@ TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
             finalSource = source;
           }
           case (sourceTypedArray: JSTypedArray): {
-            const sourceBuffer = sourceTypedArray.buffer;
-            if (IsDetachedBuffer(sourceBuffer)) goto UseUserProvidedIterator;
+            finalLength =
+                LoadJSTypedArrayLengthAndCheckDetached(sourceTypedArray)
+                otherwise UseUserProvidedIterator;
 
             // Check that the iterator function is exactly
             // Builtin::kTypedArrayPrototypeValues.
             if (!TaggedEqual(
-                    iteratorFn.shared_function_info.function_data,
+                    iteratorFn.shared_function_info.untrusted_function_data,
                     SmiConstant(kTypedArrayPrototypeValues)))
               goto UseUserProvidedIterator;
 
             // Source is a TypedArray with unmodified iterator behavior. Use the
             // source object directly, taking advantage of the special-case code
             // in TypedArrayCopyElements
-            finalLength = sourceTypedArray.length;
             finalSource = source;
+          }
+          case (sourceFromSet: JSSet): {
+            // Check that the iterator function is exactly
+            // Builtin::kSetPrototypeValues.
+            if (!TaggedEqual(
+                    iteratorFn.shared_function_info.untrusted_function_data,
+                    SmiConstant(kSetPrototypeValues))) {
+              goto UseUserProvidedIterator;
+            }
+            // Source is a JSSet with unmodified iterator behavior.
+            // Convert the Set to array, taking advantage of the special-case
+            // code in TypedArrayCopyElements
+            const sourceArray: JSArray =
+                iterator::FastIterableToList(sourceFromSet) otherwise
+            UseUserProvidedIterator;
+
+            finalSource = sourceArray;
+            finalLength = Convert<uintptr>(sourceArray.length);
           }
           case (Object): {
             goto UseUserProvidedIterator;
@@ -151,7 +171,9 @@ TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
         ThrowRangeError(MessageTemplate::kInvalidTypedArrayLength, length);
       }
     } label IteratorNotCallable(_value: JSAny) deferred {
-      ThrowTypeError(MessageTemplate::kIteratorSymbolNonCallable);
+      ThrowTypeError(
+          MessageTemplate::kFirstArgumentIteratorSymbolNonCallable,
+          kBuiltinNameFrom);
     }
 
     const finalLengthNum = Convert<Number>(finalLength);
@@ -195,17 +217,16 @@ TypedArrayFrom(js-implicit context: NativeContext, receiver: JSAny)(
       }
 
       // 12e. Perform ? Set(targetObj, Pk, mappedValue, true).
-      // Buffer may be detached during executing ToNumber/ToBigInt.
-      accessor.StoreJSAny(context, targetObj, k, mappedValue)
-          otherwise IfDetached;
+      // The buffer may be detached or the target TypedArray may go out of
+      // bounds during executing ToNumber/ToBigInt or when we executed the
+      // mapper function above.
+      accessor.StoreJSAny(context, targetObj, k, mappedValue);
 
       // 12f. Set k to k + 1. (done by the loop).
     }
     return targetObj;
   } label NotConstructor deferred {
     ThrowTypeError(MessageTemplate::kNotConstructor, receiver);
-  } label IfDetached deferred {
-    ThrowTypeError(MessageTemplate::kDetachedOperation, kBuiltinNameFrom);
   }
 }
 }

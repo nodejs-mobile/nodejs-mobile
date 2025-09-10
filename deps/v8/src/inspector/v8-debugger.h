@@ -5,6 +5,7 @@
 #ifndef V8_INSPECTOR_V8_DEBUGGER_H_
 #define V8_INSPECTOR_V8_DEBUGGER_H_
 
+#include <deque>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -31,11 +32,16 @@ class V8RuntimeAgentImpl;
 class V8StackTraceImpl;
 struct V8StackTraceId;
 
-enum class WrapMode {
-  kForceValue,
-  kNoPreview,
-  kWithPreview,
-  kGenerateWebDriverValue
+enum class WrapMode { kJson, kIdOnly, kPreview, kDeep };
+
+struct WrapSerializationOptions {
+  int maxDepth = v8::internal::kMaxInt;
+  v8::Global<v8::Object> additionalParameters;
+};
+
+struct WrapOptions {
+  WrapMode mode;
+  WrapSerializationOptions serializationOptions = {};
 };
 
 using protocol::Response;
@@ -54,12 +60,15 @@ class V8Debugger : public v8::debug::DebugDelegate,
   v8::Isolate* isolate() const { return m_isolate; }
 
   void setBreakpointsActive(bool);
+  void removeBreakpoint(v8::debug::BreakpointId id);
 
   v8::debug::ExceptionBreakState getPauseOnExceptionsState();
   void setPauseOnExceptionsState(v8::debug::ExceptionBreakState);
   bool canBreakProgram();
+  bool isInInstrumentationPause() const;
   void breakProgram(int targetContextGroupId);
   void interruptAndBreak(int targetContextGroupId);
+  void requestPauseAfterInstrumentation();
   void continueProgram(int targetContextGroupId,
                        bool terminateOnResume = false);
   void breakProgramOnAssert(int targetContextGroupId);
@@ -69,12 +78,14 @@ class V8Debugger : public v8::debug::DebugDelegate,
   void stepOverStatement(int targetContextGroupId);
   void stepOutOfFunction(int targetContextGroupId);
 
-  void terminateExecution(std::unique_ptr<TerminateExecutionCallback> callback);
+  void terminateExecution(v8::Local<v8::Context> context,
+                          std::unique_ptr<TerminateExecutionCallback> callback);
 
   Response continueToLocation(int targetContextGroupId,
                               V8DebuggerScript* script,
                               std::unique_ptr<protocol::Debugger::Location>,
                               const String16& targetCallFramess);
+  bool restartFrame(int targetContextGroupId, int callFrameOrdinal);
 
   // Each script inherits debug data from v8::Context where it has been
   // compiled.
@@ -129,6 +140,10 @@ class V8Debugger : public v8::debug::DebugDelegate,
   void setMaxAsyncTaskStacksForTest(int limit);
   void dumpAsyncTaskStacksStateForTest();
 
+  void asyncParentFor(int stackTraceId,
+                      std::shared_ptr<AsyncStackTrace>* asyncParent,
+                      V8StackTraceId* externalParent) const;
+
   internal::V8DebuggerId debuggerIdFor(int contextGroupId);
   std::shared_ptr<AsyncStackTrace> stackTraceFor(int contextGroupId,
                                                  const V8StackTraceId& id);
@@ -148,6 +163,8 @@ class V8Debugger : public v8::debug::DebugDelegate,
   static void terminateExecutionCompletedCallback(v8::Isolate* isolate);
   static void terminateExecutionCompletedCallbackIgnoringData(
       v8::Isolate* isolate, void*);
+  void installTerminateExecutionCallbacks(v8::Local<v8::Context> context);
+
   void handleProgramBreak(
       v8::Local<v8::Context> pausedContext, v8::Local<v8::Value> exception,
       const std::vector<v8::debug::BreakpointId>& hitBreakpoints,
@@ -169,6 +186,8 @@ class V8Debugger : public v8::debug::DebugDelegate,
                                             v8::Local<v8::Value>);
   v8::MaybeLocal<v8::Array> collectionsEntries(v8::Local<v8::Context> context,
                                                v8::Local<v8::Value> value);
+  v8::MaybeLocal<v8::Array> privateMethods(v8::Local<v8::Context> context,
+                                           v8::Local<v8::Value> value);
 
   void asyncTaskScheduledForStack(const StringView& taskName, void* task,
                                   bool recurring, bool skipTopFrame = false);
@@ -180,6 +199,7 @@ class V8Debugger : public v8::debug::DebugDelegate,
   void asyncTaskStartedForStepping(void* task);
   void asyncTaskFinishedForStepping(void* task);
   void asyncTaskCanceledForStepping(void* task);
+  void asyncStackTraceCaptured(int id);
 
   // v8::debug::DebugEventListener implementation.
   void AsyncEventOccurred(v8::debug::DebugAsyncActionType type, int id,
@@ -190,8 +210,8 @@ class V8Debugger : public v8::debug::DebugDelegate,
       v8::Local<v8::Context> paused_context,
       const std::vector<v8::debug::BreakpointId>& break_points_hit,
       v8::debug::BreakReasons break_reasons) override;
-  void BreakOnInstrumentation(v8::Local<v8::Context> paused_context,
-                              v8::debug::BreakpointId) override;
+  ActionAfterInstrumentation BreakOnInstrumentation(
+      v8::Local<v8::Context> paused_context, v8::debug::BreakpointId) override;
   void ExceptionThrown(v8::Local<v8::Context> paused_context,
                        v8::Local<v8::Value> exception,
                        v8::Local<v8::Value> promise, bool is_uncaught,
@@ -202,10 +222,16 @@ class V8Debugger : public v8::debug::DebugDelegate,
 
   bool ShouldBeSkipped(v8::Local<v8::debug::Script> script, int line,
                        int column) override;
+  void BreakpointConditionEvaluated(v8::Local<v8::Context> context,
+                                    v8::debug::BreakpointId breakpoint_id,
+                                    bool exception_thrown,
+                                    v8::Local<v8::Value> exception) override;
 
   int currentContextGroupId();
 
   bool hasScheduledBreakOnNextFunctionCall() const;
+
+  void quitMessageLoopIfAgentsFinishedInstrumentation();
 
   v8::Isolate* m_isolate;
   V8InspectorImpl* m_inspector;
@@ -217,6 +243,8 @@ class V8Debugger : public v8::debug::DebugDelegate,
   bool m_scheduledOOMBreak = false;
   int m_targetContextGroupId = 0;
   int m_pausedContextGroupId = 0;
+  bool m_instrumentationPause = false;
+  bool m_requestedPauseAfterInstrumentation = false;
   int m_continueToLocationBreakpointId;
   String16 m_continueToLocationTargetCallFrames;
   std::unique_ptr<V8StackTraceImpl> m_continueToLocationStack;
@@ -264,6 +292,13 @@ class V8Debugger : public v8::debug::DebugDelegate,
   std::vector<std::shared_ptr<AsyncStackTrace>> m_currentAsyncParent;
   std::vector<V8StackTraceId> m_currentExternalParent;
 
+  // Maps v8::StackTrace IDs to async parents.
+  using StackTraceToAsyncParent =
+      std::unordered_map<int, std::weak_ptr<AsyncStackTrace>>;
+  using StackTraceToExternalParent = std::deque<std::pair<int, V8StackTraceId>>;
+  StackTraceToAsyncParent m_asyncParents;
+  StackTraceToExternalParent m_externalParents;
+
   void collectOldAsyncStacksIfNeeded();
   // V8Debugger owns all the async stacks, while most of the other references
   // are weak, which allows to collect some stacks when there are too many.
@@ -284,14 +319,16 @@ class V8Debugger : public v8::debug::DebugDelegate,
   // See Debugger.stepInto for details.
   bool m_pauseOnAsyncCall = false;
 
-  using StackTraceIdToStackTrace =
+  using StoredStackTraces =
       std::unordered_map<uintptr_t, std::weak_ptr<AsyncStackTrace>>;
-  StackTraceIdToStackTrace m_storedStackTraces;
+  StoredStackTraces m_storedStackTraces;
   uintptr_t m_lastStackTraceId = 0;
 
   std::unordered_map<int, internal::V8DebuggerId> m_contextGroupIdToDebuggerId;
 
   std::unique_ptr<TerminateExecutionCallback> m_terminateExecutionCallback;
+  v8::Global<v8::Context> m_terminateExecutionCallbackContext;
+  bool m_terminateExecutionReported = true;
 };
 
 }  // namespace v8_inspector

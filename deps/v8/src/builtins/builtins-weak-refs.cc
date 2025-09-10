@@ -23,15 +23,14 @@ BUILTIN(FinalizationRegistryUnregister) {
 
   // 3. If CanBeHeldWeakly(unregisterToken) is false, throw a TypeError
   // exception.
-  if (!unregister_token->CanBeHeldWeakly()) {
+  if (!Object::CanBeHeldWeakly(*unregister_token)) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kInvalidWeakRefsUnregisterToken,
                               unregister_token));
   }
 
   bool success = JSFinalizationRegistry::Unregister(
-      finalization_registry, Handle<HeapObject>::cast(unregister_token),
-      isolate);
+      finalization_registry, Cast<HeapObject>(unregister_token), isolate);
 
   return *isolate->factory()->ToBoolean(success);
 }

@@ -2,23 +2,28 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import os
-
 from testrunner.local import testsuite
 from testrunner.objects import testcase
+from testrunner.outproc import fuzzer
 
 SUB_TESTS = [
-  'inspector',
-  'json',
-  'parser',
-  'regexp',
-  'regexp_builtins',
-  'multi_return',
-  'wasm',
-  'wasm_async',
-  'wasm_code',
-  'wasm_compile',
+    'inspector',
+    'json',
+    'parser',
+    'regexp',
+    'regexp_builtins',
+    'multi_return',
+    'wasm/module',
+    'wasm/async',
+    'wasm/code',
+    'wasm/compile',
+    'wasm/compile_all',
+    'wasm/compile_simd',
+    'wasm/compile_wasmgc',
+    'wasm/init_expr',
+    'wasm/streaming',
 ]
+
 
 class VariantsGenerator(testsuite.VariantsGenerator):
   def _get_variants(self, test):
@@ -31,7 +36,7 @@ class TestLoader(testsuite.GenericTestLoader):
     return SUB_TESTS
 
   def _to_relpath(self, abspath, _):
-    return os.path.relpath(abspath, self.suite.root)
+    return abspath.relative_to(self.suite.root)
 
   def _should_filter_by_name(self, _):
     return False
@@ -46,11 +51,9 @@ class TestSuite(testsuite.TestSuite):
   def _variants_gen_class(self):
     return VariantsGenerator
 
-
 class TestCase(testcase.TestCase):
   def _get_files_params(self):
-    suite, name = self.path.split(os.path.sep)
-    return [os.path.join(self.suite.root, suite, name)]
+    return [self.suite.root / self.path]
 
   def _get_variant_flags(self):
     return []
@@ -62,9 +65,9 @@ class TestCase(testcase.TestCase):
     return []
 
   def get_shell(self):
-    group, _ = self.path.split(os.path.sep, 1)
-    return 'v8_simple_%s_fuzzer' % group
+    fuzzer_name = '_'.join(self.path.parts[:-1])
+    return f'v8_simple_{fuzzer_name}_fuzzer'
 
-
-def GetSuite(*args, **kwargs):
-  return TestSuite(*args, **kwargs)
+  @property
+  def output_proc(self):
+    return fuzzer.OutProc(self.expected_outcomes)

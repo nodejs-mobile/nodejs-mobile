@@ -30,7 +30,7 @@
 
 #include "include/v8config.h"
 
-// {PerfJitLogger} is only implemented on Linux.
+// {LinuxPerfJitLogger} is only implemented on Linux.
 #if V8_OS_LINUX
 
 #include "src/logging/log.h"
@@ -39,14 +39,19 @@ namespace v8 {
 namespace internal {
 
 // Linux perf tool logging support.
-class PerfJitLogger : public CodeEventLogger {
+class LinuxPerfJitLogger : public CodeEventLogger {
  public:
-  explicit PerfJitLogger(Isolate* isolate);
-  ~PerfJitLogger() override;
+  explicit LinuxPerfJitLogger(Isolate* isolate);
+  ~LinuxPerfJitLogger() override;
 
-  void CodeMoveEvent(AbstractCode from, AbstractCode to) override;
-  void CodeDisableOptEvent(Handle<AbstractCode> code,
-                           Handle<SharedFunctionInfo> shared) override {}
+  void CodeMoveEvent(Tagged<InstructionStream> from,
+                     Tagged<InstructionStream> to) override {
+    UNREACHABLE();  // Unsupported.
+  }
+  void BytecodeMoveEvent(Tagged<BytecodeArray> from,
+                         Tagged<BytecodeArray> to) override {}
+  void CodeDisableOptEvent(DirectHandle<AbstractCode> code,
+                           DirectHandle<SharedFunctionInfo> shared) override {}
 
  private:
   void OpenJitDumpFile();
@@ -55,12 +60,12 @@ class PerfJitLogger : public CodeEventLogger {
   void CloseMarkerFile(void* marker_address);
 
   uint64_t GetTimestamp();
-  void LogRecordedBuffer(Handle<AbstractCode> code,
-                         MaybeHandle<SharedFunctionInfo> maybe_shared,
-                         const char* name, int length) override;
+  void LogRecordedBuffer(Tagged<AbstractCode> code,
+                         MaybeDirectHandle<SharedFunctionInfo> maybe_shared,
+                         const char* name, size_t length) override;
 #if V8_ENABLE_WEBASSEMBLY
   void LogRecordedBuffer(const wasm::WasmCode* code, const char* name,
-                         int length) override;
+                         size_t length) override;
 #endif  // V8_ENABLE_WEBASSEMBLY
 
   // Extension added to V8 log file name to get the low-level log name.
@@ -72,20 +77,20 @@ class PerfJitLogger : public CodeEventLogger {
   static const int kLogBufferSize = 2 * MB;
 
   void WriteJitCodeLoadEntry(const uint8_t* code_pointer, uint32_t code_size,
-                             const char* name, int name_length);
+                             const char* name, size_t name_length);
 
-  void LogWriteBytes(const char* bytes, int size);
+  void LogWriteBytes(const char* bytes, size_t size);
   void LogWriteHeader();
-  void LogWriteDebugInfo(Handle<Code> code, Handle<SharedFunctionInfo> shared);
+  void LogWriteDebugInfo(Tagged<Code> code,
+                         DirectHandle<SharedFunctionInfo> shared);
 #if V8_ENABLE_WEBASSEMBLY
   void LogWriteDebugInfo(const wasm::WasmCode* code);
 #endif  // V8_ENABLE_WEBASSEMBLY
-  void LogWriteUnwindingInfo(Code code);
+  void LogWriteUnwindingInfo(Tagged<Code> code);
 
   static const uint32_t kElfMachIA32 = 3;
   static const uint32_t kElfMachX64 = 62;
   static const uint32_t kElfMachARM = 40;
-  static const uint32_t kElfMachMIPS = 8;
   static const uint32_t kElfMachMIPS64 = 8;
   static const uint32_t kElfMachLOONG64 = 258;
   static const uint32_t kElfMachARM64 = 183;
@@ -100,8 +105,6 @@ class PerfJitLogger : public CodeEventLogger {
     return kElfMachX64;
 #elif V8_TARGET_ARCH_ARM
     return kElfMachARM;
-#elif V8_TARGET_ARCH_MIPS
-    return kElfMachMIPS;
 #elif V8_TARGET_ARCH_MIPS64
     return kElfMachMIPS64;
 #elif V8_TARGET_ARCH_LOONG64
@@ -112,7 +115,7 @@ class PerfJitLogger : public CodeEventLogger {
     return kElfMachS390x;
 #elif V8_TARGET_ARCH_PPC64
     return kElfMachPPC64;
-#elif V8_TARGET_ARCH_RISCV64
+#elif V8_TARGET_ARCH_RISCV32 || V8_TARGET_ARCH_RISCV64
     return kElfMachRISCV;
 #else
     UNIMPLEMENTED();
@@ -130,7 +133,6 @@ class PerfJitLogger : public CodeEventLogger {
 
   // Per-process singleton file. We assume that there is one main isolate;
   // to determine when it goes away, we keep reference count.
-  static base::LazyRecursiveMutex file_mutex_;
   static FILE* perf_output_handle_;
   static uint64_t reference_count_;
   static void* marker_address_;

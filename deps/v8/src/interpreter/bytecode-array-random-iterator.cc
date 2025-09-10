@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/interpreter/bytecode-array-random-iterator.h"
-#include "src/objects/code-inl.h"
+
 #include "src/objects/objects-inl.h"
 
 namespace v8 {
@@ -34,7 +34,7 @@ bool BytecodeArrayRandomIterator::IsValid() const {
 
 void BytecodeArrayRandomIterator::UpdateOffsetFromIndex() {
   if (IsValid()) {
-    SetOffset(offsets_[current_index_]);
+    SetOffsetUnchecked(offsets_[current_index_]);
   }
 }
 

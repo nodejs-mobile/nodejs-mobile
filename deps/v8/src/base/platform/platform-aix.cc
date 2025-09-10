@@ -129,14 +129,14 @@ void OS::SignalCodeMovingGC() {}
 
 void OS::AdjustSchedulingParams() {}
 
-std::vector<OS::MemoryRange> OS::GetFreeMemoryRangesWithin(
+std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
     OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
     size_t alignment) {
-  return {};
+  return std::nullopt;
 }
 
 // static
-Stack::StackSlot Stack::GetStackStart() {
+Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
   // pthread_getthrds_np creates 3 values:
   // __pi_stackaddr, __pi_stacksize, __pi_stackend
 

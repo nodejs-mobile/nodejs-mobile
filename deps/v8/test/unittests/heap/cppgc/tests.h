@@ -7,6 +7,7 @@
 
 #include "include/cppgc/heap-consistency.h"
 #include "include/cppgc/heap.h"
+#include "include/cppgc/macros.h"
 #include "include/cppgc/platform.h"
 #include "src/heap/cppgc/heap.h"
 #include "src/heap/cppgc/trace-event.h"
@@ -20,7 +21,14 @@ class DelegatingTracingController : public TracingController {
  public:
 #if !defined(V8_USE_PERFETTO)
   const uint8_t* GetCategoryGroupEnabled(const char* name) override {
+    static const std::string disabled_by_default_tag =
+        TRACE_DISABLED_BY_DEFAULT("");
     static uint8_t yes = 1;
+    static uint8_t no = 0;
+    if (strncmp(name, disabled_by_default_tag.c_str(),
+                disabled_by_default_tag.length()) == 0) {
+      return &no;
+    }
     return &yes;
   }
 
@@ -69,6 +77,7 @@ class TestWithPlatform : public ::testing::Test {
 class TestWithHeap : public TestWithPlatform {
  public:
   TestWithHeap();
+  ~TestWithHeap() override;
 
   void PreciseGC() {
     heap_->ForceGarbageCollectionSlow(
@@ -86,10 +95,9 @@ class TestWithHeap : public TestWithPlatform {
   // size of the heap and corresponding pages.
   void ConservativeMemoryDiscardingGC() {
     internal::Heap::From(GetHeap())->CollectGarbage(
-        {GarbageCollector::Config::CollectionType::kMajor,
-         Heap::StackState::kMayContainHeapPointers,
+        {CollectionType::kMajor, Heap::StackState::kMayContainHeapPointers,
          cppgc::Heap::MarkingType::kAtomic, cppgc::Heap::SweepingType::kAtomic,
-         GarbageCollector::Config::FreeMemoryHandling::kDiscardWherePossible});
+         GCConfig::FreeMemoryHandling::kDiscardWherePossible});
   }
 
   cppgc::Heap* GetHeap() const { return heap_.get(); }
@@ -122,6 +130,7 @@ class TestSupportingAllocationOnly : public TestWithHeap {
   TestSupportingAllocationOnly();
 
  private:
+  CPPGC_STACK_ALLOCATED_IGNORE("permitted for test code")
   subtle::NoGarbageCollectionScope no_gc_scope_;
 };
 

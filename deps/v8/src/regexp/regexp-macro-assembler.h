@@ -6,6 +6,8 @@
 #define V8_REGEXP_REGEXP_MACRO_ASSEMBLER_H_
 
 #include "src/base/strings.h"
+#include "src/execution/frame-constants.h"
+#include "src/objects/fixed-array.h"
 #include "src/regexp/regexp-ast.h"
 #include "src/regexp/regexp.h"
 
@@ -29,6 +31,7 @@ class RegExpMacroAssembler {
   // The implementation must be able to handle at least:
   static constexpr int kMaxRegisterCount = (1 << 16);
   static constexpr int kMaxRegister = kMaxRegisterCount - 1;
+  static constexpr int kMaxCaptures = (kMaxRegister - 1) / 2;
   static constexpr int kMaxCPOffset = (1 << 15) - 1;
   static constexpr int kMinCPOffset = -(1 << 15);
 
@@ -41,7 +44,8 @@ class RegExpMacroAssembler {
   RegExpMacroAssembler(Isolate* isolate, Zone* zone);
   virtual ~RegExpMacroAssembler() = default;
 
-  virtual Handle<HeapObject> GetCode(Handle<String> source) = 0;
+  virtual DirectHandle<HeapObject> GetCode(DirectHandle<String> source,
+                                           RegExpFlags flags) = 0;
 
   // This function is called when code generation is aborted, so that
   // the assembler could clean up internal data structures.
@@ -49,7 +53,7 @@ class RegExpMacroAssembler {
   // The maximal number of pushes between stack checks. Users must supply
   // kCheckStackLimit flag to push operations (instead of kNoStackLimitCheck)
   // at least once for every stack_limit() pushes that are executed.
-  virtual int stack_limit_slack() = 0;
+  virtual int stack_limit_slack_slot_count() = 0;
   virtual bool CanReadUnaligned() const = 0;
 
   virtual void AdvanceCurrentPosition(int by) = 0;  // Signed cp change.
@@ -105,6 +109,11 @@ class RegExpMacroAssembler {
   // array, and if the found byte is non-zero, we jump to the on_bit_set label.
   virtual void CheckBitInTable(Handle<ByteArray> table, Label* on_bit_set) = 0;
 
+  virtual void SkipUntilBitInTable(int cp_offset, Handle<ByteArray> table,
+                                   Handle<ByteArray> nibble_table,
+                                   int advance_by) = 0;
+  virtual bool SkipUntilBitInTableUseSimd(int advance_by) { return false; }
+
   // Checks whether the given offset from the current position is before
   // the end of the string.  May overwrite the current character.
   virtual void CheckPosition(int cp_offset, Label* on_outside_input);
@@ -112,8 +121,8 @@ class RegExpMacroAssembler {
   // character. Returns false if the type of special character class does
   // not have custom support.
   // May clobber the current loaded character.
-  virtual bool CheckSpecialCharacterClass(StandardCharacterSet type,
-                                          Label* on_no_match) {
+  virtual bool CheckSpecialClassRanges(StandardCharacterSet type,
+                                       Label* on_no_match) {
     return false;
   }
 
@@ -167,6 +176,7 @@ class RegExpMacroAssembler {
   V(MIPS)                       \
   V(LOONG64)                    \
   V(RISCV)                      \
+  V(RISCV32)                    \
   V(S390)                       \
   V(PPC)                        \
   V(X64)                        \
@@ -212,8 +222,7 @@ class RegExpMacroAssembler {
   //
   // Called from generated code.
   static uint32_t IsCharacterInRangeArray(uint32_t current_char,
-                                          Address raw_byte_array,
-                                          Isolate* isolate);
+                                          Address raw_byte_array);
 
   // Controls the generation of large inlined constants in the code.
   void set_slow_safe(bool ssc) { slow_safe_compiler_ = ssc; }
@@ -291,20 +300,19 @@ class NativeRegExpMacroAssembler: public RegExpMacroAssembler {
   };
 
   NativeRegExpMacroAssembler(Isolate* isolate, Zone* zone)
-      : RegExpMacroAssembler(isolate, zone) {}
+      : RegExpMacroAssembler(isolate, zone), range_array_cache_(zone) {}
   ~NativeRegExpMacroAssembler() override = default;
 
   // Returns a {Result} sentinel, or the number of successful matches.
-  static int Match(Handle<JSRegExp> regexp, Handle<String> subject,
-                   int* offsets_vector, int offsets_vector_length,
-                   int previous_index, Isolate* isolate);
+  static int Match(DirectHandle<IrRegExpData> regexp_data,
+                   DirectHandle<String> subject, int* offsets_vector,
+                   int offsets_vector_length, int previous_index,
+                   Isolate* isolate);
 
-  V8_EXPORT_PRIVATE static int ExecuteForTesting(String input, int start_offset,
-                                                 const byte* input_start,
-                                                 const byte* input_end,
-                                                 int* output, int output_size,
-                                                 Isolate* isolate,
-                                                 JSRegExp regexp);
+  V8_EXPORT_PRIVATE static int ExecuteForTesting(
+      Tagged<String> input, int start_offset, const uint8_t* input_start,
+      const uint8_t* input_end, int* output, int output_size, Isolate* isolate,
+      Tagged<JSRegExp> regexp);
 
   bool CanReadUnaligned() const override;
 
@@ -327,9 +335,10 @@ class NativeRegExpMacroAssembler: public RegExpMacroAssembler {
   // Called from generated code.
   static int CheckStackGuardState(Isolate* isolate, int start_index,
                                   RegExp::CallOrigin call_origin,
-                                  Address* return_address, Code re_code,
-                                  Address* subject, const byte** input_start,
-                                  const byte** input_end);
+                                  Address* return_address,
+                                  Tagged<InstructionStream> re_code,
+                                  Address* subject, const uint8_t** input_start,
+                                  const uint8_t** input_end, uintptr_t gap);
 
   static Address word_character_map_address() {
     return reinterpret_cast<Address>(&word_character_map[0]);
@@ -339,17 +348,19 @@ class NativeRegExpMacroAssembler: public RegExpMacroAssembler {
   // Byte map of one byte characters with a 0xff if the character is a word
   // character (digit, letter or underscore) and 0x00 otherwise.
   // Used by generated RegExp code.
-  static const byte word_character_map[256];
+  static const uint8_t word_character_map[256];
 
   Handle<ByteArray> GetOrAddRangeArray(const ZoneList<CharacterRange>* ranges);
 
  private:
   // Returns a {Result} sentinel, or the number of successful matches.
-  static int Execute(String input, int start_offset, const byte* input_start,
-                     const byte* input_end, int* output, int output_size,
-                     Isolate* isolate, JSRegExp regexp);
+  static int Execute(Tagged<String> input, int start_offset,
+                     const uint8_t* input_start, const uint8_t* input_end,
+                     int* output, int output_size, Isolate* isolate,
+                     Tagged<IrRegExpData> regexp_data);
 
-  std::unordered_map<uint32_t, Handle<ByteArray>> range_array_cache_;
+  ZoneUnorderedMap<uint32_t, IndirectHandle<FixedUInt16Array>>
+      range_array_cache_;
 };
 
 }  // namespace internal

@@ -13,6 +13,8 @@
 
 #if V8_OS_DARWIN
 #include <dispatch/dispatch.h>
+#elif V8_OS_ZOS
+#include "zos-semaphore.h"
 #elif V8_OS_POSIX
 #include <semaphore.h>
 #endif
@@ -36,7 +38,7 @@ class TimeDelta;
 // count reaches zero,  threads waiting for the semaphore blocks until the
 // count becomes non-zero.
 
-class V8_BASE_EXPORT Semaphore final {
+class V8_BASE_EXPORT Semaphore {
  public:
   explicit Semaphore(int count);
   Semaphore(const Semaphore&) = delete;
@@ -75,7 +77,6 @@ class V8_BASE_EXPORT Semaphore final {
  private:
   NativeHandle native_handle_;
 };
-
 
 // POD Semaphore initialized lazily (i.e. the first time Pointer() is called).
 // Usage:

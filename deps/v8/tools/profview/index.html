@@ -2,10 +2,10 @@
 <!-- Copyright 2017 the V8 project authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file. -->
-
 <html lang="en">
-
 <head>
+  <!-- This will be overwritten by the v8.dev/tools exporter -->
+<!-- ANALYTICS_PLACEHOLDER -->
   <meta charset="utf-8"/>
   <title>V8 Tick Processor</title>
   <link rel="stylesheet" href="profview.css">
@@ -72,10 +72,10 @@ found in the LICENSE file. -->
   <div>
   <canvas id="timeline-canvas"/>
   </div>
-  <table>
-    <tr id="timeline-legend">
-    </tr>
-  </table>
+  Legend:
+  <div id="timeline-legend">
+  </div>
+  <label><input type="checkbox" id="show-logging"> Show logging</label>
   <div>
     Current code object: <span id="timeline-currentCode"></span>
     <button id="source-viewer-hide-button">Hide source</button>

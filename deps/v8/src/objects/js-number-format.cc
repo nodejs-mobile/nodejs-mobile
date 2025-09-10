@@ -12,11 +12,15 @@
 #include <string>
 
 #include "src/execution/isolate.h"
+#include "src/numbers/conversions.h"
 #include "src/objects/intl-objects.h"
 #include "src/objects/js-number-format-inl.h"
 #include "src/objects/managed-inl.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/option-utils.h"
+#include "src/strings/char-predicates-inl.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 #include "unicode/currunit.h"
 #include "unicode/locid.h"
 #include "unicode/numberformatter.h"
@@ -26,11 +30,16 @@
 #include "unicode/uloc.h"
 #include "unicode/unumberformatter.h"
 #include "unicode/uvernum.h"  // for U_ICU_VERSION_MAJOR_NUM
+#pragma GCC diagnostic pop
 
 namespace v8 {
 namespace internal {
 
 namespace {
+
+// This is to work around ICU's comparison operators not being compliant with
+// clang's -Wambiguous-reversed-operator in >=C++20.
+#define AVOID_AMBIGUOUS_OP_WARNING(x) *static_cast<icu::UObject*>(&x)
 
 // [[Style]] is one of the values "decimal", "percent", "currency",
 // or "unit" identifying the style of the number format.
@@ -98,31 +107,6 @@ enum class SignDisplay {
   NEVER,
   EXCEPT_ZERO,
   NEGATIVE,
-};
-
-// [[RoundingMode]] is one of the String values "ceil", "floor", "expand",
-// "trunc", "halfCeil", "halfFloor", "halfExpand", "halfTrunc", or "halfEven",
-// specifying the rounding strategy for the number.
-// Note: To avoid name conflict with RoundingMode defined in other places,
-// prefix with Intl as IntlRoundingMode
-enum class IntlRoundingMode {
-  CEIL,
-  FLOOR,
-  EXPAND,
-  TRUNC,
-  HALF_CEIL,
-  HALF_FLOOR,
-  HALF_EXPAND,
-  HALF_TRUNC,
-  HALF_EVEN,
-};
-
-// [[TrailingZeroDisplay]] is one of the String values "auto" or
-// "stripIfInteger", specifying the strategy for displaying trailing zeros on
-// whole number.
-enum class TrailingZeroDisplay {
-  AUTO,
-  STRIP_IF_INTEGER,
 };
 
 // [[UseGrouping]] is ....
@@ -210,25 +194,25 @@ icu::number::Notation ToICUNotation(Notation notation,
 }
 
 UNumberFormatRoundingMode ToUNumberFormatRoundingMode(
-    IntlRoundingMode rounding_mode) {
+    Intl::RoundingMode rounding_mode) {
   switch (rounding_mode) {
-    case IntlRoundingMode::CEIL:
+    case Intl::RoundingMode::kCeil:
       return UNumberFormatRoundingMode::UNUM_ROUND_CEILING;
-    case IntlRoundingMode::FLOOR:
+    case Intl::RoundingMode::kFloor:
       return UNumberFormatRoundingMode::UNUM_ROUND_FLOOR;
-    case IntlRoundingMode::EXPAND:
+    case Intl::RoundingMode::kExpand:
       return UNumberFormatRoundingMode::UNUM_ROUND_UP;
-    case IntlRoundingMode::TRUNC:
+    case Intl::RoundingMode::kTrunc:
       return UNumberFormatRoundingMode::UNUM_ROUND_DOWN;
-    case IntlRoundingMode::HALF_CEIL:
+    case Intl::RoundingMode::kHalfCeil:
       return UNumberFormatRoundingMode::UNUM_ROUND_HALF_CEILING;
-    case IntlRoundingMode::HALF_FLOOR:
+    case Intl::RoundingMode::kHalfFloor:
       return UNumberFormatRoundingMode::UNUM_ROUND_HALF_FLOOR;
-    case IntlRoundingMode::HALF_EXPAND:
+    case Intl::RoundingMode::kHalfExpand:
       return UNumberFormatRoundingMode::UNUM_ROUND_HALFUP;
-    case IntlRoundingMode::HALF_TRUNC:
+    case Intl::RoundingMode::kHalfTrunc:
       return UNumberFormatRoundingMode::UNUM_ROUND_HALFDOWN;
-    case IntlRoundingMode::HALF_EVEN:
+    case Intl::RoundingMode::kHalfEven:
       return UNumberFormatRoundingMode::UNUM_ROUND_HALFEVEN;
   }
 }
@@ -249,11 +233,11 @@ UNumberGroupingStrategy ToUNumberGroupingStrategy(UseGrouping use_grouping) {
 std::map<const std::string, icu::MeasureUnit> CreateUnitMap() {
   UErrorCode status = U_ZERO_ERROR;
   int32_t total = icu::MeasureUnit::getAvailable(nullptr, 0, status);
-  CHECK(U_FAILURE(status));
+  DCHECK(U_FAILURE(status));
   status = U_ZERO_ERROR;
   std::vector<icu::MeasureUnit> units(total);
   total = icu::MeasureUnit::getAvailable(units.data(), total, status);
-  CHECK(U_SUCCESS(status));
+  DCHECK(U_SUCCESS(status));
   std::map<const std::string, icu::MeasureUnit> map;
   std::set<std::string> sanctioned(Intl::SanctionedSimpleUnits());
   for (auto it = units.begin(); it != units.end(); ++it) {
@@ -300,7 +284,7 @@ Maybe<std::pair<icu::MeasureUnit, icu::MeasureUnit>> IsWellFormedUnitIdentifier(
   icu::MeasureUnit none = icu::MeasureUnit();
   // 1. If the result of IsSanctionedUnitIdentifier(unitIdentifier) is true,
   // then
-  if (result != none) {
+  if (result != AVOID_AMBIGUOUS_OP_WARNING(none)) {
     // a. Return true.
     std::pair<icu::MeasureUnit, icu::MeasureUnit> pair(result, none);
     return Just(pair);
@@ -319,7 +303,7 @@ Maybe<std::pair<icu::MeasureUnit, icu::MeasureUnit>> IsWellFormedUnitIdentifier(
 
   // 4. If the result of IsSanctionedUnitIdentifier(numerator) is false, then
   result = IsSanctionedUnitIdentifier(numerator);
-  if (result == none) {
+  if (result == AVOID_AMBIGUOUS_OP_WARNING(none)) {
     // a. Return false.
     return Nothing<std::pair<icu::MeasureUnit, icu::MeasureUnit>>();
   }
@@ -329,7 +313,7 @@ Maybe<std::pair<icu::MeasureUnit, icu::MeasureUnit>> IsWellFormedUnitIdentifier(
 
   // 6. If the result of IsSanctionedUnitIdentifier(denominator) is false, then
   icu::MeasureUnit den_result = IsSanctionedUnitIdentifier(denominator);
-  if (den_result == none) {
+  if (den_result == AVOID_AMBIGUOUS_OP_WARNING(none)) {
     // a. Return false.
     return Nothing<std::pair<icu::MeasureUnit, icu::MeasureUnit>>();
   }
@@ -371,49 +355,44 @@ bool IsWellFormedCurrencyCode(const std::string& currency) {
 }
 
 // Return the style as a String.
-Handle<String> StyleAsString(Isolate* isolate, Style style) {
+DirectHandle<String> StyleAsString(Isolate* isolate, Style style) {
   switch (style) {
     case Style::PERCENT:
-      return ReadOnlyRoots(isolate).percent_string_handle();
+      return isolate->factory()->percent_string();
     case Style::CURRENCY:
-      return ReadOnlyRoots(isolate).currency_string_handle();
+      return isolate->factory()->currency_string();
     case Style::UNIT:
-      return ReadOnlyRoots(isolate).unit_string_handle();
+      return isolate->factory()->unit_string();
     case Style::DECIMAL:
-      return ReadOnlyRoots(isolate).decimal_string_handle();
+      return isolate->factory()->decimal_string();
   }
   UNREACHABLE();
 }
 
 // Parse the 'currencyDisplay' from the skeleton.
-Handle<String> CurrencyDisplayString(Isolate* isolate,
-                                     const icu::UnicodeString& skeleton) {
+DirectHandle<String> CurrencyDisplayString(Isolate* isolate,
+                                           const icu::UnicodeString& skeleton) {
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up unit-width-iso-code"
   if (skeleton.indexOf("unit-width-iso-code") >= 0) {
-    return ReadOnlyRoots(isolate).code_string_handle();
+    return isolate->factory()->code_string();
   }
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up unit-width-full-name;"
   if (skeleton.indexOf("unit-width-full-name") >= 0) {
-    return ReadOnlyRoots(isolate).name_string_handle();
+    return isolate->factory()->name_string();
   }
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up unit-width-narrow;
   if (skeleton.indexOf("unit-width-narrow") >= 0) {
-    return ReadOnlyRoots(isolate).narrowSymbol_string_handle();
+    return isolate->factory()->narrowSymbol_string();
   }
   // Ex: skeleton as "currency/TWD .00 rounding-mode-half-up"
-  return ReadOnlyRoots(isolate).symbol_string_handle();
+  return isolate->factory()->symbol_string();
 }
 
-// Return true if there are no "group-off" in the skeleton.
-bool UseGroupingFromSkeleton(const icu::UnicodeString& skeleton) {
-  return skeleton.indexOf("group-off") == -1;
-}
-
-Handle<Object> UseGroupingFromSkeleton(Isolate* isolate,
-                                       const icu::UnicodeString& skeleton) {
+DirectHandle<Object> UseGroupingFromSkeleton(
+    Isolate* isolate, const icu::UnicodeString& skeleton) {
   Factory* factory = isolate->factory();
   static const char* group = "group-";
   int32_t start = skeleton.indexOf(group);
@@ -428,17 +407,17 @@ Handle<Object> UseGroupingFromSkeleton(Isolate* isolate,
     // Ex: skeleton as
     // .### rounding-mode-half-up group-min2
     if (check.startsWith("min2")) {
-      return ReadOnlyRoots(isolate).min2_string_handle();
+      return isolate->factory()->min2_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-half-up group-on-aligned
     if (check.startsWith("on-aligned")) {
-      return ReadOnlyRoots(isolate).always_string_handle();
+      return isolate->factory()->always_string();
     }
   }
   // Ex: skeleton as
   // .###
-  return ReadOnlyRoots(isolate).auto_string_handle();
+  return isolate->factory()->auto_string();
 }
 
 // Parse currency code from skeleton. For example, skeleton as
@@ -452,7 +431,8 @@ const icu::UnicodeString CurrencyFromSkeleton(
   return skeleton.tempSubString(index, 3);
 }
 
-const icu::UnicodeString NumberingSystemFromSkeleton(
+}  // namespace
+const icu::UnicodeString JSNumberFormat::NumberingSystemFromSkeleton(
     const icu::UnicodeString& skeleton) {
   const char numbering_system[] = "numbering-system/";
   int32_t index = skeleton.indexOf(numbering_system);
@@ -464,34 +444,36 @@ const icu::UnicodeString NumberingSystemFromSkeleton(
   return res.tempSubString(0, index);
 }
 
+namespace {
+
 // Return CurrencySign as string based on skeleton.
-Handle<String> CurrencySignString(Isolate* isolate,
-                                  const icu::UnicodeString& skeleton) {
+DirectHandle<String> CurrencySignString(Isolate* isolate,
+                                        const icu::UnicodeString& skeleton) {
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up sign-accounting-always" OR
   // "currency/TWD .00 rounding-mode-half-up sign-accounting-except-zero"
   if (skeleton.indexOf("sign-accounting") >= 0) {
-    return ReadOnlyRoots(isolate).accounting_string_handle();
+    return isolate->factory()->accounting_string();
   }
-  return ReadOnlyRoots(isolate).standard_string_handle();
+  return isolate->factory()->standard_string();
 }
 
 // Return UnitDisplay as string based on skeleton.
-Handle<String> UnitDisplayString(Isolate* isolate,
-                                 const icu::UnicodeString& skeleton) {
+DirectHandle<String> UnitDisplayString(Isolate* isolate,
+                                       const icu::UnicodeString& skeleton) {
   // Ex: skeleton as
   // "unit/length-meter .### rounding-mode-half-up unit-width-full-name"
   if (skeleton.indexOf("unit-width-full-name") >= 0) {
-    return ReadOnlyRoots(isolate).long_string_handle();
+    return isolate->factory()->long_string();
   }
   // Ex: skeleton as
   // "unit/length-meter .### rounding-mode-half-up unit-width-narrow".
   if (skeleton.indexOf("unit-width-narrow") >= 0) {
-    return ReadOnlyRoots(isolate).narrow_string_handle();
+    return isolate->factory()->narrow_string();
   }
   // Ex: skeleton as
   // "unit/length-foot .### rounding-mode-half-up"
-  return ReadOnlyRoots(isolate).short_string_handle();
+  return isolate->factory()->short_string();
 }
 
 // Parse Notation from skeleton.
@@ -517,69 +499,71 @@ Notation NotationFromSkeleton(const icu::UnicodeString& skeleton) {
   return Notation::STANDARD;
 }
 
-Handle<String> NotationAsString(Isolate* isolate, Notation notation) {
+DirectHandle<String> NotationAsString(Isolate* isolate, Notation notation) {
   switch (notation) {
     case Notation::SCIENTIFIC:
-      return ReadOnlyRoots(isolate).scientific_string_handle();
+      return isolate->factory()->scientific_string();
     case Notation::ENGINEERING:
-      return ReadOnlyRoots(isolate).engineering_string_handle();
+      return isolate->factory()->engineering_string();
     case Notation::COMPACT:
-      return ReadOnlyRoots(isolate).compact_string_handle();
+      return isolate->factory()->compact_string();
     case Notation::STANDARD:
-      return ReadOnlyRoots(isolate).standard_string_handle();
+      return isolate->factory()->standard_string();
   }
   UNREACHABLE();
 }
 
 // Return CompactString as string based on skeleton.
-Handle<String> CompactDisplayString(Isolate* isolate,
-                                    const icu::UnicodeString& skeleton) {
+DirectHandle<String> CompactDisplayString(Isolate* isolate,
+                                          const icu::UnicodeString& skeleton) {
   // Ex: skeleton as
   // "compact-long .### rounding-mode-half-up"
   if (skeleton.indexOf("compact-long") >= 0) {
-    return ReadOnlyRoots(isolate).long_string_handle();
+    return isolate->factory()->long_string();
   }
   // Ex: skeleton as
   // "compact-short .### rounding-mode-half-up"
   DCHECK_GE(skeleton.indexOf("compact-short"), 0);
-  return ReadOnlyRoots(isolate).short_string_handle();
+  return isolate->factory()->short_string();
 }
 
 // Return SignDisplay as string based on skeleton.
-Handle<String> SignDisplayString(Isolate* isolate,
-                                 const icu::UnicodeString& skeleton) {
+DirectHandle<String> SignDisplayString(Isolate* isolate,
+                                       const icu::UnicodeString& skeleton) {
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up sign-never"
   if (skeleton.indexOf("sign-never") >= 0) {
-    return ReadOnlyRoots(isolate).never_string_handle();
+    return isolate->factory()->never_string();
   }
   // Ex: skeleton as
   // ".### rounding-mode-half-up sign-always" or
   // "currency/TWD .00 rounding-mode-half-up sign-accounting-always"
   if (skeleton.indexOf("sign-always") >= 0 ||
       skeleton.indexOf("sign-accounting-always") >= 0) {
-    return ReadOnlyRoots(isolate).always_string_handle();
+    return isolate->factory()->always_string();
   }
   // Ex: skeleton as
   // "currency/TWD .00 rounding-mode-half-up sign-accounting-except-zero" or
   // "currency/TWD .00 rounding-mode-half-up sign-except-zero"
   if (skeleton.indexOf("sign-accounting-except-zero") >= 0 ||
       skeleton.indexOf("sign-except-zero") >= 0) {
-    return ReadOnlyRoots(isolate).exceptZero_string_handle();
+    return isolate->factory()->exceptZero_string();
   }
   // Ex: skeleton as
   // ".### rounding-mode-half-up sign-negative" or
   // "currency/TWD .00 rounding-mode-half-up sign-accounting-negative"
   if (skeleton.indexOf("sign-accounting-negative") >= 0 ||
       skeleton.indexOf("sign-negative") >= 0) {
-    return ReadOnlyRoots(isolate).negative_string_handle();
+    return isolate->factory()->negative_string();
   }
-  return ReadOnlyRoots(isolate).auto_string_handle();
+  return isolate->factory()->auto_string();
 }
 
+}  // anonymous namespace
+
 // Return RoundingMode as string based on skeleton.
-Handle<String> RoundingModeString(Isolate* isolate,
-                                  const icu::UnicodeString& skeleton) {
+DirectHandle<String> JSNumberFormat::RoundingModeString(
+    Isolate* isolate, const icu::UnicodeString& skeleton) {
   static const char* rounding_mode = "rounding-mode-";
   int32_t start = skeleton.indexOf(rounding_mode);
   if (start >= 0) {
@@ -589,51 +573,51 @@ Handle<String> RoundingModeString(Isolate* isolate,
     // Ex: skeleton as
     // .### rounding-mode-ceiling
     if (check.startsWith("ceiling")) {
-      return ReadOnlyRoots(isolate).ceil_string_handle();
+      return isolate->factory()->ceil_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-down
     if (check.startsWith("down")) {
-      return ReadOnlyRoots(isolate).trunc_string_handle();
+      return isolate->factory()->trunc_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-floor
     if (check.startsWith("floor")) {
-      return ReadOnlyRoots(isolate).floor_string_handle();
+      return isolate->factory()->floor_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-half-ceiling
     if (check.startsWith("half-ceiling")) {
-      return ReadOnlyRoots(isolate).halfCeil_string_handle();
+      return isolate->factory()->halfCeil_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-half-down
     if (check.startsWith("half-down")) {
-      return ReadOnlyRoots(isolate).halfTrunc_string_handle();
+      return isolate->factory()->halfTrunc_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-half-floor
     if (check.startsWith("half-floor")) {
-      return ReadOnlyRoots(isolate).halfFloor_string_handle();
+      return isolate->factory()->halfFloor_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-half-up
     if (check.startsWith("half-up")) {
-      return ReadOnlyRoots(isolate).halfExpand_string_handle();
+      return isolate->factory()->halfExpand_string();
     }
     // Ex: skeleton as
     // .### rounding-mode-up
     if (check.startsWith("up")) {
-      return ReadOnlyRoots(isolate).expand_string_handle();
+      return isolate->factory()->expand_string();
     }
   }
   // Ex: skeleton as
   // .###
-  return ReadOnlyRoots(isolate).halfEven_string_handle();
+  return isolate->factory()->halfEven_string();
 }
 
-Handle<Object> RoundingIncrement(Isolate* isolate,
-                                 const icu::UnicodeString& skeleton) {
+DirectHandle<Object> JSNumberFormat::RoundingIncrement(
+    Isolate* isolate, const icu::UnicodeString& skeleton) {
   int32_t cur = skeleton.indexOf(u"precision-increment/");
   if (cur < 0) return isolate->factory()->NewNumberFromInt(1);
   cur += 20;  // length of "precision-increment/"
@@ -648,39 +632,37 @@ Handle<Object> RoundingIncrement(Isolate* isolate,
 }
 
 // Return RoundingPriority as string based on skeleton.
-Handle<String> RoundingPriorityString(Isolate* isolate,
-                                      const icu::UnicodeString& skeleton) {
+DirectHandle<String> JSNumberFormat::RoundingPriorityString(
+    Isolate* isolate, const icu::UnicodeString& skeleton) {
   int32_t found;
   // If #r or @r is followed by a SPACE or in the end of line.
   if ((found = skeleton.indexOf("#r")) >= 0 ||
       (found = skeleton.indexOf("@r")) >= 0) {
     if (found + 2 == skeleton.length() || skeleton[found + 2] == ' ') {
-      return ReadOnlyRoots(isolate).morePrecision_string_handle();
+      return isolate->factory()->morePrecision_string();
     }
   }
   // If #s or @s is followed by a SPACE or in the end of line.
   if ((found = skeleton.indexOf("#s")) >= 0 ||
       (found = skeleton.indexOf("@s")) >= 0) {
     if (found + 2 == skeleton.length() || skeleton[found + 2] == ' ') {
-      return ReadOnlyRoots(isolate).lessPrecision_string_handle();
+      return isolate->factory()->lessPrecision_string();
     }
   }
-  return ReadOnlyRoots(isolate).auto_string_handle();
+  return isolate->factory()->auto_string();
 }
 
 // Return trailingZeroDisplay as string based on skeleton.
-Handle<String> TrailingZeroDisplayString(Isolate* isolate,
-                                         const icu::UnicodeString& skeleton) {
+DirectHandle<String> JSNumberFormat::TrailingZeroDisplayString(
+    Isolate* isolate, const icu::UnicodeString& skeleton) {
   int32_t found;
   if ((found = skeleton.indexOf("/w")) >= 0) {
     if (found + 2 == skeleton.length() || skeleton[found + 2] == ' ') {
-      return ReadOnlyRoots(isolate).stripIfInteger_string_handle();
+      return isolate->factory()->stripIfInteger_string();
     }
   }
-  return ReadOnlyRoots(isolate).auto_string_handle();
+  return isolate->factory()->auto_string();
 }
-
-}  // anonymous namespace
 
 // Return the minimum integer digits by counting the number of '0' after
 // "integer-width/*" in the skeleton.
@@ -701,7 +683,7 @@ int32_t JSNumberFormat::MinimumIntegerDigitsFromSkeleton(
     matched++;
     index++;
   }
-  CHECK_GT(matched, 0);
+  DCHECK_GT(matched, 0);
   return matched;
 }
 
@@ -713,11 +695,29 @@ int32_t JSNumberFormat::MinimumIntegerDigitsFromSkeleton(
 //                            123
 //                               4567
 // Set The minimum as 3 and maximum as 7.
+// We also treat the following  special cases as both minimum and maximum are 0
+// while there are no . in the skeleton:
+// 1. While there are "precision-integer" in the skeleton.
+// 2. While there are "precision-increment/" in the skeleton but no . after it.
+// Examples:
+// "currency/JPY precision-integer rounding-mode-half-up"
+// "precision-increment/2 rounding-mode-half-up"
 bool JSNumberFormat::FractionDigitsFromSkeleton(
     const icu::UnicodeString& skeleton, int32_t* minimum, int32_t* maximum) {
-  icu::UnicodeString search(".");
-  int32_t index = skeleton.indexOf(search);
-  if (index < 0) return false;
+  int32_t index = skeleton.indexOf(".");
+  if (index < 0) {
+    // https://unicode-org.github.io/icu/userguide/format_parse/numbers/skeletons.html#precision
+    // Note that the stem . is considered valid and is equivalent to
+    // precision-integer.
+    // Also, if there are "precision-increment/" but no "." we consider both
+    // minimum and maximum fraction digits as 0.
+    if (skeleton.indexOf("precision-integer") >= 0 ||
+        skeleton.indexOf("precision-increment/") >= 0) {
+      *minimum = *maximum = 0;
+      return true;
+    }
+    return false;
+  }
   *minimum = 0;
   index++;  // skip the '.'
   while (index < skeleton.length() && IsDecimalDigit(skeleton[index])) {
@@ -742,8 +742,7 @@ bool JSNumberFormat::FractionDigitsFromSkeleton(
 // Set The minimum as 5 and maximum as 12.
 bool JSNumberFormat::SignificantDigitsFromSkeleton(
     const icu::UnicodeString& skeleton, int32_t* minimum, int32_t* maximum) {
-  icu::UnicodeString search("@");
-  int32_t index = skeleton.indexOf(search);
+  int32_t index = skeleton.indexOf("@");
   if (index < 0) return false;
   *minimum = 1;
   index++;  // skip the first '@'
@@ -790,7 +789,7 @@ std::string UnitFromSkeleton(const icu::UnicodeString& skeleton) {
     return "";
   }
   // Find the end of the subtype.
-  size_t end = str.find(" ", begin);
+  size_t end = str.find(' ', begin);
   // Ex:
   // "unit/acre .### rounding-mode-half-up"
   //       b   e
@@ -822,35 +821,15 @@ Style StyleFromSkeleton(const icu::UnicodeString& skeleton) {
   return Style::DECIMAL;
 }
 
-icu::number::UnlocalizedNumberFormatter SetDigitOptionsToFormatterV2(
+}  // anonymous namespace
+
+icu::number::UnlocalizedNumberFormatter
+JSNumberFormat::SetDigitOptionsToFormatter(
     const icu::number::UnlocalizedNumberFormatter& settings,
     const Intl::NumberFormatDigitOptions& digit_options) {
-  icu::number::UnlocalizedNumberFormatter result = settings;
-  if (digit_options.minimum_integer_digits > 1) {
-    result = result.integerWidth(icu::number::IntegerWidth::zeroFillTo(
-        digit_options.minimum_integer_digits));
-  }
+  icu::number::UnlocalizedNumberFormatter result = settings.roundingMode(
+      ToUNumberFormatRoundingMode(digit_options.rounding_mode));
 
-  if (digit_options.rounding_type == Intl::RoundingType::kMorePrecision) {
-    return result;
-  }
-  icu::number::Precision precision =
-      (digit_options.minimum_significant_digits > 0)
-          ? icu::number::Precision::minMaxSignificantDigits(
-                digit_options.minimum_significant_digits,
-                digit_options.maximum_significant_digits)
-          : icu::number::Precision::minMaxFraction(
-                digit_options.minimum_fraction_digits,
-                digit_options.maximum_fraction_digits);
-
-  return result.precision(precision);
-}
-
-icu::number::UnlocalizedNumberFormatter SetDigitOptionsToFormatterV3(
-    const icu::number::UnlocalizedNumberFormatter& settings,
-    const Intl::NumberFormatDigitOptions& digit_options, int rounding_increment,
-    JSNumberFormat::ShowTrailingZeros trailing_zeros) {
-  icu::number::UnlocalizedNumberFormatter result = settings;
   if (digit_options.minimum_integer_digits > 1) {
     result = result.integerWidth(icu::number::IntegerWidth::zeroFillTo(
         digit_options.minimum_integer_digits));
@@ -871,7 +850,7 @@ icu::number::UnlocalizedNumberFormatter SetDigitOptionsToFormatterV3(
       break;
     case Intl::RoundingType::kMorePrecision:
       relaxed = true;
-      V8_FALLTHROUGH;
+      [[fallthrough]];
     case Intl::RoundingType::kLessPrecision:
       precision =
           icu::number::Precision::minMaxFraction(
@@ -883,51 +862,39 @@ icu::number::UnlocalizedNumberFormatter SetDigitOptionsToFormatterV3(
                                              : UNUM_ROUNDING_PRIORITY_STRICT);
       break;
   }
-  if (rounding_increment != 1) {
-    double icu_increment = rounding_increment *
-                           std::pow(10, -digit_options.maximum_fraction_digits);
-    precision = ::icu::number::Precision::increment(icu_increment)
+  if (digit_options.rounding_increment != 1) {
+    precision = ::icu::number::Precision::incrementExact(
+                    digit_options.rounding_increment,
+                    -digit_options.maximum_fraction_digits)
                     .withMinFraction(digit_options.minimum_fraction_digits);
   }
-  if (trailing_zeros == JSNumberFormat::ShowTrailingZeros::kHide) {
+  if (digit_options.trailing_zero_display ==
+      Intl::TrailingZeroDisplay::kStripIfInteger) {
     precision = precision.trailingZeroDisplay(UNUM_TRAILING_ZERO_HIDE_IF_WHOLE);
   }
   return result.precision(precision);
 }
 
-}  // anonymous namespace
-
-icu::number::UnlocalizedNumberFormatter
-JSNumberFormat::SetDigitOptionsToFormatter(
-    const icu::number::UnlocalizedNumberFormatter& settings,
-    const Intl::NumberFormatDigitOptions& digit_options, int rounding_increment,
-    JSNumberFormat::ShowTrailingZeros trailing_zeros) {
-  if (FLAG_harmony_intl_number_format_v3) {
-    return SetDigitOptionsToFormatterV3(settings, digit_options,
-                                        rounding_increment, trailing_zeros);
-  } else {
-    return SetDigitOptionsToFormatterV2(settings, digit_options);
-  }
-}
-
 // static
 // ecma402 #sec-intl.numberformat.prototype.resolvedoptions
-Handle<JSObject> JSNumberFormat::ResolvedOptions(
-    Isolate* isolate, Handle<JSNumberFormat> number_format) {
+DirectHandle<JSObject> JSNumberFormat::ResolvedOptions(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format) {
   Factory* factory = isolate->factory();
 
   UErrorCode status = U_ZERO_ERROR;
-  icu::number::LocalizedNumberFormatter* icu_number_formatter =
-      number_format->icu_number_formatter().raw();
-  icu::UnicodeString skeleton = icu_number_formatter->toSkeleton(status);
-  CHECK(U_SUCCESS(status));
+  icu::number::LocalizedNumberFormatter* fmt =
+      number_format->icu_number_formatter()->raw();
+  icu::UnicodeString skeleton = fmt->toSkeleton(status);
+  DCHECK(U_SUCCESS(status));
 
   // 4. Let options be ! ObjectCreate(%ObjectPrototype%).
-  Handle<JSObject> options = factory->NewJSObject(isolate->object_function());
+  DirectHandle<JSObject> options =
+      factory->NewJSObject(isolate->object_function());
 
-  Handle<String> locale = Handle<String>(number_format->locale(), isolate);
+  DirectHandle<String> locale =
+      DirectHandle<String>(number_format->locale(), isolate);
   const icu::UnicodeString numberingSystem_ustr =
-      NumberingSystemFromSkeleton(skeleton);
+      JSNumberFormat::NumberingSystemFromSkeleton(skeleton);
   // 5. For each row of Table 4, except the header row, in table order, do
   // Table 4: Resolved Options of NumberFormat Instances
   //  Internal Slot                    Property
@@ -948,17 +915,16 @@ Handle<JSObject> JSNumberFormat::ResolvedOptions(
   //    [[Notation]]                    "notation"
   //    [[CompactDisplay]]              "compactDisplay"
   //    [[SignDisplay]]                 "signDisplay"
-  //
-  // For v3
-  //    [[RoundingMode]]                "roundingMode"
   //    [[RoundingIncrement]]           "roundingIncrement"
+  //    [[RoundingMode]]                "roundingMode"
+  //    [[ComputedRoundingPriority]]    "roundingPriority"
   //    [[TrailingZeroDisplay]]         "trailingZeroDisplay"
 
   CHECK(JSReceiver::CreateDataProperty(isolate, options,
                                        factory->locale_string(), locale,
                                        Just(kDontThrow))
             .FromJust());
-  Handle<String> numberingSystem_string;
+  DirectHandle<String> numberingSystem_string;
   CHECK(Intl::ToString(isolate, numberingSystem_ustr)
             .ToHandle(&numberingSystem_string));
   CHECK(JSReceiver::CreateDataProperty(isolate, options,
@@ -972,7 +938,7 @@ Handle<JSObject> JSNumberFormat::ResolvedOptions(
             .FromJust());
   const icu::UnicodeString currency_ustr = CurrencyFromSkeleton(skeleton);
   if (!currency_ustr.isEmpty()) {
-    Handle<String> currency_string;
+    DirectHandle<String> currency_string;
     CHECK(Intl::ToString(isolate, currency_ustr).ToHandle(&currency_string));
     CHECK(JSReceiver::CreateDataProperty(isolate, options,
                                          factory->currency_string(),
@@ -1011,40 +977,32 @@ Handle<JSObject> JSNumberFormat::ResolvedOptions(
           Just(kDontThrow))
           .FromJust());
 
-  int32_t minimum = 0, maximum = 0;
-  if (SignificantDigitsFromSkeleton(skeleton, &minimum, &maximum)) {
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->minimumSignificantDigits_string(),
-              factory->NewNumberFromInt(minimum), Just(kDontThrow))
-              .FromJust());
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->maximumSignificantDigits_string(),
-              factory->NewNumberFromInt(maximum), Just(kDontThrow))
-              .FromJust());
-  } else {
-    FractionDigitsFromSkeleton(skeleton, &minimum, &maximum);
+  int32_t mnsd = 0, mxsd = 0, mnfd = 0, mxfd = 0;
+  if (FractionDigitsFromSkeleton(skeleton, &mnfd, &mxfd)) {
     CHECK(JSReceiver::CreateDataProperty(
               isolate, options, factory->minimumFractionDigits_string(),
-              factory->NewNumberFromInt(minimum), Just(kDontThrow))
+              factory->NewNumberFromInt(mnfd), Just(kDontThrow))
               .FromJust());
     CHECK(JSReceiver::CreateDataProperty(
               isolate, options, factory->maximumFractionDigits_string(),
-              factory->NewNumberFromInt(maximum), Just(kDontThrow))
+              factory->NewNumberFromInt(mxfd), Just(kDontThrow))
+              .FromJust());
+  }
+  if (SignificantDigitsFromSkeleton(skeleton, &mnsd, &mxsd)) {
+    CHECK(JSReceiver::CreateDataProperty(
+              isolate, options, factory->minimumSignificantDigits_string(),
+              factory->NewNumberFromInt(mnsd), Just(kDontThrow))
+              .FromJust());
+    CHECK(JSReceiver::CreateDataProperty(
+              isolate, options, factory->maximumSignificantDigits_string(),
+              factory->NewNumberFromInt(mxsd), Just(kDontThrow))
               .FromJust());
   }
 
-  if (FLAG_harmony_intl_number_format_v3) {
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->useGrouping_string(),
-              UseGroupingFromSkeleton(isolate, skeleton), Just(kDontThrow))
-              .FromJust());
-  } else {
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->useGrouping_string(),
-              factory->ToBoolean(UseGroupingFromSkeleton(skeleton)),
-              Just(kDontThrow))
-              .FromJust());
-  }
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->useGrouping_string(),
+            UseGroupingFromSkeleton(isolate, skeleton), Just(kDontThrow))
+            .FromJust());
 
   Notation notation = NotationFromSkeleton(skeleton);
   CHECK(JSReceiver::CreateDataProperty(
@@ -1062,84 +1020,69 @@ Handle<JSObject> JSNumberFormat::ResolvedOptions(
             isolate, options, factory->signDisplay_string(),
             SignDisplayString(isolate, skeleton), Just(kDontThrow))
             .FromJust());
-  if (FLAG_harmony_intl_number_format_v3) {
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->roundingMode_string(),
-              RoundingModeString(isolate, skeleton), Just(kDontThrow))
-              .FromJust());
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->roundingIncrement_string(),
-              RoundingIncrement(isolate, skeleton), Just(kDontThrow))
-              .FromJust());
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->trailingZeroDisplay_string(),
-              TrailingZeroDisplayString(isolate, skeleton), Just(kDontThrow))
-              .FromJust());
-    CHECK(JSReceiver::CreateDataProperty(
-              isolate, options, factory->roundingPriority_string(),
-              RoundingPriorityString(isolate, skeleton), Just(kDontThrow))
-              .FromJust());
-  }
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingIncrement_string(),
+            RoundingIncrement(isolate, skeleton), Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingMode_string(),
+            RoundingModeString(isolate, skeleton), Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingPriority_string(),
+            RoundingPriorityString(isolate, skeleton), Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->trailingZeroDisplay_string(),
+            TrailingZeroDisplayString(isolate, skeleton), Just(kDontThrow))
+            .FromJust());
   return options;
 }
 
 // ecma402/#sec-unwrapnumberformat
-MaybeHandle<JSNumberFormat> JSNumberFormat::UnwrapNumberFormat(
-    Isolate* isolate, Handle<JSReceiver> format_holder) {
+MaybeDirectHandle<JSNumberFormat> JSNumberFormat::UnwrapNumberFormat(
+    Isolate* isolate, DirectHandle<JSReceiver> format_holder) {
   // old code copy from NumberFormat::Unwrap that has no spec comment and
   // compiled but fail unit tests.
-  Handle<Context> native_context =
-      Handle<Context>(isolate->context().native_context(), isolate);
-  Handle<JSFunction> constructor = Handle<JSFunction>(
-      JSFunction::cast(native_context->intl_number_format_function()), isolate);
-  Handle<Object> object;
+  DirectHandle<Context> native_context(isolate->context()->native_context(),
+                                       isolate);
+  DirectHandle<JSFunction> constructor(
+      Cast<JSFunction>(native_context->intl_number_format_function()), isolate);
+  DirectHandle<Object> object;
   ASSIGN_RETURN_ON_EXCEPTION(
       isolate, object,
       Intl::LegacyUnwrapReceiver(isolate, format_holder, constructor,
-                                 format_holder->IsJSNumberFormat()),
-      JSNumberFormat);
+                                 IsJSNumberFormat(*format_holder)));
   // 4. If ... or nf does not have an [[InitializedNumberFormat]] internal slot,
   // then
-  if (!object->IsJSNumberFormat()) {
+  if (!IsJSNumberFormat(*object)) {
     // a. Throw a TypeError exception.
     THROW_NEW_ERROR(isolate,
                     NewTypeError(MessageTemplate::kIncompatibleMethodReceiver,
                                  isolate->factory()->NewStringFromAsciiChecked(
-                                     "UnwrapNumberFormat")),
-                    JSNumberFormat);
+                                     "UnwrapNumberFormat")));
   }
   // 5. Return nf.
-  return Handle<JSNumberFormat>::cast(object);
+  return Cast<JSNumberFormat>(object);
 }
 
-// 22. is in « 1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500,
-// 5000 »
-bool IsValidRoundingIncrement(int value) {
-  return value == 1 || value == 2 || value == 5 || value == 10 || value == 20 ||
-         value == 25 || value == 50 || value == 100 || value == 200 ||
-         value == 250 || value == 500 || value == 1000 || value == 2000 ||
-         value == 2500 || value == 5000;
-}
 // static
-MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
-                                                Handle<Map> map,
-                                                Handle<Object> locales,
-                                                Handle<Object> options_obj,
-                                                const char* service) {
+MaybeDirectHandle<JSNumberFormat> JSNumberFormat::New(
+    Isolate* isolate, DirectHandle<Map> map, DirectHandle<Object> locales,
+    DirectHandle<Object> options_obj, const char* service) {
   Factory* factory = isolate->factory();
 
   // 1. Let requestedLocales be ? CanonicalizeLocaleList(locales).
   Maybe<std::vector<std::string>> maybe_requested_locales =
       Intl::CanonicalizeLocaleList(isolate, locales);
-  MAYBE_RETURN(maybe_requested_locales, Handle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_requested_locales, DirectHandle<JSNumberFormat>());
   std::vector<std::string> requested_locales =
       maybe_requested_locales.FromJust();
 
   // 2. Set options to ? CoerceOptionsToObject(options).
-  Handle<JSReceiver> options;
+  DirectHandle<JSReceiver> options;
   ASSIGN_RETURN_ON_EXCEPTION(
-      isolate, options, CoerceOptionsToObject(isolate, options_obj, service),
-      JSNumberFormat);
+      isolate, options, CoerceOptionsToObject(isolate, options_obj, service));
 
   // 3. Let opt be a new Record.
   // 4. Let matcher be ? GetOption(options, "localeMatcher", "string", «
@@ -1147,7 +1090,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   // 5. Set opt.[[localeMatcher]] to matcher.
   Maybe<Intl::MatcherOption> maybe_locale_matcher =
       Intl::GetLocaleMatcher(isolate, options, service);
-  MAYBE_RETURN(maybe_locale_matcher, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_locale_matcher, MaybeDirectHandle<JSNumberFormat>());
   Intl::MatcherOption matcher = maybe_locale_matcher.FromJust();
 
   std::unique_ptr<char[]> numbering_system_str = nullptr;
@@ -1159,7 +1102,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   // 8. If _numberingSystem_ does not match the
   //    `(3*8alphanum) *("-" (3*8alphanum))` sequence, throw a *RangeError*
   //     exception.
-  MAYBE_RETURN(maybe_numberingSystem, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_numberingSystem, MaybeDirectHandle<JSNumberFormat>());
 
   // 9. Let localeData be %NumberFormat%.[[LocaleData]].
   // 10. Let r be ResolveLocale(%NumberFormat%.[[AvailableLocales]],
@@ -1170,8 +1113,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       Intl::ResolveLocale(isolate, JSNumberFormat::GetAvailableLocales(),
                           requested_locales, matcher, relevant_extension_keys);
   if (maybe_resolve_locale.IsNothing()) {
-    THROW_NEW_ERROR(isolate, NewRangeError(MessageTemplate::kIcuError),
-                    JSNumberFormat);
+    THROW_NEW_ERROR(isolate, NewRangeError(MessageTemplate::kIcuError));
   }
   Intl::ResolvedLocale r = maybe_resolve_locale.FromJust();
 
@@ -1182,20 +1124,21 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
     if (nu_extension_it != r.extensions.end() &&
         nu_extension_it->second != numbering_system_str.get()) {
       icu_locale.setUnicodeKeywordValue("nu", nullptr, status);
-      CHECK(U_SUCCESS(status));
+      DCHECK(U_SUCCESS(status));
     }
   }
 
   // 9. Set numberFormat.[[Locale]] to r.[[locale]].
   Maybe<std::string> maybe_locale_str = Intl::ToLanguageTag(icu_locale);
-  MAYBE_RETURN(maybe_locale_str, MaybeHandle<JSNumberFormat>());
-  Handle<String> locale_str = isolate->factory()->NewStringFromAsciiChecked(
-      maybe_locale_str.FromJust().c_str());
+  MAYBE_RETURN(maybe_locale_str, MaybeDirectHandle<JSNumberFormat>());
+  DirectHandle<String> locale_str =
+      isolate->factory()->NewStringFromAsciiChecked(
+          maybe_locale_str.FromJust().c_str());
 
   if (numbering_system_str != nullptr &&
       Intl::IsValidNumberingSystem(numbering_system_str.get())) {
     icu_locale.setUnicodeKeywordValue("nu", numbering_system_str.get(), status);
-    CHECK(U_SUCCESS(status));
+    DCHECK(U_SUCCESS(status));
   }
 
   std::string numbering_system = Intl::GetNumberingSystem(icu_locale);
@@ -1212,7 +1155,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   if (!numbering_system.empty() && numbering_system != "latn") {
     settings = settings.adoptSymbols(icu::NumberingSystem::createInstanceByName(
         numbering_system.c_str(), status));
-    CHECK(U_SUCCESS(status));
+    DCHECK(U_SUCCESS(status));
   }
 
   // ==== Start SetNumberFormatUnitOptions ====
@@ -1224,7 +1167,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       {"decimal", "percent", "currency", "unit"},
       {Style::DECIMAL, Style::PERCENT, Style::CURRENCY, Style::UNIT},
       Style::DECIMAL);
-  MAYBE_RETURN(maybe_style, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_style, MaybeDirectHandle<JSNumberFormat>());
   Style style = maybe_style.FromJust();
 
   // 4. Set intlObj.[[Style]] to style.
@@ -1235,7 +1178,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   const std::vector<const char*> empty_values = {};
   Maybe<bool> found_currency = GetStringOption(
       isolate, options, "currency", empty_values, service, &currency_cstr);
-  MAYBE_RETURN(found_currency, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(found_currency, MaybeDirectHandle<JSNumberFormat>());
 
   std::string currency;
   // 6. If currency is not undefined, then
@@ -1249,15 +1192,13 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
           isolate,
           NewRangeError(MessageTemplate::kInvalid,
                         factory->NewStringFromStaticChars("currency code"),
-                        factory->NewStringFromAsciiChecked(currency.c_str())),
-          JSNumberFormat);
+                        factory->NewStringFromAsciiChecked(currency.c_str())));
     }
   } else {
     // 7. If style is "currency" and currency is undefined, throw a TypeError
     // exception.
     if (style == Style::CURRENCY) {
-      THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kCurrencyCode),
-                      JSNumberFormat);
+      THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kCurrencyCode));
     }
   }
   // 8. Let currencyDisplay be ? GetOption(options, "currencyDisplay",
@@ -1269,7 +1210,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
           {CurrencyDisplay::CODE, CurrencyDisplay::SYMBOL,
            CurrencyDisplay::NAME, CurrencyDisplay::NARROW_SYMBOL},
           CurrencyDisplay::SYMBOL);
-  MAYBE_RETURN(maybe_currency_display, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_currency_display, MaybeDirectHandle<JSNumberFormat>());
   CurrencyDisplay currency_display = maybe_currency_display.FromJust();
 
   CurrencySign currency_sign = CurrencySign::STANDARD;
@@ -1279,7 +1220,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       isolate, options, "currencySign", service, {"standard", "accounting"},
       {CurrencySign::STANDARD, CurrencySign::ACCOUNTING},
       CurrencySign::STANDARD);
-  MAYBE_RETURN(maybe_currency_sign, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_currency_sign, MaybeDirectHandle<JSNumberFormat>());
   currency_sign = maybe_currency_sign.FromJust();
 
   // 10. Let unit be ? GetOption(options, "unit", "string", undefined,
@@ -1287,7 +1228,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   std::unique_ptr<char[]> unit_cstr;
   Maybe<bool> found_unit = GetStringOption(isolate, options, "unit",
                                            empty_values, service, &unit_cstr);
-  MAYBE_RETURN(found_unit, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(found_unit, MaybeDirectHandle<JSNumberFormat>());
 
   std::pair<icu::MeasureUnit, icu::MeasureUnit> unit_pair;
   // 11. If unit is not undefined, then
@@ -1303,8 +1244,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
           isolate,
           NewRangeError(MessageTemplate::kInvalidUnit,
                         factory->NewStringFromAsciiChecked(service),
-                        factory->NewStringFromAsciiChecked(unit.c_str())),
-          JSNumberFormat);
+                        factory->NewStringFromAsciiChecked(unit.c_str())));
     }
     unit_pair = maybe_wellformed_unit.FromJust();
   } else {
@@ -1314,8 +1254,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       THROW_NEW_ERROR(isolate,
                       NewTypeError(MessageTemplate::kInvalidUnit,
                                    factory->NewStringFromAsciiChecked(service),
-                                   factory->empty_string()),
-                      JSNumberFormat);
+                                   factory->empty_string()));
     }
   }
 
@@ -1325,7 +1264,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       isolate, options, "unitDisplay", service, {"short", "narrow", "long"},
       {UnitDisplay::SHORT, UnitDisplay::NARROW, UnitDisplay::LONG},
       UnitDisplay::SHORT);
-  MAYBE_RETURN(maybe_unit_display, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_unit_display, MaybeDirectHandle<JSNumberFormat>());
   UnitDisplay unit_display = maybe_unit_display.FromJust();
 
   // 14. If style is "currency", then
@@ -1333,8 +1272,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   if (style == Style::CURRENCY) {
     // 14.a. If currency is undefined, throw a TypeError exception.
     if (!found_currency.FromJust()) {
-      THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kCurrencyCode),
-                      JSNumberFormat);
+      THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kCurrencyCode));
     }
     // 14.a. Let currency be the result of converting currency to upper case as
     //    specified in 6.1
@@ -1343,21 +1281,20 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
 
     // 14.b. Set numberFormat.[[Currency]] to currency.
     if (!currency_ustr.isEmpty()) {
-      Handle<String> currency_string;
+      DirectHandle<String> currency_string;
       ASSIGN_RETURN_ON_EXCEPTION(isolate, currency_string,
-                                 Intl::ToString(isolate, currency_ustr),
-                                 JSNumberFormat);
+                                 Intl::ToString(isolate, currency_ustr));
 
       settings =
           settings.unit(icu::CurrencyUnit(currency_ustr.getBuffer(), status));
-      CHECK(U_SUCCESS(status));
+      DCHECK(U_SUCCESS(status));
       // 14.c Set intlObj.[[CurrencyDisplay]] to currencyDisplay.
       // The default unitWidth is SHORT in ICU and that mapped from
       // Symbol so we can skip the setting for optimization.
       if (currency_display != CurrencyDisplay::SYMBOL) {
         settings = settings.unitWidth(ToUNumberUnitWidth(currency_display));
       }
-      CHECK(U_SUCCESS(status));
+      DCHECK(U_SUCCESS(status));
     }
   }
 
@@ -1368,10 +1305,10 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
 
     icu::MeasureUnit none = icu::MeasureUnit();
     // 13.b Set intlObj.[[Unit]] to unit.
-    if (unit_pair.first != none) {
+    if (unit_pair.first != AVOID_AMBIGUOUS_OP_WARNING(none)) {
       settings = settings.unit(unit_pair.first);
     }
-    if (unit_pair.second != none) {
+    if (unit_pair.second != AVOID_AMBIGUOUS_OP_WARNING(none)) {
       settings = settings.perUnit(unit_pair.second);
     }
 
@@ -1389,9 +1326,23 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
                    .scale(icu::number::Scale::powerOfTen(2));
   }
 
-  // 16. If style is "currency", then
+  Notation notation = Notation::STANDARD;
+  // xx. Let notation be ? GetOption(options, "notation", "string", «
+  // "standard", "scientific",  "engineering", "compact" », "standard").
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, notation,
+      GetStringOption<Notation>(
+          isolate, options, "notation", service,
+          {"standard", "scientific", "engineering", "compact"},
+          {Notation::STANDARD, Notation::SCIENTIFIC, Notation::ENGINEERING,
+           Notation::COMPACT},
+          Notation::STANDARD),
+      DirectHandle<JSNumberFormat>());
+  // xx. Set numberFormat.[[Notation]] to notation.
+
+  // xx. If style is *"currency"* and *"notation"* is *"standard"*, then
   int mnfd_default, mxfd_default;
-  if (style == Style::CURRENCY) {
+  if (style == Style::CURRENCY && notation == Notation::STANDARD) {
     // b. Let cDigits be CurrencyDigits(currency).
     int c_digits = CurrencyDigits(currency_ustr);
     // c. Let mnfdDefault be cDigits.
@@ -1413,84 +1364,32 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
     }
   }
 
-  Notation notation = Notation::STANDARD;
-  // 18. Let notation be ? GetOption(options, "notation", "string", «
-  // "standard", "scientific",  "engineering", "compact" », "standard").
-  Maybe<Notation> maybe_notation = GetStringOption<Notation>(
-      isolate, options, "notation", service,
-      {"standard", "scientific", "engineering", "compact"},
-      {Notation::STANDARD, Notation::SCIENTIFIC, Notation::ENGINEERING,
-       Notation::COMPACT},
-      Notation::STANDARD);
-  MAYBE_RETURN(maybe_notation, MaybeHandle<JSNumberFormat>());
-  // 19. Set numberFormat.[[Notation]] to notation.
-  notation = maybe_notation.FromJust();
-
-  // 20. Perform ? SetNumberFormatDigitOptions(numberFormat, options,
+  // 23. Perform ? SetNumberFormatDigitOptions(numberFormat, options,
   // mnfdDefault, mxfdDefault).
   Maybe<Intl::NumberFormatDigitOptions> maybe_digit_options =
       Intl::SetNumberFormatDigitOptions(isolate, options, mnfd_default,
                                         mxfd_default,
-                                        notation == Notation::COMPACT);
-  MAYBE_RETURN(maybe_digit_options, Handle<JSNumberFormat>());
+                                        notation == Notation::COMPACT, service);
+  MAYBE_RETURN(maybe_digit_options, DirectHandle<JSNumberFormat>());
   Intl::NumberFormatDigitOptions digit_options = maybe_digit_options.FromJust();
 
-  if (FLAG_harmony_intl_number_format_v3) {
-    // 21. Let roundingIncrement be ? GetNumberOption(options,
-    // "roundingIncrement,", 1, 5000, 1).
-    int rounding_increment = 1;
-    Maybe<int> maybe_rounding_increment = GetNumberOption(
-        isolate, options, factory->roundingIncrement_string(), 1, 5000, 1);
-    MAYBE_RETURN(maybe_rounding_increment, MaybeHandle<JSNumberFormat>());
-    CHECK(maybe_rounding_increment.To(&rounding_increment));
-
-    // 22. If roundingIncrement is not in « 1, 2, 5, 10, 20, 25, 50, 100, 200,
-    // 250, 500, 1000, 2000, 2500, 5000 », throw a RangeError exception.
-    if (!IsValidRoundingIncrement(rounding_increment)) {
-      THROW_NEW_ERROR(isolate,
-                      NewRangeError(MessageTemplate::kPropertyValueOutOfRange,
-                                    factory->roundingIncrement_string()),
-                      JSNumberFormat);
-    }
-    // 23. If roundingIncrement is not 1 and numberFormat.[[RoundingType]] is
-    // not fractionDigits, throw a RangeError exception.
-    if (rounding_increment != 1 &&
-        digit_options.rounding_type != Intl::RoundingType::kFractionDigits) {
-      THROW_NEW_ERROR(isolate,
-                      NewRangeError(MessageTemplate::kPropertyValueOutOfRange,
-                                    factory->roundingIncrement_string()),
-                      JSNumberFormat);
-    }
-    // 24. Set _numberFormat.[[RoundingIncrement]] to roundingIncrement.
-
-    // 25. Let trailingZeroDisplay be ? GetOption(options,
-    // "trailingZeroDisplay", "string", « "auto", "stripIfInteger" », "auto").
-    Maybe<TrailingZeroDisplay> maybe_trailing_zero_display =
-        GetStringOption<TrailingZeroDisplay>(
-            isolate, options, "trailingZeroDisplay", service,
-            {"auto", "stripIfInteger"},
-            {TrailingZeroDisplay::AUTO, TrailingZeroDisplay::STRIP_IF_INTEGER},
-            TrailingZeroDisplay::AUTO);
-    MAYBE_RETURN(maybe_trailing_zero_display, MaybeHandle<JSNumberFormat>());
-    TrailingZeroDisplay trailing_zero_display =
-        maybe_trailing_zero_display.FromJust();
-
-    // 26. Set numberFormat.[[TrailingZeroDisplay]] to trailingZeroDisplay.
-    settings = SetDigitOptionsToFormatterV3(
-        settings, digit_options, rounding_increment,
-        trailing_zero_display == TrailingZeroDisplay::STRIP_IF_INTEGER
-            ? ShowTrailingZeros::kHide
-            : ShowTrailingZeros::kShow);
-  } else {
-    settings = SetDigitOptionsToFormatterV2(settings, digit_options);
+  // 13. If roundingIncrement is not 1, set mxfdDefault to mnfdDefault.
+  if (digit_options.rounding_increment != 1) {
+    mxfd_default = mnfd_default;
   }
+  // 14. Set intlObj.[[RoundingIncrement]] to roundingIncrement.
 
-  // 27. Let compactDisplay be ? GetOption(options, "compactDisplay",
+  // 15. Set intlObj.[[RoundingMode]] to roundingMode.
+
+  // 16. Set intlObj.[[TrailingZeroDisplay]] to trailingZeroDisplay.
+  settings = SetDigitOptionsToFormatter(settings, digit_options);
+
+  // 28. Let compactDisplay be ? GetOption(options, "compactDisplay",
   // "string", « "short", "long" »,  "short").
   Maybe<CompactDisplay> maybe_compact_display = GetStringOption<CompactDisplay>(
       isolate, options, "compactDisplay", service, {"short", "long"},
       {CompactDisplay::SHORT, CompactDisplay::LONG}, CompactDisplay::SHORT);
-  MAYBE_RETURN(maybe_compact_display, MaybeHandle<JSNumberFormat>());
+  MAYBE_RETURN(maybe_compact_display, MaybeDirectHandle<JSNumberFormat>());
   CompactDisplay compact_display = maybe_compact_display.FromJust();
 
   // The default notation in ICU is Simple, which mapped from STANDARD
@@ -1499,68 +1398,42 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
     settings = settings.notation(ToICUNotation(notation, compact_display));
   }
 
-  if (!FLAG_harmony_intl_number_format_v3) {
-    // 30. Let useGrouping be ? GetOption(options, "useGrouping", "boolean",
-    // undefined, true).
-    bool use_grouping = true;
-    Maybe<bool> found_use_grouping =
-        GetBoolOption(isolate, options, "useGrouping", service, &use_grouping);
-    MAYBE_RETURN(found_use_grouping, MaybeHandle<JSNumberFormat>());
-    // 31. Set numberFormat.[[UseGrouping]] to useGrouping.
-    if (!use_grouping) {
-      settings = settings.grouping(UNumberGroupingStrategy::UNUM_GROUPING_OFF);
-    }
-    settings = JSNumberFormat::SetDigitOptionsToFormatter(
-        settings, digit_options, 1, ShowTrailingZeros::kShow);
-  } else {
-    // 28. Let defaultUseGrouping be "auto".
-    UseGrouping default_use_grouping = UseGrouping::AUTO;
+  // 28. Let defaultUseGrouping be "auto".
+  UseGrouping default_use_grouping = UseGrouping::AUTO;
 
-    // 29. If notation is "compact", then
-    if (notation == Notation::COMPACT) {
-      // a. Set numberFormat.[[CompactDisplay]] to compactDisplay.
-      // Done in above together
-      // b. Set defaultUseGrouping to "min2".
-      default_use_grouping = UseGrouping::MIN2;
-    }
+  // 29. If notation is "compact", then
+  if (notation == Notation::COMPACT) {
+    // a. Set numberFormat.[[CompactDisplay]] to compactDisplay.
+    // Done in above together
+    // b. Set defaultUseGrouping to "min2".
+    default_use_grouping = UseGrouping::MIN2;
+  }
 
-    // 30. Let useGrouping be ? GetStringOrBooleanOption(options, "useGrouping",
-    // « "min2", "auto", "always" », "always", false, defaultUseGrouping).
-    Maybe<UseGrouping> maybe_use_grouping =
-        GetStringOrBooleanOption<UseGrouping>(
-            isolate, options, "useGrouping", service,
-            {"min2", "auto", "always"},
-            {UseGrouping::MIN2, UseGrouping::AUTO, UseGrouping::ALWAYS},
-            UseGrouping::ALWAYS,    // trueValue
-            UseGrouping::OFF,       // falseValue
-            default_use_grouping);  // fallbackValue
-    MAYBE_RETURN(maybe_use_grouping, MaybeHandle<JSNumberFormat>());
-    UseGrouping use_grouping = maybe_use_grouping.FromJust();
-    // 31. Set numberFormat.[[UseGrouping]] to useGrouping.
-    if (use_grouping != UseGrouping::AUTO) {
-      settings = settings.grouping(ToUNumberGroupingStrategy(use_grouping));
-    }
+  // 30. Let useGrouping be ? GetStringOrBooleanOption(options, "useGrouping",
+  // « "min2", "auto", "always" », "always", false, defaultUseGrouping).
+  Maybe<UseGrouping> maybe_use_grouping = GetStringOrBooleanOption<UseGrouping>(
+      isolate, options, "useGrouping", service, {"min2", "auto", "always"},
+      {UseGrouping::MIN2, UseGrouping::AUTO, UseGrouping::ALWAYS},
+      UseGrouping::ALWAYS,    // trueValue
+      UseGrouping::OFF,       // falseValue
+      default_use_grouping);  // fallbackValue
+  MAYBE_RETURN(maybe_use_grouping, MaybeDirectHandle<JSNumberFormat>());
+  UseGrouping use_grouping = maybe_use_grouping.FromJust();
+  // 31. Set numberFormat.[[UseGrouping]] to useGrouping.
+  if (use_grouping != UseGrouping::AUTO) {
+    settings = settings.grouping(ToUNumberGroupingStrategy(use_grouping));
   }
 
   // 32. Let signDisplay be ? GetOption(options, "signDisplay", "string", «
   // "auto", "never", "always",  "exceptZero", "negative" », "auto").
   Maybe<SignDisplay> maybe_sign_display = Nothing<SignDisplay>();
-  if (FLAG_harmony_intl_number_format_v3) {
-    maybe_sign_display = GetStringOption<SignDisplay>(
-        isolate, options, "signDisplay", service,
-        {"auto", "never", "always", "exceptZero", "negative"},
-        {SignDisplay::AUTO, SignDisplay::NEVER, SignDisplay::ALWAYS,
-         SignDisplay::EXCEPT_ZERO, SignDisplay::NEGATIVE},
-        SignDisplay::AUTO);
-  } else {
-    maybe_sign_display = GetStringOption<SignDisplay>(
-        isolate, options, "signDisplay", service,
-        {"auto", "never", "always", "exceptZero"},
-        {SignDisplay::AUTO, SignDisplay::NEVER, SignDisplay::ALWAYS,
-         SignDisplay::EXCEPT_ZERO},
-        SignDisplay::AUTO);
-  }
-  MAYBE_RETURN(maybe_sign_display, MaybeHandle<JSNumberFormat>());
+  maybe_sign_display = GetStringOption<SignDisplay>(
+      isolate, options, "signDisplay", service,
+      {"auto", "never", "always", "exceptZero", "negative"},
+      {SignDisplay::AUTO, SignDisplay::NEVER, SignDisplay::ALWAYS,
+       SignDisplay::EXCEPT_ZERO, SignDisplay::NEGATIVE},
+      SignDisplay::AUTO);
+  MAYBE_RETURN(maybe_sign_display, MaybeDirectHandle<JSNumberFormat>());
   SignDisplay sign_display = maybe_sign_display.FromJust();
 
   // 33. Set numberFormat.[[SignDisplay]] to signDisplay.
@@ -1570,28 +1443,6 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   if (sign_display != SignDisplay::AUTO ||
       currency_sign != CurrencySign::STANDARD) {
     settings = settings.sign(ToUNumberSignDisplay(sign_display, currency_sign));
-  }
-
-  if (FLAG_harmony_intl_number_format_v3) {
-    // X. Let roundingMode be ? GetOption(options, "roundingMode", "string",
-    // « "ceil", "floor", "expand", "trunc", "halfCeil", "halfFloor",
-    // "halfExpand", "halfTrunc", "halfEven" »,
-    // "halfExpand").
-    Maybe<IntlRoundingMode> maybe_rounding_mode =
-        GetStringOption<IntlRoundingMode>(
-            isolate, options, "roundingMode", service,
-            {"ceil", "floor", "expand", "trunc", "halfCeil", "halfFloor",
-             "halfExpand", "halfTrunc", "halfEven"},
-            {IntlRoundingMode::CEIL, IntlRoundingMode::FLOOR,
-             IntlRoundingMode::EXPAND, IntlRoundingMode::TRUNC,
-             IntlRoundingMode::HALF_CEIL, IntlRoundingMode::HALF_FLOOR,
-             IntlRoundingMode::HALF_EXPAND, IntlRoundingMode::HALF_TRUNC,
-             IntlRoundingMode::HALF_EVEN},
-            IntlRoundingMode::HALF_EXPAND);
-    MAYBE_RETURN(maybe_rounding_mode, MaybeHandle<JSNumberFormat>());
-    IntlRoundingMode rounding_mode = maybe_rounding_mode.FromJust();
-    settings =
-        settings.roundingMode(ToUNumberFormatRoundingMode(rounding_mode));
   }
 
   // 25. Let dataLocaleData be localeData.[[<dataLocale>]].
@@ -1608,36 +1459,21 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   // 30. Set numberFormat.[[NegativePattern]] to
   // stylePatterns.[[negativePattern]].
   //
-  icu::number::LocalizedNumberFormatter icu_number_formatter =
-      settings.locale(icu_locale);
+  icu::number::LocalizedNumberFormatter fmt = settings.locale(icu_locale);
 
-  icu::number::LocalizedNumberRangeFormatter icu_number_range_formatter =
-      icu::number::UnlocalizedNumberRangeFormatter()
-          .numberFormatterBoth(settings)
-          .locale(icu_locale);
-
-  Handle<Managed<icu::number::LocalizedNumberFormatter>>
+  DirectHandle<Managed<icu::number::LocalizedNumberFormatter>>
       managed_number_formatter =
-          Managed<icu::number::LocalizedNumberFormatter>::FromRawPtr(
+          Managed<icu::number::LocalizedNumberFormatter>::From(
               isolate, 0,
-              new icu::number::LocalizedNumberFormatter(icu_number_formatter));
-
-  Handle<Managed<icu::number::LocalizedNumberRangeFormatter>>
-      managed_number_range_formatter =
-          Managed<icu::number::LocalizedNumberRangeFormatter>::FromRawPtr(
-              isolate, 0,
-              new icu::number::LocalizedNumberRangeFormatter(
-                  icu_number_range_formatter));
+              std::make_shared<icu::number::LocalizedNumberFormatter>(fmt));
 
   // Now all properties are ready, so we can allocate the result object.
-  Handle<JSNumberFormat> number_format = Handle<JSNumberFormat>::cast(
+  DirectHandle<JSNumberFormat> number_format = Cast<JSNumberFormat>(
       isolate->factory()->NewFastOrSlowJSObjectFromMap(map));
   DisallowGarbageCollection no_gc;
   number_format->set_locale(*locale_str);
 
   number_format->set_icu_number_formatter(*managed_number_formatter);
-  number_format->set_icu_number_range_formatter(
-      *managed_number_range_formatter);
   number_format->set_bound_format(*factory->undefined_value());
 
   // 31. Return numberFormat.
@@ -1646,96 +1482,324 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
 
 namespace {
 
-Maybe<bool> IcuFormatNumber(
+icu::number::FormattedNumber FormatDecimalString(
     Isolate* isolate,
     const icu::number::LocalizedNumberFormatter& number_format,
-    Handle<Object> numeric_obj, icu::number::FormattedNumber* formatted) {
+    Handle<String> string, UErrorCode& status) {
+  string = String::Flatten(isolate, string);
+  DisallowGarbageCollection no_gc;
+  const String::FlatContent& flat = string->GetFlatContent(no_gc);
+  int32_t length = static_cast<int32_t>(string->length());
+  if (flat.IsOneByte()) {
+    const char* char_buffer =
+        reinterpret_cast<const char*>(flat.ToOneByteVector().begin());
+    return number_format.formatDecimal({char_buffer, length}, status);
+  }
+  return number_format.formatDecimal({string->ToCString().get(), length},
+                                     status);
+}
+
+}  // namespace
+
+bool IntlMathematicalValue::IsNaN() const { return i::IsNaN(*value_); }
+
+MaybeHandle<String> IntlMathematicalValue::ToString(Isolate* isolate) const {
+  DirectHandle<String> string;
+  if (IsNumber(*value_)) {
+    return isolate->factory()->NumberToString(value_);
+  }
+  if (IsBigInt(*value_)) {
+    return BigInt::ToString(isolate, Cast<BigInt>(value_));
+  }
+  DCHECK(IsString(*value_));
+  return Cast<String>(value_);
+}
+
+namespace {
+Maybe<icu::number::FormattedNumber> IcuFormatNumber(
+    Isolate* isolate,
+    const icu::number::LocalizedNumberFormatter& number_format,
+    Handle<Object> numeric_obj) {
+  icu::number::FormattedNumber formatted;
   // If it is BigInt, handle it differently.
   UErrorCode status = U_ZERO_ERROR;
-  if (numeric_obj->IsBigInt()) {
-    Handle<BigInt> big_int = Handle<BigInt>::cast(numeric_obj);
+  if (IsBigInt(*numeric_obj)) {
+    auto big_int = Cast<BigInt>(numeric_obj);
     Handle<String> big_int_string;
     ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, big_int_string,
                                      BigInt::ToString(isolate, big_int),
-                                     Nothing<bool>());
+                                     Nothing<icu::number::FormattedNumber>());
     big_int_string = String::Flatten(isolate, big_int_string);
     DisallowGarbageCollection no_gc;
     const String::FlatContent& flat = big_int_string->GetFlatContent(no_gc);
-    int32_t length = big_int_string->length();
+    int32_t length = static_cast<int32_t>(big_int_string->length());
     DCHECK(flat.IsOneByte());
     const char* char_buffer =
         reinterpret_cast<const char*>(flat.ToOneByteVector().begin());
-    *formatted = number_format.formatDecimal({char_buffer, length}, status);
+    formatted = number_format.formatDecimal({char_buffer, length}, status);
   } else {
-    if (FLAG_harmony_intl_number_format_v3 && numeric_obj->IsString()) {
+    if (IsString(*numeric_obj)) {
       // TODO(ftang) Correct the handling of string after the resolution of
       // https://github.com/tc39/proposal-intl-numberformat-v3/pull/82
-      Handle<String> string =
-          String::Flatten(isolate, Handle<String>::cast(numeric_obj));
+      DirectHandle<String> string =
+          String::Flatten(isolate, Cast<String>(numeric_obj));
       DisallowGarbageCollection no_gc;
       const String::FlatContent& flat = string->GetFlatContent(no_gc);
-      int32_t length = string->length();
+      int32_t length = static_cast<int32_t>(string->length());
       if (flat.IsOneByte()) {
         const char* char_buffer =
             reinterpret_cast<const char*>(flat.ToOneByteVector().begin());
-        *formatted = number_format.formatDecimal({char_buffer, length}, status);
+        formatted = number_format.formatDecimal({char_buffer, length}, status);
       } else {
         // We may have two bytes string such as "漢 123456789".substring(2)
         // The value will be "123456789" only in ASCII range, but encoded
         // in two bytes string.
         // ICU accepts UTF8 string, so if the source is two-byte encoded,
         // copy into a UTF8 string via ToCString.
-        *formatted = number_format.formatDecimal(
-            {string->ToCString().get(), string->length()}, status);
+        formatted = number_format.formatDecimal(
+            {string->ToCString().get(), length}, status);
       }
     } else {
-      double number = numeric_obj->IsNaN()
+      double number = IsNaN(*numeric_obj)
                           ? std::numeric_limits<double>::quiet_NaN()
-                          : numeric_obj->Number();
-      *formatted = number_format.formatDouble(number, status);
+                          : Object::NumberValue(*numeric_obj);
+      formatted = number_format.formatDouble(number, status);
     }
   }
   if (U_FAILURE(status)) {
     // This happen because of icu data trimming trim out "unit".
     // See https://bugs.chromium.org/p/v8/issues/detail?id=8641
-    THROW_NEW_ERROR_RETURN_VALUE(
-        isolate, NewTypeError(MessageTemplate::kIcuError), Nothing<bool>());
-  }
-  return Just(true);
-}
-
-Maybe<icu::Formattable> ToFormattable(Isolate* isolate, Handle<Object> obj,
-                                      const char* field) {
-  if (obj->IsBigInt()) {
-    Handle<BigInt> big_int = Handle<BigInt>::cast(obj);
-    Handle<String> big_int_string;
-    ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, big_int_string,
-                                     BigInt::ToString(isolate, big_int),
-                                     Nothing<icu::Formattable>());
-    big_int_string = String::Flatten(isolate, big_int_string);
-    {
-      DisallowGarbageCollection no_gc;
-      const String::FlatContent& flat = big_int_string->GetFlatContent(no_gc);
-      int32_t length = big_int_string->length();
-      DCHECK(flat.IsOneByte());
-      const char* char_buffer =
-          reinterpret_cast<const char*>(flat.ToOneByteVector().begin());
-      UErrorCode status = U_ZERO_ERROR;
-      icu::Formattable result({char_buffer, length}, status);
-      if (U_SUCCESS(status)) return Just(result);
-    }
     THROW_NEW_ERROR_RETURN_VALUE(isolate,
                                  NewTypeError(MessageTemplate::kIcuError),
-                                 Nothing<icu::Formattable>());
+                                 Nothing<icu::number::FormattedNumber>());
   }
-  // TODO(ftang) Handle the case of IsString after the resolution of
-  // https://github.com/tc39/proposal-intl-numberformat-v3/pull/82
-
-  // FormatRange(|ToParts) does not allow NaN
-  DCHECK(!obj->IsNaN());
-  return Just(icu::Formattable(obj->Number()));
+  return Just(std::move(formatted));
 }
 
+}  // namespace
+
+Maybe<icu::number::FormattedNumber> IntlMathematicalValue::FormatNumeric(
+    Isolate* isolate,
+    const icu::number::LocalizedNumberFormatter& number_format,
+    const IntlMathematicalValue& x) {
+  if (IsString(*x.value_)) {
+    Handle<String> string;
+    ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, string, x.ToString(isolate),
+                                     Nothing<icu::number::FormattedNumber>());
+    UErrorCode status = U_ZERO_ERROR;
+    icu::number::FormattedNumber result =
+        FormatDecimalString(isolate, number_format, string, status);
+    if (U_FAILURE(status)) {
+      THROW_NEW_ERROR_RETURN_VALUE(isolate,
+                                   NewTypeError(MessageTemplate::kIcuError),
+                                   Nothing<icu::number::FormattedNumber>());
+    }
+    return Just(std::move(result));
+  }
+  CHECK(IsNumber(*x.value_) || IsBigInt(*x.value_));
+  return IcuFormatNumber(isolate, number_format, x.value_);
+}
+
+Maybe<icu::number::FormattedNumberRange> IntlMathematicalValue::FormatRange(
+    Isolate* isolate,
+    const icu::number::LocalizedNumberRangeFormatter& number_range_format,
+    const IntlMathematicalValue& x, const IntlMathematicalValue& y) {
+  icu::Formattable x_formatable;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, x_formatable, x.ToFormattable(isolate),
+      Nothing<icu::number::FormattedNumberRange>());
+
+  icu::Formattable y_formatable;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, y_formatable, y.ToFormattable(isolate),
+      Nothing<icu::number::FormattedNumberRange>());
+
+  UErrorCode status = U_ZERO_ERROR;
+  icu::number::FormattedNumberRange result =
+      number_range_format.formatFormattableRange(x_formatable, y_formatable,
+                                                 status);
+  if (U_FAILURE(status)) {
+    THROW_NEW_ERROR_RETURN_VALUE(isolate,
+                                 NewTypeError(MessageTemplate::kIcuError),
+                                 Nothing<icu::number::FormattedNumberRange>());
+  }
+
+  return Just(std::move(result));
+}
+
+namespace {
+// Return the index of the end of leading white space or line terminator
+// and the index of the start of trailing white space or line terminator.
+template <typename Char>
+std::pair<int, int> FindLeadingAndTrailingWhiteSpaceOrLineTerminator(
+    base::Vector<const Char> src) {
+  size_t leading_end = 0;
+
+  // Find the length of leading StrWhiteSpaceChar.
+  while (leading_end < src.size() &&
+         IsWhiteSpaceOrLineTerminator(
+             static_cast<uint16_t>(src.at(leading_end)))) {
+    leading_end++;
+  }
+  size_t trailing_start = src.size();
+  // Find the start of the trailing StrWhiteSpaceChar
+  while (trailing_start > leading_end &&
+         IsWhiteSpaceOrLineTerminator(
+             static_cast<uint16_t>(src.at(trailing_start - 1)))) {
+    trailing_start--;
+  }
+  return std::make_pair(leading_end, trailing_start);
+}
+
+Handle<String> TrimWhiteSpaceOrLineTerminator(Isolate* isolate,
+                                              Handle<String> string) {
+  string = String::Flatten(isolate, string);
+  std::pair<int, uint32_t> whitespace_offsets;
+  {
+    DisallowGarbageCollection no_gc;
+    String::FlatContent flat = string->GetFlatContent(no_gc);
+    if (flat.IsOneByte()) {
+      whitespace_offsets = FindLeadingAndTrailingWhiteSpaceOrLineTerminator(
+          flat.ToOneByteVector());
+    } else {
+      whitespace_offsets =
+          FindLeadingAndTrailingWhiteSpaceOrLineTerminator(flat.ToUC16Vector());
+    }
+  }
+  if (whitespace_offsets.first == 0 &&
+      string->length() == whitespace_offsets.second) {
+    return string;
+  }
+  return isolate->factory()->NewSubString(string, whitespace_offsets.first,
+                                          whitespace_offsets.second);
+}
+
+}  // namespace
+
+// #sec-tointlmathematicalvalue
+Maybe<IntlMathematicalValue> IntlMathematicalValue::From(Isolate* isolate,
+                                                         Handle<Object> value) {
+  Factory* factory = isolate->factory();
+  // 1. Let primValue be ? ToPrimitive(value, number).
+  Handle<Object> prim_value;
+  if (IsJSReceiver(*value)) {
+    ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+        isolate, prim_value,
+        JSReceiver::ToPrimitive(isolate, Cast<JSReceiver>(value),
+                                ToPrimitiveHint::kNumber),
+        Nothing<IntlMathematicalValue>());
+  } else {
+    prim_value = value;
+  }
+  IntlMathematicalValue result;
+  // 2. If Type(primValue) is BigInt, return the mathematical value of
+  // primValue.
+  if (IsBigInt(*prim_value)) {
+    result.value_ = prim_value;
+    result.approx_ = Cast<BigInt>(prim_value)->AsInt64();
+    return Just(result);
+  }
+  if (IsOddball(*prim_value)) {
+    prim_value = Oddball::ToNumber(isolate, Cast<Oddball>(prim_value));
+  }
+  if (IsNumber(*prim_value)) {
+    result.value_ = prim_value;
+    result.approx_ = Object::NumberValue(*prim_value);
+    return Just(result);
+  }
+  if (!IsString(*prim_value)) {
+    // No need to convert from Number to String, just call ToNumber.
+    ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, result.value_,
+                                     Object::ToNumber(isolate, prim_value),
+                                     Nothing<IntlMathematicalValue>());
+    result.approx_ = Object::NumberValue(*result.value_);
+    return Just(result);
+  }
+  Handle<String> string = Cast<String>(prim_value);
+
+  string = TrimWhiteSpaceOrLineTerminator(isolate, string);
+  if (string->length() == 0) {
+    result.value_ = handle(Smi::zero(), isolate);
+    result.approx_ = 0;
+    return Just(result);
+  }
+  // We may have a NonDecimalIntegerLiteral:
+  if (2 < string->length() && string->Get(0) == '0') {
+    uint16_t ch = string->Get(1);
+    if (ch == 'b' || ch == 'B' || ch == 'o' || ch == 'O' || ch == 'x' ||
+        ch == 'X') {
+      result.approx_ =
+          StringToDouble(isolate, string, ALLOW_NON_DECIMAL_PREFIX, 0);
+      // If approx is within the precision, just return as Number.
+      if (result.approx_ < kMaxSafeInteger) {
+        result.value_ = isolate->factory()->NewNumber(result.approx_);
+        return Just(result);
+      }
+      // Otherwise return the BigInt
+      MaybeHandle<BigInt> maybe_bigint = StringToBigInt(isolate, string);
+      // If the parsing of BigInt fail, return nan
+      if (maybe_bigint.is_null()) {
+        isolate->clear_exception();
+        result.value_ = factory->nan_value();
+        return Just(result);
+      }
+      result.value_ = maybe_bigint.ToHandleChecked();
+      return Just(result);
+    }
+  }
+  // If it does not fit StrDecimalLiteral StrWhiteSpace_opt, StringToDouble will
+  // parse it as NaN, in that case, return NaN.
+  result.approx_ = StringToDouble(isolate, string, NO_CONVERSION_FLAG, 0);
+  if (std::isnan(result.approx_)) {
+    result.value_ = factory->nan_value();
+    return Just(result);
+  }
+  // Handle Infinity / +Infinity / -Infinity
+  if (!std::isfinite(result.approx_)) {
+    if (result.approx_ < 0) {
+      result.value_ = factory->minus_infinity_value();
+    } else {
+      result.value_ = factory->infinity_value();
+    }
+    return Just(result);
+  }
+  // At this point, str is for sure fit
+  // "StrNumericLiteral StrWhiteSpace_opt" excluding "(+|-)?Infinity"
+  result.value_ = string;
+
+  return Just(result);
+}
+
+Maybe<icu::Formattable> IntlMathematicalValue::ToFormattable(
+    Isolate* isolate) const {
+  if (IsNumber(*value_)) {
+    return Just(icu::Formattable(approx_));
+  }
+  DirectHandle<String> string;
+  ASSIGN_RETURN_ON_EXCEPTION_VALUE(isolate, string, ToString(isolate),
+                                   Nothing<icu::Formattable>());
+  UErrorCode status = U_ZERO_ERROR;
+  {
+    DisallowGarbageCollection no_gc;
+    const String::FlatContent& flat = string->GetFlatContent(no_gc);
+    int32_t length = static_cast<int32_t>(string->length());
+    if (flat.IsOneByte()) {
+      icu::Formattable result(
+          {reinterpret_cast<const char*>(flat.ToOneByteVector().begin()),
+           length},
+          status);
+      if (U_SUCCESS(status)) return Just(result);
+    } else {
+      icu::Formattable result({string->ToCString().get(), length}, status);
+      if (U_SUCCESS(status)) return Just(result);
+    }
+  }
+  THROW_NEW_ERROR_RETURN_VALUE(isolate,
+                               NewTypeError(MessageTemplate::kIcuError),
+                               Nothing<icu::Formattable>());
+}
+
+namespace {
 bool cmp_NumberFormatSpan(const NumberFormatSpan& a,
                           const NumberFormatSpan& b) {
   // Regions that start earlier should be encountered earlier.
@@ -1844,11 +1908,13 @@ std::vector<NumberFormatSpan> FlattenRegionsToParts(
 }
 
 namespace {
-Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
-                          Handle<JSArray> result, int start_index,
-                          bool style_is_unit, bool is_nan, bool output_source) {
+Maybe<int> ConstructParts(Isolate* isolate,
+                          const icu::FormattedValue& formatted,
+                          DirectHandle<JSArray> result, int start_index,
+                          bool style_is_unit, bool is_nan, bool output_source,
+                          bool output_unit, DirectHandle<String> unit) {
   UErrorCode status = U_ZERO_ERROR;
-  icu::UnicodeString formatted_text = formatted->toString(status);
+  icu::UnicodeString formatted_text = formatted.toString(status);
   if (U_FAILURE(status)) {
     THROW_NEW_ERROR_RETURN_VALUE(
         isolate, NewTypeError(MessageTemplate::kIcuError), Nothing<int>());
@@ -1866,14 +1932,13 @@ Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
   Intl::FormatRangeSourceTracker tracker;
   {
     icu::ConstrainedFieldPosition cfpos;
-    while (formatted->nextPosition(cfpos, status)) {
+    while (formatted.nextPosition(cfpos, status)) {
       int32_t category = cfpos.getCategory();
       int32_t field = cfpos.getField();
       int32_t start = cfpos.getStart();
       int32_t limit = cfpos.getLimit();
       if (category == UFIELD_CATEGORY_NUMBER_RANGE_SPAN) {
         DCHECK_LE(field, 2);
-        DCHECK(FLAG_harmony_intl_number_format_v3);
         tracker.Add(field, start, limit);
       } else {
         regions.push_back(NumberFormatSpan(field, start, limit));
@@ -1885,7 +1950,8 @@ Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
 
   for (auto it = parts.begin(); it < parts.end(); it++) {
     NumberFormatSpan part = *it;
-    Handle<String> field_type_string = isolate->factory()->literal_string();
+    DirectHandle<String> field_type_string =
+        isolate->factory()->literal_string();
     if (part.field_id != -1) {
       if (style_is_unit && static_cast<UNumberFormatFields>(part.field_id) ==
                                UNUM_PERCENT_FIELD) {
@@ -1896,7 +1962,7 @@ Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
             Intl::NumberFieldToType(isolate, part, formatted_text, is_nan);
       }
     }
-    Handle<String> substring;
+    DirectHandle<String> substring;
     ASSIGN_RETURN_ON_EXCEPTION_VALUE(
         isolate, substring,
         Intl::ToString(isolate, formatted_text, part.begin_pos, part.end_pos),
@@ -1909,7 +1975,12 @@ Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
           Intl::SourceString(isolate,
                              tracker.GetSource(part.begin_pos, part.end_pos)));
     } else {
-      Intl::AddElement(isolate, result, index, field_type_string, substring);
+      if (output_unit) {
+        Intl::AddElement(isolate, result, index, field_type_string, substring,
+                         isolate->factory()->unit_string(), unit);
+      } else {
+        Intl::AddElement(isolate, result, index, field_type_string, substring);
+      }
     }
     ++index;
   }
@@ -1917,230 +1988,200 @@ Maybe<int> ConstructParts(Isolate* isolate, icu::FormattedValue* formatted,
   return Just(index);
 }
 
-bool IsPositiveInfinity(Isolate* isolate, Handle<Object> v) {
-  if (v->IsBigInt()) return false;
-  if (v->IsString()) {
-    return isolate->factory()->Infinity_string()->Equals(String::cast(*v));
-  }
-  CHECK(v->IsNumber());
-  double const value_number = v->Number();
-  return std::isinf(value_number) && (value_number > 0.0);
+}  // namespace
+
+Maybe<int> Intl::AddNumberElements(Isolate* isolate,
+                                   const icu::FormattedValue& formatted,
+                                   DirectHandle<JSArray> result,
+                                   int start_index, DirectHandle<String> unit) {
+  return ConstructParts(isolate, formatted, result, start_index, true, false,
+                        false, true, unit);
 }
 
-bool IsNegativeInfinity(Isolate* isolate, Handle<Object> v) {
-  if (v->IsBigInt()) return false;
-  if (v->IsString()) {
-    return isolate->factory()->minus_Infinity_string()->Equals(
-        String::cast(*v));
-  }
-  CHECK(v->IsNumber());
-  double const value_number = v->Number();
-  return std::isinf(value_number) && (value_number < 0.0);
-}
-
-bool IsNegativeZero(Isolate* isolate, Handle<Object> v) {
-  if (v->IsBigInt()) return false;
-  if (v->IsString()) {
-    return isolate->factory()->minus_0()->Equals(String::cast(*v));
-  }
-  CHECK(v->IsNumber());
-  return IsMinusZero(v->Number());
-}
-
-bool LessThan(Isolate* isolate, Handle<Object> a, Handle<Object> b) {
-  Maybe<ComparisonResult> comparison = Object::Compare(isolate, a, b);
-  return comparison.IsJust() &&
-         comparison.FromJust() == ComparisonResult::kLessThan;
-}
-
-bool IsFiniteNonMinusZeroNumberOrBigInt(Isolate* isolate, Handle<Object> v) {
-  return !(IsPositiveInfinity(isolate, v) || IsNegativeInfinity(isolate, v) ||
-           v->IsMinusZero());
-}
+namespace {
 
 // #sec-partitionnumberrangepattern
-template <typename T, MaybeHandle<T> (*F)(
-                          Isolate*, icu::FormattedValue*,
-                          const icu::number::LocalizedNumberFormatter*, bool)>
-MaybeHandle<T> PartitionNumberRangePattern(Isolate* isolate,
-                                           Handle<JSNumberFormat> number_format,
-                                           Handle<Object> x, Handle<Object> y,
-                                           const char* func_name) {
+template <typename T, MaybeDirectHandle<T> (*F)(
+                          Isolate*, const icu::FormattedValue&,
+                          const icu::number::LocalizedNumberFormatter&, bool)>
+MaybeDirectHandle<T> PartitionNumberRangePattern(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format,
+    Handle<Object> start, Handle<Object> end, const char* func_name) {
   Factory* factory = isolate->factory();
+  // 4. Let x be ? ToIntlMathematicalValue(start).
+  IntlMathematicalValue x;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, x, IntlMathematicalValue::From(isolate, start),
+      DirectHandle<T>());
 
-  // 1. If x is NaN or y is NaN, throw a RangeError exception.
-  if (x->IsNaN()) {
+  // 5. Let y be ? ToIntlMathematicalValue(end).
+  IntlMathematicalValue y;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, y, IntlMathematicalValue::From(isolate, end), DirectHandle<T>());
+
+  // 1. If x is not-a-number or y is not-a-number, throw a RangeError exception.
+  if (x.IsNaN()) {
     THROW_NEW_ERROR_RETURN_VALUE(
         isolate,
         NewRangeError(MessageTemplate::kInvalid,
-                      factory->NewStringFromStaticChars("start"), x),
-        MaybeHandle<T>());
+                      factory->NewStringFromStaticChars("start"), start),
+        MaybeDirectHandle<T>());
   }
-  if (y->IsNaN()) {
+  if (y.IsNaN()) {
     THROW_NEW_ERROR_RETURN_VALUE(
         isolate,
         NewRangeError(MessageTemplate::kInvalid,
-                      factory->NewStringFromStaticChars("end"), y),
-        MaybeHandle<T>());
+                      factory->NewStringFromStaticChars("end"), end),
+        MaybeDirectHandle<T>());
   }
 
-  // 2. If x is a mathematical value, then
-  if (IsFiniteNonMinusZeroNumberOrBigInt(isolate, x)) {
-    // a. If y is a mathematical value and y < x, throw a RangeError exception.
-    if (IsFiniteNonMinusZeroNumberOrBigInt(isolate, y) &&
-        LessThan(isolate, y, x)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // b. Else if y is -∞, throw a RangeError exception.
-    if (IsNegativeInfinity(isolate, y)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // c. Else if y is -0 and x ≥ 0, throw a RangeError exception.
-    if (y->IsMinusZero() &&
-        !LessThan(isolate, x, Handle<Object>(Smi::zero(), isolate))) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // 3. Else if x is +∞, then
-  } else if (IsPositiveInfinity(isolate, x)) {
-    // a. If y is a mathematical value, throw a RangeError exception.
-    if (IsFiniteNonMinusZeroNumberOrBigInt(isolate, y)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // b. Else if y is -∞, throw a RangeError exception.
-    if (IsNegativeInfinity(isolate, y)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // c. Else if y is -0, throw a RangeError exception.
-    if (IsNegativeZero(isolate, y)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // 4. Else if x is -0, then
-  } else if (IsNegativeZero(isolate, x)) {
-    // a. If y is a mathematical value and y < 0, throw a RangeError exception.
-    if (IsFiniteNonMinusZeroNumberOrBigInt(isolate, y) &&
-        LessThan(isolate, y, Handle<Object>(Smi::zero(), isolate))) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-    // b. Else if y is -∞, throw a RangeError exception.
-    if (IsNegativeInfinity(isolate, y)) {
-      THROW_NEW_ERROR_RETURN_VALUE(
-          isolate, NewRangeError(MessageTemplate::kInvalid, x, y),
-          MaybeHandle<T>());
-    }
-  }
+  Maybe<icu::number::LocalizedNumberRangeFormatter> maybe_range_formatter =
+      JSNumberFormat::GetRangeFormatter(
+          isolate, number_format->locale(),
+          *number_format->icu_number_formatter()->raw());
+  MAYBE_RETURN(maybe_range_formatter, MaybeDirectHandle<T>());
 
-  Maybe<icu::Formattable> maybe_x = ToFormattable(isolate, x, "start");
-  MAYBE_RETURN(maybe_x, MaybeHandle<T>());
+  icu::number::LocalizedNumberRangeFormatter nrfmt =
+      maybe_range_formatter.FromJust();
 
-  Maybe<icu::Formattable> maybe_y = ToFormattable(isolate, y, "end");
-  MAYBE_RETURN(maybe_y, MaybeHandle<T>());
+  Maybe<icu::number::FormattedNumberRange> maybe_formatted =
+      IntlMathematicalValue::FormatRange(isolate, nrfmt, x, y);
+  MAYBE_RETURN(maybe_formatted, DirectHandle<T>());
+  icu::number::FormattedNumberRange formatted =
+      std::move(maybe_formatted).FromJust();
 
-  icu::number::LocalizedNumberRangeFormatter* nrfmt =
-      number_format->icu_number_range_formatter().raw();
-  CHECK_NOT_NULL(nrfmt);
-  UErrorCode status = U_ZERO_ERROR;
-  icu::number::FormattedNumberRange formatted = nrfmt->formatFormattableRange(
-      maybe_x.FromJust(), maybe_y.FromJust(), status);
-  if (U_FAILURE(status)) {
-    THROW_NEW_ERROR_RETURN_VALUE(
-        isolate, NewTypeError(MessageTemplate::kIcuError), MaybeHandle<T>());
-  }
-
-  return F(isolate, &formatted, number_format->icu_number_formatter().raw(),
+  return F(isolate, formatted, *(number_format->icu_number_formatter()->raw()),
            false /* is_nan */);
 }
 
-MaybeHandle<String> FormatToString(Isolate* isolate,
-                                   icu::FormattedValue* formatted,
-                                   const icu::number::LocalizedNumberFormatter*,
-                                   bool) {
+MaybeDirectHandle<String> FormatToString(
+    Isolate* isolate, const icu::FormattedValue& formatted,
+    const icu::number::LocalizedNumberFormatter&, bool) {
   UErrorCode status = U_ZERO_ERROR;
-  icu::UnicodeString result = formatted->toString(status);
+  icu::UnicodeString result = formatted.toString(status);
   if (U_FAILURE(status)) {
-    THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kIcuError), String);
+    THROW_NEW_ERROR(isolate, NewTypeError(MessageTemplate::kIcuError));
   }
   return Intl::ToString(isolate, result);
 }
 
-MaybeHandle<JSArray> FormatToJSArray(
-    Isolate* isolate, icu::FormattedValue* formatted,
-    const icu::number::LocalizedNumberFormatter* nfmt, bool is_nan,
+MaybeDirectHandle<JSArray> FormatToJSArray(
+    Isolate* isolate, const icu::FormattedValue& formatted,
+    const icu::number::LocalizedNumberFormatter& nfmt, bool is_nan,
     bool output_source) {
   UErrorCode status = U_ZERO_ERROR;
-  bool is_unit = Style::UNIT == StyleFromSkeleton(nfmt->toSkeleton(status));
+  bool is_unit = Style::UNIT == StyleFromSkeleton(nfmt.toSkeleton(status));
   CHECK(U_SUCCESS(status));
 
   Factory* factory = isolate->factory();
-  Handle<JSArray> result = factory->NewJSArray(0);
-  Maybe<int> maybe_format_to_parts = ConstructParts(
-      isolate, formatted, result, 0, is_unit, is_nan, output_source);
-  MAYBE_RETURN(maybe_format_to_parts, Handle<JSArray>());
+  DirectHandle<JSArray> result = factory->NewJSArray(0);
+
+  int format_to_parts;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, format_to_parts,
+      ConstructParts(isolate, formatted, result, 0, is_unit, is_nan,
+                     output_source, false, DirectHandle<String>()),
+      DirectHandle<JSArray>());
+  USE(format_to_parts);
+
   return result;
 }
 
-MaybeHandle<JSArray> FormatRangeToJSArray(
-    Isolate* isolate, icu::FormattedValue* formatted,
-    const icu::number::LocalizedNumberFormatter* nfmt, bool is_nan) {
+MaybeDirectHandle<JSArray> FormatRangeToJSArray(
+    Isolate* isolate, const icu::FormattedValue& formatted,
+    const icu::number::LocalizedNumberFormatter& nfmt, bool is_nan) {
   return FormatToJSArray(isolate, formatted, nfmt, is_nan, true);
 }
 
 }  // namespace
 
-MaybeHandle<String> JSNumberFormat::FormatNumeric(
+Maybe<icu::number::LocalizedNumberRangeFormatter>
+JSNumberFormat::GetRangeFormatter(
+    Isolate* isolate, Tagged<String> locale,
+    const icu::number::LocalizedNumberFormatter& number_formatter) {
+  UErrorCode status = U_ZERO_ERROR;
+  UParseError perror;
+  icu::number::LocalizedNumberRangeFormatter range_formatter =
+      icu::number::UnlocalizedNumberRangeFormatter()
+          .numberFormatterBoth(icu::number::NumberFormatter::forSkeleton(
+              number_formatter.toSkeleton(status), perror, status))
+          .locale(
+              icu::Locale::forLanguageTag(locale->ToCString().get(), status));
+  if (U_FAILURE(status)) {
+    THROW_NEW_ERROR_RETURN_VALUE(
+        isolate, NewTypeError(MessageTemplate::kIcuError),
+        Nothing<icu::number::LocalizedNumberRangeFormatter>());
+  }
+  return Just(range_formatter);
+}
+
+MaybeDirectHandle<String> JSNumberFormat::FormatNumeric(
     Isolate* isolate,
     const icu::number::LocalizedNumberFormatter& number_format,
     Handle<Object> numeric_obj) {
-  DCHECK(numeric_obj->IsNumeric() || FLAG_harmony_intl_number_format_v3);
+  Maybe<icu::number::FormattedNumber> maybe_format =
+      IcuFormatNumber(isolate, number_format, numeric_obj);
+  MAYBE_RETURN(maybe_format, DirectHandle<String>());
+  icu::number::FormattedNumber formatted = std::move(maybe_format).FromJust();
 
-  icu::number::FormattedNumber formatted;
-  Maybe<bool> maybe_format =
-      IcuFormatNumber(isolate, number_format, numeric_obj, &formatted);
-  MAYBE_RETURN(maybe_format, Handle<String>());
-
-  return FormatToString(isolate, &formatted, &number_format,
-                        numeric_obj->IsNaN());
+  return FormatToString(isolate, formatted, number_format, IsNaN(*numeric_obj));
 }
 
-MaybeHandle<JSArray> JSNumberFormat::FormatToParts(
-    Isolate* isolate, Handle<JSNumberFormat> number_format,
-    Handle<Object> numeric_obj) {
-  CHECK(numeric_obj->IsNumeric() || FLAG_harmony_intl_number_format_v3);
+MaybeDirectHandle<String> JSNumberFormat::NumberFormatFunction(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format,
+    Handle<Object> value) {
   icu::number::LocalizedNumberFormatter* fmt =
-      number_format->icu_number_formatter().raw();
+      number_format->icu_number_formatter()->raw();
   CHECK_NOT_NULL(fmt);
 
-  icu::number::FormattedNumber formatted;
-  Maybe<bool> maybe_format =
-      IcuFormatNumber(isolate, *fmt, numeric_obj, &formatted);
-  MAYBE_RETURN(maybe_format, Handle<JSArray>());
+  // 4. Let x be ? ToIntlMathematicalValue(value).
+  IntlMathematicalValue x;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, x, IntlMathematicalValue::From(isolate, value),
+      DirectHandle<String>());
 
-  return FormatToJSArray(isolate, &formatted, fmt, numeric_obj->IsNaN(), false);
+  // 5. Return FormatNumeric(nf, x).
+  Maybe<icu::number::FormattedNumber> maybe_formatted =
+      IntlMathematicalValue::FormatNumeric(isolate, *fmt, x);
+  MAYBE_RETURN(maybe_formatted, DirectHandle<String>());
+  icu::number::FormattedNumber formatted =
+      std::move(maybe_formatted).FromJust();
+
+  return FormatToString(isolate, formatted, *fmt, x.IsNaN());
 }
 
-MaybeHandle<String> JSNumberFormat::FormatNumericRange(
-    Isolate* isolate, Handle<JSNumberFormat> number_format,
+MaybeDirectHandle<JSArray> JSNumberFormat::FormatToParts(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format,
+    Handle<Object> numeric_obj) {
+  icu::number::LocalizedNumberFormatter* fmt =
+      number_format->icu_number_formatter()->raw();
+  DCHECK_NOT_NULL(fmt);
+  IntlMathematicalValue value;
+  MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      isolate, value, IntlMathematicalValue::From(isolate, numeric_obj),
+      DirectHandle<JSArray>());
+
+  Maybe<icu::number::FormattedNumber> maybe_formatted =
+      IntlMathematicalValue::FormatNumeric(isolate, *fmt, value);
+  MAYBE_RETURN(maybe_formatted, DirectHandle<JSArray>());
+  icu::number::FormattedNumber formatted =
+      std::move(maybe_formatted).FromJust();
+
+  return FormatToJSArray(isolate, formatted, *fmt, value.IsNaN(), false);
+}
+
+// #sec-number-format-functions
+
+MaybeDirectHandle<String> JSNumberFormat::FormatNumericRange(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format,
     Handle<Object> x_obj, Handle<Object> y_obj) {
   return PartitionNumberRangePattern<String, FormatToString>(
       isolate, number_format, x_obj, y_obj,
       "Intl.NumberFormat.prototype.formatRange");
 }
 
-MaybeHandle<JSArray> JSNumberFormat::FormatNumericRangeToParts(
-    Isolate* isolate, Handle<JSNumberFormat> number_format,
+MaybeDirectHandle<JSArray> JSNumberFormat::FormatNumericRangeToParts(
+    Isolate* isolate, DirectHandle<JSNumberFormat> number_format,
     Handle<Object> x_obj, Handle<Object> y_obj) {
   return PartitionNumberRangePattern<JSArray, FormatRangeToJSArray>(
       isolate, number_format, x_obj, y_obj,

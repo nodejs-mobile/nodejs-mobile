@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_OBJECTS_JS_NUMBER_FORMAT_INL_H_
+#define V8_OBJECTS_JS_NUMBER_FORMAT_INL_H_
+
 #ifndef V8_INTL_SUPPORT
 #error Internationalization is expected to be enabled.
 #endif  // V8_INTL_SUPPORT
 
-#ifndef V8_OBJECTS_JS_NUMBER_FORMAT_INL_H_
-#define V8_OBJECTS_JS_NUMBER_FORMAT_INL_H_
-
 #include "src/objects/js-number-format.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/objects/objects-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -23,11 +25,8 @@ namespace internal {
 TQ_OBJECT_CONSTRUCTORS_IMPL(JSNumberFormat)
 
 ACCESSORS(JSNumberFormat, icu_number_formatter,
-          Managed<icu::number::LocalizedNumberFormatter>,
+          Tagged<Managed<icu::number::LocalizedNumberFormatter>>,
           kIcuNumberFormatterOffset)
-ACCESSORS(JSNumberFormat, icu_number_range_formatter,
-          Managed<icu::number::LocalizedNumberRangeFormatter>,
-          kIcuNumberRangeFormatterOffset)
 
 }  // namespace internal
 }  // namespace v8

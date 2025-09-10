@@ -49,15 +49,15 @@ void* Zone::AsanNew(size_t size) {
   size = RoundUp(size, kAlignmentInBytes);
 
   // Check if the requested size is available without expanding.
-  Address result = position_;
-
   const size_t size_with_redzone = size + kASanRedzoneBytes;
   DCHECK_LE(position_, limit_);
-  if (size_with_redzone > limit_ - position_) {
-    result = NewExpand(size_with_redzone);
-  } else {
-    position_ += size_with_redzone;
+  if (V8_UNLIKELY(size_with_redzone > limit_ - position_)) {
+    Expand(size_with_redzone);
   }
+  DCHECK_LE(size_with_redzone, limit_ - position_);
+
+  Address result = position_;
+  position_ += size_with_redzone;
 
   Address redzone_position = result + size;
   DCHECK_EQ(redzone_position + kASanRedzoneBytes, position_);
@@ -83,7 +83,7 @@ void Zone::Reset() {
   DeleteAll();
   allocator_->TraceZoneCreation(this);
 
-  // Un-poison the kept segment content so we can zap and re-use it.
+  // Un-poison the kept segment content so we can zap and reuse it.
   ASAN_UNPOISON_MEMORY_REGION(reinterpret_cast<void*>(keep->start()),
                               keep->capacity());
   keep->ZapContents();
@@ -94,6 +94,21 @@ void Zone::Reset() {
   DCHECK_LT(allocation_size(), kAlignmentInBytes);
   DCHECK_EQ(segment_bytes_allocated_, keep->total_size());
 }
+
+#ifdef DEBUG
+bool Zone::Contains(const void* ptr) const {
+  Address address = reinterpret_cast<Address>(ptr);
+  for (Segment* segment = segment_head_; segment != nullptr;
+       segment = segment->next()) {
+    if (address >= segment->start() && address < segment->end()) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
+ZoneSnapshot Zone::Snapshot() const { return ZoneSnapshot{this}; }
 
 void Zone::DeleteAll() {
   Segment* current = segment_head_;
@@ -122,13 +137,13 @@ void Zone::DeleteAll() {
 }
 
 void Zone::ReleaseSegment(Segment* segment) {
-  // Un-poison the segment content so we can re-use or zap it later.
+  // Un-poison the segment content so we can reuse or zap it later.
   ASAN_UNPOISON_MEMORY_REGION(reinterpret_cast<void*>(segment->start()),
                               segment->capacity());
   allocator_->ReturnSegment(segment, supports_compression());
 }
 
-Address Zone::NewExpand(size_t size) {
+void Zone::Expand(size_t size) {
   // Make sure the requested size is already properly aligned and that
   // there isn't enough room in the Zone to satisfy the request.
   DCHECK_EQ(size, RoundDown(size, kAlignmentInBytes));
@@ -178,19 +193,14 @@ Address Zone::NewExpand(size_t size) {
   allocator_->TraceAllocateSegment(segment);
 
   // Recompute 'top' and 'limit' based on the new segment.
-  Address result = RoundUp(segment->start(), kAlignmentInBytes);
-  position_ = result + size;
-  // Check for address overflow.
-  // (Should not happen since the segment is guaranteed to accommodate
-  // size bytes + header and alignment padding)
-  DCHECK(position_ >= result);
+  position_ = RoundUp(segment->start(), kAlignmentInBytes);
   limit_ = segment->end();
-  DCHECK(position_ <= limit_);
-  return result;
+  DCHECK_LE(position_, limit_);
+  DCHECK_LE(size, limit_ - position_);
 }
 
-ZoneScope::ZoneScope(Zone* zone)
-    : zone_(zone),
+ZoneSnapshot::ZoneSnapshot(const Zone* zone)
+    :
 #ifdef V8_ENABLE_PRECISE_ZONE_STATS
       allocation_size_for_tracing_(zone->allocation_size_for_tracing_),
       freed_size_for_tracing_(zone->freed_size_for_tracing_),
@@ -202,16 +212,19 @@ ZoneScope::ZoneScope(Zone* zone)
       segment_head_(zone->segment_head_) {
 }
 
-ZoneScope::~ZoneScope() {
+void ZoneSnapshot::Restore(Zone* zone) const {
   // Release segments up to the stored segment_head_.
-  Segment* current = zone_->segment_head_;
+  Segment* current = zone->segment_head_;
   while (current != segment_head_) {
+    // If this check failed, then either you passed a wrong zone, or the zone
+    // was reset to an earlier snapshot already. We cannot move forward again.
+    CHECK_NOT_NULL(current);
     Segment* next = current->next();
-    zone_->ReleaseSegment(current);
+    zone->ReleaseSegment(current);
     current = next;
   }
 
-  // Un-poison the trailing segment content so we can re-use or zap it later.
+  // Un-poison the trailing segment content so we can reuse or zap it later.
   if (segment_head_ != nullptr) {
     void* const start = reinterpret_cast<void*>(position_);
     DCHECK_GE(start, reinterpret_cast<void*>(current->start()));
@@ -221,14 +234,14 @@ ZoneScope::~ZoneScope() {
   }
 
   // Reset the Zone to the stored state.
-  zone_->allocation_size_ = allocation_size_;
-  zone_->segment_bytes_allocated_ = segment_bytes_allocated_;
-  zone_->position_ = position_;
-  zone_->limit_ = limit_;
-  zone_->segment_head_ = segment_head_;
+  zone->allocation_size_ = allocation_size_;
+  zone->segment_bytes_allocated_ = segment_bytes_allocated_;
+  zone->position_ = position_;
+  zone->limit_ = limit_;
+  zone->segment_head_ = segment_head_;
 #ifdef V8_ENABLE_PRECISE_ZONE_STATS
-  zone_->allocation_size_for_tracing_ = allocation_size_for_tracing_;
-  zone_->freed_size_for_tracing_ = freed_size_for_tracing_;
+  zone->allocation_size_for_tracing_ = allocation_size_for_tracing_;
+  zone->freed_size_for_tracing_ = freed_size_for_tracing_;
 #endif
 }
 

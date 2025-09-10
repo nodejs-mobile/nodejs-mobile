@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
 #include "src/base/platform/platform.h"
 #include "src/objects/backing-store.h"
 #include "test/unittests/test-utils.h"
@@ -13,14 +15,14 @@ namespace internal {
 class BackingStoreTest : public TestWithIsolate {};
 
 TEST_F(BackingStoreTest, GrowWasmMemoryInPlace) {
-  auto backing_store =
-      BackingStore::AllocateWasmMemory(isolate(), 1, 2, SharedFlag::kNotShared);
+  auto backing_store = BackingStore::AllocateWasmMemory(
+      isolate(), 1, 2, WasmMemoryFlag::kWasmMemory32, SharedFlag::kNotShared);
   CHECK(backing_store);
   EXPECT_TRUE(backing_store->is_wasm_memory());
   EXPECT_EQ(1 * wasm::kWasmPageSize, backing_store->byte_length());
   EXPECT_EQ(2 * wasm::kWasmPageSize, backing_store->byte_capacity());
 
-  base::Optional<size_t> result =
+  std::optional<size_t> result =
       backing_store->GrowWasmMemoryInPlace(isolate(), 1, 2);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(result.value(), 1u);
@@ -28,28 +30,28 @@ TEST_F(BackingStoreTest, GrowWasmMemoryInPlace) {
 }
 
 TEST_F(BackingStoreTest, GrowWasmMemoryInPlace_neg) {
-  auto backing_store =
-      BackingStore::AllocateWasmMemory(isolate(), 1, 2, SharedFlag::kNotShared);
+  auto backing_store = BackingStore::AllocateWasmMemory(
+      isolate(), 1, 2, WasmMemoryFlag::kWasmMemory32, SharedFlag::kNotShared);
   CHECK(backing_store);
   EXPECT_TRUE(backing_store->is_wasm_memory());
   EXPECT_EQ(1 * wasm::kWasmPageSize, backing_store->byte_length());
   EXPECT_EQ(2 * wasm::kWasmPageSize, backing_store->byte_capacity());
 
-  base::Optional<size_t> result =
+  std::optional<size_t> result =
       backing_store->GrowWasmMemoryInPlace(isolate(), 2, 2);
   EXPECT_FALSE(result.has_value());
   EXPECT_EQ(1 * wasm::kWasmPageSize, backing_store->byte_length());
 }
 
 TEST_F(BackingStoreTest, GrowSharedWasmMemoryInPlace) {
-  auto backing_store =
-      BackingStore::AllocateWasmMemory(isolate(), 2, 3, SharedFlag::kShared);
+  auto backing_store = BackingStore::AllocateWasmMemory(
+      isolate(), 2, 3, WasmMemoryFlag::kWasmMemory32, SharedFlag::kShared);
   CHECK(backing_store);
   EXPECT_TRUE(backing_store->is_wasm_memory());
   EXPECT_EQ(2 * wasm::kWasmPageSize, backing_store->byte_length());
   EXPECT_EQ(3 * wasm::kWasmPageSize, backing_store->byte_capacity());
 
-  base::Optional<size_t> result =
+  std::optional<size_t> result =
       backing_store->GrowWasmMemoryInPlace(isolate(), 1, 3);
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(result.value(), 2u);
@@ -57,14 +59,15 @@ TEST_F(BackingStoreTest, GrowSharedWasmMemoryInPlace) {
 }
 
 TEST_F(BackingStoreTest, CopyWasmMemory) {
-  auto bs1 =
-      BackingStore::AllocateWasmMemory(isolate(), 1, 2, SharedFlag::kNotShared);
+  auto bs1 = BackingStore::AllocateWasmMemory(
+      isolate(), 1, 2, WasmMemoryFlag::kWasmMemory32, SharedFlag::kNotShared);
   CHECK(bs1);
   EXPECT_TRUE(bs1->is_wasm_memory());
   EXPECT_EQ(1 * wasm::kWasmPageSize, bs1->byte_length());
   EXPECT_EQ(2 * wasm::kWasmPageSize, bs1->byte_capacity());
 
-  auto bs2 = bs1->CopyWasmMemory(isolate(), 3, 3);
+  auto bs2 =
+      bs1->CopyWasmMemory(isolate(), 3, 3, WasmMemoryFlag::kWasmMemory32);
   EXPECT_TRUE(bs2->is_wasm_memory());
   EXPECT_EQ(3 * wasm::kWasmPageSize, bs2->byte_length());
   EXPECT_EQ(3 * wasm::kWasmPageSize, bs2->byte_capacity());
@@ -85,7 +88,7 @@ class GrowerThread : public base::Thread {
     while (true) {
       size_t current_length = backing_store_->byte_length();
       if (current_length >= max_length) break;
-      base::Optional<size_t> result =
+      std::optional<size_t> result =
           backing_store_->GrowWasmMemoryInPlace(isolate_, increment_, max_);
       size_t new_length = backing_store_->byte_length();
       if (result.has_value()) {
@@ -111,6 +114,7 @@ TEST_F(BackingStoreTest, RacyGrowWasmMemoryInPlace) {
 
   std::shared_ptr<BackingStore> backing_store =
       BackingStore::AllocateWasmMemory(isolate(), 0, kMaxPages,
+                                       WasmMemoryFlag::kWasmMemory32,
                                        SharedFlag::kShared);
 
   for (int i = 0; i < kNumThreads; i++) {

@@ -29,7 +29,7 @@ To use Valgrind:
 It is an optional package in most cases and must be installed explicitly.
 For example on Debian/Ubuntu:
 
-```console
+```bash
 apt-get install valgrind
 ```
 
@@ -37,7 +37,7 @@ apt-get install valgrind
 
 The simplest invocation of Valgrind is:
 
-```console
+```bash
 valgrind node test.js
 ```
 
@@ -433,7 +433,7 @@ follow cover the steps needed to enable debug symbols to get more info.
 To enable debug symbols for all of your addons that are compiled on
 install use:
 
-```console
+```bash
 npm install --debug
 ```
 
@@ -443,7 +443,7 @@ results in the addons being compiled with the debug option.
 If the native addon contains pre-built binaries you will need to force
 a rebuild.
 
-```console
+```bash
 npm install --debug
 npm rebuild
 ```
@@ -456,8 +456,8 @@ line number:
 ==18481== 997,000 bytes in 997 blocks are definitely lost in loss record 35 of 35
 ==18481==    at 0x4C2FB0F: malloc (in /usr/lib/valgrind/vgpreload_memcheck-amd64-linux.so)
 >>>>> ==18481==    by 0x9794989: Method(napi_env__*, napi_callback_info__*) (hello.cc:13)  <<<<<
-==18481==    by 0x98F764: v8impl::(anonymous namespace)::FunctionCallbackWrapper::Invoke(v8::FunctionCallbackInfo<v8::Value> const&) (in /home/user1/val  grind/node-v12.14.1-linux-x64/bin/node)
-==18481==    by 0xBA6FC8: v8::internal::MaybeHandle<v8::internal::Object> v8::internal::(anonymous namespace)::HandleApiCallHelper<false>(v8::internal::  Isolate*, v8::internal::Handle<v8::internal::HeapObject>, v8::internal::Handle<v8::internal::HeapObject>, v8::internal::Handle<v8::internal::FunctionTem  plateInfo>, v8::internal::Handle<v8::internal::Object>, v8::internal::BuiltinArguments) (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
+==18481==    by 0x98F764: v8impl::(anonymous namespace)::FunctionCallbackWrapper::Invoke(v8::FunctionCallbackInfo<v8::Value> const&) (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
+==18481==    by 0xBA6FC8: v8::internal::MaybeHandle<v8::internal::Object> v8::internal::(anonymous namespace)::HandleApiCallHelper<false>(v8::internal::  Isolate*, v8::internal::Handle<v8::internal::HeapObject>, v8::internal::Handle<v8::internal::HeapObject>, v8::internal::Handle<v8::internal::FunctionTemplateInfo>, v8::internal::Handle<v8::internal::Object>, v8::internal::BuiltinArguments) (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
 ==18481==    by 0xBA8DB6: v8::internal::Builtin_HandleApiCall(int, unsigned long*, v8::internal::Isolate*) (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
 ==18481==    by 0x1376358: ??? (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
 ==18481==    by 0x12F68A3: ??? (in /home/user1/valgrind/node-v12.14.1-linux-x64/bin/node)
@@ -517,7 +517,7 @@ To get additional information with Valgrind:
 * Check out the Node.js source corresponding to the release that you
   want to debug. For example:
 
-```console
+```bash
 git clone https://github.com/nodejs/node.git
 git checkout v12.14.1
 ```
@@ -526,7 +526,7 @@ git checkout v12.14.1
   [building a debug build](https://github.com/nodejs/node/blob/v12.14.1/BUILDING.md#building-a-debug-build)).
   For example, on \*nix:
 
-```console
+```bash
 ./configure --debug
 make -j4
 ```

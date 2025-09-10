@@ -13,7 +13,7 @@ const path = require('path');
 {
   const scriptFullPath = fixtures.path('debugger', 'three-lines.js');
   const script = path.relative(process.cwd(), scriptFullPath);
-  const cli = startCLI(['--port=0', script]);
+  const cli = startCLI([script]);
 
   function onFatal(error) {
     cli.quit();
@@ -25,7 +25,7 @@ const path = require('path');
     .then(() => cli.stepCommand('n'))
     .then(() => {
       assert.ok(
-        cli.output.includes(`break in ${script}:2`),
+        cli.output.includes(`step in ${script}:2`),
         'steps to the 2nd line'
       );
     })

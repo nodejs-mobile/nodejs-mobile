@@ -31,7 +31,7 @@ static const char* kHeader =
     "# yapf: disable\n\n";
 
 // Debug builds emit debug code, affecting code object sizes.
-#ifndef DEBUG
+#if !defined(DEBUG) && defined(V8_ENABLE_SANDBOX)
 static const char* kBuild = "shipping";
 #else
 static const char* kBuild = "non-shipping";
@@ -45,7 +45,7 @@ class MockArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
 };
 
 static void DumpKnownMap(FILE* out, i::Heap* heap, const char* space_name,
-                         i::HeapObject object) {
+                         i::Tagged<i::HeapObject> object) {
 #define RO_ROOT_LIST_CASE(type, name, CamelName) \
   if (root_name == nullptr && object == roots.name()) root_name = #CamelName;
 #define MUTABLE_ROOT_LIST_CASE(type, name, CamelName) \
@@ -53,38 +53,38 @@ static void DumpKnownMap(FILE* out, i::Heap* heap, const char* space_name,
 
   i::ReadOnlyRoots roots(heap);
   const char* root_name = nullptr;
-  i::Map map = i::Map::cast(object);
+  i::Tagged<i::Map> map = i::Cast<i::Map>(object);
   intptr_t root_ptr =
-      static_cast<intptr_t>(map.ptr()) & (i::Page::kPageSize - 1);
+      static_cast<intptr_t>(map.ptr()) & (i::PageMetadata::kPageSize - 1);
 
   READ_ONLY_ROOT_LIST(RO_ROOT_LIST_CASE)
   MUTABLE_ROOT_LIST(MUTABLE_ROOT_LIST_CASE)
 
   if (root_name == nullptr) return;
   i::PrintF(out, "    (\"%s\", 0x%05" V8PRIxPTR "): (%d, \"%s\"),\n",
-            space_name, root_ptr, map.instance_type(), root_name);
+            space_name, root_ptr, map->instance_type(), root_name);
 
 #undef MUTABLE_ROOT_LIST_CASE
 #undef RO_ROOT_LIST_CASE
 }
 
 static void DumpKnownObject(FILE* out, i::Heap* heap, const char* space_name,
-                            i::HeapObject object) {
-#define RO_ROOT_LIST_CASE(type, name, CamelName)        \
-  if (root_name == nullptr && object == roots.name()) { \
-    root_name = #CamelName;                             \
-    root_index = i::RootIndex::k##CamelName;            \
+                            i::Tagged<i::HeapObject> object) {
+#define RO_ROOT_LIST_CASE(type, name, CamelName)                 \
+  if (root_name == nullptr && object.SafeEquals(roots.name())) { \
+    root_name = #CamelName;                                      \
+    root_index = i::RootIndex::k##CamelName;                     \
   }
-#define ROOT_LIST_CASE(type, name, CamelName)           \
-  if (root_name == nullptr && object == heap->name()) { \
-    root_name = #CamelName;                             \
-    root_index = i::RootIndex::k##CamelName;            \
+#define ROOT_LIST_CASE(type, name, CamelName)                    \
+  if (root_name == nullptr && object.SafeEquals(heap->name())) { \
+    root_name = #CamelName;                                      \
+    root_index = i::RootIndex::k##CamelName;                     \
   }
 
   i::ReadOnlyRoots roots(heap);
   const char* root_name = nullptr;
   i::RootIndex root_index = i::RootIndex::kFirstSmiRoot;
-  intptr_t root_ptr = object.ptr() & (i::Page::kPageSize - 1);
+  intptr_t root_ptr = object.ptr() & (i::PageMetadata::kPageSize - 1);
 
   STRONG_READ_ONLY_ROOT_LIST(RO_ROOT_LIST_CASE)
   MUTABLE_ROOT_LIST(ROOT_LIST_CASE)
@@ -101,8 +101,9 @@ static void DumpKnownObject(FILE* out, i::Heap* heap, const char* space_name,
 
 static void DumpSpaceFirstPageAddress(FILE* out, i::BaseSpace* space,
                                       i::Address first_page) {
-  const char* name = space->name();
-  i::Tagged_t compressed = i::CompressTagged(first_page);
+  const char* name = i::ToString(space->identity());
+  i::Tagged_t compressed =
+      i::V8HeapCompressionScheme::CompressObject(first_page);
   uintptr_t unsigned_compressed = static_cast<uint32_t>(compressed);
   i::PrintF(out, "  0x%08" V8PRIxPTR ": \"%s\",\n", unsigned_compressed, name);
 }
@@ -117,11 +118,6 @@ static int DumpHeapConstants(FILE* out, const char* argv0) {
   // Start up V8.
   std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();
   v8::V8::InitializePlatform(platform.get());
-#ifdef V8_SANDBOX
-  if (!v8::V8::InitializeSandbox()) {
-    FATAL("Could not initialize the sandbox");
-  }
-#endif
   v8::V8::Initialize();
   v8::V8::InitializeExternalStartupData(argv0);
   Isolate::CreateParams create_params;
@@ -131,7 +127,7 @@ static int DumpHeapConstants(FILE* out, const char* argv0) {
   {
     Isolate::Scope scope(isolate);
     i::Heap* heap = reinterpret_cast<i::Isolate*>(isolate)->heap();
-    i::SafepointScope safepoint_scope(heap);
+    i::IsolateSafepointScope safepoint_scope(heap);
     i::ReadOnlyHeap* read_only_heap =
         reinterpret_cast<i::Isolate*>(isolate)->read_only_heap();
     i::PrintF(out, "%s", kHeader);
@@ -146,19 +142,18 @@ static int DumpHeapConstants(FILE* out, const char* argv0) {
       i::PrintF(out, "\n# List of known V8 maps.\n");
       i::PrintF(out, "KNOWN_MAPS = {\n");
       i::ReadOnlyHeapObjectIterator ro_iterator(read_only_heap);
-      for (i::HeapObject object = ro_iterator.Next(); !object.is_null();
-           object = ro_iterator.Next()) {
-        if (!object.IsMap()) continue;
-        DumpKnownMap(out, heap, i::BaseSpace::GetSpaceName(i::RO_SPACE),
-                     object);
+      for (i::Tagged<i::HeapObject> object = ro_iterator.Next();
+           !object.is_null(); object = ro_iterator.Next()) {
+        if (!IsMap(object)) continue;
+        DumpKnownMap(out, heap, i::ToString(i::RO_SPACE), object);
       }
 
-      i::PagedSpace* space_for_maps = heap->space_for_maps();
-      i::PagedSpaceObjectIterator iterator(heap, space_for_maps);
-      for (i::HeapObject object = iterator.Next(); !object.is_null();
+      i::PagedSpaceObjectIterator iterator(heap, heap->old_space());
+      for (i::Tagged<i::HeapObject> object = iterator.Next(); !object.is_null();
            object = iterator.Next()) {
-        if (!object.IsMap()) continue;
-        DumpKnownMap(out, heap, space_for_maps->name(), object);
+        if (!IsMap(object)) continue;
+        DumpKnownMap(out, heap, i::ToString(heap->old_space()->identity()),
+                     object);
       }
       i::PrintF(out, "}\n");
     }
@@ -168,22 +163,21 @@ static int DumpHeapConstants(FILE* out, const char* argv0) {
       i::PrintF(out, "\n# List of known V8 objects.\n");
       i::PrintF(out, "KNOWN_OBJECTS = {\n");
       i::ReadOnlyHeapObjectIterator ro_iterator(read_only_heap);
-      for (i::HeapObject object = ro_iterator.Next(); !object.is_null();
-           object = ro_iterator.Next()) {
+      for (i::Tagged<i::HeapObject> object = ro_iterator.Next();
+           !object.is_null(); object = ro_iterator.Next()) {
         // Skip read-only heap maps, they will be reported elsewhere.
-        if (object.IsMap()) continue;
-        DumpKnownObject(out, heap, i::BaseSpace::GetSpaceName(i::RO_SPACE),
-                        object);
+        if (IsMap(object)) continue;
+        DumpKnownObject(out, heap, i::ToString(i::RO_SPACE), object);
       }
 
       i::PagedSpaceIterator spit(heap);
       for (i::PagedSpace* s = spit.Next(); s != nullptr; s = spit.Next()) {
         i::PagedSpaceObjectIterator it(heap, s);
         // Code objects are generally platform-dependent.
-        if (s->identity() == i::CODE_SPACE || s->identity() == i::MAP_SPACE)
-          continue;
-        const char* sname = s->name();
-        for (i::HeapObject o = it.Next(); !o.is_null(); o = it.Next()) {
+        if (s->identity() == i::CODE_SPACE) continue;
+        const char* sname = i::ToString(s->identity());
+        for (i::Tagged<i::HeapObject> o = it.Next(); !o.is_null();
+             o = it.Next()) {
           DumpKnownObject(out, heap, sname, o);
         }
       }
@@ -205,6 +199,11 @@ static int DumpHeapConstants(FILE* out, const char* argv0) {
       for (i::PagedSpace* s = it.Next(); s != nullptr; s = it.Next()) {
         // Code page is different on Windows vs Linux (bug v8:9844), so skip it.
         if (s->identity() == i::CODE_SPACE) {
+          continue;
+        }
+        // Trusted space is allocated in a different part of the address space,
+        // so skip it as well.
+        if (s->identity() == i::TRUSTED_SPACE) {
           continue;
         }
         DumpSpaceFirstPageAddress(out, s);

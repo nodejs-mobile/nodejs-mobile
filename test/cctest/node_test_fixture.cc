@@ -1,4 +1,5 @@
 #include "node_test_fixture.h"
+#include "absl/synchronization/mutex.h"
 #include "cppgc/platform.h"
 
 ArrayBufferUniquePtr NodeZeroIsolateTestFixture::allocator{nullptr, nullptr};
@@ -20,15 +21,23 @@ void NodeTestEnvironment::SetUp() {
   NodeZeroIsolateTestFixture::platform.reset(
       new node::NodePlatform(kV8ThreadPoolSize, tracing_controller));
   v8::V8::InitializePlatform(NodeZeroIsolateTestFixture::platform.get());
-#ifdef V8_SANDBOX
-  ASSERT_TRUE(v8::V8::InitializeSandbox());
-#endif
   cppgc::InitializeProcess(
       NodeZeroIsolateTestFixture::platform->GetPageAllocator());
+
+  // Before initializing V8, disable the --freeze-flags-after-init flag, so
+  // individual tests can set their own flags.
+  v8::V8::SetFlagsFromString("--no-freeze-flags-after-init");
+
   v8::V8::Initialize();
+
+  // Disable absl deadlock detection in V8 as it reports false-positive cases.
+  // TODO(legendecas): Replace this global disablement with case suppressions.
+  // https://github.com/nodejs/node-v8/issues/301
+  absl::SetMutexDeadlockDetectionMode(absl::OnDeadlockCycle::kIgnore);
 }
 
 void NodeTestEnvironment::TearDown() {
+  cppgc::ShutdownProcess();
   v8::V8::Dispose();
   v8::V8::DisposePlatform();
   NodeZeroIsolateTestFixture::platform->Shutdown();

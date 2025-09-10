@@ -24,7 +24,47 @@ static_assert(static_cast<int>(NM_F_LINKED) ==
                   static_cast<int>(node::ModuleFlags::kLinked),
               "NM_F_LINKED != node::ModuleFlags::kLinked");
 
-#define NODE_BINDINGS_WITH_PER_ISOLATE_INIT(V) V(builtins)
+#if NODE_HAVE_I18N_SUPPORT
+#define NODE_BUILTIN_ICU_BINDINGS(V) V(icu)
+#else
+#define NODE_BUILTIN_ICU_BINDINGS(V)
+#endif
+
+#if HAVE_OPENSSL && NODE_OPENSSL_HAS_QUIC
+#define NODE_BUILTIN_QUIC_BINDINGS(V) V(quic)
+#else
+#define NODE_BUILTIN_QUIC_BINDINGS(V)
+#endif
+
+#if HAVE_SQLITE
+#define NODE_BUILTIN_SQLITE_BINDINGS(V)                                        \
+  V(sqlite)                                                                    \
+  V(webstorage)
+#else
+#define NODE_BUILTIN_SQLITE_BINDINGS(V)
+#endif
+
+#define NODE_BINDINGS_WITH_PER_ISOLATE_INIT(V)                                 \
+  V(async_wrap)                                                                \
+  V(blob)                                                                      \
+  V(builtins)                                                                  \
+  V(contextify)                                                                \
+  V(encoding_binding)                                                          \
+  V(fs)                                                                        \
+  V(fs_dir)                                                                    \
+  V(http_parser)                                                               \
+  V(locks)                                                                     \
+  V(messaging)                                                                 \
+  V(mksnapshot)                                                                \
+  V(modules)                                                                   \
+  V(module_wrap)                                                               \
+  V(performance)                                                               \
+  V(process_methods)                                                           \
+  V(timers)                                                                    \
+  V(url)                                                                       \
+  V(worker)                                                                    \
+  NODE_BUILTIN_ICU_BINDINGS(V)                                                 \
+  NODE_BUILTIN_QUIC_BINDINGS(V)
 
 #define NODE_BINDING_CONTEXT_AWARE_CPP(modname, regfunc, priv, flags)          \
   static node::node_module _module = {                                         \
@@ -61,9 +101,11 @@ namespace node {
   NODE_BINDING_CONTEXT_AWARE_CPP(modname, regfunc, nullptr, NM_F_INTERNAL)
 
 // Define a per-isolate initialization function for a node internal binding.
+// The modname should be registered in the NODE_BINDINGS_WITH_PER_ISOLATE_INIT
+// list.
 #define NODE_BINDING_PER_ISOLATE_INIT(modname, per_isolate_func)               \
   void _register_isolate_##modname(node::IsolateData* isolate_data,            \
-                                   v8::Local<v8::FunctionTemplate> target) {   \
+                                   v8::Local<v8::ObjectTemplate> target) {     \
     per_isolate_func(isolate_data, target);                                    \
   }
 

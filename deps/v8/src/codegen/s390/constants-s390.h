@@ -10,11 +10,11 @@
 #define __STDC_FORMAT_MACROS
 #endif
 #include <inttypes.h>
-
 #include <stdint.h>
 
 #include "src/base/logging.h"
 #include "src/base/macros.h"
+#include "src/common/code-memory-access.h"
 #include "src/common/globals.h"
 
 // UNIMPLEMENTED_ macro for S390.
@@ -26,10 +26,44 @@
 #define UNIMPLEMENTED_S390()
 #endif
 
+#if V8_OS_ZOS
+#define ABI_USES_FUNCTION_DESCRIPTORS 1
+#define ABI_PASSES_HANDLES_IN_REGS 1
+#define ABI_RETURNS_OBJECTPAIR_IN_REGS 1
+#ifdef _EXT
+// Defined in stdlib.h and conflict with those in S390_RS_A_OPCODE_LIST below:
+#undef cs
+#undef cds
+#endif
+#else
+#define ABI_USES_FUNCTION_DESCRIPTORS 0
+#define ABI_PASSES_HANDLES_IN_REGS 1
+
+// ObjectPair is defined under runtime/runtime-util.h.
+// On 64-bit, ObjectPair is a Struct.  ABI dictaes Structs be
+//            returned in a storage buffer allocated by the caller,
+//            with the address of this buffer passed as a hidden
+//            argument in r2. (Does NOT return in Regs)
+// For x86 linux, ObjectPair is returned in registers.
+#define ABI_RETURNS_OBJECTPAIR_IN_REGS 0
+#endif
+
+#define ABI_CALL_VIA_IP 1
+
 namespace v8 {
 namespace internal {
 
+// The maximum size of the code range s.t. pc-relative calls are possible
+// between all Code objects in the range.
 constexpr size_t kMaxPCRelativeCodeRangeInMB = 4096;
+
+#if V8_OS_ZOS
+// Used to encode a boolean value when emitting 32 bit
+// opcodes which will indicate the presence of function descriptors
+constexpr int kHasFunctionDescriptorBitShift = 4;
+constexpr int kHasFunctionDescriptorBitMask = 1
+                                              << kHasFunctionDescriptorBitShift;
+#endif
 
 // Number of registers
 const int kNumRegisters = 16;
@@ -39,9 +73,8 @@ const int kNumDoubleRegisters = 16;
 
 const int kNoRegister = -1;
 
-// Actual value of root register is offset from the root array's start
+// The actual value of the kRootRegister is offset from the IsolateData's start
 // to take advantage of negative displacement values.
-// TODO(sigurds): Choose best value.
 constexpr int kRootRegisterBias = 128;
 
 // sign-extend the least significant 16-bits of value <imm>
@@ -62,7 +95,7 @@ constexpr int kRootRegisterBias = 128;
 
 // Constants for specific fields are defined in their respective named enums.
 // General constants are in an anonymous enum in class Instr.
-enum Condition {
+enum Condition : int {
   kNoCondition = -1,
   eq = 0x8,  // Equal.
   ne = 0x7,  // Not equal.
@@ -101,8 +134,72 @@ enum Condition {
   mask0xC = 12,
   mask0xD = 13,
   mask0xE = 14,
-  mask0xF = 15
+  mask0xF = 15,
+
+  // Unified cross-platform condition names/aliases.
+  // Do not set unsigned constants equal to their signed variants.
+  // We need to be able to differentiate between signed and unsigned enum
+  // constants in order to emit the right instructions (i.e CmpS64 vs CmpU64).
+  kEqual = eq,
+  kNotEqual = ne,
+  kLessThan = lt,
+  kGreaterThan = gt,
+  kLessThanEqual = le,
+  kGreaterThanEqual = ge,
+  kUnsignedLessThan = 16,
+  kUnsignedGreaterThan = 17,
+  kUnsignedLessThanEqual = 18,
+  kUnsignedGreaterThanEqual = 19,
+  kOverflow = overflow,
+  kNoOverflow = nooverflow,
+  kZero = 20,
+  kNotZero = 21,
 };
+
+inline Condition to_condition(Condition cond) {
+  switch (cond) {
+    case kUnsignedLessThan:
+      return lt;
+    case kUnsignedGreaterThan:
+      return gt;
+    case kUnsignedLessThanEqual:
+      return le;
+    case kUnsignedGreaterThanEqual:
+      return ge;
+    case kZero:
+      return eq;
+    case kNotZero:
+      return ne;
+    default:
+      break;
+  }
+  return cond;
+}
+
+inline bool is_signed(Condition cond) {
+  switch (cond) {
+    case kEqual:
+    case kNotEqual:
+    case kLessThan:
+    case kGreaterThan:
+    case kLessThanEqual:
+    case kGreaterThanEqual:
+    case kOverflow:
+    case kNoOverflow:
+    case kZero:
+    case kNotZero:
+      return true;
+
+    case kUnsignedLessThan:
+    case kUnsignedGreaterThan:
+    case kUnsignedLessThanEqual:
+    case kUnsignedGreaterThanEqual:
+      return false;
+
+    default:
+      UNREACHABLE();
+  }
+}
 
 inline Condition NegateCondition(Condition cond) {
   DCHECK(cond != al);
@@ -125,6 +222,14 @@ inline Condition NegateCondition(Condition cond) {
       return CC_OF;
     case CC_OF:
       return CC_NOF;
+    case kUnsignedLessThan:
+      return kUnsignedGreaterThanEqual;
+    case kUnsignedGreaterThan:
+      return kUnsignedLessThanEqual;
+    case kUnsignedLessThanEqual:
+      return kUnsignedGreaterThan;
+    case kUnsignedGreaterThanEqual:
+      return kUnsignedLessThan;
     default:
       DCHECK(false);
   }
@@ -270,6 +375,7 @@ using SixByteInstr = uint64_t;
   V(xgrk, XGRK, 0xB9E7)     /* type = RRF_A EXCLUSIVE OR (64)  */           \
   V(agrk, AGRK, 0xB9E8)     /* type = RRF_A ADD (64)  */                    \
   V(sgrk, SGRK, 0xB9E9)     /* type = RRF_A SUBTRACT (64)  */               \
+  V(mgrk, MGRK, 0xB9EC)     /* type = RRF_A MULTIPLY (64->128)  */          \
   V(algrk, ALGRK, 0xB9EA)   /* type = RRF_A ADD LOGICAL (64)  */            \
   V(slgrk, SLGRK, 0xB9EB)   /* type = RRF_A SUBTRACT LOGICAL (64)  */       \
   V(nrk, NRK, 0xB9F4)       /* type = RRF_A AND (32)  */                    \
@@ -874,6 +980,7 @@ using SixByteInstr = uint64_t;
   V(ay, AY, 0xE35A)       /* type = RXY_A ADD (32)  */                         \
   V(sy, SY, 0xE35B)       /* type = RXY_A SUBTRACT (32)  */                    \
   V(mfy, MFY, 0xE35C)     /* type = RXY_A MULTIPLY (64<-32)  */                \
+  V(mg, MG, 0xE384)       /* type = RXY_A MULTIPLY (128<-64)  */               \
   V(aly, ALY, 0xE35E)     /* type = RXY_A ADD LOGICAL (32)  */                 \
   V(sly, SLY, 0xE35F)     /* type = RXY_A SUBTRACT LOGICAL (32)  */            \
   V(sthy, STHY, 0xE370)   /* type = RXY_A STORE HALFWORD (16)  */              \
@@ -1841,7 +1948,8 @@ class Instruction {
   // Get the raw instruction bits.
   template <typename T>
   inline T InstructionBits() const {
-    return Instruction::InstructionBits<T>(reinterpret_cast<const byte*>(this));
+    return Instruction::InstructionBits<T>(
+        reinterpret_cast<const uint8_t*>(this));
   }
   inline Instr InstructionBits() const {
     return *reinterpret_cast<const Instr*>(this);
@@ -1849,13 +1957,13 @@ class Instruction {
 
   // Set the raw instruction bits to value.
   template <typename T>
-  inline void SetInstructionBits(T value) const {
-    Instruction::SetInstructionBits<T>(reinterpret_cast<const byte*>(this),
-                                       value);
+  inline void SetInstructionBits(
+      T value, WritableJitAllocation* jit_allocation = nullptr) const {
+    Instruction::SetInstructionBits<T>(reinterpret_cast<const uint8_t*>(this),
+                                       value, jit_allocation);
   }
-  inline void SetInstructionBits(Instr value) {
-    *reinterpret_cast<Instr*>(this) = value;
-  }
+  V8_EXPORT_PRIVATE void SetInstructionBits(
+      Instr value, WritableJitAllocation* jit_allocation = nullptr);
 
   // Read one particular bit out of the instruction bits.
   inline int Bit(int nr) const { return (InstructionBits() >> nr) & 1; }
@@ -1878,11 +1986,12 @@ class Instruction {
 
   // Determine the instruction length
   inline int InstructionLength() {
-    return Instruction::InstructionLength(reinterpret_cast<const byte*>(this));
+    return Instruction::InstructionLength(
+        reinterpret_cast<const uint8_t*>(this));
   }
   // Extract the Instruction Opcode
   inline Opcode S390OpcodeValue() {
-    return Instruction::S390OpcodeValue(reinterpret_cast<const byte*>(this));
+    return Instruction::S390OpcodeValue(reinterpret_cast<const uint8_t*>(this));
   }
 
   // Static support.
@@ -1901,12 +2010,12 @@ class Instruction {
   }
 
   // Determine the instruction length of the given instruction
-  static inline int InstructionLength(const byte* instr) {
+  static inline int InstructionLength(const uint8_t* instr) {
     // Length can be determined by the first nibble.
     // 0x0 to 0x3 => 2-bytes
     // 0x4 to 0xB => 4-bytes
     // 0xC to 0xF => 6-bytes
-    byte topNibble = (*instr >> 4) & 0xF;
+    uint8_t topNibble = (*instr >> 4) & 0xF;
     if (topNibble <= 3)
       return 2;
     else if (topNibble <= 0xB)
@@ -1915,7 +2024,7 @@ class Instruction {
   }
 
   // Returns the instruction bits of the given instruction
-  static inline uint64_t InstructionBits(const byte* instr) {
+  static inline uint64_t InstructionBits(const uint8_t* instr) {
     int length = InstructionLength(instr);
     if (2 == length)
       return static_cast<uint64_t>(InstructionBits<TwoByteInstr>(instr));
@@ -1927,7 +2036,7 @@ class Instruction {
 
   // Extract the raw instruction bits
   template <typename T>
-  static inline T InstructionBits(const byte* instr) {
+  static inline T InstructionBits(const uint8_t* instr) {
 #if !V8_TARGET_LITTLE_ENDIAN
     if (sizeof(T) <= 4) {
       return *reinterpret_cast<const T*>(instr);
@@ -1958,7 +2067,9 @@ class Instruction {
 
   // Set the Instruction Bits to value
   template <typename T>
-  static inline void SetInstructionBits(byte* instr, T value) {
+  static inline void SetInstructionBits(
+      uint8_t* instr, T value,
+      WritableJitAllocation* jit_allocation = nullptr) {
 #if V8_TARGET_LITTLE_ENDIAN
     // The instruction bits are stored in big endian format even on little
     // endian hosts, in order to decode instruction length and opcode.
@@ -1984,34 +2095,56 @@ class Instruction {
     }
 #endif
     if (sizeof(T) <= 4) {
-      *reinterpret_cast<T*>(instr) = value;
+      if (jit_allocation) {
+        jit_allocation->WriteUnalignedValue(reinterpret_cast<Address>(instr),
+                                            value);
+      } else {
+        *reinterpret_cast<T*>(instr) = value;
+      }
     } else {
 #if V8_TARGET_LITTLE_ENDIAN
       uint64_t orig_value = static_cast<uint64_t>(value);
-      *reinterpret_cast<uint32_t*>(instr) = static_cast<uint32_t>(value);
-      *reinterpret_cast<uint16_t*>(instr + 4) =
-          static_cast<uint16_t>((orig_value >> 32) & 0xFFFF);
+      if (jit_allocation) {
+        jit_allocation->WriteUnalignedValue(reinterpret_cast<Address>(instr),
+                                            static_cast<uint32_t>(value));
+        jit_allocation->WriteUnalignedValue(
+            reinterpret_cast<Address>(instr + 4),
+            static_cast<uint16_t>((orig_value >> 32) & 0xFFFF));
+      } else {
+        *reinterpret_cast<uint32_t*>(instr) = static_cast<uint32_t>(value);
+        *reinterpret_cast<uint16_t*>(instr + 4) =
+            static_cast<uint16_t>((orig_value >> 32) & 0xFFFF);
+      }
 #else
-      *reinterpret_cast<uint32_t*>(instr) = static_cast<uint32_t>(value >> 16);
-      *reinterpret_cast<uint16_t*>(instr + 4) =
-          static_cast<uint16_t>(value & 0xFFFF);
+      if (jit_allocation) {
+        jit_allocation->WriteUnalignedValue(reinterpret_cast<Address>(instr),
+                                            static_cast<uint32_t>(value >> 16));
+        jit_allocation->WriteUnalignedValue(
+            reinterpret_cast<Address>(instr + 4),
+            static_cast<uint16_t>(value & 0xFFFF));
+      } else {
+        *reinterpret_cast<uint32_t*>(instr) =
+            static_cast<uint32_t>(value >> 16);
+        *reinterpret_cast<uint16_t*>(instr + 4) =
+            static_cast<uint16_t>(value & 0xFFFF);
+      }
 #endif
     }
   }
 
   // Get Instruction Format Type
-  static OpcodeFormatType getOpcodeFormatType(const byte* instr) {
-    const byte firstByte = *instr;
+  static OpcodeFormatType getOpcodeFormatType(const uint8_t* instr) {
+    const uint8_t firstByte = *instr;
     return OpcodeFormatTable[firstByte];
   }
 
   // Extract the full opcode from the instruction.
-  static inline Opcode S390OpcodeValue(const byte* instr) {
+  static inline Opcode S390OpcodeValue(const uint8_t* instr) {
     OpcodeFormatType opcodeType = getOpcodeFormatType(instr);
 
     // The native instructions are encoded in big-endian format
     // even if running on little-endian host.  Hence, we need
-    // to ensure we use byte* based bit-wise logic.
+    // to ensure we use uint8_t* based bit-wise logic.
     switch (opcodeType) {
       case ONE_BYTE_OPCODE:
         // One Byte - Bits 0 to 7
@@ -2040,7 +2173,7 @@ class Instruction {
   // reference to an instruction is to convert a pointer. There is no way
   // to allocate or create instances of class Instruction.
   // Use the At(pc) function to create references to Instruction.
-  static Instruction* At(byte* pc) {
+  static Instruction* At(uint8_t* pc) {
     return reinterpret_cast<Instruction*>(pc);
   }
 

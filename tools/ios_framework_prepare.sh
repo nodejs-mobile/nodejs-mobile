@@ -17,41 +17,40 @@ NODELIB_PROJECT_PATH='tools/ios-framework'
 XCODE_PROJECT_PATH='tools/ios-framework/NodeMobile.xcodeproj/project.pbxproj'
 
 declare -a outputs_common=(
-    "libada.a"
-    "libbase64.a"
-    "libbrotli.a"
-    "libcares.a"
-    "libgtest_main.a"
-    "libgtest.a"
-    "libhistogram.a"
-    "libllhttp.a"
-    "libnghttp2.a"
-    "libnghttp3.a"
-    "libngtcp2.a"
-    "libnode.a"
-    "libopenssl.a"
-    "libsimdutf.a"
-    "libuv.a"
-    "libuvwasi.a"
-    "libv8_base_without_compiler.a"
-    "libv8_compiler.a"
-    "libv8_initializers.a"
-    "libv8_libbase.a"
-    "libv8_libplatform.a"
-    "libv8_snapshot.a"
-    "libv8_zlib.a"
-    "libzlib.a"
+  "libabseil.a"
+  "libada.a"
+  "libbrotli.a"
+  "libcares.a"
+  "libgtest.a"
+  "libgtest_main.a"
+  "libhistogram.a"
+  "libcrdtp.a"
+  "libllhttp.a"
+  "libnbytes.a"
+  "libncrypto.a"
+  "libnghttp2.a"
+  "libnode.a"
+  "libopenssl.a"
+  "libsimdjson.a"
+  "libsimdutf.a"
+  "libsqlite.a"
+  "libuv.a"
+  "libuvwasi.a"
+  "libv8_base_without_compiler.a"
+  "libv8_compiler.a"
+  "libv8_initializers.a"
+  "libv8_initializers_slow.a"
+  "libv8_libbase.a"
+  "libv8_libplatform.a"
+  "libv8_snapshot.a"
+  "libv8_zlib.a"
+  "libhighway.a"
+  "libzlib.a"
+  "libzstd.a"
 )
-declare -a outputs_x64_only=(
-    "libbase64_avx.a"
-    "libbase64_avx2.a"
-    "libbase64_sse41.a"
-    "libbase64_sse42.a"
-    "libbase64_ssse3.a"
-)
+declare -a outputs_x64_only=()
 declare -a outputs_arm64_only=(
-    "libbase64_neon64.a"
-    "libzlib_inflate_chunk_simd.a"
+  "libzlib_data_chunk_simd.a"
 )
 
 declare -a outputs_x64=("${outputs_common[@]}" "${outputs_x64_only[@]}")
@@ -108,7 +107,7 @@ build_for_x64_simulator() {
   make clean
   GYP_DEFINES="target_arch=x64 host_os=mac target_os=ios"
   export GYP_DEFINES
-  arch -x86_64 ./configure \
+  ./configure \
     --dest-os=ios \
     --dest-cpu=x64 \
     --with-intl=none \

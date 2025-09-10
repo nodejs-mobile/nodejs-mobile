@@ -17,14 +17,15 @@ still result in a few indexer issues here and there.
 This generator has no automated tests, so expect it to be broken.
 """
 
-from xml.sax.saxutils import escape
 import os.path
+import shlex
 import subprocess
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
+
 import gyp
 import gyp.common
 import gyp.msvs_emulation
-import shlex
-import xml.etree.cElementTree as ET
 
 generator_wants_static_library_dependencies_adjusted = False
 
@@ -248,10 +249,7 @@ def GetAllDefines(target_list, target_dicts, data, config_name, params, compiler
                 continue
             cpp_line_parts = cpp_line.split(" ", 2)
             key = cpp_line_parts[1]
-            if len(cpp_line_parts) >= 3:
-                val = cpp_line_parts[2]
-            else:
-                val = "1"
+            val = cpp_line_parts[2] if len(cpp_line_parts) >= 3 else "1"
             all_defines[key] = val
 
     return all_defines
@@ -453,8 +451,7 @@ def GenerateOutput(target_list, target_dicts, data, params):
     if params["options"].generator_output:
         raise NotImplementedError("--generator_output not implemented for eclipse")
 
-    user_config = params.get("generator_flags", {}).get("config", None)
-    if user_config:
+    if user_config := params.get("generator_flags", {}).get("config", None):
         GenerateOutputForConfig(target_list, target_dicts, data, params, user_config)
     else:
         config_names = target_dicts[target_list[0]]["configurations"]

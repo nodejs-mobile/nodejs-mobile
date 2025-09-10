@@ -6,18 +6,19 @@
 #define V8_PROFILER_PROFILE_GENERATOR_INL_H_
 
 #include "src/profiler/profile-generator.h"
+// Include the non-inl header before the rest of the headers.
 
 #include <memory>
 
 namespace v8 {
 namespace internal {
 
-CodeEntry::CodeEntry(CodeEventListener::LogEventsAndTags tag, const char* name,
+CodeEntry::CodeEntry(LogEventListener::CodeTag tag, const char* name,
                      const char* resource_name, int line_number,
                      int column_number,
                      std::unique_ptr<SourcePositionTable> line_info,
                      bool is_shared_cross_origin, CodeType code_type)
-    : bit_field_(TagField::encode(tag) |
+    : bit_field_(CodeTagField::encode(tag) |
                  BuiltinField::encode(Builtin::kIllegal) |
                  CodeTypeField::encode(code_type) |
                  SharedCrossOriginField::encode(is_shared_cross_origin)),

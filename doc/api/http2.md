@@ -84,7 +84,30 @@ Since there are no browsers known that support
 [`http2.createSecureServer()`][] is necessary when communicating
 with browser clients.
 
-```js
+```mjs
+import { createSecureServer } from 'node:http2';
+import { readFileSync } from 'node:fs';
+
+const server = createSecureServer({
+  key: readFileSync('localhost-privkey.pem'),
+  cert: readFileSync('localhost-cert.pem'),
+});
+
+server.on('error', (err) => console.error(err));
+
+server.on('stream', (stream, headers) => {
+  // stream is a Duplex
+  stream.respond({
+    'content-type': 'text/html; charset=utf-8',
+    ':status': 200,
+  });
+  stream.end('<h1>Hello World</h1>');
+});
+
+server.listen(8443);
+```
+
+```cjs
 const http2 = require('node:http2');
 const fs = require('node:fs');
 
@@ -117,9 +140,37 @@ openssl req -x509 -newkey rsa:2048 -nodes -sha256 -subj '/CN=localhost' \
 
 The following illustrates an HTTP/2 client:
 
-```js
+```mjs
+import { connect } from 'node:http2';
+import { readFileSync } from 'node:fs';
+
+const client = connect('https://localhost:8443', {
+  ca: readFileSync('localhost-cert.pem'),
+});
+client.on('error', (err) => console.error(err));
+
+const req = client.request({ ':path': '/' });
+
+req.on('response', (headers, flags) => {
+  for (const name in headers) {
+    console.log(`${name}: ${headers[name]}`);
+  }
+});
+
+req.setEncoding('utf8');
+let data = '';
+req.on('data', (chunk) => { data += chunk; });
+req.on('end', () => {
+  console.log(`\n${data}`);
+  client.close();
+});
+req.end();
+```
+
+```cjs
 const http2 = require('node:http2');
 const fs = require('node:fs');
+
 const client = http2.connect('https://localhost:8443', {
   ca: fs.readFileSync('localhost-cert.pem'),
 });
@@ -320,7 +371,6 @@ added: v8.4.0
 The `'stream'` event is emitted when a new `Http2Stream` is created.
 
 ```js
-const http2 = require('node:http2');
 session.on('stream', (stream, headers, flags) => {
   const method = headers[':method'];
   const path = headers[':path'];
@@ -339,7 +389,25 @@ and would instead register a handler for the `'stream'` event emitted by the
 `net.Server` or `tls.Server` instances returned by `http2.createServer()` and
 `http2.createSecureServer()`, respectively, as in the example below:
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+
+// Create an unencrypted HTTP/2 server
+const server = createServer();
+
+server.on('stream', (stream, headers) => {
+  stream.respond({
+    'content-type': 'text/html; charset=utf-8',
+    ':status': 200,
+  });
+  stream.on('error', (error) => console.error(error));
+  stream.end('<h1>Hello World</h1>');
+});
+
+server.listen(8000);
+```
+
+```cjs
 const http2 = require('node:http2');
 
 // Create an unencrypted HTTP/2 server
@@ -383,7 +451,7 @@ session.on('timeout', () => { /* .. */ });
 added: v9.4.0
 -->
 
-* {string|undefined}
+* Type: {string|undefined}
 
 Value will be `undefined` if the `Http2Session` is not yet connected to a
 socket, `h2c` if the `Http2Session` is not connected to a `TLSSocket`, or
@@ -412,7 +480,7 @@ If specified, the `callback` function is registered as a handler for the
 added: v9.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Will be `true` if this `Http2Session` instance has been closed, otherwise
 `false`.
@@ -423,7 +491,7 @@ Will be `true` if this `Http2Session` instance has been closed, otherwise
 added: v10.0.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Will be `true` if this `Http2Session` instance is still connecting, will be set
 to `false` before emitting `connect` event and/or calling the `http2.connect`
@@ -457,7 +525,7 @@ If there are any remaining open `Http2Streams` associated with the
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Will be `true` if this `Http2Session` instance has been destroyed and must no
 longer be used, otherwise `false`.
@@ -468,7 +536,7 @@ longer be used, otherwise `false`.
 added: v9.4.0
 -->
 
-* {boolean|undefined}
+* Type: {boolean|undefined}
 
 Value is `undefined` if the `Http2Session` session socket has not yet been
 connected, `true` if the `Http2Session` is connected with a `TLSSocket`,
@@ -495,7 +563,7 @@ Transmits a `GOAWAY` frame to the connected peer _without_ shutting down the
 added: v8.4.0
 -->
 
-* {HTTP/2 Settings Object}
+* Type: {HTTP/2 Settings Object}
 
 A prototype-less object describing the current local settings of this
 `Http2Session`. The local settings are local to _this_ `Http2Session` instance.
@@ -506,7 +574,7 @@ A prototype-less object describing the current local settings of this
 added: v9.4.0
 -->
 
-* {string\[]|undefined}
+* Type: {string\[]|undefined}
 
 If the `Http2Session` is connected to a `TLSSocket`, the `originSet` property
 will return an `Array` of origins for which the `Http2Session` may be
@@ -520,7 +588,7 @@ The `originSet` property is only available when using a secure TLS connection.
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Indicates whether the `Http2Session` is currently waiting for acknowledgment of
 a sent `SETTINGS` frame. Will be `true` after calling the
@@ -587,7 +655,7 @@ instance's underlying [`net.Socket`][].
 added: v8.4.0
 -->
 
-* {HTTP/2 Settings Object}
+* Type: {HTTP/2 Settings Object}
 
 A prototype-less object describing the current remote settings of this
 `Http2Session`. The remote settings are set by the _connected_ HTTP/2 peer.
@@ -606,17 +674,31 @@ Sets the local endpoint's window size.
 The `windowSize` is the total window size to set, not
 the delta.
 
-```js
-const http2 = require('node:http2');
+```mjs
+import { createServer } from 'node:http2';
 
-const server = http2.createServer();
+const server = createServer();
 const expectedWindowSize = 2 ** 20;
-server.on('connect', (session) => {
+server.on('session', (session) => {
 
   // Set local window size to be 2 ** 20
   session.setLocalWindowSize(expectedWindowSize);
 });
 ```
+
+```cjs
+const http2 = require('node:http2');
+
+const server = http2.createServer();
+const expectedWindowSize = 2 ** 20;
+server.on('session', (session) => {
+
+  // Set local window size to be 2 ** 20
+  session.setLocalWindowSize(expectedWindowSize);
+});
+```
+
+For http2 clients the proper event is either `'connect'` or `'remoteSettings'`.
 
 #### `http2session.setTimeout(msecs, callback)`
 
@@ -643,7 +725,7 @@ registered as a listener on the `'timeout'` event.
 added: v8.4.0
 -->
 
-* {net.Socket|tls.TLSSocket}
+* Type: {net.Socket|tls.TLSSocket}
 
 Returns a `Proxy` object that acts as a `net.Socket` (or `tls.TLSSocket`) but
 limits available methods to ones safe to use with HTTP/2.
@@ -665,7 +747,7 @@ added: v8.4.0
 Provides miscellaneous information about the current state of the
 `Http2Session`.
 
-* {Object}
+* Type: {Object}
   * `effectiveLocalWindowSize` {number} The current local (receive)
     flow control window size for the `Http2Session`.
   * `effectiveRecvDataLength` {number} The current number of bytes
@@ -723,7 +805,7 @@ multiple `SETTINGS` frames while acknowledgment is still pending.
 added: v8.4.0
 -->
 
-* {number}
+* Type: {number}
 
 The `http2session.type` will be equal to
 `http2.constants.NGHTTP2_SESSION_SERVER` if this `Http2Session` instance is a
@@ -762,7 +844,22 @@ added: v9.4.0
 
 Submits an `ALTSVC` frame (as defined by [RFC 7838][]) to the connected client.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+
+const server = createServer();
+server.on('session', (session) => {
+  // Set altsvc for origin https://example.org:80
+  session.altsvc('h2=":8000"', 'https://example.org:80');
+});
+
+server.on('stream', (stream) => {
+  // Set altsvc for a specific stream
+  stream.session.altsvc('h2=":8000"', stream.id);
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 
 const server = http2.createServer();
@@ -828,7 +925,20 @@ Submits an `ORIGIN` frame (as defined by [RFC 8336][]) to the connected client
 to advertise the set of origins for which the server is capable of providing
 authoritative responses.
 
-```js
+```mjs
+import { createSecureServer } from 'node:http2';
+const options = getSecureOptionsSomehow();
+const server = createSecureServer(options);
+server.on('stream', (stream) => {
+  stream.respond();
+  stream.end('ok');
+});
+server.on('session', (session) => {
+  session.origin('https://example.com', 'https://example.org');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const options = getSecureOptionsSomehow();
 const server = http2.createSecureServer(options);
@@ -855,7 +965,18 @@ ASCII origin.
 Alternatively, the `origins` option may be used when creating a new HTTP/2
 server using the `http2.createSecureServer()` method:
 
-```js
+```mjs
+import { createSecureServer } from 'node:http2';
+const options = getSecureOptionsSomehow();
+options.origins = ['https://example.com', 'https://example.org'];
+const server = createSecureServer(options);
+server.on('stream', (stream) => {
+  stream.respond();
+  stream.end('ok');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const options = getSecureOptionsSomehow();
 options.origins = ['https://example.com', 'https://example.org'];
@@ -889,7 +1010,18 @@ the client. The event is emitted with the `ALTSVC` value, origin, and stream
 ID. If no `origin` is provided in the `ALTSVC` frame, `origin` will
 be an empty string.
 
-```js
+```mjs
+import { connect } from 'node:http2';
+const client = connect('https://example.org');
+
+client.on('altsvc', (alt, origin, streamId) => {
+  console.log(alt);
+  console.log(origin);
+  console.log(streamId);
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('https://example.org');
 
@@ -913,7 +1045,17 @@ the client. The event is emitted with an array of `origin` strings. The
 `http2session.originSet` will be updated to include the received
 origins.
 
-```js
+```mjs
+import { connect } from 'node:http2';
+const client = connect('https://example.org');
+
+client.on('origin', (origins) => {
+  for (let n = 0; n < origins.length; n++)
+    console.log(origins[n]);
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('https://example.org');
 
@@ -929,9 +1071,18 @@ The `'origin'` event is only emitted when using a secure TLS connection.
 
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: v24.2.0
+    pr-url: https://github.com/nodejs/node/pull/58293
+    description: The `weight` option is now ignored, setting it will trigger a
+                 runtime warning.
+  - version: v24.2.0
+    pr-url: https://github.com/nodejs/node/pull/58313
+    description: Following the deprecation of priority signaling as of RFC 9113,
+                 `weight` option is deprecated.
 -->
 
-* `headers` {HTTP/2 Headers Object}
+* `headers` {HTTP/2 Headers Object|Array}
 
 * `options` {Object}
   * `endStream` {boolean} `true` if the `Http2Stream` _writable_ side should
@@ -943,9 +1094,6 @@ added: v8.4.0
     **Default:** `false`.
   * `parent` {number} Specifies the numeric identifier of a stream the newly
     created stream is dependent on.
-  * `weight` {number} Specifies the relative dependency of a stream in relation
-    to other streams with the same `parent`. The value is a number between `1`
-    and `256` (inclusive).
   * `waitForTrailers` {boolean} When `true`, the `Http2Stream` will emit the
     `'wantTrailers'` event after the final `DATA` frame has been sent.
   * `signal` {AbortSignal} An AbortSignal that may be used to abort an ongoing
@@ -966,7 +1114,23 @@ If the `session` is closed before the actual request be executed, an
 This method is only available if `http2session.type` is equal to
 `http2.constants.NGHTTP2_SESSION_CLIENT`.
 
-```js
+```mjs
+import { connect, constants } from 'node:http2';
+const clientSession = connect('https://localhost:1234');
+const {
+  HTTP2_HEADER_PATH,
+  HTTP2_HEADER_STATUS,
+} = constants;
+
+const req = clientSession.request({ [HTTP2_HEADER_PATH]: '/' });
+req.on('response', (headers) => {
+  console.log(headers[HTTP2_HEADER_STATUS]);
+  req.on('data', (chunk) => { /* .. */ });
+  req.on('end', () => { /* .. */ });
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const clientSession = http2.connect('https://localhost:1234');
 const {
@@ -1202,7 +1366,7 @@ option must be set for this event to be emitted.
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Set to `true` if the `Http2Stream` instance was aborted abnormally. When set,
 the `'aborted'` event will have been emitted.
@@ -1215,7 +1379,7 @@ added:
  - v10.16.0
 -->
 
-* {number}
+* Type: {number}
 
 This property shows the number of characters currently buffered to be written.
 See [`net.Socket.bufferSize`][] for details.
@@ -1246,7 +1410,7 @@ connected HTTP/2 peer.
 added: v9.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Set to `true` if the `Http2Stream` instance has been closed.
 
@@ -1256,7 +1420,7 @@ Set to `true` if the `Http2Stream` instance has been closed.
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Set to `true` if the `Http2Stream` instance has been destroyed and is no longer
 usable.
@@ -1267,7 +1431,7 @@ usable.
 added: v10.11.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Set to `true` if the `END_STREAM` flag was set in the request or response
 HEADERS frame received, indicating that no additional data should be received
@@ -1279,7 +1443,7 @@ and the readable side of the `Http2Stream` will be closed.
 added: v8.4.0
 -->
 
-* {number|undefined}
+* Type: {number|undefined}
 
 The numeric stream identifier of this `Http2Stream` instance. Set to `undefined`
 if the stream identifier has not yet been assigned.
@@ -1290,7 +1454,7 @@ if the stream identifier has not yet been assigned.
 added: v9.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Set to `true` if the `Http2Stream` instance has not yet been assigned a
 numeric stream identifier.
@@ -1299,22 +1463,18 @@ numeric stream identifier.
 
 <!-- YAML
 added: v8.4.0
+deprecated: v24.2.0
+changes:
+  - version: v24.2.0
+    pr-url: https://github.com/nodejs/node/pull/58293
+    description: This method no longer sets the priority of the stream. Using it
+                 now triggers a runtime warning.
 -->
 
-* `options` {Object}
-  * `exclusive` {boolean} When `true` and `parent` identifies a parent Stream,
-    this stream is made the sole direct dependency of the parent, with
-    all other existing dependents made a dependent of this stream. **Default:**
-    `false`.
-  * `parent` {number} Specifies the numeric identifier of a stream this stream
-    is dependent on.
-  * `weight` {number} Specifies the relative dependency of a stream in relation
-    to other streams with the same `parent`. The value is a number between `1`
-    and `256` (inclusive).
-  * `silent` {boolean} When `true`, changes the priority locally without
-    sending a `PRIORITY` frame to the connected peer.
+> Stability: 0 - Deprecated: support for priority signaling has been deprecated
+> in the [RFC 9113][] and is no longer supported in Node.js.
 
-Updates the priority for this `Http2Stream` instance.
+Empty method, only there to maintain some backward compatibility.
 
 #### `http2stream.rstCode`
 
@@ -1322,7 +1482,7 @@ Updates the priority for this `Http2Stream` instance.
 added: v8.4.0
 -->
 
-* {number}
+* Type: {number}
 
 Set to the `RST_STREAM` [error code][] reported when the `Http2Stream` is
 destroyed after either receiving an `RST_STREAM` frame from the connected peer,
@@ -1335,7 +1495,7 @@ calling `http2stream.close()`, or `http2stream.destroy()`. Will be
 added: v9.5.0
 -->
 
-* {HTTP/2 Headers Object}
+* Type: {HTTP/2 Headers Object}
 
 An object containing the outbound headers sent for this `Http2Stream`.
 
@@ -1345,7 +1505,7 @@ An object containing the outbound headers sent for this `Http2Stream`.
 added: v9.5.0
 -->
 
-* {HTTP/2 Headers Object\[]}
+* Type: {HTTP/2 Headers Object\[]}
 
 An array of objects containing the outbound informational (additional) headers
 sent for this `Http2Stream`.
@@ -1356,7 +1516,7 @@ sent for this `Http2Stream`.
 added: v9.5.0
 -->
 
-* {HTTP/2 Headers Object}
+* Type: {HTTP/2 Headers Object}
 
 An object containing the outbound trailers sent for this `HttpStream`.
 
@@ -1366,7 +1526,7 @@ An object containing the outbound trailers sent for this `HttpStream`.
 added: v8.4.0
 -->
 
-* {Http2Session}
+* Type: {Http2Session}
 
 A reference to the `Http2Session` instance that owns this `Http2Stream`. The
 value will be `undefined` after the `Http2Stream` instance is destroyed.
@@ -1386,7 +1546,17 @@ changes:
 * `msecs` {number}
 * `callback` {Function}
 
-```js
+```mjs
+import { connect, constants } from 'node:http2';
+const client = connect('http://example.org:8000');
+const { NGHTTP2_CANCEL } = constants;
+const req = client.request({ ':path': '/' });
+
+// Cancel the stream if there's no activity after 5 seconds
+req.setTimeout(5000, () => req.close(NGHTTP2_CANCEL));
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('http://example.org:8000');
 const { NGHTTP2_CANCEL } = http2.constants;
@@ -1400,12 +1570,21 @@ req.setTimeout(5000, () => req.close(NGHTTP2_CANCEL));
 
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: v24.2.0
+    pr-url: https://github.com/nodejs/node/pull/58293
+    description: The `state.weight` property is now always set to 16 and
+                 `sumDependencyWeight` is always set to 0.
+  - version: v24.2.0
+    pr-url: https://github.com/nodejs/node/pull/58313
+    description: Following the deprecation of priority signaling as of RFC 9113,
+                 `weight` and `sumDependencyWeight` options are deprecated.
 -->
 
 Provides miscellaneous information about the current state of the
 `Http2Stream`.
 
-* {Object}
+* Type: {Object}
   * `localWindowSize` {number} The number of bytes the connected peer may send
     for this `Http2Stream` without receiving a `WINDOW_UPDATE`.
   * `state` {number} A flag indicating the low-level current state of the
@@ -1413,10 +1592,8 @@ Provides miscellaneous information about the current state of the
   * `localClose` {number} `1` if this `Http2Stream` has been closed locally.
   * `remoteClose` {number} `1` if this `Http2Stream` has been closed
     remotely.
-  * `sumDependencyWeight` {number} The sum weight of all `Http2Stream`
-    instances that depend on this `Http2Stream` as specified using
-    `PRIORITY` frames.
-  * `weight` {number} The priority weight of this `Http2Stream`.
+  * `sumDependencyWeight` {number} Legacy property, always set to `0`.
+  * `weight` {number} Legacy property, always set to `16`.
 
 A current state of this `Http2Stream`.
 
@@ -1435,7 +1612,19 @@ request or sending a response, the `options.waitForTrailers` option must be set
 in order to keep the `Http2Stream` open after the final `DATA` frame so that
 trailers can be sent.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  stream.respond(undefined, { waitForTrailers: true });
+  stream.on('wantTrailers', () => {
+    stream.sendTrailers({ xyz: 'abc' });
+  });
+  stream.end('Hello World');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1526,7 +1715,16 @@ received for this stream from the connected HTTP/2 server. The listener is
 invoked with two arguments: an `Object` containing the received
 [HTTP/2 Headers Object][], and flags associated with the headers.
 
-```js
+```mjs
+import { connect } from 'node:http2';
+const client = connect('https://localhost');
+const req = client.request({ ':path': '/' });
+req.on('response', (headers, flags) => {
+  console.log(headers[':status']);
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('https://localhost');
 const req = client.request({ ':path': '/' });
@@ -1564,7 +1762,7 @@ Sends an additional informational `HEADERS` frame to the connected HTTP/2 peer.
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 True if headers were sent, false otherwise (read-only).
 
@@ -1574,7 +1772,7 @@ True if headers were sent, false otherwise (read-only).
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Read-only property mapped to the `SETTINGS_ENABLE_PUSH` flag of the remote
 client's most recent `SETTINGS` frame. Will be `true` if the remote peer
@@ -1612,7 +1810,21 @@ Initiates a push stream. The callback is invoked with the new `Http2Stream`
 instance created for the push stream passed as the second argument, or an
 `Error` passed as the first argument.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  stream.respond({ ':status': 200 });
+  stream.pushStream({ ':path': '/' }, (err, pushStream, headers) => {
+    if (err) throw err;
+    pushStream.respond({ ':status': 200 });
+    pushStream.end('some pushed data');
+  });
+  stream.end('some data');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1652,7 +1864,16 @@ changes:
   * `waitForTrailers` {boolean} When `true`, the `Http2Stream` will emit the
     `'wantTrailers'` event after the final `DATA` frame has been sent.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  stream.respond({ ':status': 200 });
+  stream.end('some data');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1671,7 +1892,19 @@ close when the final `DATA` frame is transmitted. User code must call either
 `http2stream.sendTrailers()` or `http2stream.close()` to close the
 `Http2Stream`.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  stream.respond({ ':status': 200 }, { waitForTrailers: true });
+  stream.on('wantTrailers', () => {
+    stream.sendTrailers({ ABC: 'some value to send' });
+  });
+  stream.end('some data');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1719,7 +1952,26 @@ closed using an `RST_STREAM` frame using the standard `INTERNAL_ERROR` code.
 When used, the `Http2Stream` object's `Duplex` interface will be closed
 automatically.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+import { openSync, fstatSync, closeSync } from 'node:fs';
+
+const server = createServer();
+server.on('stream', (stream) => {
+  const fd = openSync('/some/file', 'r');
+
+  const stat = fstatSync(fd);
+  const headers = {
+    'content-length': stat.size,
+    'last-modified': stat.mtime.toUTCString(),
+    'content-type': 'text/plain; charset=utf-8',
+  };
+  stream.respondWithFD(fd, headers);
+  stream.on('close', () => closeSync(fd));
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const fs = require('node:fs');
 
@@ -1764,7 +2016,30 @@ close when the final `DATA` frame is transmitted. User code _must_ call either
 `http2stream.sendTrailers()` or `http2stream.close()` to close the
 `Http2Stream`.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+import { openSync, fstatSync, closeSync } from 'node:fs';
+
+const server = createServer();
+server.on('stream', (stream) => {
+  const fd = openSync('/some/file', 'r');
+
+  const stat = fstatSync(fd);
+  const headers = {
+    'content-length': stat.size,
+    'last-modified': stat.mtime.toUTCString(),
+    'content-type': 'text/plain; charset=utf-8',
+  };
+  stream.respondWithFD(fd, headers, { waitForTrailers: true });
+  stream.on('wantTrailers', () => {
+    stream.sendTrailers({ ABC: 'some value to send' });
+  });
+
+  stream.on('close', () => closeSync(fd));
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const fs = require('node:fs');
 
@@ -1831,7 +2106,37 @@ the stream will be destroyed.
 
 Example using a file path:
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  function statCheck(stat, headers) {
+    headers['last-modified'] = stat.mtime.toUTCString();
+  }
+
+  function onError(err) {
+    // stream.respond() can throw if the stream has been destroyed by
+    // the other side.
+    try {
+      if (err.code === 'ENOENT') {
+        stream.respond({ ':status': 404 });
+      } else {
+        stream.respond({ ':status': 500 });
+      }
+    } catch (err) {
+      // Perform actual error handling.
+      console.error(err);
+    }
+    stream.end();
+  }
+
+  stream.respondWithFile('/some/file',
+                         { 'content-type': 'text/plain; charset=utf-8' },
+                         { statCheck, onError });
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1866,7 +2171,22 @@ by returning `false`. For instance, a conditional request may check the stat
 results to determine if the file has been modified to return an appropriate
 `304` response:
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  function statCheck(stat, headers) {
+    // Check the stat here...
+    stream.respond({ ':status': 304 });
+    return false; // Cancel the send operation
+  }
+  stream.respondWithFile('/some/file',
+                         { 'content-type': 'text/plain; charset=utf-8' },
+                         { statCheck });
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -1901,7 +2221,20 @@ close when the final `DATA` frame is transmitted. User code must call either
 `http2stream.sendTrailers()` or `http2stream.close()` to close the
 `Http2Stream`.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream) => {
+  stream.respondWithFile('/some/file',
+                         { 'content-type': 'text/plain; charset=utf-8' },
+                         { waitForTrailers: true });
+  stream.on('wantTrailers', () => {
+    stream.sendTrailers({ ABC: 'some value to send' });
+  });
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream) => {
@@ -2016,7 +2349,30 @@ an `Http2Session` associated with the server.
 
 See also [`Http2Session`'s `'stream'` event][].
 
-```js
+```mjs
+import { createServer, constants } from 'node:http2';
+const {
+  HTTP2_HEADER_METHOD,
+  HTTP2_HEADER_PATH,
+  HTTP2_HEADER_STATUS,
+  HTTP2_HEADER_CONTENT_TYPE,
+} = constants;
+
+const server = createServer();
+server.on('stream', (stream, headers, flags) => {
+  const method = headers[HTTP2_HEADER_METHOD];
+  const path = headers[HTTP2_HEADER_PATH];
+  // ...
+  stream.respond({
+    [HTTP2_HEADER_STATUS]: 200,
+    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain; charset=utf-8',
+  });
+  stream.write('hello ');
+  stream.end('world');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const {
   HTTP2_HEADER_METHOD,
@@ -2070,6 +2426,19 @@ If `callback` is provided, it is not invoked until all active sessions have been
 closed, although the server has already stopped allowing new sessions. See
 [`net.Server.close()`][] for more details.
 
+#### `server[Symbol.asyncDispose]()`
+
+<!-- YAML
+added: v20.4.0
+changes:
+ - version: v24.2.0
+   pr-url: https://github.com/nodejs/node/pull/58467
+   description: No longer experimental.
+-->
+
+Calls [`server.close()`][] and returns a promise that fulfills when the
+server has closed.
+
 #### `server.setTimeout([msecs][, callback])`
 
 <!-- YAML
@@ -2108,7 +2477,7 @@ changes:
     description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* {number} Timeout in milliseconds. **Default:** 0 (no timeout)
+* Type: {number} Timeout in milliseconds. **Default:** 0 (no timeout)
 
 The number of milliseconds of inactivity before a socket is presumed
 to have timed out.
@@ -2236,7 +2605,32 @@ an `Http2Session` associated with the server.
 
 See also [`Http2Session`'s `'stream'` event][].
 
-```js
+```mjs
+import { createSecureServer, constants } from 'node:http2';
+const {
+  HTTP2_HEADER_METHOD,
+  HTTP2_HEADER_PATH,
+  HTTP2_HEADER_STATUS,
+  HTTP2_HEADER_CONTENT_TYPE,
+} = constants;
+
+const options = getOptionsSomehow();
+
+const server = createSecureServer(options);
+server.on('stream', (stream, headers, flags) => {
+  const method = headers[HTTP2_HEADER_METHOD];
+  const path = headers[HTTP2_HEADER_PATH];
+  // ...
+  stream.respond({
+    [HTTP2_HEADER_STATUS]: 200,
+    [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain; charset=utf-8',
+  });
+  stream.write('hello ');
+  stream.end('world');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const {
   HTTP2_HEADER_METHOD,
@@ -2275,6 +2669,11 @@ a given number of milliseconds set using `http2secureServer.setTimeout()`.
 
 <!-- YAML
 added: v8.4.0
+changes:
+  - version: v19.0.0
+    pr-url: https://github.com/nodejs/node/pull/44031
+    description: This event will only be emitted if the client did not transmit
+                 an ALPN extension during the TLS handshake.
 -->
 
 * `socket` {stream.Duplex}
@@ -2284,6 +2683,15 @@ negotiate an allowed protocol (i.e. HTTP/2 or HTTP/1.1). The event handler
 receives the socket for handling. If no listener is registered for this event,
 the connection is terminated. A timeout may be specified using the
 `'unknownProtocolTimeout'` option passed to [`http2.createSecureServer()`][].
+
+In earlier versions of Node.js, this event would be emitted if `allowHTTP1` is
+`false` and, during the TLS handshake, the client either does not send an ALPN
+extension or sends an ALPN extension that does not include HTTP/2 (`h2`). Newer
+versions of Node.js only emit this event if `allowHTTP1` is `false` and the
+client does not send an ALPN extension. If the client sends an ALPN extension
+that does not include HTTP/2 (or HTTP/1.1 if `allowHTTP1` is `true`), the TLS
+handshake will fail and no secure connection will be established.
+
 See the [Compatibility API][].
 
 #### `server.close([callback])`
@@ -2338,7 +2746,7 @@ changes:
     description: The default timeout changed from 120s to 0 (no timeout).
 -->
 
-* {number} Timeout in milliseconds. **Default:** 0 (no timeout)
+* Type: {number} Timeout in milliseconds. **Default:** 0 (no timeout)
 
 The number of milliseconds of inactivity before a socket is presumed
 to have timed out.
@@ -2369,6 +2777,11 @@ Throws `ERR_INVALID_ARG_TYPE` for invalid `settings` argument.
 <!-- YAML
 added: v8.4.0
 changes:
+  - version:
+      - v23.0.0
+      - v22.10.0
+    pr-url: https://github.com/nodejs/node/pull/54875
+    description: Added `streamResetBurst` and `streamResetRate`.
   - version:
       - v15.10.0
       - v14.16.0
@@ -2471,6 +2884,14 @@ changes:
     **Default:** `100`.
   * `settings` {HTTP/2 Settings Object} The initial settings to send to the
     remote peer upon connection.
+  * `streamResetBurst` {number} and `streamResetRate` {number} Sets the rate
+    limit for the incoming stream reset (RST\_STREAM frame). Both settings must
+    be set to have any effect, and default to 1000 and 33 respectively.
+  * `remoteCustomSettings` {Array} The array of integer values determines the
+    settings types, which are included in the `CustomSettings`-property of
+    the received remoteSettings. Please see the `CustomSettings`-property of
+    the `Http2Settings` object for more information,
+    on the allowed setting types.
   * `Http1IncomingMessage` {http.IncomingMessage} Specifies the
     `IncomingMessage` class to used for HTTP/1 fallback. Useful for extending
     the original `http.IncomingMessage`. **Default:** `http.IncomingMessage`.
@@ -2489,6 +2910,10 @@ changes:
     a server should wait when an [`'unknownProtocol'`][] is emitted. If the
     socket has not been destroyed by that time the server will destroy it.
     **Default:** `10000`.
+  * `strictFieldWhitespaceValidation` {boolean} If `true`, it turns on strict leading
+    and trailing whitespace validation for HTTP/2 header field names and values
+    as per [RFC-9113](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1).
+    **Default:** `true`.
   * ...: Any [`net.createServer()`][] option can be provided.
 * `onRequestHandler` {Function} See [Compatibility API][]
 * Returns: {Http2Server}
@@ -2501,7 +2926,27 @@ Since there are no browsers known that support
 [`http2.createSecureServer()`][] is necessary when communicating
 with browser clients.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+
+// Create an unencrypted HTTP/2 server.
+// Since there are no browsers known that support
+// unencrypted HTTP/2, the use of `createSecureServer()`
+// is necessary when communicating with browser clients.
+const server = createServer();
+
+server.on('stream', (stream, headers) => {
+  stream.respond({
+    'content-type': 'text/html; charset=utf-8',
+    ':status': 200,
+  });
+  stream.end('<h1>Hello World</h1>');
+});
+
+server.listen(8000);
+```
+
+```cjs
 const http2 = require('node:http2');
 
 // Create an unencrypted HTTP/2 server.
@@ -2625,6 +3070,13 @@ changes:
     **Default:** `100`.
   * `settings` {HTTP/2 Settings Object} The initial settings to send to the
     remote peer upon connection.
+  * `streamResetBurst` {number} and `streamResetRate` {number} Sets the rate
+    limit for the incoming stream reset (RST\_STREAM frame). Both settings must
+    be set to have any effect, and default to 1000 and 33 respectively.
+  * `remoteCustomSettings` {Array} The array of integer values determines the
+    settings types, which are included in the `customSettings`-property of the
+    received remoteSettings. Please see the `customSettings`-property of the
+    `Http2Settings` object for more information, on the allowed setting types.
   * ...: Any [`tls.createServer()`][] options can be provided. For
     servers, the identity options (`pfx` or `key`/`cert`) are usually required.
   * `origins` {string\[]} An array of origin strings to send within an `ORIGIN`
@@ -2633,13 +3085,40 @@ changes:
     a server should wait when an [`'unknownProtocol'`][] event is emitted. If
     the socket has not been destroyed by that time the server will destroy it.
     **Default:** `10000`.
+  * `strictFieldWhitespaceValidation` {boolean} If `true`, it turns on strict leading
+    and trailing whitespace validation for HTTP/2 header field names and values
+    as per [RFC-9113](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1).
+    **Default:** `true`.
 * `onRequestHandler` {Function} See [Compatibility API][]
 * Returns: {Http2SecureServer}
 
 Returns a `tls.Server` instance that creates and manages `Http2Session`
 instances.
 
-```js
+```mjs
+import { createSecureServer } from 'node:http2';
+import { readFileSync } from 'node:fs';
+
+const options = {
+  key: readFileSync('server-key.pem'),
+  cert: readFileSync('server-cert.pem'),
+};
+
+// Create a secure HTTP/2 server
+const server = createSecureServer(options);
+
+server.on('stream', (stream, headers) => {
+  stream.respond({
+    'content-type': 'text/html; charset=utf-8',
+    ':status': 200,
+  });
+  stream.end('<h1>Hello World</h1>');
+});
+
+server.listen(8443);
+```
+
+```cjs
 const http2 = require('node:http2');
 const fs = require('node:fs');
 
@@ -2753,6 +3232,10 @@ changes:
     `'https:'`
   * `settings` {HTTP/2 Settings Object} The initial settings to send to the
     remote peer upon connection.
+  * `remoteCustomSettings` {Array} The array of integer values determines the
+    settings types, which are included in the `CustomSettings`-property of the
+    received remoteSettings. Please see the `CustomSettings`-property of the
+    `Http2Settings` object for more information, on the allowed setting types.
   * `createConnection` {Function} An optional callback that receives the `URL`
     instance passed to `connect` and the `options` object, and returns any
     [`Duplex`][] stream that is to be used as the connection for this session.
@@ -2761,13 +3244,26 @@ changes:
     a server should wait when an [`'unknownProtocol'`][] event is emitted. If
     the socket has not been destroyed by that time the server will destroy it.
     **Default:** `10000`.
+  * `strictFieldWhitespaceValidation` {boolean} If `true`, it turns on strict leading
+    and trailing whitespace validation for HTTP/2 header field names and values
+    as per [RFC-9113](https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1).
+    **Default:** `true`.
 * `listener` {Function} Will be registered as a one-time listener of the
   [`'connect'`][] event.
 * Returns: {ClientHttp2Session}
 
 Returns a `ClientHttp2Session` instance.
 
-```js
+```mjs
+import { connect } from 'node:http2';
+const client = connect('https://localhost:1234');
+
+/* Use the client */
+
+client.close();
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('https://localhost:1234');
 
@@ -2829,7 +3325,16 @@ Returns a `Buffer` instance containing serialized representation of the given
 HTTP/2 settings as specified in the [HTTP/2][] specification. This is intended
 for use with the `HTTP2-Settings` header field.
 
-```js
+```mjs
+import { getPackedSettings } from 'node:http2';
+
+const packed = getPackedSettings({ enablePush: false });
+
+console.log(packed.toString('base64'));
+// Prints: AAIAAAAA
+```
+
+```cjs
 const http2 = require('node:http2');
 
 const packed = http2.getPackedSettings({ enablePush: false });
@@ -2850,6 +3355,21 @@ added: v8.4.0
 Returns a [HTTP/2 Settings Object][] containing the deserialized settings from
 the given `Buffer` as generated by `http2.getPackedSettings()`.
 
+### `http2.performServerHandshake(socket[, options])`
+
+<!-- YAML
+added:
+  - v21.7.0
+  - v20.12.0
+-->
+
+* `socket` {stream.Duplex}
+* `options` {Object}
+  * ...: Any [`http2.createServer()`][] option can be provided.
+* Returns: {ServerHttp2Session}
+
+Create an HTTP/2 server session from an existing socket.
+
 ### `http2.sensitiveHeaders`
 
 <!-- YAML
@@ -2858,7 +3378,7 @@ added:
   - v14.18.0
 -->
 
-* {symbol}
+* Type: {symbol}
 
 This symbol can be set as a property on the HTTP/2 headers object with an array
 value in order to provide a list of headers considered sensitive.
@@ -2903,7 +3423,16 @@ For incoming headers:
 * For duplicate `cookie` headers, the values are joined together with '; '.
 * For all other headers, the values are joined together with ', '.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer();
+server.on('stream', (stream, headers) => {
+  console.log(headers[':path']);
+  console.log(headers.ABC);
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer();
 server.on('stream', (stream, headers) => {
@@ -2985,6 +3514,21 @@ properties.
   meaningful if sent by the server. Once the `enableConnectProtocol` setting
   has been enabled for a given `Http2Session`, it cannot be disabled.
   **Default:** `false`.
+* `customSettings` {Object} Specifies additional settings, yet not implemented
+  in node and the underlying libraries. The key of the object defines the
+  numeric value of the settings type (as defined in the "HTTP/2 SETTINGS"
+  registry established by \[RFC 7540]) and the values the actual numeric value
+  of the settings.
+  The settings type has to be an integer in the range from 1 to 2^16-1.
+  It should not be a settings type already handled by node, i.e. currently
+  it should be greater than 6, although it is not an error.
+  The values need to be unsigned integers in the range from 0 to 2^32-1.
+  Currently, a maximum of up 10 custom settings is supported.
+  It is only supported for sending SETTINGS, or for receiving settings values
+  specified in the `remoteCustomSettings` options of the server or client
+  object. Do not mix the `customSettings`-mechanism for a settings id with
+  interfaces for the natively handled settings, in case a setting becomes
+  natively supported in a future node version.
 
 All additional properties on the settings object are ignored.
 
@@ -3036,7 +3580,22 @@ characters, per the requirements of the HTTP specification.
 To receive pushed streams on the client, set a listener for the `'stream'`
 event on the `ClientHttp2Session`:
 
-```js
+```mjs
+import { connect } from 'node:http2';
+
+const client = connect('http://localhost');
+
+client.on('stream', (pushedStream, requestHeaders) => {
+  pushedStream.on('push', (responseHeaders) => {
+    // Process response headers
+  });
+  pushedStream.on('data', (chunk) => { /* handle pushed data */ });
+});
+
+const req = client.request({ ':path': '/' });
+```
+
+```cjs
 const http2 = require('node:http2');
 
 const client = http2.connect('http://localhost');
@@ -3058,7 +3617,20 @@ for TCP/IP connections.
 
 A simple TCP Server:
 
-```js
+```mjs
+import { createServer } from 'node:net';
+
+const server = createServer((socket) => {
+  let name = '';
+  socket.setEncoding('utf8');
+  socket.on('data', (chunk) => name += chunk);
+  socket.on('end', () => socket.end(`hello ${name}`));
+});
+
+server.listen(8000);
+```
+
+```cjs
 const net = require('node:net');
 
 const server = net.createServer((socket) => {
@@ -3073,7 +3645,35 @@ server.listen(8000);
 
 An HTTP/2 CONNECT proxy:
 
-```js
+```mjs
+import { createServer, constants } from 'node:http2';
+const { NGHTTP2_REFUSED_STREAM, NGHTTP2_CONNECT_ERROR } = constants;
+import { connect } from 'node:net';
+
+const proxy = createServer();
+proxy.on('stream', (stream, headers) => {
+  if (headers[':method'] !== 'CONNECT') {
+    // Only accept CONNECT requests
+    stream.close(NGHTTP2_REFUSED_STREAM);
+    return;
+  }
+  const auth = new URL(`tcp://${headers[':authority']}`);
+  // It's a very good idea to verify that hostname and port are
+  // things this proxy should be connecting to.
+  const socket = connect(auth.port, auth.hostname, () => {
+    stream.respond();
+    socket.pipe(stream);
+    stream.pipe(socket);
+  });
+  socket.on('error', (error) => {
+    stream.close(NGHTTP2_CONNECT_ERROR);
+  });
+});
+
+proxy.listen(8001);
+```
+
+```cjs
 const http2 = require('node:http2');
 const { NGHTTP2_REFUSED_STREAM } = http2.constants;
 const net = require('node:net');
@@ -3103,7 +3703,32 @@ proxy.listen(8001);
 
 An HTTP/2 CONNECT client:
 
-```js
+```mjs
+import { connect, constants } from 'node:http2';
+
+const client = connect('http://localhost:8001');
+
+// Must not specify the ':path' and ':scheme' headers
+// for CONNECT requests or an error will be thrown.
+const req = client.request({
+  ':method': 'CONNECT',
+  ':authority': 'localhost:8000',
+});
+
+req.on('response', (headers) => {
+  console.log(headers[constants.HTTP2_HEADER_STATUS]);
+});
+let data = '';
+req.setEncoding('utf8');
+req.on('data', (chunk) => data += chunk);
+req.on('end', () => {
+  console.log(`The server says: ${data}`);
+  client.close();
+});
+req.end('Jane');
+```
+
+```cjs
 const http2 = require('node:http2');
 
 const client = http2.connect('http://localhost:8001');
@@ -3137,7 +3762,13 @@ method as a tunnel for other communication protocols (such as WebSockets).
 The use of the Extended CONNECT Protocol is enabled by HTTP/2 servers by using
 the `enableConnectProtocol` setting:
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const settings = { enableConnectProtocol: true };
+const server = createServer({ settings });
+```
+
+```cjs
 const http2 = require('node:http2');
 const settings = { enableConnectProtocol: true };
 const server = http2.createServer({ settings });
@@ -3147,7 +3778,18 @@ Once the client receives the `SETTINGS` frame from the server indicating that
 the extended CONNECT may be used, it may send `CONNECT` requests that use the
 `':protocol'` HTTP/2 pseudo-header:
 
-```js
+```mjs
+import { connect } from 'node:http2';
+const client = connect('http://localhost:8080');
+client.on('remoteSettings', (settings) => {
+  if (settings.enableConnectProtocol) {
+    const req = client.request({ ':method': 'CONNECT', ':protocol': 'foo' });
+    // ...
+  }
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const client = http2.connect('http://localhost:8080');
 client.on('remoteSettings', (settings) => {
@@ -3170,7 +3812,17 @@ different implementation.
 The following example creates an HTTP/2 server using the compatibility
 API:
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer((req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('X-Foo', 'bar');
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('ok');
+});
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer((req, res) => {
   res.setHeader('Content-Type', 'text/html');
@@ -3199,7 +3851,31 @@ features of HTTP/2.
 
 The following example creates a server that supports both protocols:
 
-```js
+```mjs
+import { createSecureServer } from 'node:http2';
+import { readFileSync } from 'node:fs';
+
+const cert = readFileSync('./cert.pem');
+const key = readFileSync('./key.pem');
+
+const server = createSecureServer(
+  { cert, key, allowHTTP1: true },
+  onRequest,
+).listen(8000);
+
+function onRequest(req, res) {
+  // Detects if it is a HTTPS request or HTTP/2
+  const { socket: { alpnProtocol } } = req.httpVersion === '2.0' ?
+    req.stream.session : req;
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({
+    alpnProtocol,
+    httpVersion: req.httpVersion,
+  }));
+}
+```
+
+```cjs
 const { createSecureServer } = require('node:http2');
 const { readFileSync } = require('node:fs');
 
@@ -3266,7 +3942,7 @@ Just like `'end'`, this event occurs only once per response.
 added: v10.1.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 The `request.aborted` property will be `true` if the request has
 been aborted.
@@ -3277,7 +3953,7 @@ been aborted.
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 The request authority pseudo header field. Because HTTP/2 allows requests
 to set either `:authority` or `host`, this value is derived from
@@ -3290,7 +3966,7 @@ to set either `:authority` or `host`, this value is derived from
 added: v12.10.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 The `request.complete` property will be `true` if the request has
 been completed, aborted, or destroyed.
@@ -3304,7 +3980,7 @@ deprecated: v13.0.0
 
 > Stability: 0 - Deprecated. Use [`request.socket`][].
 
-* {net.Socket|tls.TLSSocket}
+* Type: {net.Socket|tls.TLSSocket}
 
 See [`request.socket`][].
 
@@ -3328,7 +4004,7 @@ It does nothing if the stream was already destroyed.
 added: v8.4.0
 -->
 
-* {Object}
+* Type: {Object}
 
 The request/response headers object.
 
@@ -3362,7 +4038,7 @@ assert(request.url);   // Fails because the :path header has been removed
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 In case of server request, the HTTP version sent by the client. In the case of
 client response, the HTTP version of the connected-to server. Returns
@@ -3377,7 +4053,7 @@ Also `message.httpVersionMajor` is the first integer and
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 The request method as a string. Read-only. Examples: `'GET'`, `'DELETE'`.
 
@@ -3387,7 +4063,7 @@ The request method as a string. Read-only. Examples: `'GET'`, `'DELETE'`.
 added: v8.4.0
 -->
 
-* {string\[]}
+* Type: {string\[]}
 
 The raw request/response headers list exactly as they were received.
 
@@ -3417,7 +4093,7 @@ console.log(request.rawHeaders);
 added: v8.4.0
 -->
 
-* {string\[]}
+* Type: {string\[]}
 
 The raw request/response trailer keys and values exactly as they were
 received. Only populated at the `'end'` event.
@@ -3428,7 +4104,7 @@ received. Only populated at the `'end'` event.
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 The request scheme pseudo header field indicating the scheme
 portion of the target URL.
@@ -3458,7 +4134,7 @@ events, timed out sockets must be handled explicitly.
 added: v8.4.0
 -->
 
-* {net.Socket|tls.TLSSocket}
+* Type: {net.Socket|tls.TLSSocket}
 
 Returns a `Proxy` object that acts as a `net.Socket` (or `tls.TLSSocket`) but
 applies getters, setters, and methods based on HTTP/2 logic.
@@ -3485,7 +4161,7 @@ authentication details.
 added: v8.4.0
 -->
 
-* {Http2Stream}
+* Type: {Http2Stream}
 
 The [`Http2Stream`][] object backing the request.
 
@@ -3495,7 +4171,7 @@ The [`Http2Stream`][] object backing the request.
 added: v8.4.0
 -->
 
-* {Object}
+* Type: {Object}
 
 The request/response trailers object. Only populated at the `'end'` event.
 
@@ -3505,7 +4181,7 @@ The request/response trailers object. Only populated at the `'end'` event.
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 Request URL string. This contains only the URL that is present in the actual
 HTTP request. If the request is:
@@ -3517,7 +4193,7 @@ Accept: text/plain
 
 Then `request.url` will be:
 
-<!-- eslint-disable semi -->
+<!-- eslint-disable @stylistic/js/semi -->
 
 ```js
 '/status?name=ryan'
@@ -3591,6 +4267,38 @@ message) to the response.
 Attempting to set a header field name or value that contains invalid characters
 will result in a [`TypeError`][] being thrown.
 
+#### `response.appendHeader(name, value)`
+
+<!-- YAML
+added:
+  - v21.7.0
+  - v20.12.0
+-->
+
+* `name` {string}
+* `value` {string|string\[]}
+
+Append a single header value to the header object.
+
+If the value is an array, this is equivalent to calling this method multiple
+times.
+
+If there were no previous values for the header, this is equivalent to calling
+[`response.setHeader()`][].
+
+Attempting to set a header field name or value that contains invalid characters
+will result in a [`TypeError`][] being thrown.
+
+```js
+// Returns headers including "set-cookie: a" and "set-cookie: b"
+const server = http2.createServer((req, res) => {
+  res.setHeader('set-cookie', 'a');
+  res.appendHeader('set-cookie', 'b');
+  res.writeHead(200);
+  res.end('ok');
+});
+```
+
 #### `response.connection`
 
 <!-- YAML
@@ -3600,7 +4308,7 @@ deprecated: v13.0.0
 
 > Stability: 0 - Deprecated. Use [`response.socket`][].
 
-* {net.Socket|tls.TLSSocket}
+* Type: {net.Socket|tls.TLSSocket}
 
 See [`response.socket`][].
 
@@ -3666,7 +4374,7 @@ deprecated:
 
 > Stability: 0 - Deprecated. Use [`response.writableEnded`][].
 
-* {boolean}
+* Type: {boolean}
 
 Boolean value that indicates whether the response has completed. Starts
 as `false`. After [`response.end()`][] executes, the value will be `true`.
@@ -3755,7 +4463,7 @@ const hasContentType = response.hasHeader('content-type');
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 True if headers were sent, false otherwise (read-only).
 
@@ -3779,7 +4487,7 @@ response.removeHeader('Content-Encoding');
 added: v15.7.0
 -->
 
-* {http2.Http2ServerRequest}
+* Type: {http2.Http2ServerRequest}
 
 A reference to the original HTTP2 `request` object.
 
@@ -3789,7 +4497,7 @@ A reference to the original HTTP2 `request` object.
 added: v8.4.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 When true, the Date header will be automatically generated and sent in
 the response if it is not already present in the headers. Defaults to true.
@@ -3862,7 +4570,7 @@ events, timed out sockets must be handled explicitly.
 added: v8.4.0
 -->
 
-* {net.Socket|tls.TLSSocket}
+* Type: {net.Socket|tls.TLSSocket}
 
 Returns a `Proxy` object that acts as a `net.Socket` (or `tls.TLSSocket`) but
 applies getters, setters, and methods based on HTTP/2 logic.
@@ -3881,7 +4589,16 @@ more information.
 
 All other interactions will be routed directly to the socket.
 
-```js
+```mjs
+import { createServer } from 'node:http2';
+const server = createServer((req, res) => {
+  const ip = req.socket.remoteAddress;
+  const port = req.socket.remotePort;
+  res.end(`Your IP address is ${ip} and your source port is ${port}.`);
+}).listen(3000);
+```
+
+```cjs
 const http2 = require('node:http2');
 const server = http2.createServer((req, res) => {
   const ip = req.socket.remoteAddress;
@@ -3896,7 +4613,7 @@ const server = http2.createServer((req, res) => {
 added: v8.4.0
 -->
 
-* {number}
+* Type: {number}
 
 When using implicit headers (not calling [`response.writeHead()`][] explicitly),
 this property controls the status code that will be sent to the client when
@@ -3915,7 +4632,7 @@ status code which was sent out.
 added: v8.4.0
 -->
 
-* {string}
+* Type: {string}
 
 Status message is not supported by HTTP/2 (RFC 7540 8.1.2.4). It returns
 an empty string.
@@ -3926,7 +4643,7 @@ an empty string.
 added: v8.4.0
 -->
 
-* {Http2Stream}
+* Type: {Http2Stream}
 
 The [`Http2Stream`][] object backing the response.
 
@@ -3936,7 +4653,7 @@ The [`Http2Stream`][] object backing the response.
 added: v12.9.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 Is `true` after [`response.end()`][] has been called. This property
 does not indicate whether the data has been flushed, for this use
@@ -4092,7 +4809,22 @@ will result in a [`TypeError`][] being thrown.
 The [Performance Observer][] API can be used to collect basic performance
 metrics for each `Http2Session` and `Http2Stream` instance.
 
-```js
+```mjs
+import { PerformanceObserver } from 'node:perf_hooks';
+
+const obs = new PerformanceObserver((items) => {
+  const entry = items.getEntries()[0];
+  console.log(entry.entryType);  // prints 'http2'
+  if (entry.name === 'Http2Session') {
+    // Entry contains statistics about the Http2Session
+  } else if (entry.name === 'Http2Stream') {
+    // Entry contains statistics about the Http2Stream
+  }
+});
+obs.observe({ entryTypes: ['http2'] });
+```
+
+```cjs
 const { PerformanceObserver } = require('node:perf_hooks');
 
 const obs = new PerformanceObserver((items) => {
@@ -4172,6 +4904,7 @@ you need to implement any fall-back behavior yourself.
 [RFC 7838]: https://tools.ietf.org/html/rfc7838
 [RFC 8336]: https://tools.ietf.org/html/rfc8336
 [RFC 8441]: https://tools.ietf.org/html/rfc8441
+[RFC 9113]: https://datatracker.ietf.org/doc/html/rfc9113#section-5.3.1
 [Sensitive headers]: #sensitive-headers
 [`'checkContinue'`]: #event-checkcontinue
 [`'connect'`]: #event-connect
@@ -4212,6 +4945,7 @@ you need to implement any fall-back behavior yourself.
 [`response.write(data, encoding)`]: http.md#responsewritechunk-encoding-callback
 [`response.writeContinue()`]: #responsewritecontinue
 [`response.writeHead()`]: #responsewriteheadstatuscode-statusmessage-headers
+[`server.close()`]: #serverclosecallback
 [`server.maxHeadersCount`]: http.md#servermaxheaderscount
 [`tls.Server.close()`]: tls.md#serverclosecallback
 [`tls.TLSSocket`]: tls.md#class-tlstlssocket

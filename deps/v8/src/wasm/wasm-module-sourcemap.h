@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_WASM_WASM_MODULE_SOURCEMAP_H_
+#define V8_WASM_WASM_MODULE_SOURCEMAP_H_
+
 #if !V8_ENABLE_WEBASSEMBLY
 #error This header should only be included if WebAssembly is enabled.
 #endif  // !V8_ENABLE_WEBASSEMBLY
-
-#ifndef V8_WASM_WASM_MODULE_SOURCEMAP_H_
-#define V8_WASM_WASM_MODULE_SOURCEMAP_H_
 
 #include <string>
 #include <vector>
@@ -71,6 +71,8 @@ class V8_EXPORT_PRIVATE WasmModuleSourceMap {
   // source file name. It should only be called when current function is checked
   // with IsValid, HasSource and HasValidEntry.
   std::string GetFilename(size_t wasm_offset) const;
+
+  size_t EstimateCurrentMemoryConsumption() const;
 
  private:
   std::vector<size_t> offsets;

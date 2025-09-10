@@ -5,8 +5,6 @@
 #include "src/codegen/tick-counter.h"
 #include "src/compiler/access-builder.h"
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph-visualizer.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/js-graph.h"
 #include "src/compiler/js-operator.h"
 #include "src/compiler/loop-analysis.h"
@@ -16,6 +14,8 @@
 #include "src/compiler/schedule.h"
 #include "src/compiler/scheduler.h"
 #include "src/compiler/simplified-operator.h"
+#include "src/compiler/turbofan-graph-visualizer.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/compiler/verifier.h"
 #include "test/cctest/cctest.h"
 
@@ -46,7 +46,7 @@ class LoopFinderTester : HandleAndZoneScope {
         p0(graph.NewNode(common.Parameter(0), start)),
         zero(jsgraph.Int32Constant(0)),
         one(jsgraph.OneConstant()),
-        half(jsgraph.Constant(0.5)),
+        half(jsgraph.ConstantNoHole(0.5)),
         self(graph.NewNode(common.Int32Constant(0xAABBCCDD))),
         dead(graph.NewNode(common.Dead())),
         loop_tree(nullptr) {
@@ -61,7 +61,7 @@ class LoopFinderTester : HandleAndZoneScope {
   Isolate* isolate;
   TickCounter tick_counter;
   CommonOperatorBuilder common;
-  Graph graph;
+  TFGraph graph;
   JSGraph jsgraph;
   Node* start;
   Node* end;
@@ -126,7 +126,7 @@ class LoopFinderTester : HandleAndZoneScope {
 
   LoopTree* GetLoopTree() {
     if (loop_tree == nullptr) {
-      if (FLAG_trace_turbo_graph) {
+      if (v8_flags.trace_turbo_graph) {
         StdoutStream{} << AsRPO(graph);
       }
       Zone zone(main_isolate()->allocator(), ZONE_NAME);
@@ -927,7 +927,7 @@ TEST(LaEdgeMatrix3_5) { RunEdgeMatrix3_i(5); }
 
 static void RunManyChainedLoops_i(int count) {
   LoopFinderTester t;
-  Node** nodes = t.zone()->NewArray<Node*>(count * 4);
+  Node** nodes = t.zone()->AllocateArray<Node*>(count * 4);
   Node* k11 = t.jsgraph.Int32Constant(11);
   Node* k12 = t.jsgraph.Int32Constant(12);
   Node* last = t.start;
@@ -963,7 +963,7 @@ static void RunManyChainedLoops_i(int count) {
 
 static void RunManyNestedLoops_i(int count) {
   LoopFinderTester t;
-  Node** nodes = t.zone()->NewArray<Node*>(count * 5);
+  Node** nodes = t.zone()->AllocateArray<Node*>(count * 5);
   Node* k11 = t.jsgraph.Int32Constant(11);
   Node* k12 = t.jsgraph.Int32Constant(12);
   Node* outer = nullptr;

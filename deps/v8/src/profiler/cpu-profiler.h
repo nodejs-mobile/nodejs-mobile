@@ -16,6 +16,10 @@
 #include "src/profiler/tick-sample.h"
 #include "src/utils/locked-queue.h"
 
+#if V8_OS_WIN
+#include "src/base/platform/platform-win32.h"
+#endif
+
 namespace v8 {
 namespace sampler {
 class Sampler;
@@ -24,7 +28,7 @@ namespace internal {
 
 // Forward declarations.
 class CodeEntry;
-class CodeMap;
+class InstructionStreamMap;
 class CpuProfilesCollection;
 class Isolate;
 class Symbolizer;
@@ -58,7 +62,7 @@ class CodeCreateEventRecord : public CodeEventRecord {
   CodeEntry* entry;
   unsigned instruction_size;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 
@@ -67,7 +71,7 @@ class CodeMoveEventRecord : public CodeEventRecord {
   Address from_instruction_start;
   Address to_instruction_start;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 
@@ -76,7 +80,7 @@ class CodeDisableOptEventRecord : public CodeEventRecord {
   Address instruction_start;
   const char* bailout_reason;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 
@@ -90,7 +94,7 @@ class CodeDeoptEventRecord : public CodeEventRecord {
   CpuProfileDeoptFrame* deopt_frames;
   int deopt_frame_count;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 
@@ -100,7 +104,7 @@ class ReportBuiltinEventRecord : public CodeEventRecord {
   unsigned instruction_size;
   Builtin builtin;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 // Signals that a native context's address has changed.
@@ -127,7 +131,7 @@ class CodeDeleteEventRecord : public CodeEventRecord {
  public:
   CodeEntry* entry;
 
-  V8_INLINE void UpdateCodeMap(CodeMap* code_map);
+  V8_INLINE void UpdateCodeMap(InstructionStreamMap* instruction_stream_map);
 };
 
 // A record type for sending code events (e.g. create, move, delete) to the
@@ -176,7 +180,8 @@ class V8_EXPORT_PRIVATE ProfilerEventsProcessor : public base::Thread,
   void Enqueue(const CodeEventsContainer& event);
 
   // Puts current stack into the tick sample events buffer.
-  void AddCurrentStack(bool update_stats = false);
+  void AddCurrentStack(bool update_stats = false,
+                       const std::optional<uint64_t> trace_id = std::nullopt);
   void AddDeoptStack(Address from, int fp_to_sp_delta);
   // Add a sample into the tick sample events buffer. Used for testing.
   void AddSample(TickSample sample);
@@ -254,19 +259,22 @@ class V8_EXPORT_PRIVATE SamplingEventsProcessor
   base::TimeDelta period_;           // Samples & code events processing period.
   const bool use_precise_sampling_;  // Whether or not busy-waiting is used for
                                      // low sampling intervals on Windows.
+#if V8_OS_WIN
+  base::PreciseSleepTimer precise_sleep_timer_;
+#endif  // V8_OS_WIN
 };
 
-// Builds and maintains a CodeMap tracking code objects on the VM heap. While
-// alive, logs generated code, callbacks, and builtins from the isolate.
-// Redirects events to the profiler events processor when present. CodeEntry
-// lifetime is associated with the given CodeEntryStorage.
+// Builds and maintains an InstructionStreamMap tracking code objects on the VM
+// heap. While alive, logs generated code, callbacks, and builtins from the
+// isolate. Redirects events to the profiler events processor when present.
+// CodeEntry lifetime is associated with the given CodeEntryStorage.
 class V8_EXPORT_PRIVATE ProfilerCodeObserver : public CodeEventObserver {
  public:
   explicit ProfilerCodeObserver(Isolate*, CodeEntryStorage&);
 
   void CodeEventHandler(const CodeEventsContainer& evt_rec) override;
   CodeEntryStorage* code_entries() { return &code_entries_; }
-  CodeMap* code_map() { return &code_map_; }
+  InstructionStreamMap* instruction_stream_map() { return &code_map_; }
   WeakCodeRegistry* weak_code_registry() { return &weak_code_registry_; }
   size_t GetEstimatedMemoryUsage() const;
 
@@ -292,7 +300,7 @@ class V8_EXPORT_PRIVATE ProfilerCodeObserver : public CodeEventObserver {
 
   Isolate* const isolate_;
   CodeEntryStorage& code_entries_;
-  CodeMap code_map_;
+  InstructionStreamMap code_map_;
   WeakCodeRegistry weak_code_registry_;
   ProfilerEventsProcessor* processor_;
 };
@@ -305,7 +313,7 @@ class V8_EXPORT_PRIVATE ProfilerCodeObserver : public CodeEventObserver {
 //
 // Sampling is done using posix signals (except on Windows). The profiling
 // thread sends a signal to the main thread, based on a timer. The signal
-// handler can interrupt the main thread between any abitrary instructions.
+// handler can interrupt the main thread between any arbitrary instructions.
 // This means we are very careful about reading stack values during the signal
 // handler as we could be in the middle of an operation that is modifying the
 // stack.
@@ -332,7 +340,8 @@ class V8_EXPORT_PRIVATE CpuProfiler {
   CpuProfiler(const CpuProfiler&) = delete;
   CpuProfiler& operator=(const CpuProfiler&) = delete;
 
-  static void CollectSample(Isolate* isolate);
+  static void CollectSample(Isolate* isolate,
+                            std::optional<uint64_t> trace_id = std::nullopt);
   static size_t GetAllProfilersMemorySize(Isolate* isolate);
 
   using ProfilingMode = v8::CpuProfilingMode;
@@ -344,7 +353,7 @@ class V8_EXPORT_PRIVATE CpuProfiler {
   base::TimeDelta sampling_interval() const { return base_sampling_interval_; }
   void set_sampling_interval(base::TimeDelta value);
   void set_use_precise_sampling(bool);
-  void CollectSample();
+  void CollectSample(const std::optional<uint64_t> trace_id = std::nullopt);
   size_t GetEstimatedMemoryUsage() const;
   CpuProfilingResult StartProfiling(
       CpuProfilingOptions options = {},
@@ -353,11 +362,11 @@ class V8_EXPORT_PRIVATE CpuProfiler {
       const char* title, CpuProfilingOptions options = {},
       std::unique_ptr<DiscardedSamplesDelegate> delegate = nullptr);
   CpuProfilingResult StartProfiling(
-      String title, CpuProfilingOptions options = {},
+      Tagged<String> title, CpuProfilingOptions options = {},
       std::unique_ptr<DiscardedSamplesDelegate> delegate = nullptr);
 
   CpuProfile* StopProfiling(const char* title);
-  CpuProfile* StopProfiling(String title);
+  CpuProfile* StopProfiling(Tagged<String> title);
   CpuProfile* StopProfiling(ProfilerId id);
 
   int GetProfilesCount();
@@ -375,7 +384,9 @@ class V8_EXPORT_PRIVATE CpuProfiler {
   ProfilerListener* profiler_listener_for_test() const {
     return profiler_listener_.get();
   }
-  CodeMap* code_map_for_test() { return code_observer_->code_map(); }
+  InstructionStreamMap* code_map_for_test() {
+    return code_observer_->instruction_stream_map();
+  }
 
  private:
   void StartProcessorIfNotStarted();
@@ -385,8 +396,8 @@ class V8_EXPORT_PRIVATE CpuProfiler {
   void EnableLogging();
   void DisableLogging();
 
-  // Computes a sampling interval sufficient to accomodate attached profiles.
-  base::TimeDelta ComputeSamplingInterval() const;
+  // Computes a sampling interval sufficient to accommodate attached profiles.
+  base::TimeDelta ComputeSamplingInterval();
   // Dynamically updates the sampler to use a sampling interval sufficient for
   // child profiles.
   void AdjustSamplingInterval();

@@ -26,7 +26,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import argparse
 from collections import OrderedDict
 import sys
 
@@ -143,8 +142,6 @@ class CreateCommitMessage(Step):
       # TODO(machenbach): Use proper gerrit footer for bug after switch to
       # gerrit. Keep BUG= for now for backwards-compatibility.
       msg_pieces.append("BUG=%s\n" % bug_aggregate)
-
-    msg_pieces.append("NOTRY=true\nNOPRESUBMIT=true\nNOTREECHECKS=true\n")
 
     self["new_commit_msg"] = "".join(msg_pieces)
 

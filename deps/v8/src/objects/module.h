@@ -6,7 +6,6 @@
 #define V8_OBJECTS_MODULE_H_
 
 #include "include/v8-script.h"
-#include "src/objects/fixed-array.h"
 #include "src/objects/js-objects.h"
 #include "src/objects/objects.h"
 #include "src/objects/struct.h"
@@ -17,15 +16,13 @@
 namespace v8 {
 namespace internal {
 
-template <typename T>
-class Handle;
-class Isolate;
 class JSModuleNamespace;
 class SourceTextModuleDescriptor;
 class SourceTextModuleInfo;
 class SourceTextModuleInfoEntry;
-class String;
 class Zone;
+template <typename T>
+class ZoneForwardList;
 
 #include "torque-generated/src/objects/module-tq.inc"
 
@@ -50,22 +47,16 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
     kErrored
   };
 
+#ifdef DEBUG
+  static const char* StatusString(Module::Status status);
+#endif  // DEBUG
+
   // The exception in the case {status} is kErrored.
-  Object GetException();
+  Tagged<Object> GetException();
 
   // Returns if this module or any transitively requested module is [[Async]],
   // i.e. has a top-level await.
   V8_WARN_UNUSED_RESULT bool IsGraphAsync(Isolate* isolate) const;
-
-  // While deprecating v8::ResolveCallback in v8.h we still need to support the
-  // version of the API that uses it, but we can't directly reference the
-  // deprecated version because of the enusing build warnings.  So, we declare
-  // this matching typedef for temporary internal use.
-  // TODO(v8:10958) Delete this typedef and all references to it once
-  // v8::ResolveCallback is removed.
-  typedef MaybeLocal<v8::Module> (*DeprecatedResolveCallback)(
-      Local<v8::Context> context, Local<v8::String> specifier,
-      Local<v8::Module> referrer);
 
   // Implementation of spec operation ModuleDeclarationInstantiation.
   // Returns false if an exception occurred during instantiation, true
@@ -73,17 +64,17 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
   // exception is propagated.)
   static V8_WARN_UNUSED_RESULT bool Instantiate(
       Isolate* isolate, Handle<Module> module, v8::Local<v8::Context> context,
-      v8::Module::ResolveModuleCallback callback,
-      DeprecatedResolveCallback callback_without_import_assertions);
+      v8::Module::ResolveModuleCallback module_callback,
+      v8::Module::ResolveSourceCallback source_callback);
 
   // Implementation of spec operation ModuleEvaluation.
-  static V8_WARN_UNUSED_RESULT MaybeHandle<Object> Evaluate(
+  static V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Evaluate(
       Isolate* isolate, Handle<Module> module);
 
   // Get the namespace object for [module].  If it doesn't exist yet, it is
   // created.
-  static Handle<JSModuleNamespace> GetModuleNamespace(Isolate* isolate,
-                                                      Handle<Module> module);
+  static DirectHandle<JSModuleNamespace> GetModuleNamespace(
+      Isolate* isolate, Handle<Module> module);
 
   using BodyDescriptor =
       FixedBodyDescriptor<kExportsOffset, kHeaderSize, kHeaderSize>;
@@ -103,14 +94,15 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
   // exception (so check manually!).
   class ResolveSet;
   static V8_WARN_UNUSED_RESULT MaybeHandle<Cell> ResolveExport(
-      Isolate* isolate, Handle<Module> module, Handle<String> module_specifier,
-      Handle<String> export_name, MessageLocation loc, bool must_resolve,
-      ResolveSet* resolve_set);
+      Isolate* isolate, Handle<Module> module,
+      DirectHandle<String> module_specifier, Handle<String> export_name,
+      MessageLocation loc, bool must_resolve, ResolveSet* resolve_set);
 
   static V8_WARN_UNUSED_RESULT bool PrepareInstantiate(
-      Isolate* isolate, Handle<Module> module, v8::Local<v8::Context> context,
-      v8::Module::ResolveModuleCallback callback,
-      DeprecatedResolveCallback callback_without_import_assertions);
+      Isolate* isolate, DirectHandle<Module> module,
+      v8::Local<v8::Context> context,
+      v8::Module::ResolveModuleCallback module_callback,
+      v8::Module::ResolveSourceCallback source_callback);
   static V8_WARN_UNUSED_RESULT bool FinishInstantiate(
       Isolate* isolate, Handle<Module> module,
       ZoneForwardList<Handle<SourceTextModule>>* stack, unsigned* dfs_index,
@@ -118,16 +110,12 @@ class Module : public TorqueGeneratedModule<Module, HeapObject> {
 
   // Set module's status back to kUnlinked and reset other internal state.
   // This is used when instantiation fails.
-  static void Reset(Isolate* isolate, Handle<Module> module);
-  static void ResetGraph(Isolate* isolate, Handle<Module> module);
+  static void Reset(Isolate* isolate, DirectHandle<Module> module);
+  static void ResetGraph(Isolate* isolate, DirectHandle<Module> module);
 
-  // To set status to kErrored, RecordError or RecordErrorUsingPendingException
-  // should be used.
+  // To set status to kErrored, RecordError should be used.
   void SetStatus(Status status);
-  static void RecordErrorUsingPendingException(Isolate* isolate,
-                                               Handle<Module>);
-  static void RecordError(Isolate* isolate, Handle<Module> module,
-                          Handle<Object> error);
+  void RecordError(Isolate* isolate, Tagged<Object> error);
 
   TQ_OBJECT_CONSTRUCTORS(Module)
 };
@@ -144,8 +132,10 @@ class JSModuleNamespace
   // Retrieve the value exported by [module] under the given [name]. If there is
   // no such export, return Just(undefined). If the export is uninitialized,
   // schedule an exception and return Nothing.
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> GetExport(Isolate* isolate,
-                                                      Handle<String> name);
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> GetExport(
+      Isolate* isolate, DirectHandle<String> name);
+
+  bool HasExport(Isolate* isolate, DirectHandle<String> name);
 
   // Return the (constant) property attributes for the referenced property,
   // which is assumed to correspond to an export. If the export is
@@ -154,8 +144,9 @@ class JSModuleNamespace
       LookupIterator* it);
 
   static V8_WARN_UNUSED_RESULT Maybe<bool> DefineOwnProperty(
-      Isolate* isolate, Handle<JSModuleNamespace> o, Handle<Object> key,
-      PropertyDescriptor* desc, Maybe<ShouldThrow> should_throw);
+      Isolate* isolate, DirectHandle<JSModuleNamespace> o,
+      DirectHandle<Object> key, PropertyDescriptor* desc,
+      Maybe<ShouldThrow> should_throw);
 
   // In-object fields.
   enum {

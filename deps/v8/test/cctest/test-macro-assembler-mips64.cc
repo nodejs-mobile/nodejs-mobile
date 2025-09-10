@@ -32,9 +32,9 @@
 #include "src/base/utils/random-number-generator.h"
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/macro-assembler.h"
+#include "src/compiler/access-builder.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/simulator.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "src/utils/ostreams.h"
 #include "test/cctest/cctest.h"
@@ -112,7 +112,7 @@ TEST(BYTESWAP) {
   masm->GetCode(isolate, &desc);
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-  auto f = GeneratedCode<F3>::FromCode(*code);
+  auto f = GeneratedCode<F3>::FromCode(isolate, *code);
 
   for (size_t i = 0; i < arraysize(test_values); i++) {
     int32_t in_s4 = static_cast<int32_t>(test_values[i]);
@@ -168,7 +168,7 @@ TEST(LoadConstants) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<FV>::FromCode(*code);
+  auto f = GeneratedCode<FV>::FromCode(isolate, *code);
   (void)f.Call(reinterpret_cast<int64_t>(result), 0, 0, 0, 0);
   // Check results.
   for (int i = 0; i < 64; i++) {
@@ -211,7 +211,7 @@ TEST(LoadAddress) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<FV>::FromCode(*code);
+  auto f = GeneratedCode<FV>::FromCode(isolate, *code);
   (void)f.Call(0, 0, 0, 0, 0);
   // Check results.
 }
@@ -268,9 +268,9 @@ TEST(jump_tables4) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
-  code->Print(std::cout);
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   for (int i = 0; i < kNumCases; ++i) {
     int64_t res = reinterpret_cast<int64_t>(f.Call(i, 0, 0, 0, 0));
     ::printf("f(%d) = %" PRId64 "\n", i, res);
@@ -338,9 +338,9 @@ TEST(jump_tables5) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
-  code->Print(std::cout);
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   for (int i = 0; i < kNumCases; ++i) {
     int64_t res = reinterpret_cast<int64_t>(f.Call(i, 0, 0, 0, 0));
     ::printf("f(%d) = %" PRId64 "\n", i, res);
@@ -427,9 +427,9 @@ TEST(jump_tables6) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef OBJECT_PRINT
-  code->Print(std::cout);
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
   for (int i = 0; i < kSwitchTableCases; ++i) {
     int64_t res = reinterpret_cast<int64_t>(f.Call(i, 0, 0, 0, 0));
     ::printf("f(%d) = %" PRId64 "\n", i, res);
@@ -452,7 +452,7 @@ static uint64_t run_lsa(uint32_t rt, uint32_t rs, int8_t sa) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<F1>::FromCode(*code);
+  auto f = GeneratedCode<F1>::FromCode(isolate, *code);
 
   uint64_t res = reinterpret_cast<uint64_t>(f.Call(rt, rs, 0, 0, 0));
 
@@ -532,7 +532,7 @@ static uint64_t run_dlsa(uint64_t rt, uint64_t rs, int8_t sa) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<FV>::FromCode(*code);
+  auto f = GeneratedCode<FV>::FromCode(isolate, *code);
 
   uint64_t res = reinterpret_cast<uint64_t>(f.Call(rt, rs, 0, 0, 0));
 
@@ -682,7 +682,7 @@ RET_TYPE run_Cvt(IN_TYPE x, Func GenerateConvertInstructionFunc) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<F_CVT>::FromCode(*code);
+  auto f = GeneratedCode<F_CVT>::FromCode(isolate, *code);
 
   return reinterpret_cast<RET_TYPE>(f.Call(x, 0, 0, 0, 0));
 }
@@ -741,7 +741,7 @@ TEST(cvt_d_l_Trunc_l_ud) {
   CcTest::InitializeVM();
   FOR_INT64_INPUTS(i, cvt_trunc_int64_test_values) {
     int64_t input = *i;
-    uint64_t abs_input = (input < 0) ? -input : input;
+    uint64_t abs_input = (input >= 0 || input == INT64_MIN) ? input : -input;
     auto fn = [](MacroAssembler* masm) {
       __ dmtc1(a0, f4);
       __ cvt_d_l(f0, f4);
@@ -856,7 +856,7 @@ TEST(OverflowInstructions) {
       masm->GetCode(isolate, &desc);
       Handle<Code> code =
           Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-      auto f = GeneratedCode<F3>::FromCode(*code);
+      auto f = GeneratedCode<F3>::FromCode(isolate, *code);
       t.lhs = ii;
       t.rhs = jj;
       f.Call(&t, 0, 0, 0, 0);
@@ -935,7 +935,8 @@ TEST(min_max_nan) {
   auto handle_dnan = [masm](FPURegister dst, Label* nan, Label* back) {
     __ bind(nan);
     __ LoadRoot(t8, RootIndex::kNanValue);
-    __ Ldc1(dst, FieldMemOperand(t8, HeapNumber::kValueOffset));
+    __ Ldc1(dst, FieldMemOperand(
+                     t8, compiler::AccessBuilder::ForHeapNumberValue().offset));
     __ Branch(back);
   };
 
@@ -979,7 +980,7 @@ TEST(min_max_nan) {
   masm->GetCode(isolate, &desc);
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
-  auto f = GeneratedCode<F3>::FromCode(*code);
+  auto f = GeneratedCode<F3>::FromCode(isolate, *code);
   for (int i = 0; i < kTableLength; i++) {
     test.a = inputsa[i];
     test.b = inputsb[i];
@@ -1015,7 +1016,7 @@ bool run_Unaligned(char* memory_buffer, int32_t in_offset, int32_t out_offset,
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<F_CVT>::FromCode(*code);
+  auto f = GeneratedCode<F_CVT>::FromCode(isolate, *code);
 
   MemCopy(memory_buffer + in_offset, &value, sizeof(IN_TYPE));
   f.Call(memory_buffer, 0, 0, 0, 0);
@@ -1379,7 +1380,7 @@ bool run_Sltu(uint64_t rs, uint64_t rd, Func GenerateSltuInstructionFunc) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 
-  auto f = GeneratedCode<F_CVT>::FromCode(*code);
+  auto f = GeneratedCode<F_CVT>::FromCode(isolate, *code);
   int64_t res = reinterpret_cast<int64_t>(f.Call(rs, rd, 0, 0, 0));
   return res == 1;
 }
@@ -1474,10 +1475,9 @@ static GeneratedCode<F4> GenerateMacroFloat32MinMax(MacroAssembler* masm) {
       Factory::CodeBuilder(masm->isolate(), desc, CodeKind::FOR_TESTING)
           .Build();
 #ifdef DEBUG
-  StdoutStream os;
-  code->Print(os);
+  Print(*code);
 #endif
-  return GeneratedCode<F4>::FromCode(*code);
+  return GeneratedCode<F4>::FromCode(masm->isolate(), *code);
 }
 
 TEST(macro_float_minmax_f32) {
@@ -1508,18 +1508,24 @@ TEST(macro_float_minmax_f32) {
   GeneratedCode<F4> f =
       GenerateMacroFloat32MinMax<FPURegister, Inputs, Results>(masm);
 
-#define CHECK_MINMAX(src1, src2, min, max)                                   \
-  do {                                                                       \
-    Inputs inputs = {src1, src2};                                            \
-    Results results;                                                         \
-    f.Call(&inputs, &results, 0, 0, 0);                                      \
-    CHECK_EQ(bit_cast<uint32_t>(min), bit_cast<uint32_t>(results.min_abc_)); \
-    CHECK_EQ(bit_cast<uint32_t>(min), bit_cast<uint32_t>(results.min_aab_)); \
-    CHECK_EQ(bit_cast<uint32_t>(min), bit_cast<uint32_t>(results.min_aba_)); \
-    CHECK_EQ(bit_cast<uint32_t>(max), bit_cast<uint32_t>(results.max_abc_)); \
-    CHECK_EQ(bit_cast<uint32_t>(max), bit_cast<uint32_t>(results.max_aab_)); \
-    CHECK_EQ(bit_cast<uint32_t>(max), bit_cast<uint32_t>(results.max_aba_)); \
-    /* Use a bit_cast to correctly identify -0.0 and NaNs. */                \
+#define CHECK_MINMAX(src1, src2, min, max)                          \
+  do {                                                              \
+    Inputs inputs = {src1, src2};                                   \
+    Results results;                                                \
+    f.Call(&inputs, &results, 0, 0, 0);                             \
+    CHECK_EQ(base::bit_cast<uint32_t>(min),                         \
+             base::bit_cast<uint32_t>(results.min_abc_));           \
+    CHECK_EQ(base::bit_cast<uint32_t>(min),                         \
+             base::bit_cast<uint32_t>(results.min_aab_));           \
+    CHECK_EQ(base::bit_cast<uint32_t>(min),                         \
+             base::bit_cast<uint32_t>(results.min_aba_));           \
+    CHECK_EQ(base::bit_cast<uint32_t>(max),                         \
+             base::bit_cast<uint32_t>(results.max_abc_));           \
+    CHECK_EQ(base::bit_cast<uint32_t>(max),                         \
+             base::bit_cast<uint32_t>(results.max_aab_));           \
+    CHECK_EQ(base::bit_cast<uint32_t>(max),                         \
+             base::bit_cast<uint32_t>(results.max_aba_));           \
+    /* Use a base::bit_cast to correctly identify -0.0 and NaNs. */ \
   } while (0)
 
   float nan_a = std::numeric_limits<float>::quiet_NaN();
@@ -1616,10 +1622,9 @@ static GeneratedCode<F4> GenerateMacroFloat64MinMax(MacroAssembler* masm) {
       Factory::CodeBuilder(masm->isolate(), desc, CodeKind::FOR_TESTING)
           .Build();
 #ifdef DEBUG
-  StdoutStream os;
-  code->Print(os);
+  Print(*code);
 #endif
-  return GeneratedCode<F4>::FromCode(*code);
+  return GeneratedCode<F4>::FromCode(masm->isolate(), *code);
 }
 
 TEST(macro_float_minmax_f64) {
@@ -1650,18 +1655,24 @@ TEST(macro_float_minmax_f64) {
   GeneratedCode<F4> f =
       GenerateMacroFloat64MinMax<DoubleRegister, Inputs, Results>(masm);
 
-#define CHECK_MINMAX(src1, src2, min, max)                                   \
-  do {                                                                       \
-    Inputs inputs = {src1, src2};                                            \
-    Results results;                                                         \
-    f.Call(&inputs, &results, 0, 0, 0);                                      \
-    CHECK_EQ(bit_cast<uint64_t>(min), bit_cast<uint64_t>(results.min_abc_)); \
-    CHECK_EQ(bit_cast<uint64_t>(min), bit_cast<uint64_t>(results.min_aab_)); \
-    CHECK_EQ(bit_cast<uint64_t>(min), bit_cast<uint64_t>(results.min_aba_)); \
-    CHECK_EQ(bit_cast<uint64_t>(max), bit_cast<uint64_t>(results.max_abc_)); \
-    CHECK_EQ(bit_cast<uint64_t>(max), bit_cast<uint64_t>(results.max_aab_)); \
-    CHECK_EQ(bit_cast<uint64_t>(max), bit_cast<uint64_t>(results.max_aba_)); \
-    /* Use a bit_cast to correctly identify -0.0 and NaNs. */                \
+#define CHECK_MINMAX(src1, src2, min, max)                          \
+  do {                                                              \
+    Inputs inputs = {src1, src2};                                   \
+    Results results;                                                \
+    f.Call(&inputs, &results, 0, 0, 0);                             \
+    CHECK_EQ(base::bit_cast<uint64_t>(min),                         \
+             base::bit_cast<uint64_t>(results.min_abc_));           \
+    CHECK_EQ(base::bit_cast<uint64_t>(min),                         \
+             base::bit_cast<uint64_t>(results.min_aab_));           \
+    CHECK_EQ(base::bit_cast<uint64_t>(min),                         \
+             base::bit_cast<uint64_t>(results.min_aba_));           \
+    CHECK_EQ(base::bit_cast<uint64_t>(max),                         \
+             base::bit_cast<uint64_t>(results.max_abc_));           \
+    CHECK_EQ(base::bit_cast<uint64_t>(max),                         \
+             base::bit_cast<uint64_t>(results.max_aab_));           \
+    CHECK_EQ(base::bit_cast<uint64_t>(max),                         \
+             base::bit_cast<uint64_t>(results.max_aba_));           \
+    /* Use a base::bit_cast to correctly identify -0.0 and NaNs. */ \
   } while (0)
 
   double nan_a = std::numeric_limits<double>::quiet_NaN();
@@ -1695,7 +1706,7 @@ TEST(DeoptExitSizeIsFixed) {
   auto buffer = AllocateAssemblerBuffer();
   MacroAssembler masm(isolate, v8::internal::CodeObjectRequired::kYes,
                       buffer->CreateView());
-  STATIC_ASSERT(static_cast<int>(kFirstDeoptimizeKind) == 0);
+  static_assert(static_cast<int>(kFirstDeoptimizeKind) == 0);
   for (int i = 0; i < kDeoptimizeKindCount; i++) {
     DeoptimizeKind kind = static_cast<DeoptimizeKind>(i);
     Label before_exit;

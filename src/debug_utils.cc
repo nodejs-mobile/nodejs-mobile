@@ -59,10 +59,12 @@ namespace per_process {
 EnabledDebugList enabled_debug_list;
 }
 
-void EnabledDebugList::Parse(std::shared_ptr<KVStore> env_vars,
-                             v8::Isolate* isolate) {
+using v8::Local;
+using v8::StackTrace;
+
+void EnabledDebugList::Parse(Environment* env) {
   std::string cats;
-  credentials::SafeGetenv("NODE_DEBUG_NATIVE", &cats, env_vars, isolate);
+  credentials::SafeGetenv("NODE_DEBUG_NATIVE", &cats, env);
   Parse(cats);
 }
 
@@ -180,10 +182,13 @@ class Win32SymbolDebuggingContext final : public NativeSymbolDebuggingContext {
       return NameAndDisplacement(pSymbol->Name, dwDisplacement);
     } else {
       // SymFromAddr failed
-      const DWORD error = GetLastError();  // "eat" the error anyway
 #ifdef DEBUG
+      const DWORD error = GetLastError();
       fprintf(stderr, "SymFromAddr returned error : %lu\n", error);
-#endif
+#else
+      // Consume the error anyway
+      USE(GetLastError());
+#endif  // DEBUG
     }
     // End MSDN code
 
@@ -215,10 +220,13 @@ class Win32SymbolDebuggingContext final : public NativeSymbolDebuggingContext {
       sym.line = line.LineNumber;
     } else {
       // SymGetLineFromAddr64 failed
-      const DWORD error = GetLastError();  // "eat" the error anyway
 #ifdef DEBUG
+      const DWORD error = GetLastError();
       fprintf(stderr, "SymGetLineFromAddr64 returned error : %lu\n", error);
-#endif
+#else
+      // Consume the error anyway
+      USE(GetLastError());
+#endif  // DEBUG
     }
     // End MSDN code
 
@@ -238,12 +246,15 @@ class Win32SymbolDebuggingContext final : public NativeSymbolDebuggingContext {
       return szUndName;
     } else {
       // UnDecorateSymbolName failed
-      const DWORD error = GetLastError();  // "eat" the error anyway
 #ifdef DEBUG
+      const DWORD error = GetLastError();
       fprintf(stderr, "UnDecorateSymbolName returned error %lu\n", error);
-#endif
+#else
+      // Consume the error anyway
+      USE(GetLastError());
+#endif  // DEBUG
     }
-    return nullptr;
+    return {};
   }
 
   SymbolInfo LookupSymbol(void* address) override {
@@ -303,7 +314,8 @@ std::string NativeSymbolDebuggingContext::SymbolInfo::Display() const {
   return oss.str();
 }
 
-void DumpBacktrace(FILE* fp) {
+void DumpNativeBacktrace(FILE* fp) {
+  fprintf(fp, "----- Native stack trace -----\n\n");
   auto sym_ctx = NativeSymbolDebuggingContext::New();
   void* frames[256];
   const int size = sym_ctx->GetStackTrace(frames, arraysize(frames));
@@ -312,6 +324,22 @@ void DumpBacktrace(FILE* fp) {
     NativeSymbolDebuggingContext::SymbolInfo s = sym_ctx->LookupSymbol(frame);
     fprintf(fp, "%2d: %p %s\n", i, frame, s.Display().c_str());
   }
+}
+
+void DumpJavaScriptBacktrace(FILE* fp) {
+  v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+  if (isolate == nullptr) {
+    return;
+  }
+
+  Local<StackTrace> stack;
+  if (!GetCurrentStackTrace(isolate).ToLocal(&stack)) {
+    return;
+  }
+
+  fprintf(fp, "\n----- JavaScript stack trace -----\n\n");
+  PrintStackTrace(isolate, stack, StackTracePrefix::kNumber);
+  fprintf(fp, "\n");
 }
 
 void CheckedUvLoopClose(uv_loop_t* loop) {
@@ -443,7 +471,7 @@ std::vector<std::string> NativeSymbolDebuggingContext::GetLoadedLibraries() {
   DWORD size_2 = 0;
   // First call to get the size of module array needed
   if (EnumProcessModules(process_handle, nullptr, 0, &size_1)) {
-    MallocedBuffer<HMODULE> modules(size_1);
+    MallocedBuffer<HMODULE> modules(size_1 / sizeof(HMODULE));
 
     // Second call to populate the module array
     if (EnumProcessModules(process_handle, modules.data, size_1, &size_2)) {
@@ -452,16 +480,15 @@ std::vector<std::string> NativeSymbolDebuggingContext::GetLoadedLibraries() {
            i++) {
         WCHAR module_name[MAX_PATH];
         // Obtain and report the full pathname for each module
-        if (GetModuleFileNameExW(process_handle,
-                                 modules.data[i],
-                                 module_name,
-                                 arraysize(module_name) / sizeof(WCHAR))) {
+        if (GetModuleFileNameW(
+                modules.data[i], module_name, arraysize(module_name))) {
           DWORD size = WideCharToMultiByte(
               CP_UTF8, 0, module_name, -1, nullptr, 0, nullptr, nullptr);
           char* str = new char[size];
           WideCharToMultiByte(
               CP_UTF8, 0, module_name, -1, str, size, nullptr, nullptr);
           list.emplace_back(str);
+          delete[] str;
         }
       }
     }
@@ -540,5 +567,6 @@ void FWrite(FILE* file, const std::string& str) {
 }  // namespace node
 
 extern "C" void __DumpBacktrace(FILE* fp) {
-  node::DumpBacktrace(fp);
+  node::DumpNativeBacktrace(fp);
+  node::DumpJavaScriptBacktrace(fp);
 }

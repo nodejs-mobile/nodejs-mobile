@@ -9,8 +9,12 @@
 The `node:path` module provides utilities for working with file and directory
 paths. It can be accessed using:
 
-```js
+```cjs
 const path = require('node:path');
+```
+
+```mjs
+import path from 'node:path';
 ```
 
 ## Windows vs. POSIX
@@ -110,7 +114,7 @@ and is not a string.
 added: v0.9.3
 -->
 
-* {string}
+* Type: {string}
 
 Provides the platform-specific path delimiter:
 
@@ -206,6 +210,10 @@ A [`TypeError`][] is thrown if `path` is not a string.
 
 <!-- YAML
 added: v0.11.15
+changes:
+  - version: v19.0.0
+    pr-url: https://github.com/nodejs/node/pull/44349
+    description: The dot will be added if it is not specified in `ext`.
 -->
 
 * `pathObject` {Object} Any JavaScript object having the following properties:
@@ -255,6 +263,14 @@ path.format({
   ext: '.txt',
 });
 // Returns: '/file.txt'
+
+// The dot will be added if it is not specified in `ext`.
+path.format({
+  root: '/',
+  name: 'file',
+  ext: 'txt',
+});
+// Returns: '/file.txt'
 ```
 
 On Windows:
@@ -267,6 +283,31 @@ path.format({
 // Returns: 'C:\\path\\dir\\file.txt'
 ```
 
+## `path.matchesGlob(path, pattern)`
+
+<!-- YAML
+added:
+  - v22.5.0
+  - v20.17.0
+-->
+
+> Stability: 1 - Experimental
+
+* `path` {string} The path to glob-match against.
+* `pattern` {string} The glob to check the path against.
+* Returns: {boolean} Whether or not the `path` matched the `pattern`.
+
+The `path.matchesGlob()` method determines if `path` matches the `pattern`.
+
+For example:
+
+```js
+path.matchesGlob('/foo/bar', '/foo/*'); // true
+path.matchesGlob('/foo/bar*', 'foo/bird'); // false
+```
+
+A [`TypeError`][] is thrown if `path` or `pattern` are not strings.
+
 ## `path.isAbsolute(path)`
 
 <!-- YAML
@@ -276,17 +317,19 @@ added: v0.11.2
 * `path` {string}
 * Returns: {boolean}
 
-The `path.isAbsolute()` method determines if `path` is an absolute path.
+The `path.isAbsolute()` method determines if the literal `path` is absolute.
+Therefore, it’s not safe for mitigating path traversals.
 
 If the given `path` is a zero-length string, `false` will be returned.
 
 For example, on POSIX:
 
 ```js
-path.isAbsolute('/foo/bar'); // true
-path.isAbsolute('/baz/..');  // true
-path.isAbsolute('qux/');     // false
-path.isAbsolute('.');        // false
+path.isAbsolute('/foo/bar');   // true
+path.isAbsolute('/baz/..');    // true
+path.isAbsolute('/baz/../..'); // true
+path.isAbsolute('qux/');       // false
+path.isAbsolute('.');          // false
 ```
 
 On Windows:
@@ -348,6 +391,14 @@ instance of the platform-specific path segment separator (`/` on POSIX and
 
 If the `path` is a zero-length string, `'.'` is returned, representing the
 current working directory.
+
+On POSIX, the types of normalization applied by this function do not strictly
+adhere to the POSIX specification. For example, this function will replace two
+leading forward slashes with a single slash as if it was a regular absolute
+path, whereas a few POSIX systems assign special meaning to paths beginning with
+exactly two forward slashes. Similarly, other substitutions performed by this
+function, such as removing `..` segments, may change how the underlying system
+resolves the path.
 
 For example, on POSIX:
 
@@ -450,7 +501,7 @@ changes:
     description: Exposed as `require('path/posix')`.
 -->
 
-* {Object}
+* Type: {Object}
 
 The `path.posix` property provides access to POSIX specific implementations
 of the `path` methods.
@@ -544,7 +595,7 @@ A [`TypeError`][] is thrown if any of the arguments is not a string.
 added: v0.7.9
 -->
 
-* {string}
+* Type: {string}
 
 Provides the platform-specific path segment separator:
 
@@ -595,7 +646,7 @@ changes:
     description: Exposed as `require('path/win32')`.
 -->
 
-* {Object}
+* Type: {Object}
 
 The `path.win32` property provides access to Windows-specific implementations
 of the `path` methods.

@@ -6,6 +6,7 @@
 #define INCLUDE_CPPGC_INTERNAL_NAME_TRAIT_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 #include "cppgc/name-provider.h"
@@ -58,6 +59,11 @@ struct HeapObjectName {
   bool name_was_hidden;
 };
 
+enum class HeapObjectNameForUnnamedObject : uint8_t {
+  kUseClassNameIfSupported,
+  kUseHiddenName,
+};
+
 class V8_EXPORT NameTraitBase {
  protected:
   static HeapObjectName GetNameFromTypeSignature(const char*);
@@ -78,16 +84,24 @@ class NameTrait final : public NameTraitBase {
 #endif  // !CPPGC_SUPPORTS_OBJECT_NAMES
   }
 
-  static HeapObjectName GetName(const void* obj) {
-    return GetNameFor(static_cast<const T*>(obj));
+  static HeapObjectName GetName(
+      const void* obj, HeapObjectNameForUnnamedObject name_retrieval_mode) {
+    return GetNameFor(static_cast<const T*>(obj), name_retrieval_mode);
   }
 
  private:
-  static HeapObjectName GetNameFor(const NameProvider* name_provider) {
+  static HeapObjectName GetNameFor(const NameProvider* name_provider,
+                                   HeapObjectNameForUnnamedObject) {
+    // Objects inheriting from `NameProvider` are not considered unnamed as
+    // users already provided a name for them.
     return {name_provider->GetHumanReadableName(), false};
   }
 
-  static HeapObjectName GetNameFor(...) {
+  static HeapObjectName GetNameFor(
+      const void*, HeapObjectNameForUnnamedObject name_retrieval_mode) {
+    if (name_retrieval_mode == HeapObjectNameForUnnamedObject::kUseHiddenName)
+      return {NameProvider::kHiddenName, true};
+
 #if CPPGC_SUPPORTS_COMPILE_TIME_TYPENAME
     return {GetTypename<T>(), false};
 #elif CPPGC_SUPPORTS_OBJECT_NAMES
@@ -102,17 +116,22 @@ class NameTrait final : public NameTraitBase {
 
     static const HeapObjectName leaky_name =
         GetNameFromTypeSignature(PRETTY_FUNCTION_VALUE);
-    return {leaky_name, false};
+    return leaky_name;
 
 #undef PRETTY_FUNCTION_VALUE
 
 #else   // !CPPGC_SUPPORTS_OBJECT_NAMES
-    return {NameProvider::kHiddenName, true};
+    // We wanted to use a class name but were unable to provide one due to
+    // compiler limitations or build configuration. As such, return the hidden
+    // name with name_was_hidden=false, which will cause this object to be
+    // visible in the snapshot.
+    return {NameProvider::kHiddenName, false};
 #endif  // !CPPGC_SUPPORTS_OBJECT_NAMES
   }
 };
 
-using NameCallback = HeapObjectName (*)(const void*);
+using NameCallback = HeapObjectName (*)(const void*,
+                                        HeapObjectNameForUnnamedObject);
 
 }  // namespace internal
 }  // namespace cppgc

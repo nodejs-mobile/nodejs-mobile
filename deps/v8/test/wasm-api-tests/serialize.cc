@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/common/ptr-compr-inl.h"
 #include "src/execution/isolate.h"
 #include "src/wasm/c-api.h"
 #include "test/wasm-api-tests/wasm-api-test.h"
@@ -14,7 +15,7 @@ namespace {
 
 bool g_callback_called;
 
-own<Trap> Callback(const Val args[], Val results[]) {
+own<Trap> Callback(const vec<Val>& args, vec<Val>& results) {
   g_callback_called = true;
   return nullptr;
 }
@@ -25,7 +26,7 @@ TEST_F(WasmCapiTest, Serialize) {
   FunctionSig sig(0, 0, nullptr);
   uint32_t callback_index =
       builder()->AddImport(base::CStrVector("callback"), &sig);
-  byte code[] = {WASM_CALL_FUNCTION0(callback_index)};
+  uint8_t code[] = {WASM_CALL_FUNCTION0(callback_index)};
   AddExportedFunction(base::CStrVector("run"), code, sizeof(code), &sig);
   Compile();
 
@@ -35,14 +36,20 @@ TEST_F(WasmCapiTest, Serialize) {
   // We reset the module and collect it to make sure the NativeModuleCache does
   // not contain it anymore. Otherwise deserialization will not happen.
   ResetModule();
-  i::Isolate* isolate =
-      reinterpret_cast<::wasm::StoreImpl*>(store())->i_isolate();
-  isolate->heap()->PreciseCollectAllGarbage(
-      i::Heap::kForcedGC, i::GarbageCollectionReason::kTesting,
-      v8::kNoGCCallbackFlags);
-  isolate->heap()->PreciseCollectAllGarbage(
-      i::Heap::kForcedGC, i::GarbageCollectionReason::kTesting,
-      v8::kNoGCCallbackFlags);
+  {
+    Isolate* isolate =
+        reinterpret_cast<::wasm::StoreImpl*>(store())->i_isolate();
+    v8::Isolate::Scope isolate_scope(reinterpret_cast<v8::Isolate*>(isolate));
+    // This method might be called on a thread that's not bound to any Isolate
+    // and thus pointer compression schemes might have cage base value unset.
+    // Ensure cage bases are initialized so that the V8 heap can be accessed.
+    i::PtrComprCageAccessScope ptr_compr_cage_access_scope(isolate);
+    Heap* heap = isolate->heap();
+    heap->PreciseCollectAllGarbage(GCFlag::kForced,
+                                   GarbageCollectionReason::kTesting);
+    heap->PreciseCollectAllGarbage(GCFlag::kForced,
+                                   GarbageCollectionReason::kTesting);
+  }
   own<Module> deserialized = Module::deserialize(store(), serialized);
 
   // Try to serialize the module again. This can fail if deserialization does
@@ -52,13 +59,14 @@ TEST_F(WasmCapiTest, Serialize) {
   own<FuncType> callback_type =
       FuncType::make(ownvec<ValType>::make(), ownvec<ValType>::make());
   own<Func> callback = Func::make(store(), callback_type.get(), Callback);
-  Extern* imports[] = {callback.get()};
+  vec<Extern*> imports = vec<Extern*>::make(callback.get());
 
   own<Instance> instance = Instance::make(store(), deserialized.get(), imports);
   ownvec<Extern> exports = instance->exports();
   Func* run = exports[0]->func();
   g_callback_called = false;
-  run->call();
+  auto rets = vec<Val>::make_uninitialized();
+  run->call(vec<Val>::make_uninitialized(), rets);
   EXPECT_TRUE(g_callback_called);
 }
 

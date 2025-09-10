@@ -140,7 +140,7 @@ assert.strictEqual(newObject.test_string, 'test string');
   test_object.Wrap(wrapper);
 
   assert(test_object.Unwrap(wrapper));
-  assert(wrapper.protoA);
+  assert.strictEqual(wrapper.protoA, true);
 }
 
 {
@@ -155,8 +155,8 @@ assert.strictEqual(newObject.test_string, 'test string');
   Object.setPrototypeOf(wrapper, protoB);
 
   assert(test_object.Unwrap(wrapper));
-  assert(wrapper.protoA, true);
-  assert(wrapper.protoB, true);
+  assert.strictEqual(wrapper.protoA, true);
+  assert.strictEqual(wrapper.protoB, true);
 }
 
 {
@@ -258,9 +258,9 @@ assert.strictEqual(newObject.test_string, 'test string');
   // i.e.: includes prototypes, only enumerable properties, skips symbols,
   // and includes indices and converts them to strings.
 
-  const object = Object.create({
+  const object = { __proto__: {
     inherited: 1,
-  });
+  } };
 
   const fooSymbol = Symbol('foo');
 

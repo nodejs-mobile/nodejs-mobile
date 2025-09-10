@@ -23,7 +23,7 @@ class V8_EXPORT_PRIVATE WeakCodeRegistry {
   explicit WeakCodeRegistry(Isolate* isolate) : isolate_(isolate) {}
   ~WeakCodeRegistry() { Clear(); }
 
-  void Track(CodeEntry* entry, Handle<AbstractCode> code);
+  void Track(CodeEntry* entry, DirectHandle<AbstractCode> code);
 
   // Removes all dead code objects from the registry, invoking the provided
   // listener for each new CodeEntry that is no longer referenced on the heap
@@ -35,8 +35,9 @@ class V8_EXPORT_PRIVATE WeakCodeRegistry {
 
  private:
   Isolate* const isolate_;
-  // Invariant: Entries will always be removed here before the CodeMap is
-  // destroyed. CodeEntries should not be freed while their heap objects exist.
+  // Invariant: Entries will always be removed here before the
+  // InstructionStreamMap is destroyed. CodeEntries should not be freed while
+  // their heap objects exist.
   std::vector<CodeEntry*> entries_;
 };
 

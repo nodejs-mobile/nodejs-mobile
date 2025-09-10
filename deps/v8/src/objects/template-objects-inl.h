@@ -6,6 +6,7 @@
 #define V8_OBJECTS_TEMPLATE_OBJECTS_INL_H_
 
 #include "src/objects/template-objects.h"
+// Include the non-inl header before the rest of the headers.
 
 #include "src/objects/js-array-inl.h"
 
@@ -18,7 +19,6 @@ namespace internal {
 #include "torque-generated/src/objects/template-objects-tq-inl.inc"
 
 TQ_OBJECT_CONSTRUCTORS_IMPL(TemplateObjectDescription)
-TQ_OBJECT_CONSTRUCTORS_IMPL(CachedTemplateObject)
 
 }  // namespace internal
 }  // namespace v8

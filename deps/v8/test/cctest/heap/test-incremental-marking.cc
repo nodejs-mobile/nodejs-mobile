@@ -38,17 +38,20 @@ class MockPlatform : public TestPlatform {
   MockPlatform() : taskrunner_(new MockTaskRunner()) {}
   ~MockPlatform() override {
     for (auto& task : worker_tasks_) {
-      CcTest::default_platform()->CallOnWorkerThread(std::move(task));
+      CcTest::default_platform()->PostTaskOnWorkerThread(
+          TaskPriority::kUserVisible, std::move(task));
     }
     worker_tasks_.clear();
   }
 
   std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
-      v8::Isolate* isolate) override {
+      v8::Isolate* isolate, v8::TaskPriority) override {
     return taskrunner_;
   }
 
-  void CallOnWorkerThread(std::unique_ptr<Task> task) override {
+  void PostTaskOnWorkerThreadImpl(TaskPriority priority,
+                                  std::unique_ptr<Task> task,
+                                  const SourceLocation& location) override {
     worker_tasks_.push_back(std::move(task));
   }
 
@@ -61,25 +64,30 @@ class MockPlatform : public TestPlatform {
  private:
   class MockTaskRunner : public v8::TaskRunner {
    public:
-    void PostTask(std::unique_ptr<v8::Task> task) override {
+    void PostTaskImpl(std::unique_ptr<v8::Task> task,
+                      const SourceLocation& location) override {
       task_ = std::move(task);
     }
 
-    void PostNonNestableTask(std::unique_ptr<Task> task) override {
+    void PostNonNestableTaskImpl(std::unique_ptr<Task> task,
+                                 const SourceLocation& location) override {
       PostTask(std::move(task));
     }
 
-    void PostDelayedTask(std::unique_ptr<Task> task,
-                         double delay_in_seconds) override {
+    void PostDelayedTaskImpl(std::unique_ptr<Task> task,
+                             double delay_in_seconds,
+                             const SourceLocation& location) override {
       PostTask(std::move(task));
     }
 
-    void PostNonNestableDelayedTask(std::unique_ptr<Task> task,
-                                    double delay_in_seconds) override {
+    void PostNonNestableDelayedTaskImpl(
+        std::unique_ptr<Task> task, double delay_in_seconds,
+        const SourceLocation& location) override {
       PostTask(std::move(task));
     }
 
-    void PostIdleTask(std::unique_ptr<IdleTask> task) override {
+    void PostIdleTaskImpl(std::unique_ptr<IdleTask> task,
+                          const SourceLocation& location) override {
       UNREACHABLE();
     }
 
@@ -103,9 +111,9 @@ class MockPlatform : public TestPlatform {
 };
 
 TEST_WITH_PLATFORM(IncrementalMarkingUsingTasks, MockPlatform) {
-  if (!i::FLAG_incremental_marking) return;
-  FLAG_stress_concurrent_allocation = false;  // For SimulateFullSpace.
-  FLAG_stress_incremental_marking = false;
+  if (!i::v8_flags.incremental_marking) return;
+  v8_flags.stress_concurrent_allocation = false;  // For SimulateFullSpace.
+  v8_flags.stress_incremental_marking = false;
   v8::Isolate* isolate = CcTest::isolate();
   {
     v8::HandleScope handle_scope(isolate);
@@ -118,14 +126,15 @@ TEST_WITH_PLATFORM(IncrementalMarkingUsingTasks, MockPlatform) {
     i::IncrementalMarking* marking = heap->incremental_marking();
     marking->Stop();
     {
-      SafepointScope scope(heap);
+      IsolateSafepointScope scope(heap);
       heap->tracer()->StartCycle(
           GarbageCollector::MARK_COMPACTOR, GarbageCollectionReason::kTesting,
           "collector cctest", GCTracer::MarkingType::kIncremental);
-      marking->Start(i::GarbageCollectionReason::kTesting);
+      marking->Start(GarbageCollector::MARK_COMPACTOR,
+                     i::GarbageCollectionReason::kTesting);
     }
-    CHECK(platform.PendingTask());
-    while (platform.PendingTask()) {
+    CHECK(marking->IsMajorMarking());
+    while (marking->IsMajorMarking()) {
       platform.PerformTask();
     }
     CHECK(marking->IsStopped());

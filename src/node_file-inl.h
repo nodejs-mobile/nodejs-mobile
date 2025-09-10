@@ -221,9 +221,15 @@ void FSReqPromise<AliasedBufferT>::Reject(v8::Local<v8::Value> reject) {
   finished_ = true;
   v8::HandleScope scope(env()->isolate());
   InternalCallbackScope callback_scope(this);
-  v8::Local<v8::Value> value =
-      object()->Get(env()->context(),
-                    env()->promise_string()).ToLocalChecked();
+  v8::Local<v8::Value> value;
+  if (!object()
+           ->Get(env()->context(), env()->promise_string())
+           .ToLocal(&value)) {
+    // If we hit this, getting the value from the object failed and
+    // an error was likely scheduled. We could try to reject the promise
+    // but let's just allow the error to propagate.
+    return;
+  }
   v8::Local<v8::Promise::Resolver> resolver = value.As<v8::Promise::Resolver>();
   USE(resolver->Reject(env()->context(), reject).FromJust());
 }
@@ -233,9 +239,13 @@ void FSReqPromise<AliasedBufferT>::Resolve(v8::Local<v8::Value> value) {
   finished_ = true;
   v8::HandleScope scope(env()->isolate());
   InternalCallbackScope callback_scope(this);
-  v8::Local<v8::Value> val =
-      object()->Get(env()->context(),
-                    env()->promise_string()).ToLocalChecked();
+  v8::Local<v8::Value> val;
+  if (!object()->Get(env()->context(), env()->promise_string()).ToLocal(&val)) {
+    // If we hit this, getting the value from the object failed and
+    // an error was likely scheduled. We could try to reject the promise
+    // but let's just allow the error to propagate.
+    return;
+  }
   v8::Local<v8::Promise::Resolver> resolver = val.As<v8::Promise::Resolver>();
   USE(resolver->Resolve(env()->context(), value).FromJust());
 }
@@ -255,9 +265,13 @@ void FSReqPromise<AliasedBufferT>::ResolveStatFs(const uv_statfs_t* stat) {
 template <typename AliasedBufferT>
 void FSReqPromise<AliasedBufferT>::SetReturnValue(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Local<v8::Value> val =
-      object()->Get(env()->context(),
-                    env()->promise_string()).ToLocalChecked();
+  v8::Local<v8::Value> val;
+  if (!object()->Get(env()->context(), env()->promise_string()).ToLocal(&val)) {
+    // If we hit this, getting the value from the object failed and
+    // an error was likely scheduled. We could try to reject the promise
+    // but let's just allow the error to propagate.
+    return;
+  }
   v8::Local<v8::Promise::Resolver> resolver = val.As<v8::Promise::Resolver>();
   args.GetReturnValue().Set(resolver->GetPromise());
 }
@@ -273,20 +287,27 @@ FSReqBase* GetReqWrap(const v8::FunctionCallbackInfo<v8::Value>& args,
                       int index,
                       bool use_bigint) {
   v8::Local<v8::Value> value = args[index];
+  FSReqBase* result = nullptr;
   if (value->IsObject()) {
-    return Unwrap<FSReqBase>(value.As<v8::Object>());
-  }
+    result = BaseObject::Unwrap<FSReqBase>(value.As<v8::Object>());
+  } else {
+    Realm* realm = Realm::GetCurrent(args);
+    BindingData* binding_data = realm->GetBindingData<BindingData>();
 
-  BindingData* binding_data = Realm::GetBindingData<BindingData>(args);
-  Environment* env = binding_data->env();
-  if (value->StrictEquals(env->fs_use_promises_symbol())) {
-    if (use_bigint) {
-      return FSReqPromise<AliasedBigInt64Array>::New(binding_data, use_bigint);
-    } else {
-      return FSReqPromise<AliasedFloat64Array>::New(binding_data, use_bigint);
+    if (value->StrictEquals(realm->isolate_data()->fs_use_promises_symbol())) {
+      if (use_bigint) {
+        result =
+            FSReqPromise<AliasedBigInt64Array>::New(binding_data, use_bigint);
+      } else {
+        result =
+            FSReqPromise<AliasedFloat64Array>::New(binding_data, use_bigint);
+      }
     }
   }
-  return nullptr;
+  if (result != nullptr) {
+    result->SetReturnValue(args);
+  }
+  return result;
 }
 
 // Returns nullptr if the operation fails from the start.
@@ -305,10 +326,7 @@ FSReqBase* AsyncDestCall(Environment* env, FSReqBase* req_wrap,
     uv_req->path = nullptr;
     after(uv_req);  // after may delete req_wrap if there is an error
     req_wrap = nullptr;
-  } else {
-    req_wrap->SetReturnValue(args);
   }
-
   return req_wrap;
 }
 
@@ -329,23 +347,61 @@ FSReqBase* AsyncCall(Environment* env,
 // creating an error in the C++ land.
 // ctx must be checked using value->IsObject() before being passed.
 template <typename Func, typename... Args>
-int SyncCall(Environment* env, v8::Local<v8::Value> ctx,
-             FSReqWrapSync* req_wrap, const char* syscall,
-             Func fn, Args... args) {
+v8::Maybe<int> SyncCall(Environment* env,
+                        v8::Local<v8::Value> ctx,
+                        FSReqWrapSync* req_wrap,
+                        const char* syscall,
+                        Func fn,
+                        Args... args) {
   env->PrintSyncTrace();
   int err = fn(env->event_loop(), &(req_wrap->req), args..., nullptr);
   if (err < 0) {
     v8::Local<v8::Context> context = env->context();
     v8::Local<v8::Object> ctx_obj = ctx.As<v8::Object>();
     v8::Isolate* isolate = env->isolate();
-    ctx_obj->Set(context,
-                 env->errno_string(),
-                 v8::Integer::New(isolate, err)).Check();
-    ctx_obj->Set(context,
-                 env->syscall_string(),
-                 OneByteString(isolate, syscall)).Check();
+    if (ctx_obj
+            ->Set(context, env->errno_string(), v8::Integer::New(isolate, err))
+            .IsNothing() ||
+        ctx_obj
+            ->Set(
+                context, env->syscall_string(), OneByteString(isolate, syscall))
+            .IsNothing()) {
+      return v8::Nothing<int>();
+    }
   }
-  return err;
+  return v8::Just(err);
+}
+
+// Similar to SyncCall but throws immediately if there is an error.
+template <typename Predicate, typename Func, typename... Args>
+int SyncCallAndThrowIf(Predicate should_throw,
+                       Environment* env,
+                       FSReqWrapSync* req_wrap,
+                       Func fn,
+                       Args... args) {
+  env->PrintSyncTrace();
+  int result = fn(nullptr, &(req_wrap->req), args..., nullptr);
+  if (should_throw(result)) {
+    env->ThrowUVException(result,
+                          req_wrap->syscall_p,
+                          nullptr,
+                          req_wrap->path_p,
+                          req_wrap->dest_p);
+  }
+  return result;
+}
+
+constexpr bool is_uv_error(int result) {
+  return result < 0;
+}
+
+// Similar to SyncCall but throws immediately if there is an error.
+template <typename Func, typename... Args>
+int SyncCallAndThrowOnError(Environment* env,
+                            FSReqWrapSync* req_wrap,
+                            Func fn,
+                            Args... args) {
+  return SyncCallAndThrowIf(is_uv_error, env, req_wrap, fn, args...);
 }
 
 }  // namespace fs

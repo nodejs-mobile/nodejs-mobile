@@ -6,9 +6,8 @@
 #define V8_HEAP_ALLOCATION_RESULT_H_
 
 #include "src/common/globals.h"
+#include "src/objects/casting.h"
 #include "src/objects/heap-object.h"
-#include "src/objects/objects.h"
-#include "src/objects/smi.h"
 
 namespace v8 {
 namespace internal {
@@ -28,7 +27,7 @@ class AllocationResult final {
  public:
   static AllocationResult Failure() { return AllocationResult(); }
 
-  static AllocationResult FromObject(HeapObject heap_object) {
+  static AllocationResult FromObject(Tagged<HeapObject> heap_object) {
     return AllocationResult(heap_object);
   }
 
@@ -39,34 +38,37 @@ class AllocationResult final {
   bool IsFailure() const { return object_.is_null(); }
 
   template <typename T>
-  bool To(T* obj) const {
+  bool To(Tagged<T>* obj) const {
     if (IsFailure()) return false;
-    *obj = T::cast(object_);
+    *obj = Cast<T>(object_);
     return true;
   }
 
-  HeapObject ToObjectChecked() const {
+  Tagged<HeapObject> ToObjectChecked() const {
     CHECK(!IsFailure());
-    return HeapObject::cast(object_);
+    return Cast<HeapObject>(object_);
   }
 
-  HeapObject ToObject() const {
+  Tagged<HeapObject> ToObject() const {
     DCHECK(!IsFailure());
-    return HeapObject::cast(object_);
+    return Cast<HeapObject>(object_);
   }
 
   Address ToAddress() const {
     DCHECK(!IsFailure());
-    return HeapObject::cast(object_).address();
+    return Cast<HeapObject>(object_).address();
   }
 
- private:
-  explicit AllocationResult(HeapObject heap_object) : object_(heap_object) {}
+  explicit operator bool() const { return !IsFailure(); }
 
-  HeapObject object_;
+ private:
+  explicit AllocationResult(Tagged<HeapObject> heap_object)
+      : object_(heap_object) {}
+
+  Tagged<HeapObject> object_;
 };
 
-STATIC_ASSERT(sizeof(AllocationResult) == kSystemPointerSize);
+static_assert(sizeof(AllocationResult) == kSystemPointerSize);
 
 }  // namespace internal
 }  // namespace v8

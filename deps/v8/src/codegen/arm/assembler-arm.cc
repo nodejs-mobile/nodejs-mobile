@@ -36,6 +36,8 @@
 
 #include "src/codegen/arm/assembler-arm.h"
 
+#include <optional>
+
 #if V8_TARGET_ARCH_ARM
 
 #include "src/base/bits.h"
@@ -45,7 +47,6 @@
 #include "src/codegen/assembler-inl.h"
 #include "src/codegen/machine-type.h"
 #include "src/codegen/macro-assembler.h"
-#include "src/codegen/string-constants.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/objects/objects-inl.h"
 
@@ -59,17 +60,18 @@ static const unsigned kArmv8 = kArmv7WithSudiv | (1u << ARMv8);
 
 static unsigned CpuFeaturesFromCommandLine() {
   unsigned result;
-  if (strcmp(FLAG_arm_arch, "armv8") == 0) {
+  const char* arm_arch = v8_flags.arm_arch;
+  if (strcmp(arm_arch, "armv8") == 0) {
     result = kArmv8;
-  } else if (strcmp(FLAG_arm_arch, "armv7+sudiv") == 0) {
+  } else if (strcmp(arm_arch, "armv7+sudiv") == 0) {
     result = kArmv7WithSudiv;
-  } else if (strcmp(FLAG_arm_arch, "armv7") == 0) {
+  } else if (strcmp(arm_arch, "armv7") == 0) {
     result = kArmv7;
-  } else if (strcmp(FLAG_arm_arch, "armv6") == 0) {
+  } else if (strcmp(arm_arch, "armv6") == 0) {
     result = kArmv6;
   } else {
     fprintf(stderr, "Error: unrecognised value for --arm-arch ('%s').\n",
-            FLAG_arm_arch);
+            arm_arch);
     fprintf(stderr,
             "Supported values are:  armv8\n"
             "                       armv7+sudiv\n"
@@ -81,9 +83,15 @@ static unsigned CpuFeaturesFromCommandLine() {
   // If any of the old (deprecated) flags are specified, print a warning, but
   // otherwise try to respect them for now.
   // TODO(jbramley): When all the old bots have been updated, remove this.
-  if (FLAG_enable_armv7.has_value || FLAG_enable_vfp3.has_value ||
-      FLAG_enable_32dregs.has_value || FLAG_enable_neon.has_value ||
-      FLAG_enable_sudiv.has_value || FLAG_enable_armv8.has_value) {
+  std::optional<bool> maybe_enable_armv7 = v8_flags.enable_armv7;
+  std::optional<bool> maybe_enable_vfp3 = v8_flags.enable_vfp3;
+  std::optional<bool> maybe_enable_32dregs = v8_flags.enable_32dregs;
+  std::optional<bool> maybe_enable_neon = v8_flags.enable_neon;
+  std::optional<bool> maybe_enable_sudiv = v8_flags.enable_sudiv;
+  std::optional<bool> maybe_enable_armv8 = v8_flags.enable_armv8;
+  if (maybe_enable_armv7.has_value() || maybe_enable_vfp3.has_value() ||
+      maybe_enable_32dregs.has_value() || maybe_enable_neon.has_value() ||
+      maybe_enable_sudiv.has_value() || maybe_enable_armv8.has_value()) {
     // As an approximation of the old behaviour, set the default values from the
     // arm_arch setting, then apply the flags over the top.
     bool enable_armv7 = (result & (1u << ARMv7)) != 0;
@@ -92,41 +100,41 @@ static unsigned CpuFeaturesFromCommandLine() {
     bool enable_neon = (result & (1u << ARMv7)) != 0;
     bool enable_sudiv = (result & (1u << ARMv7_SUDIV)) != 0;
     bool enable_armv8 = (result & (1u << ARMv8)) != 0;
-    if (FLAG_enable_armv7.has_value) {
+    if (maybe_enable_armv7.has_value()) {
       fprintf(stderr,
               "Warning: --enable_armv7 is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_armv7 = FLAG_enable_armv7.value;
+      enable_armv7 = maybe_enable_armv7.value();
     }
-    if (FLAG_enable_vfp3.has_value) {
+    if (maybe_enable_vfp3.has_value()) {
       fprintf(stderr,
               "Warning: --enable_vfp3 is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_vfp3 = FLAG_enable_vfp3.value;
+      enable_vfp3 = maybe_enable_vfp3.value();
     }
-    if (FLAG_enable_32dregs.has_value) {
+    if (maybe_enable_32dregs.has_value()) {
       fprintf(stderr,
               "Warning: --enable_32dregs is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_32dregs = FLAG_enable_32dregs.value;
+      enable_32dregs = maybe_enable_32dregs.value();
     }
-    if (FLAG_enable_neon.has_value) {
+    if (maybe_enable_neon.has_value()) {
       fprintf(stderr,
               "Warning: --enable_neon is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_neon = FLAG_enable_neon.value;
+      enable_neon = maybe_enable_neon.value();
     }
-    if (FLAG_enable_sudiv.has_value) {
+    if (maybe_enable_sudiv.has_value()) {
       fprintf(stderr,
               "Warning: --enable_sudiv is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_sudiv = FLAG_enable_sudiv.value;
+      enable_sudiv = maybe_enable_sudiv.value();
     }
-    if (FLAG_enable_armv8.has_value) {
+    if (maybe_enable_armv8.has_value()) {
       fprintf(stderr,
               "Warning: --enable_armv8 is deprecated. "
               "Use --arm_arch instead.\n");
-      enable_armv8 = FLAG_enable_armv8.value;
+      enable_armv8 = maybe_enable_armv8.value();
     }
     // Emulate the old implications.
     if (enable_armv8) {
@@ -391,15 +399,8 @@ Operand Operand::EmbeddedNumber(double value) {
   int32_t smi;
   if (DoubleToSmiInteger(value, &smi)) return Operand(Smi::FromInt(smi));
   Operand result(0, RelocInfo::FULL_EMBEDDED_OBJECT);
-  result.is_heap_object_request_ = true;
-  result.value_.heap_object_request = HeapObjectRequest(value);
-  return result;
-}
-
-Operand Operand::EmbeddedStringConstant(const StringConstantBase* str) {
-  Operand result(0, RelocInfo::FULL_EMBEDDED_OBJECT);
-  result.is_heap_object_request_ = true;
-  result.value_.heap_object_request = HeapObjectRequest(str);
+  result.is_heap_number_request_ = true;
+  result.value_.heap_number_request = HeapNumberRequest(value);
   return result;
 }
 
@@ -456,22 +457,12 @@ void NeonMemOperand::SetAlignment(int align) {
   }
 }
 
-void Assembler::AllocateAndInstallRequestedHeapObjects(Isolate* isolate) {
-  DCHECK_IMPLIES(isolate == nullptr, heap_object_requests_.empty());
-  for (auto& request : heap_object_requests_) {
-    Handle<HeapObject> object;
-    switch (request.kind()) {
-      case HeapObjectRequest::kHeapNumber:
-        object = isolate->factory()->NewHeapNumber<AllocationType::kOld>(
+void Assembler::AllocateAndInstallRequestedHeapNumbers(LocalIsolate* isolate) {
+  DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
+  for (auto& request : heap_number_requests_) {
+    Handle<HeapObject> object =
+        isolate->factory()->NewHeapNumber<AllocationType::kOld>(
             request.heap_number());
-        break;
-      case HeapObjectRequest::kStringConstant: {
-        const StringConstantBase* str = request.string();
-        CHECK_NOT_NULL(str);
-        object = str->AllocateStringConstant(isolate);
-        break;
-      }
-    }
     Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
     Memory<Address>(constant_pool_entry_address(pc, 0 /* unused */)) =
         object.address();
@@ -533,7 +524,8 @@ Assembler::Assembler(const AssemblerOptions& options,
                      std::unique_ptr<AssemblerBuffer> buffer)
     : AssemblerBase(options, std::move(buffer)),
       pending_32_bit_constants_(),
-      scratch_register_list_({ip}) {
+      scratch_register_list_(DefaultTmpList()),
+      scratch_vfp_register_list_(DefaultFPTmpList()) {
   reloc_info_writer.Reposition(buffer_start_ + buffer_->size(), pc_);
   constant_pool_deadline_ = kMaxInt;
   const_pool_blocked_nesting_ = 0;
@@ -545,13 +537,6 @@ Assembler::Assembler(const AssemblerOptions& options,
     // it's awkward to use CpuFeatures::VFP32DREGS with CpuFeatureScope. To make
     // its use consistent with other features, we always enable it if we can.
     EnableCpuFeature(VFP32DREGS);
-    // Make sure we pick two D registers which alias a Q register. This way, we
-    // can use a Q as a scratch if NEON is supported.
-    scratch_vfp_register_list_ = d14.ToVfpRegList() | d15.ToVfpRegList();
-  } else {
-    // When VFP32DREGS is not supported, d15 become allocatable. Therefore we
-    // cannot use it as a scratch.
-    scratch_vfp_register_list_ = d14.ToVfpRegList();
   }
 }
 
@@ -560,17 +545,36 @@ Assembler::~Assembler() {
   DCHECK_EQ(first_const_pool_32_use_, -1);
 }
 
-void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
-                        SafepointTableBuilder* safepoint_table_builder,
+// static
+RegList Assembler::DefaultTmpList() { return {ip}; }
+
+// static
+VfpRegList Assembler::DefaultFPTmpList() {
+  if (CpuFeatures::IsSupported(VFP32DREGS)) {
+    // Make sure we pick two D registers which alias a Q register. This way, we
+    // can use a Q as a scratch if NEON is supported.
+    return d14.ToVfpRegList() | d15.ToVfpRegList();
+  } else {
+    // When VFP32DREGS is not supported, d15 become allocatable. Therefore we
+    // cannot use it as a scratch.
+    return d14.ToVfpRegList();
+  }
+}
+
+void Assembler::GetCode(Isolate* isolate, CodeDesc* desc) {
+  GetCode(isolate->main_thread_local_isolate(), desc);
+}
+void Assembler::GetCode(LocalIsolate* isolate, CodeDesc* desc,
+                        SafepointTableBuilderBase* safepoint_table_builder,
                         int handler_table_offset) {
   // As a crutch to avoid having to add manual Align calls wherever we use a
-  // raw workflow to create Code objects (mostly in tests), add another Align
-  // call here. It does no harm - the end of the Code object is aligned to the
-  // (larger) kCodeAlignment anyways.
+  // raw workflow to create InstructionStream objects (mostly in tests), add
+  // another Align call here. It does no harm - the end of the InstructionStream
+  // object is aligned to the (larger) kCodeAlignment anyways.
   // TODO(jgruber): Consider moving responsibility for proper alignment to
   // metadata table builders (safepoint, handler, constant pool, code
   // comments).
-  DataAlign(Code::kMetadataAlignment);
+  DataAlign(InstructionStream::kMetadataAlignment);
 
   // Emit constant pool if necessary.
   CheckConstPool(true, false);
@@ -578,15 +582,19 @@ void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
 
   int code_comments_size = WriteCodeComments();
 
-  AllocateAndInstallRequestedHeapObjects(isolate);
+  AllocateAndInstallRequestedHeapNumbers(isolate);
 
   // Set up code descriptor.
   // TODO(jgruber): Reconsider how these offsets and sizes are maintained up to
   // this point to make CodeDesc initialization less fiddly.
 
   static constexpr int kConstantPoolSize = 0;
+  static constexpr int kBuiltinJumpTableInfoSize = 0;
   const int instruction_size = pc_offset();
-  const int code_comments_offset = instruction_size - code_comments_size;
+  const int builtin_jump_table_info_offset =
+      instruction_size - kBuiltinJumpTableInfoSize;
+  const int code_comments_offset =
+      builtin_jump_table_info_offset - code_comments_size;
   const int constant_pool_offset = code_comments_offset - kConstantPoolSize;
   const int handler_table_offset2 = (handler_table_offset == kNoHandlerTable)
                                         ? constant_pool_offset
@@ -599,7 +607,8 @@ void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
       static_cast<int>(reloc_info_writer.pos() - buffer_->start());
   CodeDesc::Initialize(desc, this, safepoint_table_offset,
                        handler_table_offset2, constant_pool_offset,
-                       code_comments_offset, reloc_info_offset);
+                       code_comments_offset, builtin_jump_table_info_offset,
+                       reloc_info_offset);
 }
 
 void Assembler::Align(int m) {
@@ -842,13 +851,14 @@ void Assembler::target_at_put(int pos, int target_pos) {
     //      orr dst, dst, #target8_1 << 8
     //      orr dst, dst, #target8_2 << 16
 
-    uint32_t target24 = target_pos + (Code::kHeaderSize - kHeapObjectTag);
+    uint32_t target24 =
+        target_pos + (InstructionStream::kHeaderSize - kHeapObjectTag);
     CHECK(is_uint24(target24));
     if (is_uint8(target24)) {
       // If the target fits in a byte then only patch with a mov
       // instruction.
       PatchingAssembler patcher(
-          options(), reinterpret_cast<byte*>(buffer_start_ + pos), 1);
+          options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 1);
       patcher.mov(dst, Operand(target24));
     } else {
       uint16_t target16_0 = target24 & kImm16Mask;
@@ -857,12 +867,12 @@ void Assembler::target_at_put(int pos, int target_pos) {
         // Patch with movw/movt.
         if (target16_1 == 0) {
           PatchingAssembler patcher(
-              options(), reinterpret_cast<byte*>(buffer_start_ + pos), 1);
+              options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 1);
           CpuFeatureScope scope(&patcher, ARMv7);
           patcher.movw(dst, target16_0);
         } else {
           PatchingAssembler patcher(
-              options(), reinterpret_cast<byte*>(buffer_start_ + pos), 2);
+              options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 2);
           CpuFeatureScope scope(&patcher, ARMv7);
           patcher.movw(dst, target16_0);
           patcher.movt(dst, target16_1);
@@ -874,12 +884,12 @@ void Assembler::target_at_put(int pos, int target_pos) {
         uint8_t target8_2 = target16_1 & kImm8Mask;
         if (target8_2 == 0) {
           PatchingAssembler patcher(
-              options(), reinterpret_cast<byte*>(buffer_start_ + pos), 2);
+              options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 2);
           patcher.mov(dst, Operand(target8_0));
           patcher.orr(dst, dst, Operand(target8_1 << 8));
         } else {
           PatchingAssembler patcher(
-              options(), reinterpret_cast<byte*>(buffer_start_ + pos), 3);
+              options(), reinterpret_cast<uint8_t*>(buffer_start_ + pos), 3);
           patcher.mov(dst, Operand(target8_0));
           patcher.orr(dst, dst, Operand(target8_1 << 8));
           patcher.orr(dst, dst, Operand(target8_2 << 16));
@@ -1197,7 +1207,7 @@ void Assembler::Move32BitImmediate(Register rd, const Operand& x,
     // can be patched.
     DCHECK(!x.MustOutputRelocInfo(this));
     UseScratchRegisterScope temps(this);
-    // Re-use the destination register as a scratch if possible.
+    // Reuse the destination register as a scratch if possible.
     Register target = rd != pc && rd != sp ? rd : temps.Acquire();
     uint32_t imm32 = static_cast<uint32_t>(x.immediate());
     movw(target, imm32 & 0xFFFF, cond);
@@ -1207,8 +1217,8 @@ void Assembler::Move32BitImmediate(Register rd, const Operand& x,
     }
   } else {
     int32_t immediate;
-    if (x.IsHeapObjectRequest()) {
-      RequestHeapObject(x.heap_object_request());
+    if (x.IsHeapNumberRequest()) {
+      RequestHeapNumber(x.heap_number_request());
       immediate = 0;
     } else {
       immediate = x.immediate();
@@ -1247,10 +1257,10 @@ void Assembler::AddrMode1(Instr instr, Register rd, Register rn,
       // pool only for a MOV instruction which does not set the flags.
       DCHECK(!rn.is_valid());
       Move32BitImmediate(rd, x, cond);
-    } else if ((opcode == ADD) && !set_flags && (rd == rn) &&
+    } else if ((opcode == ADD || opcode == SUB) && !set_flags && (rd == rn) &&
                !temps.CanAcquire()) {
       // Split the operation into a sequence of additions if we cannot use a
-      // scratch register. In this case, we cannot re-use rn and the assembler
+      // scratch register. In this case, we cannot reuse rn and the assembler
       // does not have any scratch registers to spare.
       uint32_t imm = x.immediate();
       do {
@@ -1263,15 +1273,25 @@ void Assembler::AddrMode1(Instr instr, Register rd, Register rn,
         // immediate allows us to more efficiently split it:
         int trailing_zeroes = base::bits::CountTrailingZeros(imm) & ~1u;
         uint32_t mask = (0xFF << trailing_zeroes);
-        add(rd, rd, Operand(imm & mask), LeaveCC, cond);
+        if (opcode == ADD) {
+          add(rd, rd, Operand(imm & mask), LeaveCC, cond);
+        } else {
+          DCHECK_EQ(opcode, SUB);
+          sub(rd, rd, Operand(imm & mask), LeaveCC, cond);
+        }
         imm = imm & ~mask;
       } while (!ImmediateFitsAddrMode1Instruction(imm));
-      add(rd, rd, Operand(imm), LeaveCC, cond);
+      if (opcode == ADD) {
+        add(rd, rd, Operand(imm), LeaveCC, cond);
+      } else {
+        DCHECK_EQ(opcode, SUB);
+        sub(rd, rd, Operand(imm), LeaveCC, cond);
+      }
     } else {
       // The immediate operand cannot be encoded as a shifter operand, so load
       // it first to a scratch register and change the original instruction to
       // use it.
-      // Re-use the destination register if possible.
+      // Reuse the destination register if possible.
       Register scratch = (rd.is_valid() && rd != rn && rd != pc && rd != sp)
                              ? rd
                              : temps.Acquire();
@@ -1337,7 +1357,7 @@ void Assembler::AddrMode2(Instr instr, Register rd, const MemOperand& x) {
       // Immediate offset cannot be encoded, load it first to a scratch
       // register.
       UseScratchRegisterScope temps(this);
-      // Allow re-using rd for load instructions if possible.
+      // Allow reuse of rd for load instructions if possible.
       bool is_load = (instr & L) == L;
       Register scratch = (is_load && rd != x.rn_ && rd != pc && rd != sp)
                              ? rd
@@ -1379,7 +1399,7 @@ void Assembler::AddrMode3(Instr instr, Register rd, const MemOperand& x) {
       // Immediate offset cannot be encoded, load it first to a scratch
       // register.
       UseScratchRegisterScope temps(this);
-      // Allow re-using rd for load instructions if possible.
+      // Allow reuse of rd for load instructions if possible.
       Register scratch = (is_load && rd != x.rn_ && rd != pc && rd != sp)
                              ? rd
                              : temps.Acquire();
@@ -1394,7 +1414,7 @@ void Assembler::AddrMode3(Instr instr, Register rd, const MemOperand& x) {
     // Scaled register offsets are not supported, compute the offset separately
     // to a scratch register.
     UseScratchRegisterScope temps(this);
-    // Allow re-using rd for load instructions if possible.
+    // Allow reuse of rd for load instructions if possible.
     Register scratch =
         (is_load && rd != x.rn_ && rd != pc && rd != sp) ? rd : temps.Acquire();
     mov(scratch, Operand(x.rm_, x.shift_op_, x.shift_imm_), LeaveCC,
@@ -1646,7 +1666,8 @@ void Assembler::mov(Register dst, Register src, SBit s, Condition cond) {
 
 void Assembler::mov_label_offset(Register dst, Label* label) {
   if (label->is_bound()) {
-    mov(dst, Operand(label->pos() + (Code::kHeaderSize - kHeapObjectTag)));
+    mov(dst, Operand(label->pos() +
+                     (InstructionStream::kHeaderSize - kHeapObjectTag)));
   } else {
     // Emit the link to the label in the code stream followed by extra nop
     // instructions.
@@ -4399,9 +4420,9 @@ enum IntegerBinOp {
   VQRDMULH
 };
 
-static Instr EncodeNeonBinOp(IntegerBinOp op, NeonDataType dt,
-                             QwNeonRegister dst, QwNeonRegister src1,
-                             QwNeonRegister src2) {
+static Instr EncodeNeonDataTypeBinOp(IntegerBinOp op, NeonDataType dt,
+                                     QwNeonRegister dst, QwNeonRegister src1,
+                                     QwNeonRegister src2) {
   int op_encoding = 0;
   switch (op) {
     case VADD:
@@ -4458,11 +4479,13 @@ static Instr EncodeNeonBinOp(IntegerBinOp op, NeonDataType dt,
          n * B7 | B6 | m * B5 | vm | op_encoding;
 }
 
-static Instr EncodeNeonBinOp(IntegerBinOp op, NeonSize size, QwNeonRegister dst,
-                             QwNeonRegister src1, QwNeonRegister src2) {
+static Instr EncodeNeonSizeBinOp(IntegerBinOp op, NeonSize size,
+                                 QwNeonRegister dst, QwNeonRegister src1,
+                                 QwNeonRegister src2) {
   // Map NeonSize values to the signed values in NeonDataType, so the U bit
   // will be 0.
-  return EncodeNeonBinOp(op, static_cast<NeonDataType>(size), dst, src1, src2);
+  return EncodeNeonDataTypeBinOp(op, static_cast<NeonDataType>(size), dst, src1,
+                                 src2);
 }
 
 void Assembler::vadd(QwNeonRegister dst, QwNeonRegister src1,
@@ -4478,7 +4501,7 @@ void Assembler::vadd(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vadd(Qn, Qm) SIMD integer addition.
   // Instruction details available in ARM DDI 0406C.b, A8-828.
-  emit(EncodeNeonBinOp(VADD, size, dst, src1, src2));
+  emit(EncodeNeonSizeBinOp(VADD, size, dst, src1, src2));
 }
 
 void Assembler::vqadd(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
@@ -4486,7 +4509,7 @@ void Assembler::vqadd(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vqadd(Qn, Qm) SIMD integer saturating addition.
   // Instruction details available in ARM DDI 0406C.b, A8-996.
-  emit(EncodeNeonBinOp(VQADD, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VQADD, dt, dst, src1, src2));
 }
 
 void Assembler::vsub(QwNeonRegister dst, QwNeonRegister src1,
@@ -4502,7 +4525,7 @@ void Assembler::vsub(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vsub(Qn, Qm) SIMD integer subtraction.
   // Instruction details available in ARM DDI 0406C.b, A8-1084.
-  emit(EncodeNeonBinOp(VSUB, size, dst, src1, src2));
+  emit(EncodeNeonSizeBinOp(VSUB, size, dst, src1, src2));
 }
 
 void Assembler::vqsub(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
@@ -4510,7 +4533,7 @@ void Assembler::vqsub(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vqsub(Qn, Qm) SIMD integer saturating subtraction.
   // Instruction details available in ARM DDI 0406C.b, A8-1020.
-  emit(EncodeNeonBinOp(VQSUB, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VQSUB, dt, dst, src1, src2));
 }
 
 void Assembler::vmlal(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
@@ -4545,7 +4568,7 @@ void Assembler::vmul(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vadd(Qn, Qm) SIMD integer multiply.
   // Instruction details available in ARM DDI 0406C.b, A8-960.
-  emit(EncodeNeonBinOp(VMUL, size, dst, src1, src2));
+  emit(EncodeNeonSizeBinOp(VMUL, size, dst, src1, src2));
 }
 
 void Assembler::vmull(NeonDataType dt, QwNeonRegister dst, DwVfpRegister src1,
@@ -4578,7 +4601,7 @@ void Assembler::vmin(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vmin(Qn, Qm) SIMD integer MIN.
   // Instruction details available in ARM DDI 0406C.b, A8-926.
-  emit(EncodeNeonBinOp(VMIN, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VMIN, dt, dst, src1, src2));
 }
 
 void Assembler::vmax(QwNeonRegister dst, QwNeonRegister src1,
@@ -4594,7 +4617,7 @@ void Assembler::vmax(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vmax(Qn, Qm) SIMD integer MAX.
   // Instruction details available in ARM DDI 0406C.b, A8-926.
-  emit(EncodeNeonBinOp(VMAX, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VMAX, dt, dst, src1, src2));
 }
 
 enum NeonShiftOp { VSHL, VSHR, VSLI, VSRI, VSRA };
@@ -4871,7 +4894,7 @@ void Assembler::vtst(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vtst(Qn, Qm) SIMD test integer operands.
   // Instruction details available in ARM DDI 0406C.b, A8-1098.
-  emit(EncodeNeonBinOp(VTST, size, dst, src1, src2));
+  emit(EncodeNeonSizeBinOp(VTST, size, dst, src1, src2));
 }
 
 void Assembler::vceq(QwNeonRegister dst, QwNeonRegister src1,
@@ -4887,7 +4910,7 @@ void Assembler::vceq(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vceq(Qn, Qm) SIMD integer compare equal.
   // Instruction details available in ARM DDI 0406C.b, A8-844.
-  emit(EncodeNeonBinOp(VCEQ, size, dst, src1, src2));
+  emit(EncodeNeonSizeBinOp(VCEQ, size, dst, src1, src2));
 }
 
 void Assembler::vceq(NeonSize size, QwNeonRegister dst, QwNeonRegister src1,
@@ -4912,7 +4935,7 @@ void Assembler::vcge(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vcge(Qn, Qm) SIMD integer compare greater or equal.
   // Instruction details available in ARM DDI 0406C.b, A8-848.
-  emit(EncodeNeonBinOp(VCGE, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VCGE, dt, dst, src1, src2));
 }
 
 void Assembler::vcgt(QwNeonRegister dst, QwNeonRegister src1,
@@ -4928,7 +4951,7 @@ void Assembler::vcgt(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vcgt(Qn, Qm) SIMD integer compare greater than.
   // Instruction details available in ARM DDI 0406C.b, A8-852.
-  emit(EncodeNeonBinOp(VCGT, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VCGT, dt, dst, src1, src2));
 }
 
 void Assembler::vclt(NeonSize size, QwNeonRegister dst, QwNeonRegister src,
@@ -4945,7 +4968,7 @@ void Assembler::vrhadd(NeonDataType dt, QwNeonRegister dst, QwNeonRegister src1,
   DCHECK(IsEnabled(NEON));
   // Qd = vrhadd(Qn, Qm) SIMD integer rounding halving add.
   // Instruction details available in ARM DDI 0406C.b, A8-1030.
-  emit(EncodeNeonBinOp(VRHADD, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VRHADD, dt, dst, src1, src2));
 }
 
 void Assembler::vext(QwNeonRegister dst, QwNeonRegister src1,
@@ -5055,7 +5078,7 @@ void Assembler::vqrdmulh(NeonDataType dt, QwNeonRegister dst,
                          QwNeonRegister src1, QwNeonRegister src2) {
   DCHECK(IsEnabled(NEON));
   DCHECK(dt == NeonS16 || dt == NeonS32);
-  emit(EncodeNeonBinOp(VQRDMULH, dt, dst, src1, src2));
+  emit(EncodeNeonDataTypeBinOp(VQRDMULH, dt, dst, src1, src2));
 }
 
 void Assembler::vcnt(QwNeonRegister dst, QwNeonRegister src) {
@@ -5199,22 +5222,22 @@ void Assembler::GrowBuffer() {
   // Set up new buffer.
   std::unique_ptr<AssemblerBuffer> new_buffer = buffer_->Grow(new_size);
   DCHECK_EQ(new_size, new_buffer->size());
-  byte* new_start = new_buffer->start();
+  uint8_t* new_start = new_buffer->start();
 
   // Copy the data.
   int pc_delta = new_start - buffer_start_;
   int rc_delta = (new_start + new_size) - (buffer_start_ + old_size);
   size_t reloc_size = (buffer_start_ + old_size) - reloc_info_writer.pos();
   MemMove(new_start, buffer_start_, pc_offset());
-  byte* new_reloc_start = reinterpret_cast<byte*>(
+  uint8_t* new_reloc_start = reinterpret_cast<uint8_t*>(
       reinterpret_cast<Address>(reloc_info_writer.pos()) + rc_delta);
   MemMove(new_reloc_start, reloc_info_writer.pos(), reloc_size);
 
   // Switch buffers.
   buffer_ = std::move(new_buffer);
   buffer_start_ = new_start;
-  pc_ = reinterpret_cast<byte*>(reinterpret_cast<Address>(pc_) + pc_delta);
-  byte* new_last_pc = reinterpret_cast<byte*>(
+  pc_ = reinterpret_cast<uint8_t*>(reinterpret_cast<Address>(pc_) + pc_delta);
+  uint8_t* new_last_pc = reinterpret_cast<uint8_t*>(
       reinterpret_cast<Address>(reloc_info_writer.last_pc()) + pc_delta);
   reloc_info_writer.Reposition(new_reloc_start, new_last_pc);
 
@@ -5232,30 +5255,20 @@ void Assembler::db(uint8_t data) {
   pc_ += sizeof(uint8_t);
 }
 
-void Assembler::dd(uint32_t data, RelocInfo::Mode rmode) {
+void Assembler::dd(uint32_t data) {
   // dd is used to write raw data. The constant pool should be emitted or
   // blocked before using dd.
   DCHECK(is_const_pool_blocked() || pending_32_bit_constants_.empty());
   CheckBuffer();
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
-           RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
-  }
   base::WriteUnalignedValue(reinterpret_cast<Address>(pc_), data);
   pc_ += sizeof(uint32_t);
 }
 
-void Assembler::dq(uint64_t value, RelocInfo::Mode rmode) {
+void Assembler::dq(uint64_t value) {
   // dq is used to write raw data. The constant pool should be emitted or
   // blocked before using dq.
   DCHECK(is_const_pool_blocked() || pending_32_bit_constants_.empty());
   CheckBuffer();
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
-           RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
-  }
   base::WriteUnalignedValue(reinterpret_cast<Address>(pc_), value);
   pc_ += sizeof(uint64_t);
 }
@@ -5263,7 +5276,7 @@ void Assembler::dq(uint64_t value, RelocInfo::Mode rmode) {
 void Assembler::RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data) {
   if (!ShouldRecordRelocInfo(rmode)) return;
   DCHECK_GE(buffer_space(), kMaxRelocSize);  // too late to grow buffer here
-  RelocInfo rinfo(reinterpret_cast<Address>(pc_), rmode, data, Code());
+  RelocInfo rinfo(reinterpret_cast<Address>(pc_), rmode, data);
   reloc_info_writer.Write(&rinfo);
 }
 
@@ -5473,7 +5486,7 @@ void Assembler::CheckConstPool(bool force_emit, bool require_jump) {
 }
 
 PatchingAssembler::PatchingAssembler(const AssemblerOptions& options,
-                                     byte* address, int instructions)
+                                     uint8_t* address, int instructions)
     : Assembler(options, ExternalAssemblerBuffer(
                              address, instructions * kInstrSize + kGap)) {
   DCHECK_EQ(reloc_info_writer.pos(), buffer_start_ + buffer_->size());
@@ -5495,22 +5508,6 @@ void PatchingAssembler::PadWithNops() {
   while (pc_ < buffer_start_ + buffer_->size() - kGap) {
     nop();
   }
-}
-
-UseScratchRegisterScope::UseScratchRegisterScope(Assembler* assembler)
-    : assembler_(assembler),
-      old_available_(*assembler->GetScratchRegisterList()),
-      old_available_vfp_(*assembler->GetScratchVfpRegisterList()) {}
-
-UseScratchRegisterScope::~UseScratchRegisterScope() {
-  *assembler_->GetScratchRegisterList() = old_available_;
-  *assembler_->GetScratchVfpRegisterList() = old_available_vfp_;
-}
-
-Register UseScratchRegisterScope::Acquire() {
-  RegList* available = assembler_->GetScratchRegisterList();
-  DCHECK_NOT_NULL(available);
-  return available->PopFirst();
 }
 
 LoadStoreLaneParams::LoadStoreLaneParams(MachineRepresentation rep,

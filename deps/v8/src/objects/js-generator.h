@@ -23,7 +23,7 @@ class StructBodyDescriptor;
 class JSGeneratorObject
     : public TorqueGeneratedJSGeneratorObject<JSGeneratorObject, JSObject> {
  public:
-  enum ResumeMode { kNext, kReturn, kThrow };
+  enum ResumeMode { kNext, kReturn, kThrow, kRethrow };
 
   inline bool is_closed() const;
   inline bool is_executing() const;
@@ -32,6 +32,7 @@ class JSGeneratorObject
   // For suspended generators: the source position at which the generator
   // is suspended.
   int source_position() const;
+  int code_offset() const;
 
   // Dispatched behavior.
   DECL_PRINTER(JSGeneratorObject)

@@ -35,7 +35,7 @@ import * as common from './common.mjs';
 import * as typeParser from './type-parser.mjs';
 import buildCSSForFlavoredJS from './buildCSSForFlavoredJS.mjs';
 
-const dynamicSizes = Object.create(null);
+const dynamicSizes = { __proto__: null };
 
 const { highlight, getLanguage } = highlightJs;
 
@@ -206,16 +206,33 @@ function linkJsTypeDocs(text) {
 
 const isJSFlavorSnippet = (node) => node.lang === 'cjs' || node.lang === 'mjs';
 
+const STABILITY_RE = /(.*:)\s*(\d(?:\.\d)?)([\s\S]*)/;
+
 // Preprocess headers, stability blockquotes, and YAML blocks.
 export function preprocessElements({ filename }) {
   return (tree) => {
-    const STABILITY_RE = /(.*:)\s*(\d)([\s\S]*)/;
     let headingIndex = -1;
     let heading = null;
 
     visit(tree, null, (node, index, parent) => {
       if (node.type === 'heading') {
         headingIndex = index;
+        if (heading) {
+          node.parentHeading = heading;
+          for (let d = heading.depth; d >= node.depth; d--) {
+            node.parentHeading = node.parentHeading.parentHeading;
+          }
+
+          if (heading.depth > 2 || node.depth > 2) {
+            const isNonWrapped = node.depth > 2; // For depth of 1 and 2, there's already a wrapper.
+            parent.children.splice(index++, 0, {
+              type: 'html',
+              value:
+                `</div>`.repeat(heading.depth - node.depth + isNonWrapped) +
+                (isNonWrapped ? '<div>' : ''),
+            });
+          }
+        }
         heading = node;
       } else if (node.type === 'code') {
         if (!node.lang) {
@@ -250,7 +267,7 @@ export function preprocessElements({ filename }) {
             const actualCharCount = Math.max(charCountFirstTwoLines, previousNode.charCountFirstTwoLines);
             (dynamicSizes[filename] ??= new Set()).add(actualCharCount);
             node.value = `<pre class="with-${actualCharCount}-chars">` +
-              '<input class="js-flavor-selector" type="checkbox"' +
+              '<input class="js-flavor-toggle" type="checkbox"' +
               // If CJS comes in second, ESM should display by default.
               (node.lang === 'cjs' ? ' checked' : '') +
               ' aria-label="Show modern ES modules syntax">' +
@@ -286,13 +303,20 @@ export function preprocessElements({ filename }) {
 
           if (heading && isStabilityIndex) {
             heading.stability = number;
+            for (let h = heading; h != null; h = h.parentHeading) {
+              if (!h.hasStabilityIndexElement) continue;
+              if (h.stability === number && h.explication === explication) {
+                throw new Error(`Duplicate stability index at ${filename}:${node.position.start.line}, it already inherits it from a parent heading ${filename}:${h.position.start.line}`);
+              } else break;
+            }
+            heading.hasStabilityIndexElement = true;
+            heading.explication = explication;
             headingIndex = -1;
-            heading = null;
           }
 
           // Do not link to the section we are already in.
           const noLinking = filename.includes('documentation') &&
-            heading !== null && heading.children[0].value === 'Stability index';
+            !heading.hasStabilityIndexElement && heading.children[0].value === 'Stability index';
 
           // Collapse blockquote and paragraph into a single node
           node.type = 'paragraph';
@@ -302,7 +326,7 @@ export function preprocessElements({ filename }) {
           // Insert div with prefix and number
           node.children.unshift({
             type: 'html',
-            value: `<div class="api_stability api_stability_${number}">` +
+            value: `<div class="api_stability api_stability_${parseInt(number)}">` +
               (noLinking ? '' :
                 '<a href="documentation.html#stability-index">') +
               `${prefix} ${number}${noLinking ? '' : '</a>'}`
@@ -316,6 +340,10 @@ export function preprocessElements({ filename }) {
           node.children.push({ type: 'html', value: '</div>' });
         }
       }
+
+      // In case we've inserted/removed node(s) before the current one, we need
+      // to make sure we're not visiting the same node again or skipping one.
+      return [true, index + 1];
     });
   };
 }
@@ -394,16 +422,16 @@ function versionSort(a, b) {
   b = minVersion(b).trim();
   let i = 0; // Common prefix length.
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  a = a.substr(i);
-  b = b.substr(i);
+  a = a.substring(i);
+  b = b.substring(i);
   return +b.match(numberRe)[0] - +a.match(numberRe)[0];
 }
 
 const DEPRECATION_HEADING_PATTERN = /^DEP\d+:/;
 export function buildToc({ filename, apilinks }) {
   return (tree, file) => {
-    const idCounters = Object.create(null);
-    const legacyIdCounters = Object.create(null);
+    const idCounters = { __proto__: null };
+    const legacyIdCounters = { __proto__: null };
     let toc = '';
     let depth = 0;
 
@@ -428,8 +456,8 @@ export function buildToc({ filename, apilinks }) {
       const isDeprecationHeading =
         DEPRECATION_HEADING_PATTERN.test(headingText);
       if (isDeprecationHeading) {
-        if (!node.data) node.data = {};
-        if (!node.data.hProperties) node.data.hProperties = {};
+        node.data ||= {};
+        node.data.hProperties ||= {};
         node.data.hProperties.id =
           headingText.substring(0, headingText.indexOf(':'));
       }
@@ -467,7 +495,7 @@ export function buildToc({ filename, apilinks }) {
         .use(htmlStringify)
         .processSync(toc).toString();
 
-      file.toc = `<details id="toc" open><summary>Table of contents</summary>${inner}</details>`;
+      file.toc = `<details role="navigation" id="toc" open><summary>Table of contents</summary>${inner}</details>`;
       file.tocPicker = `<div class="toc">${inner}</div>`;
     } else {
       file.toc = file.tocPicker = '<!-- TOC -->';
@@ -527,11 +555,11 @@ function altDocs(filename, docCreated, versions) {
 
   return list ? `
     <li class="picker-header">
-      <a href="#">
-        <span class="collapsed-arrow">&#x25ba;</span><span class="expanded-arrow">&#x25bc;</span>
+      <a href="#alt-docs" aria-controls="alt-docs">
+        <span class="picker-arrow"></span>
         Other versions
       </a>
-      <div class="picker"><ol id="alt-docs">${list}</ol></div>
+      <div class="picker" tabindex="-1"><ol id="alt-docs">${list}</ol></div>
     </li>
   ` : '';
 }
@@ -557,12 +585,12 @@ function gtocPicker(id) {
 
   return `
     <li class="picker-header">
-      <a href="#">
-        <span class="collapsed-arrow">&#x25ba;</span><span class="expanded-arrow">&#x25bc;</span>
+      <a href="#gtoc-picker" aria-controls="gtoc-picker">
+        <span class="picker-arrow"></span>
         Index
       </a>
 
-      <div class="picker">${gtoc}</div>
+      <div class="picker" tabindex="-1" id="gtoc-picker">${gtoc}</div>
     </li>
   `;
 }
@@ -574,12 +602,12 @@ function tocPicker(id, content) {
 
   return `
     <li class="picker-header">
-      <a href="#">
-        <span class="collapsed-arrow">&#x25ba;</span><span class="expanded-arrow">&#x25bc;</span>
+      <a href="#toc-picker" aria-controls="toc-picker">
+        <span class="picker-arrow"></span>
         Table of contents
       </a>
 
-      <div class="picker">${content.tocPicker}</div>
+      <div class="picker" tabindex="-1">${content.tocPicker.replace('<ul', '<ul id="toc-picker"')}</div>
     </li>
   `;
 }

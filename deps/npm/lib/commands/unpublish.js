@@ -6,7 +6,7 @@ const { output, log } = require('proc-log')
 const pkgJson = require('@npmcli/package-json')
 const { flatten } = require('@npmcli/config/lib/definitions')
 const getIdentity = require('../utils/get-identity.js')
-const otplease = require('../utils/otplease.js')
+const { otplease } = require('../utils/auth.js')
 const BaseCommand = require('../base-cmd.js')
 
 const LAST_REMAINING_VERSION_ERROR = 'Refusing to delete the last version of the package. ' +
@@ -145,6 +145,9 @@ class Unpublish extends BaseCommand {
       // corresponding `publishConfig` settings
       const filteredPublishConfig = Object.fromEntries(
         Object.entries(manifest.publishConfig).filter(([key]) => !(key in cliFlags)))
+      for (const key in filteredPublishConfig) {
+        this.npm.config.checkUnknown('publishConfig', key)
+      }
       flatten(filteredPublishConfig, opts)
     }
 

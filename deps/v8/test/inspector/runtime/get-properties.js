@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Flags: --harmony-private-fields --allow-natives-syntax
+// Flags: --allow-natives-syntax
 
 let {session, contextGroup, Protocol} = InspectorTest.start('Checks Runtime.getProperties method');
 
@@ -114,6 +114,10 @@ InspectorTest.runAsyncTestSuite([
 
   function testTypedArrayNonIndexedPropertiesOnly() {
     return logExpressionProperties('new Int8Array(1)', {nonIndexedPropertiesOnly: true, ownProperties: true});
+  },
+
+  function testWeakRef() {
+    return logExpressionProperties('new WeakRef(globalThis)');
   }
 ]);
 

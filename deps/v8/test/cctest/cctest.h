@@ -35,11 +35,9 @@
 #include "src/base/enum-set.h"
 #include "src/codegen/register-configuration.h"
 #include "src/debug/debug-interface.h"
-#include "src/execution/isolate.h"
+#include "src/execution/isolate-inl.h"
 #include "src/execution/simulator.h"
-#include "src/flags/flags.h"
 #include "src/heap/factory.h"
-#include "src/init/v8.h"
 #include "src/objects/js-function.h"
 #include "src/objects/objects.h"
 #include "src/zone/accounting-allocator.h"
@@ -56,6 +54,7 @@ namespace internal {
 const auto GetRegConfig = RegisterConfiguration::Default;
 
 class HandleScope;
+class ManualGCScope;
 class Zone;
 
 namespace compiler {
@@ -107,7 +106,7 @@ class JSHeapBroker;
 #endif
 
 // Similar to TEST, but used when test definitions appear as members of a
-// (probably parameterized) class. This allows re-using the given tests multiple
+// (probably parameterized) class. This allows reusing the given tests multiple
 // times. For this to work, the following conditions must hold:
 //   1. The class has a template parameter named kTestFileName of type  char
 //      const*, which is instantiated with __FILE__ at the *use site*, in order
@@ -172,11 +171,6 @@ class CcTest {
 
   static void AddGlobalFunction(v8::Local<v8::Context> env, const char* name,
                                 v8::FunctionCallback callback);
-  static void CollectGarbage(i::AllocationSpace space,
-                             i::Isolate* isolate = nullptr);
-  static void CollectAllGarbage(i::Isolate* isolate = nullptr);
-  static void CollectAllAvailableGarbage(i::Isolate* isolate = nullptr);
-  static void PreciseCollectAllGarbage(i::Isolate* isolate = nullptr);
 
   static i::Handle<i::String> MakeString(const char* str);
   static i::Handle<i::String> MakeName(const char* str, int suffix);
@@ -226,7 +220,7 @@ class CcTest {
   TestPlatformFactory* test_platform_factory_;
 
   friend int main(int argc, char** argv);
-  friend class ManualGCScope;
+  friend class v8::internal::ManualGCScope;
 };
 
 // Switches between all the Api tests using the threading support.
@@ -241,6 +235,8 @@ class CcTest {
 // to that thread, suspending the current test.
 class ApiTestFuzzer: public v8::base::Thread {
  public:
+  ~ApiTestFuzzer() override = default;
+
   void CallTest();
 
   // The ApiTestFuzzer is also a Thread, so it has a Run method.
@@ -271,21 +267,35 @@ class ApiTestFuzzer: public v8::base::Thread {
         test_number_(num),
         gate_(0),
         active_(true) {}
-  ~ApiTestFuzzer() override = default;
 
-  static bool fuzzing_;
-  static int tests_being_run_;
-  static int current_;
-  static int active_tests_;
   static bool NextThread();
+  void ContextSwitch();
+  static int GetNextFuzzer();
+
+  static unsigned linear_congruential_generator;
+  static std::vector<std::unique_ptr<ApiTestFuzzer>> fuzzers_;
+  static bool fuzzing_;
+  static v8::base::Semaphore all_tests_done_;
+  static int tests_being_run_;
+  static int active_tests_;
+  static int current_fuzzer_;
+
   int test_number_;
   v8::base::Semaphore gate_;
   bool active_;
-  void ContextSwitch();
-  static int GetNextTestNumber();
-  static v8::base::Semaphore all_tests_done_;
 };
 
+// In threaded cctests, control flow alternates between different threads, each
+// of which runs a single test. All threaded cctests share the same isolate and
+// a heap. With conservative stack scanning (CSS), whenever a thread invokes a
+// GC for the common heap, the stacks of all threads are scanned. In this
+// setting, it is not possible to disable CSS without losing correctness.
+// Therefore, tests defined with THREADED_TEST:
+//
+// 1.  must not explicitly disable CSS, using the scope
+//     internal::DisableConservativeStackScanningScopeForTesting, and
+// 2.  cannot rely on the assumption that garbage collection will reclaim all
+//     non-live objects.
 
 #define THREADED_TEST(Name)                                          \
   static void Test##Name();                                          \
@@ -296,30 +306,23 @@ class RegisterThreadedTest {
  public:
   explicit RegisterThreadedTest(CcTest::TestFunction* callback,
                                 const char* name)
-      : fuzzer_(nullptr), callback_(callback), name_(name) {
-    prev_ = first_;
-    first_ = this;
-    count_++;
+      : callback_(callback), name_(name) {
+    tests_.push_back(this);
   }
-  static int count() { return count_; }
-  static RegisterThreadedTest* nth(int i) {
-    CHECK(i < count());
-    RegisterThreadedTest* current = first_;
-    while (i > 0) {
-      i--;
-      current = current->prev_;
-    }
-    return current;
+  static int count() { return static_cast<int>(tests_.size()); }
+  static const RegisterThreadedTest* nth(int i) {
+    DCHECK_LE(0, i);
+    DCHECK_LT(i, count());
+    // Added tests used to be prepended to a linked list and therefore the last
+    // one to be added was at index 0. This ensures that we keep this behavior.
+    return tests_[count() - i - 1];
   }
-  CcTest::TestFunction* callback() { return callback_; }
-  ApiTestFuzzer* fuzzer_;
-  const char* name() { return name_; }
+  CcTest::TestFunction* callback() const { return callback_; }
+  const char* name() const { return name_; }
 
  private:
-  static RegisterThreadedTest* first_;
-  static int count_;
+  static std::vector<const RegisterThreadedTest*> tests_;
   CcTest::TestFunction* callback_;
-  RegisterThreadedTest* prev_;
   const char* name_;
 };
 
@@ -343,9 +346,7 @@ class LocalContext {
 
   virtual ~LocalContext();
 
-  v8::Context* operator->() {
-    return *reinterpret_cast<v8::Context**>(&context_);
-  }
+  v8::Context* operator->() { return i::ValueHelper::HandleAsValue(context_); }
   v8::Context* operator*() { return operator->(); }
   bool IsReady() { return !context_.IsEmpty(); }
 
@@ -370,28 +371,41 @@ static inline uint16_t* AsciiToTwoByteString(const char* source) {
   return converted;
 }
 
+static inline uint16_t* AsciiToTwoByteString(const char16_t* source,
+                                             size_t* length_out = nullptr) {
+  size_t array_length = std::char_traits<char16_t>::length(source) + 1;
+  uint16_t* converted = i::NewArray<uint16_t>(array_length);
+  for (size_t i = 0; i < array_length; i++) converted[i] = source[i];
+  if (length_out != nullptr) *length_out = array_length - 1;
+  return converted;
+}
+
 template <typename T>
-static inline i::Handle<T> GetGlobal(const char* name) {
+static inline i::DirectHandle<T> GetGlobal(const char* name) {
   i::Isolate* isolate = CcTest::i_isolate();
-  i::Handle<i::String> str_name =
+  i::DirectHandle<i::String> str_name =
       isolate->factory()->InternalizeUtf8String(name);
 
-  i::Handle<i::Object> value =
+  i::DirectHandle<i::Object> value =
       i::Object::GetProperty(isolate, isolate->global_object(), str_name)
           .ToHandleChecked();
-  return i::Handle<T>::cast(value);
+  return i::Cast<T>(value);
 }
 
 static inline v8::Local<v8::Boolean> v8_bool(bool val) {
   return v8::Boolean::New(v8::Isolate::GetCurrent(), val);
 }
 
-static inline v8::Local<v8::Value> v8_num(double x) {
+static inline v8::Local<v8::Number> v8_num(double x) {
   return v8::Number::New(v8::Isolate::GetCurrent(), x);
 }
 
 static inline v8::Local<v8::Integer> v8_int(int32_t x) {
   return v8::Integer::New(v8::Isolate::GetCurrent(), x);
+}
+
+static inline v8::Local<v8::Integer> v8_uint(uint32_t x) {
+  return v8::Integer::NewFromUnsigned(v8::Isolate::GetCurrent(), x);
 }
 
 static inline v8::Local<v8::BigInt> v8_bigint(int64_t x) {
@@ -443,7 +457,7 @@ static inline v8::Local<v8::Script> CompileWithOrigin(
     v8::Local<v8::String> source, v8::Local<v8::String> origin_url,
     bool is_shared_cross_origin) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
-  v8::ScriptOrigin origin(isolate, origin_url, 0, 0, is_shared_cross_origin);
+  v8::ScriptOrigin origin(origin_url, 0, 0, is_shared_cross_origin);
   v8::ScriptCompiler::Source script_source(source, origin);
   return v8::ScriptCompiler::Compile(isolate->GetCurrentContext(),
                                      &script_source)
@@ -520,8 +534,7 @@ static inline v8::Local<v8::Value> CompileRunWithOrigin(const char* source,
                                                         int column_number) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::ScriptOrigin origin(isolate, v8_str(origin_url), line_number,
-                          column_number);
+  v8::ScriptOrigin origin(v8_str(origin_url), line_number, column_number);
   v8::ScriptCompiler::Source script_source(v8_str(source), origin);
   return CompileRun(context, &script_source,
                     v8::ScriptCompiler::CompileOptions());
@@ -533,7 +546,7 @@ static inline v8::Local<v8::Value> CompileRunWithOrigin(
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   v8::ScriptCompiler::Source script_source(
-      source, v8::ScriptOrigin(isolate, v8_str(origin_url)));
+      source, v8::ScriptOrigin(v8_str(origin_url)));
   return CompileRun(context, &script_source,
                     v8::ScriptCompiler::CompileOptions());
 }
@@ -565,13 +578,10 @@ class StreamerThread : public v8::base::Thread {
 
 // Takes a JSFunction and runs it through the test version of the optimizing
 // pipeline, allocating the temporary compilation artifacts in a given Zone.
-// For possible {flags} values, look at OptimizedCompilationInfo::Flag.  If
-// {out_broker} is not nullptr, returns the JSHeapBroker via that (transferring
-// ownership to the caller).
-i::Handle<i::JSFunction> Optimize(
-    i::Handle<i::JSFunction> function, i::Zone* zone, i::Isolate* isolate,
-    uint32_t flags,
-    std::unique_ptr<i::compiler::JSHeapBroker>* out_broker = nullptr);
+// For possible {flags} values, look at OptimizedCompilationInfo::Flag.
+i::Handle<i::JSFunction> Optimize(i::Handle<i::JSFunction> function,
+                                  i::Zone* zone, i::Isolate* isolate,
+                                  uint32_t flags);
 
 static inline void ExpectString(const char* code, const char* expected) {
   v8::Local<v8::Value> result = CompileRun(code);
@@ -579,7 +589,6 @@ static inline void ExpectString(const char* code, const char* expected) {
   v8::String::Utf8Value utf8(v8::Isolate::GetCurrent(), result);
   CHECK_EQ(0, strcmp(expected, *utf8));
 }
-
 
 static inline void ExpectInt32(const char* code, int expected) {
   v8::Local<v8::Value> result = CompileRun(code);
@@ -691,27 +700,6 @@ class StaticOneByteResource : public v8::String::ExternalOneByteStringResource {
   const char* data_;
 };
 
-// ManualGCScope allows for disabling GC heuristics. This is useful for tests
-// that want to check specific corner cases around GC.
-//
-// The scope will finalize any ongoing GC on the provided Isolate. If no Isolate
-// is manually provided, it is assumed that a CcTest setup (e.g.
-// CcTest::InitializeVM()) is used.
-class V8_NODISCARD ManualGCScope {
- public:
-  explicit ManualGCScope(
-      i::Isolate* isolate = reinterpret_cast<i::Isolate*>(CcTest::isolate_));
-  ~ManualGCScope();
-
- private:
-  const bool flag_concurrent_marking_;
-  const bool flag_concurrent_sweeping_;
-  const bool flag_stress_concurrent_allocation_;
-  const bool flag_stress_incremental_marking_;
-  const bool flag_parallel_marking_;
-  const bool flag_detect_ineffective_gcs_near_heap_limit_;
-};
-
 // This is a base class that can be overridden to implement a test platform. It
 // delegates all operations to the default platform.
 class TestPlatform : public v8::Platform {
@@ -721,16 +709,18 @@ class TestPlatform : public v8::Platform {
   // v8::Platform implementation.
   v8::PageAllocator* GetPageAllocator() override;
   void OnCriticalMemoryPressure() override;
-  bool OnCriticalMemoryPressure(size_t length) override;
   int NumberOfWorkerThreads() override;
   std::shared_ptr<v8::TaskRunner> GetForegroundTaskRunner(
-      v8::Isolate* isolate) override;
-  void CallOnWorkerThread(std::unique_ptr<v8::Task> task) override;
-  void CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
-                                 double delay_in_seconds) override;
-  std::unique_ptr<v8::JobHandle> PostJob(
-      v8::TaskPriority priority,
-      std::unique_ptr<v8::JobTask> job_task) override;
+      v8::Isolate* isolate, v8::TaskPriority priority) override;
+  void PostTaskOnWorkerThreadImpl(v8::TaskPriority priority,
+                                  std::unique_ptr<v8::Task> task,
+                                  const v8::SourceLocation& location) override;
+  void PostDelayedTaskOnWorkerThreadImpl(
+      v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+      double delay_in_seconds, const v8::SourceLocation& location) override;
+  std::unique_ptr<v8::JobHandle> CreateJobImpl(
+      v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task,
+      const v8::SourceLocation& location) override;
   double MonotonicallyIncreasingTime() override;
   double CurrentClockTimeMillis() override;
   bool IdleTasksEnabled(v8::Isolate* isolate) override;
@@ -772,20 +762,28 @@ class SimulatorHelper {
     state->sp = reinterpret_cast<void*>(simulator_->sp());
     state->fp = reinterpret_cast<void*>(simulator_->fp());
     state->lr = reinterpret_cast<void*>(simulator_->lr());
-#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
+#elif V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64
     state->pc = reinterpret_cast<void*>(simulator_->get_pc());
     state->sp = reinterpret_cast<void*>(
         simulator_->get_register(v8::internal::Simulator::sp));
     state->fp = reinterpret_cast<void*>(
         simulator_->get_register(v8::internal::Simulator::fp));
-#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+#elif V8_TARGET_ARCH_RISCV64 || V8_TARGET_ARCH_RISCV32
+    state->pc = reinterpret_cast<void*>(simulator_->get_pc());
+    state->sp = reinterpret_cast<void*>(
+        simulator_->get_register(v8::internal::Simulator::sp));
+    state->fp = reinterpret_cast<void*>(
+        simulator_->get_register(v8::internal::Simulator::fp));
+    state->lr = reinterpret_cast<void*>(
+        simulator_->get_register(v8::internal::Simulator::ra));
+#elif V8_TARGET_ARCH_PPC64
     state->pc = reinterpret_cast<void*>(simulator_->get_pc());
     state->sp = reinterpret_cast<void*>(
         simulator_->get_register(v8::internal::Simulator::sp));
     state->fp = reinterpret_cast<void*>(
         simulator_->get_register(v8::internal::Simulator::fp));
     state->lr = reinterpret_cast<void*>(simulator_->get_lr());
-#elif V8_TARGET_ARCH_S390 || V8_TARGET_ARCH_S390X
+#elif V8_TARGET_ARCH_S390X
     state->pc = reinterpret_cast<void*>(simulator_->get_pc());
     state->sp = reinterpret_cast<void*>(
         simulator_->get_register(v8::internal::Simulator::sp));

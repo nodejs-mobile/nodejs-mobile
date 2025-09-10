@@ -484,11 +484,31 @@ Running test: testRegExp
         type : object
     }
 }
+'/w+/v', returnByValue: false, generatePreview: false
+{
+    result : {
+        className : RegExp
+        description : /w+/v
+        objectId : <objectId>
+        subtype : regexp
+        type : object
+    }
+}
 '/w+/dgimsuy', returnByValue: false, generatePreview: false
 {
     result : {
         className : RegExp
         description : /w+/dgimsuy
+        objectId : <objectId>
+        subtype : regexp
+        type : object
+    }
+}
+'/w+/dgimsvy', returnByValue: false, generatePreview: false
+{
+    result : {
+        className : RegExp
+        description : /w+/dgimsvy
         objectId : <objectId>
         subtype : regexp
         type : object
@@ -521,6 +541,18 @@ Running test: testRegExp
     result : {
         className : RegExp
         description : /./dgimsuy
+        objectId : <objectId>
+        subtype : regexp
+        type : object
+    }
+}
+'var re = /./dgimsvy;
+        re.toString = () => 'foo';
+        re', returnByValue: false, generatePreview: false
+{
+    result : {
+        className : RegExp
+        description : /./dgimsvy
         objectId : <objectId>
         subtype : regexp
         type : object
@@ -656,7 +688,7 @@ Running test: testDate
                 [0] : {
                     name : toString
                     type : function
-                    value : 
+                    value :
                 }
             ]
             subtype : date
@@ -1282,7 +1314,7 @@ Running test: testWeakMap
                             [0] : {
                                 name : setTimeout
                                 type : function
-                                value : 
+                                value :
                             }
                             [1] : {
                                 name : inspector
@@ -1366,7 +1398,7 @@ Running test: testWeakSet
                             [0] : {
                                 name : setTimeout
                                 type : function
-                                value : 
+                                value :
                             }
                             [1] : {
                                 name : inspector
@@ -1598,7 +1630,7 @@ Running test: testProxy
 {
     result : {
         className : Object
-        description : Proxy
+        description : Proxy(Object)
         objectId : <objectId>
         subtype : proxy
         type : object
@@ -1608,7 +1640,7 @@ Running test: testProxy
 {
     result : {
         className : Object
-        description : Proxy
+        description : Proxy(Error)
         objectId : <objectId>
         subtype : proxy
         type : object
@@ -1626,10 +1658,10 @@ Running test: testProxy
 {
     result : {
         className : Object
-        description : Proxy
+        description : Proxy(Object)
         objectId : <objectId>
         preview : {
-            description : Proxy
+            description : Proxy(Object)
             overflow : false
             properties : [
                 [0] : {
@@ -1659,11 +1691,57 @@ Running test: testProxy
                     name : e
                     subtype : proxy
                     type : object
-                    value : Proxy
+                    value : Proxy(Object)
                 }
             ]
             type : object
         }
+        type : object
+    }
+}
+'new Proxy([1, 2], {})', returnByValue: false, generatePreview: true
+{
+    result : {
+        className : Object
+        description : Proxy(Array)
+        objectId : <objectId>
+        preview : {
+            description : Proxy(Array)
+            overflow : false
+            properties : [
+                [0] : {
+                    name : 0
+                    type : number
+                    value : 1
+                }
+                [1] : {
+                    name : 1
+                    type : number
+                    value : 2
+                }
+            ]
+            subtype : proxy
+            type : object
+        }
+        subtype : proxy
+        type : object
+    }
+}
+'revocable = Proxy.revocable({}, {}); revocable.revoke(); revocable.proxy', returnByValue: false, generatePreview: true
+{
+    result : {
+        className : Object
+        description : Proxy
+        objectId : <objectId>
+        preview : {
+            description : Proxy
+            overflow : false
+            properties : [
+            ]
+            subtype : proxy
+            type : object
+        }
+        subtype : proxy
         type : object
     }
 }
@@ -2405,6 +2483,21 @@ Running test: testArrayBuffer
                     type : number
                     value : 0
                 }
+                [1] : {
+                    name : maxByteLength
+                    type : number
+                    value : 0
+                }
+                [2] : {
+                    name : resizable
+                    type : boolean
+                    value : false
+                }
+                [3] : {
+                    name : detached
+                    type : boolean
+                    value : false
+                }
             ]
             subtype : arraybuffer
             type : object
@@ -2427,6 +2520,21 @@ Running test: testArrayBuffer
                     name : byteLength
                     type : number
                     value : 400
+                }
+                [1] : {
+                    name : maxByteLength
+                    type : number
+                    value : 400
+                }
+                [2] : {
+                    name : resizable
+                    type : boolean
+                    value : false
+                }
+                [3] : {
+                    name : detached
+                    type : boolean
+                    value : false
                 }
             ]
             subtype : arraybuffer
@@ -2529,36 +2637,24 @@ Running test: testArray
     }
 }
 
-Running test: testArrayLike
-'({length: 5, splice: () => []})', returnByValue: false, generatePreview: false
+Running test: testArgumentsObject
+'(function() { return arguments; })(1, 2, 3)', returnByValue: false, generatePreview: false
 {
     result : {
-        className : Object
-        description : Object(5)
+        className : Arguments
+        description : Arguments(3)
         objectId : <objectId>
         subtype : array
         type : object
     }
 }
-'new (class Foo{constructor() {
-        this.length = 5;
-        this.splice = () => [];
-      }})', returnByValue: false, generatePreview: false
+'(function() { "use strict"; return arguments; })(-1, 0, 1, 2, 3)', returnByValue: false, generatePreview: false
 {
     result : {
-        className : Foo
-        description : Foo(5)
+        className : Arguments
+        description : Arguments(5)
         objectId : <objectId>
         subtype : array
-        type : object
-    }
-}
-'({length: -5, splice: () => []})', returnByValue: false, generatePreview: false
-{
-    result : {
-        className : Object
-        description : Object
-        objectId : <objectId>
         type : object
     }
 }
@@ -2640,7 +2736,7 @@ Running test: testOtherObjects
         type : object
     }
 }
-'inspector.createObjectWithAccessor('title', true)', returnByValue: false, generatePreview: true
+'inspector.createObjectWithNativeDataProperty('title', true)', returnByValue: false, generatePreview: true
 {
     id : <messageId>
     result : {
@@ -2663,7 +2759,7 @@ Running test: testOtherObjects
         }
     }
 }
-'inspector.createObjectWithAccessor('title', false)', returnByValue: false, generatePreview: true
+'inspector.createObjectWithNativeDataProperty('title', false)', returnByValue: false, generatePreview: true
 {
     id : <messageId>
     result : {
@@ -2686,7 +2782,7 @@ Running test: testOtherObjects
         }
     }
 }
-'inspector.createObjectWithAccessor('title', true)', returnByValue: true, generatePreview: false
+'inspector.createObjectWithNativeDataProperty('title', true)', returnByValue: true, generatePreview: false
 {
     error : {
         code : -32603
@@ -2751,7 +2847,7 @@ Running test: testOtherObjects
                     [0] : {
                         name : a
                         type : function
-                        value : 
+                        value :
                     }
                 ]
                 type : object
@@ -2941,12 +3037,12 @@ Running test: testOtherObjects
                     [0] : {
                         name : a1
                         type : function
-                        value : 
+                        value :
                     }
                     [1] : {
                         name : a2
                         type : function
-                        value : 
+                        value :
                     }
                 ]
                 type : object

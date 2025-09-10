@@ -33,6 +33,10 @@ FromConstexpr<uint8, constexpr IntegerLiteral>(i: constexpr IntegerLiteral):
     uint8 {
   return ConstexprIntegerLiteralToUint8(i);
 }
+FromConstexpr<int64, constexpr IntegerLiteral>(i: constexpr IntegerLiteral):
+    int64 {
+  return ConstexprIntegerLiteralToInt64(i);
+}
 FromConstexpr<uint64, constexpr IntegerLiteral>(i: constexpr IntegerLiteral):
     uint64 {
   return ConstexprIntegerLiteralToUint64(i);
@@ -113,12 +117,6 @@ FromConstexpr<int8, constexpr int31>(i: constexpr int31): int8 {
 FromConstexpr<char8, constexpr int31>(i: constexpr int31): char8 {
   return %RawDownCast<char8>(FromConstexpr<uint8>(i));
 }
-FromConstexpr<Number, constexpr Smi>(s: constexpr Smi): Number {
-  return SmiConstant(s);
-}
-FromConstexpr<Smi, constexpr Smi>(s: constexpr Smi): Smi {
-  return SmiConstant(s);
-}
 FromConstexpr<uint32, constexpr int31>(i: constexpr int31): uint32 {
   return Unsigned(Int32Constant(i));
 }
@@ -128,6 +126,9 @@ FromConstexpr<uint8, constexpr uint8>(i: constexpr uint8): uint8 {
 }
 FromConstexpr<uint32, constexpr uint32>(i: constexpr uint32): uint32 {
   return Unsigned(%FromConstexpr<int32>(i));
+}
+FromConstexpr<int64, constexpr int64>(i: constexpr int64): int64 {
+  return Int64Constant(i);
 }
 FromConstexpr<uint64, constexpr uint64>(i: constexpr uint64): uint64 {
   return Uint64Constant(i);
@@ -221,6 +222,9 @@ Convert<Smi, uint32>(ui: uint32): Smi {
 Convert<uintptr, uint32>(ui: uint32): uintptr {
   return ChangeUint32ToWord(ui);
 }
+Convert<int64, int32>(i: int32): int64 {
+  return ChangeInt32ToInt64(i);
+}
 Convert<uint64, uint32>(ui: uint32): uint64 {
   return ChangeUint32ToUint64(ui);
 }
@@ -262,6 +266,9 @@ Convert<int32, intptr>(i: intptr): int32 {
 }
 Convert<int32, int64>(i: int64): int32 {
   return TruncateInt64ToInt32(i);
+}
+Convert<uint32, uint64>(i: uint64): uint32 {
+  return Unsigned(TruncateInt64ToInt32(Signed(i)));
 }
 Convert<int32, Number>(n: Number): int32 {
   typeswitch (n) {
@@ -336,17 +343,44 @@ Convert<float64, int32>(f: int32): float64 {
 Convert<float64, float32>(f: float32): float64 {
   return ChangeFloat32ToFloat64(f);
 }
-Convert<float64_or_hole, float64>(f: float64): float64_or_hole {
-  return float64_or_hole{is_hole: false, value: f};
+Convert<float64_or_undefined_or_hole, float64>(f: float64):
+    float64_or_undefined_or_hole {
+  @if(V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE) {
+    return float64_or_undefined_or_hole{
+      is_undefined: false,
+      is_hole: false,
+      value: f
+    };
+  }
+  @ifnot(V8_ENABLE_EXPERIMENTAL_UNDEFINED_DOUBLE) {
+    return float64_or_undefined_or_hole{is_hole: false, value: f};
+  }
 }
-Convert<float64_or_hole, Number>(n: Number): float64_or_hole {
-  return Convert<float64_or_hole>(Convert<float64>(n));
+Convert<float64_or_undefined_or_hole, Number>(n: Number):
+    float64_or_undefined_or_hole {
+  return Convert<float64_or_undefined_or_hole>(Convert<float64>(n));
 }
 Convert<float32, float64>(f: float64): float32 {
   return TruncateFloat64ToFloat32(f);
 }
 Convert<float32, Number>(n: Number): float32 {
   return Convert<float32>(ChangeNumberToFloat64(n));
+}
+Convert<float16_raw_bits, Number>(n: Number): float16_raw_bits {
+  return TruncateFloat64ToFloat16(ChangeNumberToFloat64(n));
+}
+
+Convert<float64, float16_raw_bits>(n: float16_raw_bits): float64 {
+  return ChangeFloat16ToFloat64(n);
+}
+Convert<float32, int32>(n: int32): float32 {
+  return RoundInt32ToFloat32(n);
+}
+Convert<float32, HeapNumber>(h: HeapNumber): float32 {
+  return Convert<float32>(LoadHeapNumberValue(h));
+}
+Convert<Number, float32>(d: float32): Number {
+  return ChangeFloat32ToTagged(d);
 }
 Convert<Number, float64>(d: float64): Number {
   return ChangeFloat64ToTagged(d);
@@ -378,6 +412,7 @@ Convert<intptr, Number>(n: Number): intptr {
 Convert<bint, int32>(v: int32): bint {
   return IntPtrToBInt(Convert<intptr>(v));
 }
+
 FromConstexpr<float64, constexpr IntegerLiteral>(v: constexpr IntegerLiteral):
     float64 {
   return ConstexprIntegerLiteralToFloat64(v);
@@ -400,9 +435,6 @@ Convert<Smi, bint>(v: bint): Smi {
 }
 Convert<PromiseState, int32>(s: int32): PromiseState {
   return %RawDownCast<PromiseState>(s);
-}
-Convert<ScopeFlags, Smi>(s: Smi): ScopeFlags {
-  return %RawDownCast<ScopeFlags>(Unsigned(SmiToInt32(s)));
 }
 Convert<I8X16, Simd128>(s: Simd128): I8X16 {
   return %RawDownCast<I8X16>(s);

@@ -8,19 +8,247 @@
 #include "include/v8config.h"
 #include "src/base/atomicops.h"
 #include "src/base/memory.h"
-#include "src/base/platform/mutex.h"
 #include "src/common/globals.h"
+#include "src/sandbox/check.h"
+#include "src/sandbox/compactible-external-entity-table.h"
+#include "src/sandbox/tagged-payload.h"
+#include "src/utils/allocation.h"
 
-#ifdef V8_SANDBOX_IS_AVAILABLE
+#ifdef V8_COMPRESS_POINTERS
 
 namespace v8 {
 namespace internal {
 
 class Isolate;
+class Counters;
+class ReadOnlyArtifacts;
 
 /**
- * A table storing pointers to objects outside the sandbox.
+ * The entries of an ExternalPointerTable.
  *
+ * Each entry consists of a single pointer-sized word containing the external
+ * pointer, the marking bit, and a type tag. An entry can either be:
+ *  - A "regular" entry, containing the external pointer together with a type
+ *    tag and the marking bit in the unused upper bits, or
+ *  - A freelist entry, tagged with the kExternalPointerFreeEntryTag and
+ *    containing the index of the next free entry in the lower 32 bits, or
+ *  - An evacuation entry, tagged with the kExternalPointerEvacuationEntryTag
+ *    and containing the address of the ExternalPointerSlot referencing the
+ *    entry that will be evacuated into this entry. See the compaction
+ *    algorithm overview for more details about these entries.
+ */
+struct ExternalPointerTableEntry {
+  enum class EvacuateMarkMode { kTransferMark, kLeaveUnmarked, kClearMark };
+
+  // Make this entry an external pointer entry containing the given pointer
+  // tagged with the given tag.
+  inline void MakeExternalPointerEntry(Address value, ExternalPointerTag tag,
+                                       bool mark_as_alive);
+
+  // Load and untag the external pointer stored in this entry.
+  // This entry must be an external pointer entry.
+  // If the specified tag doesn't match the actual tag of this entry, the
+  // resulting pointer will be invalid and cannot be dereferenced.
+  inline Address GetExternalPointer(ExternalPointerTagRange tag_range) const;
+
+  // Tag and store the given external pointer in this entry.
+  // This entry must be an external pointer entry.
+  inline void SetExternalPointer(Address value, ExternalPointerTag tag);
+
+  // Returns true if this entry contains an external pointer with the given tag.
+  inline bool HasExternalPointer(ExternalPointerTagRange tag_range) const;
+
+  // Exchanges the external pointer stored in this entry with the provided one.
+  // Returns the old external pointer. This entry must be an external pointer
+  // entry. If the provided tag doesn't match the tag of the old entry, the
+  // returned pointer will be invalid.
+  inline Address ExchangeExternalPointer(Address value, ExternalPointerTag tag);
+
+  // Load the tag of the external pointer stored in this entry.
+  // This entry must be an external pointer entry.
+  inline ExternalPointerTag GetExternalPointerTag() const;
+
+  // Returns the address of the managed resource contained in this entry or
+  // nullptr if this entry does not reference a managed resource.
+  inline Address ExtractManagedResourceOrNull() const;
+
+  // Invalidate the entry. Any access to a zapped entry will result in an
+  // invalid pointer that will crash upon dereference.
+  inline void MakeZappedEntry();
+
+  // Make this entry a freelist entry, containing the index of the next entry
+  // on the freelist.
+  inline void MakeFreelistEntry(uint32_t next_entry_index);
+
+  // Get the index of the next entry on the freelist. This method may be
+  // called even when the entry is not a freelist entry. However, the result
+  // is only valid if this is a freelist entry. This behaviour is required
+  // for efficient entry allocation, see TryAllocateEntryFromFreelist.
+  inline uint32_t GetNextFreelistEntryIndex() const;
+
+  // Make this entry an evacuation entry containing the address of the handle to
+  // the entry being evacuated.
+  inline void MakeEvacuationEntry(Address handle_location);
+
+  // Returns true if this entry contains an evacuation entry.
+  inline bool HasEvacuationEntry() const;
+
+  // Move the content of this entry into the provided entry, possibly clearing
+  // the marking bit. Used during table compaction and during promotion.
+  // Invalidates the source entry.
+  inline void Evacuate(ExternalPointerTableEntry& dest, EvacuateMarkMode mode);
+
+  // Mark this entry as alive during table garbage collection.
+  inline void Mark();
+
+  static constexpr bool IsWriteProtected = false;
+
+ private:
+  friend class ExternalPointerTable;
+
+  // TODO(saelo): generalize this payload struct and reuse it for all other
+  // pointer table that use type tags. For that, we probably will have to make
+  // this more flexible, allowing shifts and masks to be applied to both the
+  // tag- and payload bits since the tables store the tag bits differently.
+  struct Payload {
+    Payload(Address pointer, ExternalPointerTag tag)
+        : encoded_word_(Tag(pointer, tag)) {}
+
+    static Address Tag(Address pointer, ExternalPointerTag tag) {
+      DCHECK_LE(tag, kLastExternalPointerTag);
+      return pointer | (static_cast<Address>(tag) << kExternalPointerTagShift);
+    }
+
+    static bool CheckTag(Address content, ExternalPointerTagRange tag_range) {
+      // TODO(saelo): use well-known null entries per type tag instead of a
+      // generic null entry. Then this check can be removed.
+      if (ExternalPointerCanBeEmpty(tag_range) && !content) {
+        return true;
+      }
+
+      ExternalPointerTag tag = static_cast<ExternalPointerTag>(
+          (content & kExternalPointerTagMask) >> kExternalPointerTagShift);
+      return tag_range.Contains(tag);
+    }
+
+    Address Untag(ExternalPointerTagRange tag_range) const {
+      Address content = encoded_word_;
+      SBXCHECK(CheckTag(content, tag_range));
+      return content & kExternalPointerPayloadMask;
+    }
+
+    Address Untag(ExternalPointerTag tag) const {
+      return Untag(ExternalPointerTagRange(tag, tag));
+    }
+
+    bool IsTaggedWithTagIn(ExternalPointerTagRange tag_range) const {
+      return CheckTag(encoded_word_, tag_range);
+    }
+
+    bool IsTaggedWith(ExternalPointerTag tag) const {
+      return IsTaggedWithTagIn(ExternalPointerTagRange(tag));
+    }
+
+    void SetMarkBit() { encoded_word_ |= kExternalPointerMarkBit; }
+
+    void ClearMarkBit() { encoded_word_ &= ~kExternalPointerMarkBit; }
+
+    bool HasMarkBitSet() const {
+      return encoded_word_ & kExternalPointerMarkBit;
+    }
+
+    uint32_t ExtractFreelistLink() const {
+      return static_cast<uint32_t>(encoded_word_);
+    }
+
+    ExternalPointerTag ExtractTag() const {
+      return static_cast<ExternalPointerTag>(
+          (encoded_word_ & kExternalPointerTagMask) >>
+          kExternalPointerTagShift);
+    }
+
+    bool ContainsFreelistLink() const {
+      return IsTaggedWith(kExternalPointerFreeEntryTag);
+    }
+
+    bool ContainsEvacuationEntry() const {
+      return IsTaggedWith(kExternalPointerEvacuationEntryTag);
+    }
+
+    Address ExtractEvacuationEntryHandleLocation() const {
+      return Untag(kExternalPointerEvacuationEntryTag);
+    }
+
+    bool ContainsPointer() const {
+      return !ContainsFreelistLink() && !ContainsEvacuationEntry();
+    }
+
+    bool operator==(Payload other) const {
+      return encoded_word_ == other.encoded_word_;
+    }
+
+    bool operator!=(Payload other) const {
+      return encoded_word_ != other.encoded_word_;
+    }
+
+   private:
+    Address encoded_word_;
+  };
+
+  inline Payload GetRawPayload() {
+    return payload_.load(std::memory_order_relaxed);
+  }
+  inline void SetRawPayload(Payload new_payload) {
+    return payload_.store(new_payload, std::memory_order_relaxed);
+  }
+
+  inline void MaybeUpdateRawPointerForLSan(Address value) {
+#if defined(LEAK_SANITIZER)
+    raw_pointer_for_lsan_ = value;
+#endif  // LEAK_SANITIZER
+  }
+
+  // ExternalPointerTable entries consist of a single pointer-sized word
+  // containing a tag and marking bit together with the actual content (e.g. an
+  // external pointer).
+  std::atomic<Payload> payload_;
+
+#if defined(LEAK_SANITIZER)
+  //  When LSan is active, it must be able to detect live references to heap
+  //  allocations from an external pointer table. It will, however, not be able
+  //  to recognize the encoded pointers as they will have their top bits set. So
+  //  instead, when LSan is active we use "fat" entries where the 2nd atomic
+  //  words contains the unencoded raw pointer which LSan will be able to
+  //  recognize as such.
+  //  NOTE: THIS MODE IS NOT SECURE! Attackers are able to modify an
+  //  ExternalPointerHandle to point to the raw pointer part, not the encoded
+  //  part of an entry, thereby bypassing the type checks. If this mode is ever
+  //  needed outside of testing environments, then the external pointer
+  //  accessors (e.g. in the JIT) need to be made aware that entries are now 16
+  //  bytes large so that all entry accesses are again guaranteed to access an
+  //  encoded pointer.
+  Address raw_pointer_for_lsan_;
+#endif  // LEAK_SANITIZER
+};
+
+#if defined(LEAK_SANITIZER)
+//  When LSan is active, we need "fat" entries, see above.
+static_assert(sizeof(ExternalPointerTableEntry) == 16);
+#else
+//  We expect ExternalPointerTable entries to consist of a single 64-bit word.
+static_assert(sizeof(ExternalPointerTableEntry) == 8);
+#endif
+
+/**
+ * A table storing pointers to objects outside the V8 heap.
+ *
+ * When V8_ENABLE_SANDBOX, its primary use is for pointing to objects outside
+ * the sandbox, as described below.
+ * When V8_COMPRESS_POINTERS, external pointer tables are also used to ease
+ * alignment requirements in heap object fields via indirection.
+ *
+ * A table's role for the V8 Sandbox:
+ * --------------------------------
  * An external pointer table provides the basic mechanisms to ensure
  * memory-safe access to objects located outside the sandbox, but referenced
  * from within it. When an external pointer table is used, objects located
@@ -36,12 +264,15 @@ class Isolate;
  * which ensures that every entry is either an invalid pointer or a valid
  * pointer pointing to a live object.
  *
- * Spatial memory safety can, if necessary, be ensured by storing the size of a
- * referenced object together with the object itself outside the sandbox, and
- * referencing both through a single entry in the table.
+ * Spatial memory safety can, if necessary, be ensured either by storing the
+ * size of the referenced object together with the object itself outside the
+ * sandbox, or by storing both the pointer and the size in one (double-width)
+ * table entry.
  *
- * The garbage collection algorithm for the table works as follows:
- *  - The top bit of every entry is reserved for the marking bit.
+ * Table memory management:
+ * ------------------------
+ * The garbage collection algorithm works as follows:
+ *  - One bit of every entry is reserved for the marking bit.
  *  - Every store to an entry automatically sets the marking bit when ORing
  *    with the tag. This avoids the need for write barriers.
  *  - Every load of an entry automatically removes the marking bit when ANDing
@@ -49,157 +280,214 @@ class Isolate;
  *  - When the GC marking visitor finds a live object with an external pointer,
  *    it marks the corresponding entry as alive through Mark(), which sets the
  *    marking bit using an atomic CAS operation.
- *  - When marking is finished, Sweep() iterates of the table once while the
- *    mutator is stopped and builds a freelist from all dead entries while also
- *    removing the marking bit from any live entry.
+ *  - When marking is finished, SweepAndCompact() iterates over a Space once
+ *    while the mutator is stopped and builds a freelist from all dead entries
+ *    while also possibly clearing the marking bit from any live entry.
  *
- * The freelist is a singly-linked list, using the lower 32 bits of each entry
- * to store the index of the next free entry. When the freelist is empty and a
- * new entry is allocated, the table grows in place and the freelist is
- * re-populated from the newly added entries.
+ * Generational collection for tables:
+ * -----------------------------------
+ * Young-generation objects with external pointer slots allocate their
+ * ExternalPointerTable entries in a spatially partitioned young external
+ * pointer space.  There are two different mechanisms:
+ *  - When using the semi-space nursery, promoting an object evacuates its EPT
+ *    entries to the old external pointer space.
+ *  - For the in-place MinorMS nursery, possibly-concurrent marking populates
+ *    the SURVIVOR_TO_EXTERNAL_POINTER remembered sets.  In the pause, promoted
+ *    objects use this remembered set to evacuate their EPT entries to the old
+ *    external pointer space.  Survivors have their EPT entries are left in
+ *    place.
+ * In a full collection, segments from the young EPT space are eagerly promoted
+ * during the pause, leaving the young generation empty.
+ *
+ * Table compaction:
+ * -----------------
+ * Additionally, the external pointer table supports compaction.
+ * For details about the compaction algorithm see the
+ * CompactibleExternalEntityTable class.
  */
-class V8_EXPORT_PRIVATE ExternalPointerTable {
+class V8_EXPORT_PRIVATE ExternalPointerTable
+    : public CompactibleExternalEntityTable<
+          ExternalPointerTableEntry, kExternalPointerTableReservationSize> {
+  using Base =
+      CompactibleExternalEntityTable<ExternalPointerTableEntry,
+                                     kExternalPointerTableReservationSize>;
+
+#if defined(LEAK_SANITIZER)
+  //  When LSan is active, we use "fat" entries, see above.
+  static_assert(kMaxExternalPointers == kMaxCapacity * 2);
+#else
+  static_assert(kMaxExternalPointers == kMaxCapacity);
+#endif
+  static_assert(kSupportsCompaction);
+
  public:
-  // Size of an ExternalPointerTable, for layout computation in IsolateData.
-  // Asserted to be equal to the actual size in external-pointer-table.cc.
-  static int constexpr kSize = 3 * kSystemPointerSize;
+  using EvacuateMarkMode = ExternalPointerTableEntry::EvacuateMarkMode;
 
   ExternalPointerTable() = default;
+  ExternalPointerTable(const ExternalPointerTable&) = delete;
+  ExternalPointerTable& operator=(const ExternalPointerTable&) = delete;
 
-  // Initializes this external pointer table by reserving the backing memory
-  // and initializing the freelist.
-  inline void Init(Isolate* isolate);
+  // The Spaces used by an ExternalPointerTable.
+  struct Space : public Base::Space {
+   public:
+    // During table compaction, we may record the addresses of fields
+    // containing external pointer handles (if they are evacuation candidates).
+    // As such, if such a field is invalidated (for example because the host
+    // object is converted to another object type), we need to be notified of
+    // that. Note that we do not need to care about "re-validated" fields here:
+    // if an external pointer field is first converted to different kind of
+    // field, then again converted to a external pointer field, then it will be
+    // re-initialized, at which point it will obtain a new entry in the
+    // external pointer table which cannot be a candidate for evacuation.
+    inline void NotifyExternalPointerFieldInvalidated(
+        Address field_address, ExternalPointerTagRange tag_range);
 
-  // Resets this external pointer table and deletes all associated memory.
-  inline void TearDown();
+    // Not atomic.  Mutators and concurrent marking must be paused.
+    void AssertEmpty() { CHECK(segments_.empty()); }
 
-  // Retrieves the entry at the given index.
+    bool allocate_black() { return allocate_black_; }
+    void set_allocate_black(bool allocate_black) {
+      allocate_black_ = allocate_black;
+    }
+
+   private:
+    bool allocate_black_ = false;
+  };
+
+  // Initializes all slots in the RO space from pre-existing artifacts.
+  void SetUpFromReadOnlyArtifacts(Space* read_only_space,
+                                  const ReadOnlyArtifacts* artifacts);
+
+  // Retrieves the entry referenced by the given handle.
   //
   // This method is atomic and can be called from background threads.
-  inline Address Get(uint32_t index, ExternalPointerTag tag) const;
+  inline Address Get(ExternalPointerHandle handle,
+                     ExternalPointerTagRange tag_range) const;
 
-  // Sets the entry at the given index to the given value.
+  // Sets the entry referenced by the given handle.
   //
   // This method is atomic and can be called from background threads.
-  inline void Set(uint32_t index, Address value, ExternalPointerTag tag);
+  inline void Set(ExternalPointerHandle handle, Address value,
+                  ExternalPointerTag tag);
 
-  // Allocates a new entry in the external pointer table. The caller must
-  // initialize the entry afterwards through set(). In particular, the caller is
-  // responsible for setting the mark bit of the new entry.
-  // TODO(saelo) this can fail, in which case we should probably do GC + retry.
+  // Exchanges the entry referenced by the given handle with the given value,
+  // returning the previous value. The same tag is applied both to decode the
+  // previous value and encode the given value.
   //
   // This method is atomic and can be called from background threads.
-  inline uint32_t Allocate();
+  inline Address Exchange(ExternalPointerHandle handle, Address value,
+                          ExternalPointerTag tag);
 
-  // Runtime function called from CSA. Internally just calls Allocate().
-  static uint32_t AllocateEntry(ExternalPointerTable* table);
+  // Retrieves the tag used for the entry referenced by the given handle.
+  //
+  // This method is atomic and can be called from background threads.
+  inline ExternalPointerTag GetTag(ExternalPointerHandle handle) const;
+
+  // Invalidates the entry referenced by the given handle.
+  inline void Zap(ExternalPointerHandle handle);
+
+  // Allocates a new entry in the given space. The caller must provide the
+  // initial value and tag for the entry.
+  //
+  // This method is atomic and can be called from background threads.
+  inline ExternalPointerHandle AllocateAndInitializeEntry(
+      Space* space, Address initial_value, ExternalPointerTag tag);
 
   // Marks the specified entry as alive.
   //
-  // This method is atomic and can be called from background threads.
-  inline void Mark(uint32_t index);
-
-  // Frees unmarked entries.
+  // If the space to which the entry belongs is currently being compacted, this
+  // may also mark the entry for evacuation for which the location of the
+  // handle is required. See the comments about the compaction algorithm for
+  // more details.
   //
-  // This method must be called on the mutator thread or while that thread is
-  // stopped.
+  // This method is atomic and can be called from background threads.
+  inline void Mark(Space* space, ExternalPointerHandle handle,
+                   Address handle_location);
+
+  // Evacuate the specified entry from one space to another, updating the handle
+  // location in place.
+  //
+  // This method is not atomic and can be called only when the mutator is
+  // paused.
+  inline void Evacuate(Space* from_space, Space* to_space,
+                       ExternalPointerHandle handle, Address handle_location,
+                       EvacuateMarkMode mode);
+
+  // Evacuate all segments from from_space to to_space, leaving from_space empty
+  // with an empty free list.  Then free unmarked entries, finishing compaction
+  // if it was running, and collecting freed entries onto to_space's free list.
+  //
+  // The from_space will be left empty with an empty free list.
+  //
+  // This method must only be called while mutator threads are stopped as it is
+  // not safe to allocate table entries while the table is being swept.
+  //
+  // SweepAndCompact is the same as EvacuateAndSweepAndCompact, except without
+  // the evacuation phase.
+  //
+  // Sweep is the same as SweepAndCompact, but assumes that compaction was not
+  // running.
   //
   // Returns the number of live entries after sweeping.
-  uint32_t Sweep(Isolate* isolate);
+  uint32_t EvacuateAndSweepAndCompact(Space* to_space, Space* from_space,
+                                      Counters* counters);
+  uint32_t SweepAndCompact(Space* space, Counters* counters);
+  uint32_t Sweep(Space* space, Counters* counters);
+
+  // Updates all evacuation entries with new handle locations. The function
+  // takes the old hanlde location and returns the new one.
+  void UpdateAllEvacuationEntries(Space*, std::function<Address(Address)>);
+
+  inline bool Contains(Space* space, ExternalPointerHandle handle) const;
+
+  // A resource outside of the V8 heap whose lifetime is tied to something
+  // inside the V8 heap. This class makes that relationship explicit.
+  //
+  // Knowing about such objects is important for the sandbox to guarantee
+  // memory safety. In particular, it is necessary to prevent issues where the
+  // external resource is destroyed before the entry in the
+  // ExternalPointerTable (EPT) that references it is freed. In that case, the
+  // EPT entry would then contain a dangling pointer which could be abused by
+  // an attacker to cause a use-after-free outside of the sandbox.
+  //
+  // Currently, this is solved by remembering the EPT entry in the external
+  // object and zapping/invalidating it when the resource is destroyed. An
+  // alternative approach that might be preferable in the future would be to
+  // destroy the external resource only when the EPT entry is freed. This would
+  // avoid the need to manually keep track of the entry, for example.
+  class ManagedResource : public Malloced {
+   public:
+    // This method must be called before destroying the external resource.
+    // When the sandbox is enabled, it will take care of zapping its EPT entry.
+    inline void ZapExternalPointerTableEntry();
+
+   private:
+    friend class ExternalPointerTable;
+    // Currently required for snapshot stress mode, see deserializer.cc.
+    template <typename IsolateT>
+    friend class Deserializer;
+
+    ExternalPointerTable* owning_table_ = nullptr;
+    ExternalPointerHandle ept_entry_ = kNullExternalPointerHandle;
+  };
 
  private:
-  // Required for Isolate::CheckIsolateLayout().
-  friend class Isolate;
+  static inline bool IsValidHandle(ExternalPointerHandle handle);
+  static inline uint32_t HandleToIndex(ExternalPointerHandle handle);
+  static inline ExternalPointerHandle IndexToHandle(uint32_t index);
 
-  // An external pointer table grows in blocks of this size. This is also the
-  // initial size of the table.
-  static const size_t kBlockSize = 64 * KB;
-  static const size_t kEntriesPerBlock = kBlockSize / kSystemPointerSize;
+  inline void TakeOwnershipOfManagedResourceIfNecessary(
+      Address value, ExternalPointerHandle handle, ExternalPointerTag tag);
+  inline void FreeManagedResourceIfPresent(uint32_t entry_index);
 
-  static const Address kExternalPointerMarkBit = 1ULL << 63;
-
-  // Returns true if this external pointer table has been initialized.
-  bool is_initialized() { return buffer_ != kNullAddress; }
-
-  // Extends the table and adds newly created entries to the freelist. Returns
-  // the new freelist head. When calling this method, mutex_ must be locked.
-  //
-  // TODO(saelo) this can fail, deal with that appropriately.
-  uint32_t Grow();
-
-  // Computes the address of the specified entry.
-  inline Address entry_address(uint32_t index) const {
-    return buffer_ + index * sizeof(Address);
-  }
-
-  // Loads the value at the given index. This method is non-atomic, only use it
-  // when no other threads can currently access the table.
-  inline Address load(uint32_t index) const {
-    return base::Memory<Address>(entry_address(index));
-  }
-
-  // Stores the provided value at the given index. This method is non-atomic,
-  // only use it when no other threads can currently access the table.
-  inline void store(uint32_t index, Address value) {
-    base::Memory<Address>(entry_address(index)) = value;
-  }
-
-  // Atomically loads the value at the given index.
-  inline Address load_atomic(uint32_t index) const {
-    auto addr = reinterpret_cast<base::Atomic64*>(entry_address(index));
-    return base::Relaxed_Load(addr);
-  }
-
-  // Atomically stores the provided value at the given index.
-  inline void store_atomic(uint32_t index, Address value) {
-    auto addr = reinterpret_cast<base::Atomic64*>(entry_address(index));
-    base::Relaxed_Store(addr, value);
-  }
-
-  static bool is_marked(Address entry) {
-    return (entry & kExternalPointerMarkBit) == kExternalPointerMarkBit;
-  }
-
-  static Address set_mark_bit(Address entry) {
-    return entry | kExternalPointerMarkBit;
-  }
-
-  static Address clear_mark_bit(Address entry) {
-    return entry & ~kExternalPointerMarkBit;
-  }
-
-  static bool is_free(Address entry) {
-    return (entry & kExternalPointerFreeEntryTag) ==
-           kExternalPointerFreeEntryTag;
-  }
-
-  static Address make_freelist_entry(uint32_t current_freelist_head) {
-    // The next freelist entry is stored in the lower 32 bits of the entry.
-    Address entry = current_freelist_head;
-    return entry | kExternalPointerFreeEntryTag;
-  }
-
-  // The buffer backing this table. This is const after initialization. Should
-  // only be accessed using the load_x() and store_x() methods, which take care
-  // of atomicicy if necessary.
-  Address buffer_ = kNullAddress;
-
-  // The current capacity of this table, which is the number of usable entries.
-  uint32_t capacity_ = 0;
-
-  // The index of the first entry on the freelist or zero if the list is empty.
-  uint32_t freelist_head_ = 0;
-
-  // Lock protecting the slow path for entry allocation, in particular Grow().
-  // As the size of this structure must be predictable (it's part of
-  // IsolateData), it cannot directly contain a Mutex and so instead contains a
-  // pointer to one.
-  base::Mutex* mutex_ = nullptr;
+  void ResolveEvacuationEntryDuringSweeping(
+      uint32_t index, ExternalPointerHandle* handle_location,
+      uint32_t start_of_evacuation_area);
 };
 
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_SANDBOX_IS_AVAILABLE
+#endif  // V8_COMPRESS_POINTERS
 
 #endif  // V8_SANDBOX_EXTERNAL_POINTER_TABLE_H_

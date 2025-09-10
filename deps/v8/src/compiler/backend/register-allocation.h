@@ -56,6 +56,7 @@ inline int ByteWidthForStackSlot(MachineRepresentation rep) {
     case MachineRepresentation::kWord8:
     case MachineRepresentation::kWord16:
     case MachineRepresentation::kWord32:
+    case MachineRepresentation::kFloat16:
     case MachineRepresentation::kFloat32:
     case MachineRepresentation::kSandboxedPointer:
       return kSystemPointerSize;
@@ -64,6 +65,7 @@ inline int ByteWidthForStackSlot(MachineRepresentation rep) {
     case MachineRepresentation::kTagged:
     case MachineRepresentation::kCompressedPointer:
     case MachineRepresentation::kCompressed:
+    case MachineRepresentation::kProtectedPointer:
       // TODO(ishell): kTaggedSize once half size locations are supported.
       return kSystemPointerSize;
     case MachineRepresentation::kWord64:
@@ -71,28 +73,15 @@ inline int ByteWidthForStackSlot(MachineRepresentation rep) {
       return kDoubleSize;
     case MachineRepresentation::kSimd128:
       return kSimd128Size;
+    case MachineRepresentation::kSimd256:
+      return kSimd256Size;
     case MachineRepresentation::kNone:
     case MachineRepresentation::kMapWord:
-      break;
+    case MachineRepresentation::kIndirectPointer:
+    case MachineRepresentation::kFloat16RawBits:
+      UNREACHABLE();
   }
-  UNREACHABLE();
 }
-
-class RegisterAllocationData : public ZoneObject {
- public:
-  enum Type {
-    kTopTier,
-    kMidTier,
-  };
-
-  Type type() const { return type_; }
-
- protected:
-  explicit RegisterAllocationData(Type type) : type_(type) {}
-
- private:
-  Type type_;
-};
 
 }  // namespace compiler
 }  // namespace internal

@@ -32,7 +32,7 @@ bool IsSamePage(i::Address ptr1, i::Address ptr2) {
 bool IsNoFrameRegion(i::Address address) {
   struct Pattern {
     int bytes_count;
-    i::byte bytes[8];
+    uint8_t bytes[8];
     int offsets[4];
   };
   static Pattern patterns[] = {
@@ -59,7 +59,7 @@ bool IsNoFrameRegion(i::Address address) {
 #endif
     {0, {}, {}}
   };
-  i::byte* pc = reinterpret_cast<i::byte*>(address);
+  uint8_t* pc = reinterpret_cast<uint8_t*>(address);
   for (Pattern* pattern = patterns; pattern->bytes_count; ++pattern) {
     for (int* offset_ptr = pattern->offsets; *offset_ptr != -1; ++offset_ptr) {
       int offset = *offset_ptr;
@@ -106,20 +106,20 @@ bool SimulatorHelper::FillRegisters(Isolate* isolate,
   state->sp = reinterpret_cast<void*>(simulator->sp());
   state->fp = reinterpret_cast<void*>(simulator->fp());
   state->lr = reinterpret_cast<void*>(simulator->lr());
-#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64
+#elif V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
   state->sp = reinterpret_cast<void*>(simulator->get_register(Simulator::sp));
   state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
-#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+#elif V8_TARGET_ARCH_PPC64
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
   state->sp = reinterpret_cast<void*>(simulator->get_register(Simulator::sp));
   state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
   state->lr = reinterpret_cast<void*>(simulator->get_lr());
-#elif V8_TARGET_ARCH_S390
+#elif V8_TARGET_ARCH_S390X
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
@@ -127,6 +127,13 @@ bool SimulatorHelper::FillRegisters(Isolate* isolate,
   state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
   state->lr = reinterpret_cast<void*>(simulator->get_register(Simulator::ra));
 #elif V8_TARGET_ARCH_RISCV64
+  if (!simulator->has_bad_pc()) {
+    state->pc = reinterpret_cast<void*>(simulator->get_pc());
+  }
+  state->sp = reinterpret_cast<void*>(simulator->get_register(Simulator::sp));
+  state->fp = reinterpret_cast<void*>(simulator->get_register(Simulator::fp));
+  state->lr = reinterpret_cast<void*>(simulator->get_register(Simulator::ra));
+#elif V8_TARGET_ARCH_RISCV32
   if (!simulator->has_bad_pc()) {
     state->pc = reinterpret_cast<void*>(simulator->get_pc());
   }
@@ -159,7 +166,8 @@ DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
                                    RecordCEntryFrame record_c_entry_frame,
                                    bool update_stats,
                                    bool use_simulator_reg_state,
-                                   base::TimeDelta sampling_interval) {
+                                   base::TimeDelta sampling_interval,
+                                   const std::optional<uint64_t> trace_id) {
   update_stats_ = update_stats;
   SampleInfo info;
   RegisterState regs = reg_state;
@@ -200,9 +208,14 @@ DISABLE_ASAN void TickSample::Init(Isolate* v8_isolate,
     tos = nullptr;
   }
   sampling_interval_ = sampling_interval;
+  trace_id_ = trace_id;
   timestamp = base::TimeTicks::Now();
 }
 
+// IMPORTANT: 'GetStackSample' is sensitive to stack overflows. For this reason
+// we try not to use any function/method marked as V8_EXPORT_PRIVATE with their
+// only use-site in 'GetStackSample': The resulting linker stub needs quite
+// a bit of stack space and has caused stack overflow crashes in the past.
 bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
                                 RecordCEntryFrame record_c_entry_frame,
                                 void** frames, size_t frames_limit,
@@ -217,7 +230,16 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
   sample_info->embedder_context = nullptr;
   sample_info->context = nullptr;
 
-  if (sample_info->vm_state == GC) return true;
+  if (sample_info->vm_state == GC || v8_isolate->heap()->IsInGC()) {
+    // GC can happen any time, not directly caused by its caller. Don't collect
+    // stacks for it. We check for both GC VMState and IsInGC, since we can
+    // observe LOGGING VM states during GC.
+    // TODO(leszeks): We could still consider GC stacks (as long as this isn't a
+    // moving GC), e.g. to surface if one particular function is triggering all
+    // the GCs. However, this is a user-visible change, and we would need to
+    // adjust the symbolizer and devtools to expose this information.
+    return true;
+  }
 
   EmbedderState* embedder_state = isolate->current_embedder_state();
   if (embedder_state != nullptr) {
@@ -226,15 +248,28 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
     sample_info->embedder_state = embedder_state->GetState();
   }
 
-  Context top_context = isolate->context();
+  Tagged<Context> top_context = isolate->context();
   if (top_context.ptr() != i::Context::kNoContext &&
       top_context.ptr() != i::Context::kInvalidContext) {
-    NativeContext top_native_context = top_context.native_context();
+    Tagged<NativeContext> top_native_context = top_context->native_context();
     sample_info->context = reinterpret_cast<void*>(top_native_context.ptr());
   }
 
   i::Address js_entry_sp = isolate->js_entry_sp();
   if (js_entry_sp == 0) return true;  // Not executing JS now.
+#if V8_ENABLE_WEBASSEMBLY
+  // With stack-switching, the js_entry_sp and current sp may be in different
+  // stacks. Use the active stack base instead as the upper bound to correctly
+  // validate addresses in the stack frame iterator.
+  Tagged<Object> cont_obj = isolate->root(RootIndex::kActiveContinuation);
+  if (!IsUndefined(cont_obj)) {
+    auto cont = Cast<WasmContinuationObject>(cont_obj);
+    if (!IsUndefined(cont->parent())) {
+      auto* stack = reinterpret_cast<wasm::StackMemory*>(cont->stack());
+      js_entry_sp = stack->base();
+    }
+  }
+#endif
 
 #if defined(USE_SIMULATOR)
   if (use_simulator_reg_state) {
@@ -268,7 +303,7 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
   // If there is a handler on top of the external callback scope then
   // we have already entered JavaScript again and the external callback
   // is not the top function.
-  if (scope && scope->scope_address() < handler) {
+  if (scope && scope->JSStackComparableAddress() < handler) {
     i::Address* external_callback_entry_ptr =
         scope->callback_entrypoint_address();
     sample_info->external_callback_entry =
@@ -294,11 +329,11 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
     }
   }
 
-  i::SafeStackFrameIterator it(isolate, reinterpret_cast<i::Address>(regs->pc),
-                               reinterpret_cast<i::Address>(regs->fp),
-                               reinterpret_cast<i::Address>(regs->sp),
-                               reinterpret_cast<i::Address>(regs->lr),
-                               js_entry_sp);
+  i::StackFrameIteratorForProfiler it(
+      isolate, reinterpret_cast<i::Address>(regs->pc),
+      reinterpret_cast<i::Address>(regs->fp),
+      reinterpret_cast<i::Address>(regs->sp),
+      reinterpret_cast<i::Address>(regs->lr), js_entry_sp);
 
   if (it.done()) return true;
 
@@ -306,8 +341,16 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
   if (record_c_entry_frame == kIncludeCEntryFrame &&
       (it.top_frame_type() == internal::StackFrame::EXIT ||
        it.top_frame_type() == internal::StackFrame::BUILTIN_EXIT)) {
-    frames[i] = reinterpret_cast<void*>(isolate->c_function());
-    i++;
+    // While BUILTIN_EXIT definitely represents a call to CEntry the EXIT frame
+    // might represent either a call to CEntry or an optimized call to
+    // Api callback. In the latter case the ExternalCallbackScope points to
+    // the same function, so skip adding a frame in that case in order to avoid
+    // double-reporting.
+    void* c_function = reinterpret_cast<void*>(isolate->c_function());
+    if (sample_info->external_callback_entry != c_function) {
+      frames[i] = c_function;
+      i++;
+    }
   }
 #ifdef V8_RUNTIME_CALL_STATS
   i::RuntimeCallTimer* timer =
@@ -320,8 +363,8 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
       frames[i++] = reinterpret_cast<void*>(timer->counter());
       timer = timer->parent();
     }
-#endif  // V8_RUNTIME_CALL_STATS
     if (i == frames_limit) break;
+#endif  // V8_RUNTIME_CALL_STATS
 
     if (it.frame()->is_interpreted()) {
       // For interpreted frames use the bytecode array pointer as the pc.
@@ -329,7 +372,7 @@ bool TickSample::GetStackSample(Isolate* v8_isolate, RegisterState* regs,
           static_cast<i::InterpretedFrame*>(it.frame());
       // Since the sampler can interrupt execution at any point the
       // bytecode_array might be garbage, so don't actually dereference it. We
-      // avoid the frame->GetXXX functions since they call BytecodeArray::cast,
+      // avoid the frame->GetXXX functions since they call Cast<BytecodeArray>,
       // which has a heap access in its DCHECK.
       i::Address bytecode_array = base::Memory<i::Address>(
           frame->fp() + i::InterpreterFrameConstants::kBytecodeArrayFromFp);

@@ -5,26 +5,25 @@
 #include "src/compiler/common-operator-reducer.h"
 
 #include <algorithm>
+#include <optional>
 
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
 #include "src/compiler/opcodes.h"
+#include "src/compiler/turbofan-graph.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-CommonOperatorReducer::CommonOperatorReducer(Editor* editor, Graph* graph,
-                                             JSHeapBroker* broker,
-                                             CommonOperatorBuilder* common,
-                                             MachineOperatorBuilder* machine,
-                                             Zone* temp_zone,
-                                             BranchSemantics branch_semantics)
+CommonOperatorReducer::CommonOperatorReducer(
+    Editor* editor, TFGraph* graph, JSHeapBroker* broker,
+    CommonOperatorBuilder* common, MachineOperatorBuilder* machine,
+    Zone* temp_zone, BranchSemantics default_branch_semantics)
     : AdvancedReducer(editor),
       graph_(graph),
       broker_(broker),
@@ -32,7 +31,7 @@ CommonOperatorReducer::CommonOperatorReducer(Editor* editor, Graph* graph,
       machine_(machine),
       dead_(graph->NewNode(common->Dead())),
       zone_(temp_zone),
-      branch_semantics_(branch_semantics) {
+      default_branch_semantics_(default_branch_semantics) {
   NodeProperties::SetType(dead_, Type::None());
 }
 
@@ -67,20 +66,22 @@ Reduction CommonOperatorReducer::Reduce(Node* node) {
   return NoChange();
 }
 
-Decision CommonOperatorReducer::DecideCondition(Node* const cond) {
+Decision CommonOperatorReducer::DecideCondition(
+    Node* const cond, BranchSemantics branch_semantics) {
   Node* unwrapped = SkipValueIdentities(cond);
   switch (unwrapped->opcode()) {
     case IrOpcode::kInt32Constant: {
-      DCHECK_EQ(branch_semantics_, BranchSemantics::kMachine);
+      DCHECK_EQ(branch_semantics, BranchSemantics::kMachine);
       Int32Matcher m(unwrapped);
       return m.ResolvedValue() ? Decision::kTrue : Decision::kFalse;
     }
     case IrOpcode::kHeapConstant: {
-      if (branch_semantics_ == BranchSemantics::kMachine) {
+      if (branch_semantics == BranchSemantics::kMachine) {
         return Decision::kTrue;
       }
       HeapObjectMatcher m(unwrapped);
-      base::Optional<bool> maybe_result = m.Ref(broker_).TryGetBooleanValue();
+      std::optional<bool> maybe_result =
+          m.Ref(broker_).TryGetBooleanValue(broker());
       if (!maybe_result.has_value()) return Decision::kUnknown;
       return *maybe_result ? Decision::kTrue : Decision::kFalse;
     }
@@ -91,6 +92,7 @@ Decision CommonOperatorReducer::DecideCondition(Node* const cond) {
 
 Reduction CommonOperatorReducer::ReduceBranch(Node* node) {
   DCHECK_EQ(IrOpcode::kBranch, node->opcode());
+  BranchSemantics branch_semantics = BranchSemanticsOf(node);
   Node* const cond = node->InputAt(0);
   // Swap IfTrue/IfFalse on {branch} if {cond} is a BooleanNot and use the input
   // to BooleanNot as new condition for {branch}. Note we assume that {cond} was
@@ -99,8 +101,10 @@ Reduction CommonOperatorReducer::ReduceBranch(Node* node) {
   // not (i.e. true being returned in the false case and vice versa).
   if (cond->opcode() == IrOpcode::kBooleanNot ||
       (cond->opcode() == IrOpcode::kSelect &&
-       DecideCondition(cond->InputAt(1)) == Decision::kFalse &&
-       DecideCondition(cond->InputAt(2)) == Decision::kTrue)) {
+       DecideCondition(cond->InputAt(1), branch_semantics) ==
+           Decision::kFalse &&
+       DecideCondition(cond->InputAt(2), branch_semantics) ==
+           Decision::kTrue)) {
     for (Node* const use : node->uses()) {
       switch (use->opcode()) {
         case IrOpcode::kIfTrue:
@@ -122,7 +126,7 @@ Reduction CommonOperatorReducer::ReduceBranch(Node* node) {
         node, common()->Branch(NegateBranchHint(BranchHintOf(node->op()))));
     return Changed(node);
   }
-  Decision const decision = DecideCondition(cond);
+  Decision const decision = DecideCondition(cond, branch_semantics);
   if (decision == Decision::kUnknown) return NoChange();
   Node* const control = node->InputAt(1);
   for (Node* const use : node->uses()) {
@@ -161,16 +165,15 @@ Reduction CommonOperatorReducer::ReduceDeoptimizeConditional(Node* node) {
                   : common()->DeoptimizeUnless(p.reason(), p.feedback()));
     return Changed(node);
   }
-  Decision const decision = DecideCondition(condition);
+  Decision const decision =
+      DecideCondition(condition, default_branch_semantics_);
   if (decision == Decision::kUnknown) return NoChange();
   if (condition_is_true == (decision == Decision::kTrue)) {
     ReplaceWithValue(node, dead(), effect, control);
   } else {
     control = graph()->NewNode(common()->Deoptimize(p.reason(), p.feedback()),
                                frame_state, effect, control);
-    // TODO(bmeurer): This should be on the AdvancedReducer somehow.
-    NodeProperties::MergeControlToEnd(graph(), common(), control);
-    Revisit(graph()->end());
+    MergeControlToEnd(graph(), common(), control);
   }
   return Replace(dead());
 }
@@ -245,6 +248,21 @@ Reduction CommonOperatorReducer::ReducePhi(Node* node) {
   DCHECK(IrOpcode::IsMergeOpcode(merge->opcode()));
   DCHECK_EQ(value_input_count, merge->InputCount());
   if (value_input_count == 2) {
+    // The following optimization tries to match `0 < v ? v : 0 - v`, which
+    // corresponds in Turbofan to something like:
+    //
+    //       Branch(0 < v)
+    //         /      \
+    //        /        \
+    //       v        0 - v
+    //        \        /
+    //         \      /
+    //        phi(v, 0-v)
+    //
+    // And replace it by `fabs(v)`.
+    // TODO(dmercadier): it seems that these optimizations never kick in. While
+    // keeping them doesn't cost too much, we could consider removing them to
+    // simplify the code and not maintain unused pieces of code.
     Node* vtrue = inputs[0];
     Node* vfalse = inputs[1];
     Node::Inputs merge_inputs = merge->inputs();
@@ -283,6 +301,35 @@ Reduction CommonOperatorReducer::ReducePhi(Node* node) {
             return Change(node, machine()->Float64Abs(), vtrue);
           }
         }
+      } else if (cond->opcode() == IrOpcode::kInt32LessThan) {
+        Int32BinopMatcher mcond(cond);
+        if (mcond.left().Is(0) && mcond.right().Equals(vtrue) &&
+            (vfalse->opcode() == IrOpcode::kInt32Sub)) {
+          Int32BinopMatcher mvfalse(vfalse);
+          if (mvfalse.left().Is(0) && mvfalse.right().Equals(vtrue)) {
+            // We might now be able to further reduce the {merge} node.
+            Revisit(merge);
+
+            if (machine()->Word32Select().IsSupported()) {
+              // Select positive value with conditional move if is supported.
+              Node* abs = graph()->NewNode(machine()->Word32Select().op(), cond,
+                                           vtrue, vfalse);
+              return Replace(abs);
+            } else {
+              // Generate absolute integer value.
+              //
+              //    let sign = input >> 31 in
+              //    (input ^ sign) - sign
+              Node* sign = graph()->NewNode(
+                  machine()->Word32Sar(), vtrue,
+                  graph()->NewNode(common()->Int32Constant(31)));
+              Node* abs = graph()->NewNode(
+                  machine()->Int32Sub(),
+                  graph()->NewNode(machine()->Word32Xor(), vtrue, sign), sign);
+              return Replace(abs);
+            }
+          }
+        }
       }
     }
   }
@@ -305,6 +352,7 @@ Reduction CommonOperatorReducer::ReducePhi(Node* node) {
 Reduction CommonOperatorReducer::ReduceReturn(Node* node) {
   DCHECK_EQ(IrOpcode::kReturn, node->opcode());
   Node* effect = NodeProperties::GetEffectInput(node);
+  // TODO(mslekova): Port this to Turboshaft.
   if (effect->opcode() == IrOpcode::kCheckpoint) {
     // Any {Return} node can never be used to insert a deoptimization point,
     // hence checkpoints can be cut out of the effect chain flowing into it.
@@ -360,7 +408,7 @@ Reduction CommonOperatorReducer::ReduceReturn(Node* node) {
         // the reducer logic will visit {end} again.
         Node* ret = graph()->NewNode(node->op(), pop_count, value_inputs[i],
                                      effect, control_inputs[i]);
-        NodeProperties::MergeControlToEnd(graph(), common(), ret);
+        MergeControlToEnd(graph(), common(), ret);
       }
       // Mark the Merge {control} and Return {node} as {dead}.
       Replace(control, dead());
@@ -376,7 +424,7 @@ Reduction CommonOperatorReducer::ReduceReturn(Node* node) {
         // the reducer logic will visit {end} again.
         Node* ret = graph()->NewNode(node->op(), pop_count, value_inputs[i],
                                      effect_inputs[i], control_inputs[i]);
-        NodeProperties::MergeControlToEnd(graph(), common(), ret);
+        MergeControlToEnd(graph(), common(), ret);
       }
       // Mark the Merge {control} and Return {node} as {dead}.
       Replace(control, dead());
@@ -392,7 +440,7 @@ Reduction CommonOperatorReducer::ReduceSelect(Node* node) {
   Node* const vtrue = node->InputAt(1);
   Node* const vfalse = node->InputAt(2);
   if (vtrue == vfalse) return Replace(vtrue);
-  switch (DecideCondition(cond)) {
+  switch (DecideCondition(cond, default_branch_semantics_)) {
     case Decision::kTrue:
       return Replace(vtrue);
     case Decision::kFalse:
@@ -400,6 +448,11 @@ Reduction CommonOperatorReducer::ReduceSelect(Node* node) {
     case Decision::kUnknown:
       break;
   }
+  // The following optimization tries to replace `select(0 < v ? v : 0 - v)` by
+  // `fabs(v)`.
+  // TODO(dmercadier): it seems that these optimizations never kick in. While
+  // keeping them doesn't cost too much, we could consider removing them to
+  // simplify the code and not maintain unused pieces of code.
   switch (cond->opcode()) {
     case IrOpcode::kFloat32LessThan: {
       Float32BinopMatcher mcond(cond);
@@ -443,7 +496,7 @@ Reduction CommonOperatorReducer::ReduceSwitch(Node* node) {
     bool matched = false;
 
     size_t const projection_count = node->op()->ControlOutputCount();
-    Node** projections = zone_->NewArray<Node*>(projection_count);
+    Node** projections = zone_->AllocateArray<Node*>(projection_count);
     NodeProperties::CollectControlProjections(node, projections,
                                               projection_count);
     for (size_t i = 0; i < projection_count - 1; i++) {
@@ -469,7 +522,7 @@ Reduction CommonOperatorReducer::ReduceSwitch(Node* node) {
 Reduction CommonOperatorReducer::ReduceStaticAssert(Node* node) {
   DCHECK_EQ(IrOpcode::kStaticAssert, node->opcode());
   Node* const cond = node->InputAt(0);
-  Decision decision = DecideCondition(cond);
+  Decision decision = DecideCondition(cond, default_branch_semantics_);
   if (decision == Decision::kTrue) {
     RelaxEffectsAndControls(node);
     return Changed(node);
@@ -483,7 +536,7 @@ Reduction CommonOperatorReducer::ReduceTrapConditional(Node* trap) {
          trap->opcode() == IrOpcode::kTrapUnless);
   bool trapping_condition = trap->opcode() == IrOpcode::kTrapIf;
   Node* const cond = trap->InputAt(0);
-  Decision decision = DecideCondition(cond);
+  Decision decision = DecideCondition(cond, default_branch_semantics_);
 
   if (decision == Decision::kUnknown) {
     return NoChange();
@@ -491,14 +544,16 @@ Reduction CommonOperatorReducer::ReduceTrapConditional(Node* trap) {
     // This will always trap. Mark its outputs as dead and connect it to
     // graph()->end().
     ReplaceWithValue(trap, dead(), dead(), dead());
-    Node* effect = NodeProperties::GetEffectInput(trap);
-    Node* control = graph()->NewNode(common()->Throw(), effect, trap);
-    NodeProperties::MergeControlToEnd(graph(), common(), control);
-    Revisit(graph()->end());
+    Node* control = graph()->NewNode(common()->Throw(), trap, trap);
+    MergeControlToEnd(graph(), common(), control);
     return Changed(trap);
   } else {
-    // This will not trap, remove it.
-    return Replace(NodeProperties::GetControlInput(trap));
+    // This will not trap, remove it by relaxing effect/control.
+    Node* control = NodeProperties::GetControlInput(trap);
+    ReplaceWithValue(trap, dead());
+    trap->Kill();
+    // The argument below is irrelevant, picked {control} for debugging.
+    return Replace(control);
   }
 }
 

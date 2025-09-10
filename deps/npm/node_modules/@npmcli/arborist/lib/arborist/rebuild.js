@@ -8,7 +8,7 @@ const rpj = require('read-package-json-fast')
 const binLinks = require('bin-links')
 const runScript = require('@npmcli/run-script')
 const { callLimit: promiseCallLimit } = require('promise-call-limit')
-const { resolve } = require('path')
+const { resolve } = require('node:path')
 const { isNodeGypPackage, defaultGypInstallScript } = require('@npmcli/node-gyp')
 const { log, time } = require('proc-log')
 
@@ -154,7 +154,9 @@ module.exports = cls => class Builder extends cls {
 
     // links should run prepare scripts and only link bins after that
     if (type === 'links') {
-      await this.#runScripts('prepare')
+      if (!this.options.ignoreScripts) {
+        await this.#runScripts('prepare')
+      }
     }
     if (this.options.binLinks) {
       await this.#linkAllBins()

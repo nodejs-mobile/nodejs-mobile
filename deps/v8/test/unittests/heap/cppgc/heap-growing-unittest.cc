@@ -4,14 +4,15 @@
 
 #include "src/heap/cppgc/heap-growing.h"
 
+#include <optional>
+
 #include "include/cppgc/platform.h"
 #include "src/heap/cppgc/heap.h"
 #include "src/heap/cppgc/stats-collector.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace cppgc {
-namespace internal {
+namespace cppgc::internal {
 
 namespace {
 
@@ -22,24 +23,28 @@ class FakeGarbageCollector : public GarbageCollector {
 
   void SetLiveBytes(size_t live_bytes) { live_bytes_ = live_bytes; }
 
-  void CollectGarbage(GarbageCollector::Config config) override {
-    stats_collector_->NotifyMarkingStarted(
-        GarbageCollector::Config::CollectionType::kMajor,
-        GarbageCollector::Config::IsForcedGC::kNotForced);
+  void CollectGarbage(GCConfig config) override {
+    stats_collector_->NotifyMarkingStarted(CollectionType::kMajor,
+                                           GCConfig::MarkingType::kAtomic,
+                                           GCConfig::IsForcedGC::kNotForced);
     stats_collector_->NotifyMarkingCompleted(live_bytes_);
-    stats_collector_->NotifySweepingCompleted();
+    stats_collector_->NotifySweepingCompleted(GCConfig::SweepingType::kAtomic);
     callcount_++;
   }
 
-  void StartIncrementalGarbageCollection(
-      GarbageCollector::Config config) override {
+  void StartIncrementalGarbageCollection(GCConfig config) override {
     UNREACHABLE();
   }
 
   size_t epoch() const override { return callcount_; }
-  const EmbedderStackState* override_stack_state() const override {
-    return nullptr;
+  std::optional<EmbedderStackState> overridden_stack_state() const override {
+    return {};
   }
+  void set_override_stack_state(EmbedderStackState state) override {}
+  void clear_overridden_stack_state() override {}
+#ifdef V8_ENABLE_ALLOCATION_TIMEOUT
+  std::optional<int> UpdateAllocationTimeout() override { return std::nullopt; }
+#endif  // V8_ENABLE_ALLOCATION_TIMEOUT
 
  private:
   StatsCollector* stats_collector_;
@@ -49,12 +54,16 @@ class FakeGarbageCollector : public GarbageCollector {
 
 class MockGarbageCollector : public GarbageCollector {
  public:
-  MOCK_METHOD(void, CollectGarbage, (GarbageCollector::Config), (override));
-  MOCK_METHOD(void, StartIncrementalGarbageCollection,
-              (GarbageCollector::Config), (override));
+  MOCK_METHOD(void, CollectGarbage, (GCConfig), (override));
+  MOCK_METHOD(void, StartIncrementalGarbageCollection, (GCConfig), (override));
   MOCK_METHOD(size_t, epoch, (), (const, override));
-  MOCK_METHOD(const EmbedderStackState*, override_stack_state, (),
+  MOCK_METHOD(std::optional<EmbedderStackState>, overridden_stack_state, (),
               (const, override));
+  MOCK_METHOD(void, set_override_stack_state, (EmbedderStackState), (override));
+  MOCK_METHOD(void, clear_overridden_stack_state, (), (override));
+#ifdef V8_ENABLE_ALLOCATION_TIMEOUT
+  MOCK_METHOD(std::optional<int>, UpdateAllocationTimeout, (), (override));
+#endif  // V8_ENABLE_ALLOCATION_TIMEOUT
 };
 
 void FakeAllocate(StatsCollector* stats_collector, size_t bytes) {
@@ -77,8 +86,7 @@ TEST(HeapGrowingTest, ConservativeGCInvoked) {
                       cppgc::Heap::SweepingType::kIncrementalAndConcurrent);
   EXPECT_CALL(
       gc, CollectGarbage(::testing::Field(
-              &GarbageCollector::Config::stack_state,
-              GarbageCollector::Config::StackState::kMayContainHeapPointers)));
+              &GCConfig::stack_state, StackState::kMayContainHeapPointers)));
   FakeAllocate(&stats_collector, 100 * kMB);
 }
 
@@ -95,8 +103,7 @@ TEST(HeapGrowingTest, InitialHeapSize) {
   FakeAllocate(&stats_collector, kObjectSize - 1);
   EXPECT_CALL(
       gc, CollectGarbage(::testing::Field(
-              &GarbageCollector::Config::stack_state,
-              GarbageCollector::Config::StackState::kMayContainHeapPointers)));
+              &GCConfig::stack_state, StackState::kMayContainHeapPointers)));
   FakeAllocate(&stats_collector, kObjectSize);
 }
 
@@ -144,9 +151,8 @@ TEST(HeapGrowingTest, IncrementalGCStarted) {
                       cppgc::Heap::MarkingType::kIncrementalAndConcurrent,
                       cppgc::Heap::SweepingType::kIncrementalAndConcurrent);
   EXPECT_CALL(
-      gc, CollectGarbage(::testing::Field(
-              &GarbageCollector::Config::stack_state,
-              GarbageCollector::Config::StackState::kMayContainHeapPointers)))
+      gc, CollectGarbage(::testing::Field(&GCConfig::stack_state,
+                                          StackState::kMayContainHeapPointers)))
       .Times(0);
   EXPECT_CALL(gc, StartIncrementalGarbageCollection(::testing::_));
   // Allocate 1 byte less the limit for atomic gc to trigger incremental gc.
@@ -161,9 +167,8 @@ TEST(HeapGrowingTest, IncrementalGCFinalized) {
                       cppgc::Heap::MarkingType::kIncrementalAndConcurrent,
                       cppgc::Heap::SweepingType::kIncrementalAndConcurrent);
   EXPECT_CALL(
-      gc, CollectGarbage(::testing::Field(
-              &GarbageCollector::Config::stack_state,
-              GarbageCollector::Config::StackState::kMayContainHeapPointers)))
+      gc, CollectGarbage(::testing::Field(&GCConfig::stack_state,
+                                          StackState::kMayContainHeapPointers)))
       .Times(0);
   EXPECT_CALL(gc, StartIncrementalGarbageCollection(::testing::_));
   // Allocate 1 byte less the limit for atomic gc to trigger incremental gc.
@@ -172,12 +177,10 @@ TEST(HeapGrowingTest, IncrementalGCFinalized) {
   ::testing::Mock::VerifyAndClearExpectations(&gc);
   EXPECT_CALL(
       gc, CollectGarbage(::testing::Field(
-              &GarbageCollector::Config::stack_state,
-              GarbageCollector::Config::StackState::kMayContainHeapPointers)));
+              &GCConfig::stack_state, StackState::kMayContainHeapPointers)));
   EXPECT_CALL(gc, StartIncrementalGarbageCollection(::testing::_)).Times(0);
   // Allocate the rest needed to trigger atomic gc ().
   FakeAllocate(&stats_collector, StatsCollector::kAllocationThresholdBytes);
 }
 
-}  // namespace internal
-}  // namespace cppgc
+}  // namespace cppgc::internal

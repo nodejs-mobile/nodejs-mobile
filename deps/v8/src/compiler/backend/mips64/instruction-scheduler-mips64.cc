@@ -44,6 +44,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kMips64CvtSUw:
     case kMips64CvtSW:
     case kMips64DMulHigh:
+    case kMips64DMulHighU:
+    case kMips64DMulOvf:
     case kMips64MulHighU:
     case kMips64Dadd:
     case kMips64DaddOvf:
@@ -127,8 +129,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kMips64F32x4Ne:
     case kMips64F32x4Neg:
     case kMips64F32x4Sqrt:
-    case kMips64F32x4RecipApprox:
-    case kMips64F32x4RecipSqrtApprox:
     case kMips64F32x4ReplaceLane:
     case kMips64F32x4SConvertI32x4:
     case kMips64F32x4Splat:
@@ -152,6 +152,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kMips64Float32RoundUp:
     case kMips64Float64ExtractLowWord32:
     case kMips64Float64ExtractHighWord32:
+    case kMips64Float64FromWord32Pair:
     case kMips64Float64InsertLowWord32:
     case kMips64Float64InsertHighWord32:
     case kMips64Float64Max:
@@ -775,7 +776,7 @@ int PrepareForTailCallLatency() {
 int AssertLatency() { return 1; }
 
 int PrepareCallCFunctionLatency() {
-  int frame_alignment = TurboAssembler::ActivationFrameAlignment();
+  int frame_alignment = MacroAssembler::ActivationFrameAlignment();
   if (frame_alignment > kSystemPointerSize) {
     return 1 + DsubuLatency(false) + AndLatency(false) + 1;
   } else {
@@ -1276,7 +1277,7 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
       return JumpLatency();
     case kArchCallJSFunction: {
       int latency = 0;
-      if (FLAG_debug_code) {
+      if (v8_flags.debug_code) {
         latency = 1 + AssertLatency();
       }
       return latency + 1 + DadduLatency(false) + CallLatency();
@@ -1362,6 +1363,7 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
     case kMips64Mul:
       return MulLatency();
     case kMips64MulOvf:
+    case kMips64DMulOvf:
       return MulOverflowLatency();
     case kMips64MulHigh:
       return MulhLatency();
@@ -1615,6 +1617,8 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
       return Latency::MFC1;
     case kMips64Float64InsertLowWord32:
       return Latency::MFHC1 + Latency::MTC1 + Latency::MTHC1;
+    case kMips64Float64FromWord32Pair:
+      return Latency::MTC1 + Latency::MTHC1;
     case kMips64Float64ExtractHighWord32:
       return Latency::MFHC1;
     case kMips64Float64InsertHighWord32:

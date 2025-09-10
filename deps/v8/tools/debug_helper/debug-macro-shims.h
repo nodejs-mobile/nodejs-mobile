@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file contains implementations of a few macros that are defined
-// as external in Torque, so that generated debug code can work.
-
 #ifndef V8_TORQUE_DEBUG_MACRO_SHIMS_H_
 #define V8_TORQUE_DEBUG_MACRO_SHIMS_H_
+
+// This file contains implementations of a few macros that are defined
+// as external in Torque, so that generated debug code can work.
 
 #include "src/numbers/integer-literal.h"
 #include "src/objects/smi.h"
@@ -79,7 +79,7 @@ inline Value<intptr_t> Signed(d::MemoryAccessor accessor, uintptr_t u) {
   return {d::MemoryAccessResult::kOk, static_cast<intptr_t>(u)};
 }
 inline Value<int32_t> SmiUntag(d::MemoryAccessor accessor, uintptr_t s_t) {
-  Smi s(s_t);
+  Tagged<Smi> s(s_t);
   return {d::MemoryAccessResult::kOk, s.value()};
 }
 inline Value<uintptr_t> SmiFromInt32(d::MemoryAccessor accessor, int32_t i) {

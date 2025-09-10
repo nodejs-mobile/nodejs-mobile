@@ -35,7 +35,7 @@ namespace internal {
          R(x19) R(x20) R(x21) R(x22) R(x23) R(x24) R(x25) \
   R(x27)
 
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(R)
 #else
 #define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(R) R(x28)
@@ -76,6 +76,10 @@ namespace internal {
   R(d8)  R(d9)  R(d10) R(d11) R(d12) R(d13) R(d14) R(d16) \
   R(d17) R(d18) R(d19) R(d20) R(d21) R(d22) R(d23) R(d24) \
   R(d25) R(d26) R(d27) R(d28)
+
+#define MAGLEV_SCRATCH_DOUBLE_REGISTERS(R)                \
+  R(d30) R(d31)
+
 // clang-format on
 
 // Some CPURegister methods can return Register and VRegister types, so we
@@ -184,6 +188,16 @@ class CPURegister : public RegisterBase<CPURegister, kRegAfterLast> {
 
   bool IsSameSizeAndType(const CPURegister& other) const;
 
+  constexpr bool IsEven() const { return (code() % 2) == 0; }
+
+  int MaxCode() const {
+    if (IsVRegister()) {
+      return kNumberOfVRegisters - 1;
+    }
+    DCHECK(IsRegister());
+    return kNumberOfRegisters - 1;
+  }
+
  protected:
   uint8_t reg_size_;
   RegisterType reg_type_;
@@ -252,6 +266,14 @@ ASSERT_TRIVIALLY_COPYABLE(Register);
 static_assert(sizeof(Register) <= sizeof(int),
               "Register can efficiently be passed by value");
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+template <typename RegT>
+inline RegT ReassignRegister(RegT& source) {
+  RegT result = source;
+  source = RegT::no_reg();
+  return result;
+}
+
 // Stack frame alignment and padding.
 constexpr int ArgumentPaddingSlots(int argument_count) {
   // Stack frames are aligned to 16 bytes.
@@ -290,7 +312,9 @@ enum VectorFormat {
   kFormatB = NEON_B | NEONScalar,
   kFormatH = NEON_H | NEONScalar,
   kFormatS = NEON_S | NEONScalar,
-  kFormatD = NEON_D | NEONScalar
+  kFormatD = NEON_D | NEONScalar,
+
+  kFormat1Q = 0xfffffffd
 };
 
 VectorFormat VectorFormatHalfWidth(VectorFormat vform);
@@ -363,6 +387,9 @@ class VRegister : public CPURegister {
   VRegister V1D() const {
     return VRegister::Create(code(), kDRegSizeInBits, 1);
   }
+  VRegister V1Q() const {
+    return VRegister::Create(code(), kQRegSizeInBits, 1);
+  }
 
   VRegister Format(VectorFormat f) const {
     return VRegister::Create(code(), f);
@@ -376,6 +403,7 @@ class VRegister : public CPURegister {
   bool Is4S() const { return (Is128Bits() && (lane_count_ == 4)); }
   bool Is1D() const { return (Is64Bits() && (lane_count_ == 1)); }
   bool Is2D() const { return (Is128Bits() && (lane_count_ == 2)); }
+  bool Is1Q() const { return (Is128Bits() && (lane_count_ == 1)); }
 
   // For consistency, we assert the number of lanes of these scalar registers,
   // even though there are no vectors of equivalent total size with which they
@@ -412,7 +440,7 @@ class VRegister : public CPURegister {
   unsigned LaneSizeInBits() const { return LaneSizeInBytes() * 8; }
 
   static constexpr int kMaxNumRegisters = kNumberOfVRegisters;
-  STATIC_ASSERT(kMaxNumRegisters == kDoubleAfterLast);
+  static_assert(kMaxNumRegisters == kDoubleAfterLast);
 
   static constexpr VRegister from_code(int code) {
     // Always return a D register.
@@ -470,6 +498,7 @@ GENERAL_REGISTER_CODE_LIST(DEFINE_VREGISTERS)
 #undef DEFINE_REGISTER
 
 // Registers aliases.
+ALIAS_REGISTER(Register, kStackPointerRegister, sp);
 ALIAS_REGISTER(VRegister, v8_, v8);  // Avoid conflicts with namespace v8.
 ALIAS_REGISTER(Register, ip0, x16);
 ALIAS_REGISTER(Register, ip1, x17);
@@ -479,10 +508,10 @@ ALIAS_REGISTER(Register, wip1, w17);
 ALIAS_REGISTER(Register, kRootRegister, x26);
 ALIAS_REGISTER(Register, rr, x26);
 // Pointer cage base register.
-#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#ifdef V8_COMPRESS_POINTERS
 ALIAS_REGISTER(Register, kPtrComprCageBaseRegister, x28);
 #else
-ALIAS_REGISTER(Register, kPtrComprCageBaseRegister, kRootRegister);
+ALIAS_REGISTER(Register, kPtrComprCageBaseRegister, no_reg);
 #endif
 // Context pointer register.
 ALIAS_REGISTER(Register, cp, x27);
@@ -508,6 +537,11 @@ ALIAS_REGISTER(VRegister, fp_scratch2, d31);
 
 #undef ALIAS_REGISTER
 
+// Arm64 calling convention
+constexpr Register kCArgRegs[] = {x0, x1, x2, x3, x4, x5, x6, x7};
+constexpr int kRegisterPassedArguments = arraysize(kCArgRegs);
+constexpr int kFPRegisterPassedArguments = 8;
+
 // AreAliased returns true if any of the named registers overlap. Arguments set
 // to NoReg are ignored. The system stack pointer may be specified.
 V8_EXPORT_PRIVATE bool AreAliased(
@@ -529,6 +563,8 @@ V8_EXPORT_PRIVATE bool AreSameSizeAndType(
 // AreSameFormat returns true if all of the specified VRegisters have the same
 // vector format. Arguments set to NoVReg are ignored, as are any subsequent
 // arguments. At least one argument (reg1) must be valid (not NoVReg).
+bool AreSameFormat(const Register& reg1, const Register& reg2,
+                   const Register& reg3 = NoReg, const Register& reg4 = NoReg);
 bool AreSameFormat(const VRegister& reg1, const VRegister& reg2,
                    const VRegister& reg3 = NoVReg,
                    const VRegister& reg4 = NoVReg);
@@ -537,10 +573,15 @@ bool AreSameFormat(const VRegister& reg1, const VRegister& reg2,
 // consecutive in the register file. Arguments may be set to NoVReg, and if so,
 // subsequent arguments must also be NoVReg. At least one argument (reg1) must
 // be valid (not NoVReg).
-V8_EXPORT_PRIVATE bool AreConsecutive(const VRegister& reg1,
-                                      const VRegister& reg2,
-                                      const VRegister& reg3 = NoVReg,
-                                      const VRegister& reg4 = NoVReg);
+V8_EXPORT_PRIVATE bool AreConsecutive(const CPURegister& reg1,
+                                      const CPURegister& reg2,
+                                      const CPURegister& reg3 = NoReg,
+                                      const CPURegister& reg4 = NoReg);
+
+bool AreEven(const CPURegister& reg1, const CPURegister& reg2,
+             const CPURegister& reg3 = NoReg, const CPURegister& reg4 = NoReg,
+             const CPURegister& reg5 = NoReg, const CPURegister& reg6 = NoReg,
+             const CPURegister& reg7 = NoReg, const CPURegister& reg8 = NoReg);
 
 using FloatRegister = VRegister;
 using DoubleRegister = VRegister;
@@ -568,13 +609,15 @@ constexpr Register kJavaScriptCallCodeStartRegister = x2;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = x3;
 constexpr Register kJavaScriptCallExtraArg1Register = x2;
+constexpr Register kJavaScriptCallDispatchHandleRegister = x4;
 
-constexpr Register kOffHeapTrampolineRegister = ip0;
 constexpr Register kRuntimeCallFunctionRegister = x1;
 constexpr Register kRuntimeCallArgCountRegister = x0;
 constexpr Register kRuntimeCallArgvRegister = x11;
-constexpr Register kWasmInstanceRegister = x7;
+constexpr Register kWasmImplicitArgRegister = x7;
 constexpr Register kWasmCompileLazyFuncIndexRegister = x8;
+constexpr Register kWasmTrapHandlerFaultAddressRegister = x16;
+constexpr Register kSimulatorHltArgument = x16;
 
 constexpr DoubleRegister kFPReturnRegister0 = d0;
 

@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_OBJECTS_JS_DISPLAY_NAMES_H_
+#define V8_OBJECTS_JS_DISPLAY_NAMES_H_
+
 #ifndef V8_INTL_SUPPORT
 #error Internationalization is expected to be enabled.
 #endif  // V8_INTL_SUPPORT
-
-#ifndef V8_OBJECTS_JS_DISPLAY_NAMES_H_
-#define V8_OBJECTS_JS_DISPLAY_NAMES_H_
 
 #include <set>
 #include <string>
@@ -32,21 +32,23 @@ class JSDisplayNames
  public:
   // Creates display names object with properties derived from input
   // locales and options.
-  static MaybeHandle<JSDisplayNames> New(Isolate* isolate, Handle<Map> map,
-                                         Handle<Object> locales,
-                                         Handle<Object> options);
+  static MaybeDirectHandle<JSDisplayNames> New(Isolate* isolate,
+                                               DirectHandle<Map> map,
+                                               DirectHandle<Object> locales,
+                                               DirectHandle<Object> options);
 
-  static Handle<JSObject> ResolvedOptions(Isolate* isolate,
-                                          Handle<JSDisplayNames> format_holder);
+  static DirectHandle<JSObject> ResolvedOptions(
+      Isolate* isolate, DirectHandle<JSDisplayNames> format_holder);
 
-  static MaybeHandle<Object> Of(Isolate* isolate, Handle<JSDisplayNames> holder,
-                                Handle<Object> code_obj);
+  static MaybeDirectHandle<Object> Of(Isolate* isolate,
+                                      DirectHandle<JSDisplayNames> holder,
+                                      Handle<Object> code_obj);
 
   V8_EXPORT_PRIVATE static const std::set<std::string>& GetAvailableLocales();
 
-  Handle<String> StyleAsString() const;
-  Handle<String> FallbackAsString() const;
-  Handle<String> LanguageDisplayAsString() const;
+  Handle<String> StyleAsString(Isolate* isolate) const;
+  Handle<String> FallbackAsString(Isolate* isolate) const;
+  DirectHandle<String> LanguageDisplayAsString(Isolate* isolate) const;
 
   // Style: identifying the display names style used.
   //
@@ -79,15 +81,15 @@ class JSDisplayNames
   // Bit positions in |flags|.
   DEFINE_TORQUE_GENERATED_JS_DISPLAY_NAMES_FLAGS()
 
-  STATIC_ASSERT(Style::kLong <= StyleBits::kMax);
-  STATIC_ASSERT(Style::kShort <= StyleBits::kMax);
-  STATIC_ASSERT(Style::kNarrow <= StyleBits::kMax);
-  STATIC_ASSERT(Fallback::kCode <= FallbackBit::kMax);
-  STATIC_ASSERT(Fallback::kNone <= FallbackBit::kMax);
-  STATIC_ASSERT(LanguageDisplay::kDialect <= LanguageDisplayBit::kMax);
-  STATIC_ASSERT(LanguageDisplay::kStandard <= LanguageDisplayBit::kMax);
+  static_assert(StyleBits::is_valid(Style::kLong));
+  static_assert(StyleBits::is_valid(Style::kShort));
+  static_assert(StyleBits::is_valid(Style::kNarrow));
+  static_assert(FallbackBit::is_valid(Fallback::kCode));
+  static_assert(FallbackBit::is_valid(Fallback::kNone));
+  static_assert(LanguageDisplayBit::is_valid(LanguageDisplay::kDialect));
+  static_assert(LanguageDisplayBit::is_valid(LanguageDisplay::kStandard));
 
-  DECL_ACCESSORS(internal, Managed<DisplayNamesInternal>)
+  DECL_ACCESSORS(internal, Tagged<Managed<DisplayNamesInternal>>)
 
   DECL_PRINTER(JSDisplayNames)
 

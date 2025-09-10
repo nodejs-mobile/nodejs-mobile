@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copcright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,7 +30,6 @@ FILES_TO_SYNC = [
     'crdtp/find_by_first.h',
     'crdtp/find_by_first_test.cc',
     'crdtp/frontend_channel.h',
-    'crdtp/maybe.h',
     'crdtp/maybe_test.cc',
     'crdtp/json.cc',
     'crdtp/json.h',

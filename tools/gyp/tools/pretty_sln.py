@@ -16,6 +16,7 @@
 import os
 import re
 import sys
+
 import pretty_vcproj
 
 __author__ = "nsylvain (Nicolas Sylvain)"
@@ -34,10 +35,10 @@ def BuildProject(project, built, projects, deps):
 
 def ParseSolution(solution_file):
     # All projects, their clsid and paths.
-    projects = dict()
+    projects = {}
 
     # A list of dependencies associated with a project.
-    dependencies = dict()
+    dependencies = {}
 
     # Regular expressions that matches the SLN format.
     # The first line of a project definition.
@@ -93,10 +94,10 @@ def ParseSolution(solution_file):
             continue
 
     # Change all dependencies clsid to name instead.
-    for project in dependencies:
+    for project, deps in dependencies.items():
         # For each dependencies in this project
         new_dep_array = []
-        for dep in dependencies[project]:
+        for dep in deps:
             # Look for the project name matching this cldis
             for project_info in projects:
                 if projects[project_info][1] == dep:
@@ -118,7 +119,7 @@ def PrintDependencies(projects, deps):
         if dep_list:
             for dep in dep_list:
                 print("  - %s" % dep)
-        print("")
+        print()
 
     print("--                                   --")
 

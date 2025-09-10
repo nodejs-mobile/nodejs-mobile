@@ -126,7 +126,7 @@ function onSession(session, next) {
     const { port } = server.address();
     const origin = `https://localhost:${port}`;
 
-    const cleanup = countdown(3, () => server.close());
+    const cleanup = countdown(4, () => server.close());
 
     // HTTP/2 client
     connect(
@@ -149,12 +149,23 @@ function onSession(session, next) {
 
     function testWrongALPN() {
       // Incompatible ALPN TLS client
-      let text = '';
       tls(Object.assign({ port, ALPNProtocols: ['fake'] }, clientOptions))
+        .on('error', common.mustCall((err) => {
+          const allowedErrors = ['ECONNRESET', 'ERR_SSL_TLSV1_ALERT_NO_APPLICATION_PROTOCOL'];
+          ok(allowedErrors.includes(err.code), `'${err.code}' was not one of ${allowedErrors}.`);
+          cleanup();
+          testNoALPN();
+        }));
+    }
+
+    function testNoALPN() {
+      // TLS client does not send an ALPN extension
+      let text = '';
+      tls(Object.assign({ port }, clientOptions))
         .setEncoding('utf8')
         .on('data', (chunk) => text += chunk)
         .on('end', common.mustCall(() => {
-          ok(/Unknown ALPN Protocol, expected `h2` to be available/.test(text));
+          ok(/Missing ALPN Protocol, expected `h2` to be available/.test(text));
           cleanup();
         }));
     }

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-threads
-
 // This test might time out if the search space for a sequential
 // interleaving becomes to large. However, it should never fail.
 // Note that results of this test are flaky by design. While the test is
@@ -300,7 +298,7 @@ function getSequence(start, end) {
 
 function spawnWorkers() {
   function workerCode() {
-    onmessage = function(msg) {
+    onmessage = function({data:msg}) {
       if (msg.module) {
         let module = msg.module;
         let mem = msg.mem;

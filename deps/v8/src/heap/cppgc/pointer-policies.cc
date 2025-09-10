@@ -4,7 +4,6 @@
 
 #include "include/cppgc/internal/pointer-policies.h"
 
-#include "include/cppgc/internal/caged-heap-local-data.h"
 #include "include/cppgc/internal/persistent-node.h"
 #include "src/base/logging.h"
 #include "src/base/macros.h"
@@ -34,6 +33,10 @@ void SameThreadEnabledCheckingPolicyBase::CheckPointerImpl(
     const void* ptr, bool points_to_payload, bool check_off_heap_assignments) {
   // `ptr` must not reside on stack.
   DCHECK(!IsOnStack(ptr));
+#if defined(CPPGC_CAGED_HEAP)
+  // `ptr` must reside in the cage.
+  DCHECK(CagedHeapBase::IsWithinCage(ptr));
+#endif  // defined(CPPGC_CAGED_HEAP)
   // Check for the most commonly used wrong sentinel value (-1).
   DCHECK_NE(reinterpret_cast<void*>(-1), ptr);
   auto* base_page = BasePage::FromPayload(ptr);
@@ -58,18 +61,21 @@ void SameThreadEnabledCheckingPolicyBase::CheckPointerImpl(
   // Member references should never mix heaps.
   DCHECK_EQ(heap_, &base_page->heap());
 
-  DCHECK_EQ(heap_->GetCreationThreadId(), v8::base::OS::GetCurrentThreadId());
+  DCHECK(heap_->CurrentThreadIsHeapThread());
 
   // Header checks.
   const HeapObjectHeader* header = nullptr;
   if (points_to_payload) {
     header = &HeapObjectHeader::FromObject(ptr);
+    DCHECK_EQ(
+        header,
+        &base_page->ObjectHeaderFromInnerAddress<AccessMode::kAtomic>(ptr));
   } else {
     // Mixin case. Access the ObjectStartBitmap atomically since sweeping can be
     // in progress.
     header = &base_page->ObjectHeaderFromInnerAddress<AccessMode::kAtomic>(ptr);
     DCHECK_LE(header->ObjectStart(), ptr);
-    DCHECK_GT(header->ObjectEnd(), ptr);
+    DCHECK_GT(header->ObjectEnd<AccessMode::kAtomic>(), ptr);
   }
   if (header) {
     DCHECK(!header->IsFree());

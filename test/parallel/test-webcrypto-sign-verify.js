@@ -6,7 +6,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { subtle } = require('crypto').webcrypto;
+const { subtle } = globalThis.crypto;
 
 // This is only a partial test. The WebCrypto Web Platform Tests
 // will provide much greater coverage.
@@ -121,8 +121,9 @@ const { subtle } = require('crypto').webcrypto;
       name: 'Ed25519',
     }, publicKey, signature, ec.encode(data)));
   }
-
-  test('hello world').then(common.mustCall());
+  if (!process.features.openssl_is_boringssl) {
+    test('hello world').then(common.mustCall());
+  }
 }
 
 // Test Sign/Verify Ed448
@@ -142,5 +143,7 @@ const { subtle } = require('crypto').webcrypto;
     }, publicKey, signature, ec.encode(data)));
   }
 
-  test('hello world').then(common.mustCall());
+  if (!process.features.openssl_is_boringssl) {
+    test('hello world').then(common.mustCall());
+  }
 }

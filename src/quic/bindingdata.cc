@@ -25,7 +25,7 @@ using v8::Value;
 namespace quic {
 
 BindingData& BindingData::Get(Environment* env) {
-  return *Realm::GetBindingData<BindingData>(env->context());
+  return *(env->principal_realm()->GetBindingData<BindingData>());
 }
 
 BindingData::operator ngtcp2_mem() {
@@ -56,15 +56,16 @@ void BindingData::DecreaseAllocatedSize(size_t size) {
   current_ngtcp2_memory_ -= size;
 }
 
-void BindingData::Initialize(Environment* env, Local<Object> target) {
-  SetMethod(env->context(), target, "setCallbacks", SetCallbacks);
-  SetMethod(env->context(), target, "flushPacketFreelist", FlushPacketFreelist);
-  Realm::GetCurrent(env->context())
-      ->AddBindingData<BindingData>(env->context(), target);
+void BindingData::InitPerContext(Realm* realm, Local<Object> target) {
+  SetMethod(realm->context(), target, "setCallbacks", SetCallbacks);
+  SetMethod(
+      realm->context(), target, "flushPacketFreelist", FlushPacketFreelist);
+  Realm::GetCurrent(realm->context())->AddBindingData<BindingData>(target);
 }
 
 void BindingData::RegisterExternalReferences(
     ExternalReferenceRegistry* registry) {
+  registry->Register(IllegalConstructor);
   registry->Register(SetCallbacks);
   registry->Register(FlushPacketFreelist);
 }
@@ -142,7 +143,7 @@ QUIC_JS_CALLBACKS(V)
 void BindingData::SetCallbacks(const FunctionCallbackInfo<Value>& args) {
   auto env = Environment::GetCurrent(args);
   auto isolate = env->isolate();
-  auto& state = BindingData::Get(env);
+  auto& state = Get(env);
   CHECK(args[0]->IsObject());
   Local<Object> obj = args[0].As<Object>();
 
@@ -163,7 +164,7 @@ void BindingData::SetCallbacks(const FunctionCallbackInfo<Value>& args) {
 
 void BindingData::FlushPacketFreelist(const FunctionCallbackInfo<Value>& args) {
   auto env = Environment::GetCurrent(args);
-  auto& state = BindingData::Get(env);
+  auto& state = Get(env);
   state.packet_freelist.clear();
 }
 
@@ -197,6 +198,19 @@ NgHttp3CallbackScope::~NgHttp3CallbackScope() {
 bool NgHttp3CallbackScope::in_nghttp3_callback(Environment* env) {
   auto& binding = BindingData::Get(env);
   return binding.in_nghttp3_callback_scope;
+}
+
+CallbackScopeBase::CallbackScopeBase(Environment* env)
+    : env(env), context_scope(env->context()), try_catch(env->isolate()) {}
+
+CallbackScopeBase::~CallbackScopeBase() {
+  if (try_catch.HasCaught()) {
+    if (!try_catch.HasTerminated() && env->can_call_into_js()) {
+      errors::TriggerUncaughtException(env->isolate(), try_catch);
+    } else {
+      try_catch.ReThrow();
+    }
+  }
 }
 
 void IllegalConstructor(const FunctionCallbackInfo<Value>& args) {

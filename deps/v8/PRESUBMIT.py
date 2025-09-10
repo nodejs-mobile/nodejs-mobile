@@ -31,10 +31,12 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into gcl.
 """
 
+import ast
 import json
 import os
 import re
 import sys
+import traceback
 
 # This line is 'magic' in that git-cl looks for it to decide whether to
 # use Python3 instead of Python2 when running the code in this file.
@@ -85,6 +87,7 @@ def _V8PresubmitChecks(input_api, output_api):
   sys.path.append(input_api.os_path.join(
         input_api.PresubmitLocalPath(), 'tools'))
   from v8_presubmit import CppLintProcessor
+  from v8_presubmit import GCMoleProcessor
   from v8_presubmit import JSLintProcessor
   from v8_presubmit import TorqueLintProcessor
   from v8_presubmit import SourceProcessor
@@ -126,11 +129,36 @@ def _V8PresubmitChecks(input_api, output_api):
   if not StatusFilesProcessor().RunOnFiles(
       input_api.AffectedFiles(include_deletes=True)):
     results.append(output_api.PresubmitError("Status file check failed"))
+  if not GCMoleProcessor().RunOnFiles(
+      input_api.AffectedFiles(include_deletes=False)):
+    results.append(output_api.PresubmitError("GCMole pattern check failed"))
   results.extend(input_api.canned_checks.CheckAuthorizedAuthor(
       input_api, output_api, bot_allowlist=[
-        'v8-ci-autoroll-builder@chops-service-accounts.iam.gserviceaccount.com'
+        'v8-ci-autoroll-builder@chops-service-accounts.iam.gserviceaccount.com',
+        'v8-ci-test262-import-export@chops-service-accounts.iam.gserviceaccount.com',
       ]))
   return results
+
+
+def _CheckPythonLiterals(input_api, output_api):
+  """Checks that all .pyl files are valid python literals."""
+  affected_files = [
+      af for af in input_api.AffectedFiles()
+      if af.LocalPath().endswith('.pyl')
+  ]
+
+  results = []
+  for af in affected_files:
+    try:
+      ast.literal_eval('\n'.join(af.NewContents()))
+    except SyntaxError as e:
+      results.append(output_api.PresubmitError(
+          f'Failed to parse python literal {af.LocalPath()}:\n' +
+          traceback.format_exc(0)
+      ))
+
+  return results
+
 
 
 def _CheckUnwantedDependencies(input_api, output_api):
@@ -257,8 +285,9 @@ def _CheckHeadersHaveIncludeGuards(input_api, output_api):
       files_to_check=(file_inclusion_pattern, ),
       files_to_skip=files_to_skip)
 
-  leading_src_pattern = input_api.re.compile(r'^src/')
-  dash_dot_slash_pattern = input_api.re.compile(r'[-./]')
+  leading_src_pattern = input_api.re.compile(r'^src[\\\/]')
+  dash_dot_slash_pattern = input_api.re.compile(r'[-.\\\/]')
+
   def PathToGuardMacro(path):
     """Guards should be of the form V8_PATH_TO_FILE_WITHOUT_SRC_H_."""
     x = input_api.re.sub(leading_src_pattern, 'v8_', path)
@@ -332,6 +361,51 @@ def _CheckNoInlineHeaderIncludesInNormalHeaders(input_api, output_api):
     return []
 
 
+def _CheckInlineHeadersIncludeNonInlineHeadersFirst(input_api, output_api):
+  """Checks that the first include in each inline header ("*-inl.h") is the
+  non-inl counterpart of that header, if that file exists."""
+  file_inclusion_pattern = r'.+-inl\.h'
+  include_error = (
+      'The first include of an -inl.h header should be the non-inl counterpart.'
+  )
+
+  def FilterFile(affected_file):
+    files_to_skip = _EXCLUDED_PATHS + input_api.DEFAULT_FILES_TO_SKIP + (
+        # Exclude macro-assembler-<ARCH>-inl.h headers because they have special
+        # include rules (arch-specific macro assembler headers must be included
+        # via the general macro-assembler.h).
+        r'src[\\\/]codegen[\\\/].*[\\\/]macro-assembler-.*-inl\.h',)
+    return input_api.FilterSourceFile(
+        affected_file,
+        files_to_check=(file_inclusion_pattern,),
+        files_to_skip=files_to_skip)
+
+  to_non_inl = lambda filename: filename[:-len("-inl.h")] + ".h"
+  problems = []
+  for f in input_api.AffectedSourceFiles(FilterFile):
+    if not os.path.isfile(to_non_inl(f.AbsoluteLocalPath())):
+      continue
+    non_inl_header = to_non_inl(f.LocalPath())
+    first_include = None
+    for line in f.NewContents():
+      if line.startswith('#include '):
+        first_include = line
+        break
+    expected_include = f'#include "{non_inl_header}"'
+    if first_include is None:
+      problems.append(f'{f.LocalPath()}: should include {non_inl_header}\n'
+                      '    found no includes in the file.')
+    elif not first_include.startswith(expected_include):
+      problems.append(
+          f'{f.LocalPath()}: should include {non_inl_header} first\n'
+          f'    found: {first_include}')
+
+  if problems:
+    return [output_api.PresubmitError(include_error, problems)]
+  else:
+    return []
+
+
 def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   """Attempts to prevent use of functions intended only for testing in
   non-testing code. For now this is just a best-effort implementation
@@ -397,19 +471,21 @@ def _CommonChecks(input_api, output_api):
   # with the canned PanProjectChecks. Need to make sure that the checks all
   # pass on all existing files.
   checks = [
-    input_api.canned_checks.CheckOwnersFormat,
-    input_api.canned_checks.CheckOwners,
-    _CheckCommitMessageBugEntry,
-    input_api.canned_checks.CheckPatchFormatted,
-    _CheckGenderNeutralInLicenses,
-    _V8PresubmitChecks,
-    _CheckUnwantedDependencies,
-    _CheckNoProductionCodeUsingTestOnlyFunctions,
-    _CheckHeadersHaveIncludeGuards,
-    _CheckNoInlineHeaderIncludesInNormalHeaders,
-    _CheckJSONFiles,
-    _CheckNoexceptAnnotations,
-    _RunTestsWithVPythonSpec,
+      input_api.canned_checks.CheckOwnersFormat,
+      input_api.canned_checks.CheckOwners,
+      _CheckCommitMessageBugEntry,
+      input_api.canned_checks.CheckPatchFormatted,
+      _CheckGenderNeutralInLicenses,
+      _V8PresubmitChecks,
+      _CheckUnwantedDependencies,
+      _CheckNoProductionCodeUsingTestOnlyFunctions,
+      _CheckHeadersHaveIncludeGuards,
+      _CheckNoInlineHeaderIncludesInNormalHeaders,
+      _CheckInlineHeadersIncludeNonInlineHeadersFirst,
+      _CheckJSONFiles,
+      _CheckNoexceptAnnotations,
+      _RunTestsWithVPythonSpec,
+      _CheckPythonLiterals,
   ]
 
   return sum([check(input_api, output_api) for check in checks], [])
@@ -428,26 +504,26 @@ def _SkipTreeCheck(input_api, output_api):
 def _CheckCommitMessageBugEntry(input_api, output_api):
   """Check that bug entries are well-formed in commit message."""
   bogus_bug_msg = (
-      'Bogus BUG entry: {}. Please specify the issue tracker prefix and the '
-      'issue number, separated by a colon, e.g. v8:123 or chromium:12345.')
+      'Bogus BUG entry: {}. Please specify prefix:number for v8 or chromium '
+      '(e.g. chromium:12345) or b/number for buganizer.')
   results = []
   for bug in (input_api.change.BUG or '').split(','):
     bug = bug.strip()
     if 'none'.startswith(bug.lower()):
       continue
-    if ':' not in bug:
+    if ':' not in bug and not bug.startswith('b/'):
       try:
-        if int(bug) > 100000:
-          # Rough indicator for current chromium bugs.
-          prefix_guess = 'chromium'
-        else:
-          prefix_guess = 'v8'
-        results.append(
-            'BUG entry requires issue tracker prefix, e.g. {}:{}'.format(
-                prefix_guess, bug))
+        if int(bug) < 10000000:
+          if int(bug) > 200000:
+            prefix_guess = 'chromium'
+          else:
+            prefix_guess = 'v8'
+          results.append(
+              'BUG entry requires issue tracker prefix, e.g. {}:{}'.format(
+                  prefix_guess, bug))
       except ValueError:
         results.append(bogus_bug_msg.format(bug))
-    elif not re.match(r'\w+:\d+', bug):
+    elif not re.match(r'\w+[:\/]\d+', bug):
       results.append(bogus_bug_msg.format(bug))
   return [output_api.PresubmitError(r) for r in results]
 
@@ -486,14 +562,18 @@ def _CheckNoexceptAnnotations(input_api, output_api):
   """
 
   def FilterFile(affected_file):
-    return input_api.FilterSourceFile(
-        affected_file,
-        files_to_check=(r'src[\\\/].*', r'test[\\\/].*'),
+    files_to_skip = _EXCLUDED_PATHS + (
         # Skip api.cc since we cannot easily add the 'noexcept' annotation to
         # public methods.
+        r'src[\\\/]api[\\\/]api\.cc',
         # Skip src/bigint/ because it's meant to be V8-independent.
-        files_to_skip=(r'src[\\\/]api[\\\/]api\.cc',
-                       r'src[\\\/]bigint[\\\/].*'))
+        r'src[\\\/]bigint[\\\/].*',
+    )
+    return input_api.FilterSourceFile(
+        affected_file,
+        files_to_check=(r'src[\\\/].*\.cc', r'src[\\\/].*\.h',
+                        r'test[\\\/].*\.cc', r'test[\\\/].*\.h'),
+        files_to_skip=files_to_skip)
 
   # matches any class name.
   class_name = r'\b([A-Z][A-Za-z0-9_:]*)(?:::\1)?'

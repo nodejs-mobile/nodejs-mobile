@@ -1,12 +1,35 @@
 'use strict';
 
+const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { isMainThread } = require('worker_threads');
+const isUnixLike = process.platform !== 'win32';
+let escapePOSIXShell;
 
-function rmSync(pathname) {
-  fs.rmSync(pathname, { maxRetries: 3, recursive: true, force: true });
+function rmSync(pathname, useSpawn) {
+  if (useSpawn) {
+    if (isUnixLike) {
+      escapePOSIXShell ??= require('./index.js').escapePOSIXShell;
+      for (let i = 0; i < 3; i++) {
+        const { status } = spawnSync(...escapePOSIXShell`rm -rf "${pathname}"`);
+        if (status === 0) {
+          break;
+        }
+      }
+    } else {
+      spawnSync(
+        process.execPath,
+        [
+          '-e',
+          `fs.rmSync(${JSON.stringify(pathname)}, { maxRetries: 3, recursive: true, force: true });`,
+        ],
+      );
+    }
+  } else {
+    fs.rmSync(pathname, { maxRetries: 3, recursive: true, force: true });
+  }
 }
 
 const testRoot = process.env.NODE_TEST_DIR ?
@@ -16,28 +39,30 @@ const testRoot = process.env.NODE_TEST_DIR ?
 // gets tools to ignore it by default or by simple rules, especially eslint.
 const tmpdirName = '.tmp.' +
   (process.env.TEST_SERIAL_ID || process.env.TEST_THREAD_ID || '0');
-const tmpPath = path.join(testRoot, tmpdirName);
+let tmpPath = path.join(testRoot, tmpdirName);
 
 let firstRefresh = true;
-function refresh() {
-  rmSync(tmpPath);
+function refresh(useSpawn = false) {
+  rmSync(tmpPath, useSpawn);
   fs.mkdirSync(tmpPath);
 
   if (firstRefresh) {
     firstRefresh = false;
     // Clean only when a test uses refresh. This allows for child processes to
     // use the tmpdir and only the parent will clean on exit.
-    process.on('exit', onexit);
+    process.on('exit', () => {
+      return onexit(useSpawn);
+    });
   }
 }
 
-function onexit() {
+function onexit(useSpawn) {
   // Change directory to avoid possible EBUSY
   if (isMainThread)
     process.chdir(testRoot);
 
   try {
-    rmSync(tmpPath);
+    rmSync(tmpPath, useSpawn);
   } catch (e) {
     console.error('Can\'t clean tmpdir:', tmpPath);
 
@@ -75,7 +100,13 @@ function fileURL(...paths) {
 module.exports = {
   fileURL,
   hasEnoughSpace,
-  path: tmpPath,
   refresh,
   resolve,
+
+  get path() {
+    return tmpPath;
+  },
+  set path(newPath) {
+    tmpPath = path.resolve(newPath);
+  },
 };

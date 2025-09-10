@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 // Flags: --trace-wasm --no-wasm-tier-up --liftoff
+// Flags: --no-wasm-inlining-call-indirect
 
 d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
@@ -41,8 +42,11 @@ let kCallIdentityFunction = builder.addFunction('call_identity', kSig_i_v)
                                 ])
                                 .exportFunc()
                                 .index;
+let kVoidFunction =
+    builder.addFunction('void', kSig_v_v).addBody([]).exportFunc().index;
 builder.addFunction('main', kSig_v_v)
     .addBody([
+      kExprCallFunction, kVoidFunction,                    // -
       kExprCallFunction, kCall23Function, kExprDrop,       // -
       kExprCallFunction, kUnnamedFunction, kExprDrop,      // -
       kExprCallFunction, kRet0Function, kExprDrop,         // -

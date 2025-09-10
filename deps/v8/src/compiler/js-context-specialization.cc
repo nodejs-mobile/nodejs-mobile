@@ -4,14 +4,21 @@
 
 #include "src/compiler/js-context-specialization.h"
 
+#include "src/base/logging.h"
+#include "src/compiler/access-builder.h"
 #include "src/compiler/common-operator.h"
+#include "src/compiler/compilation-dependencies.h"
+#include "src/compiler/feedback-source.h"
 #include "src/compiler/js-graph.h"
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/js-operator.h"
 #include "src/compiler/linkage.h"
-#include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
+#include "src/compiler/property-access-builder.h"
+#include "src/compiler/simplified-operator.h"
+#include "src/deoptimizer/deoptimize-reason.h"
 #include "src/objects/contexts-inl.h"
+#include "src/objects/property-cell.h"
 
 namespace v8 {
 namespace internal {
@@ -23,8 +30,12 @@ Reduction JSContextSpecialization::Reduce(Node* node) {
       return ReduceParameter(node);
     case IrOpcode::kJSLoadContext:
       return ReduceJSLoadContext(node);
+    case IrOpcode::kJSLoadScriptContext:
+      return ReduceJSLoadScriptContext(node);
     case IrOpcode::kJSStoreContext:
       return ReduceJSStoreContext(node);
+    case IrOpcode::kJSStoreScriptContext:
+      return ReduceJSStoreScriptContext(node);
     case IrOpcode::kJSGetImportMeta:
       return ReduceJSGetImportMeta(node);
     default:
@@ -40,7 +51,8 @@ Reduction JSContextSpecialization::ReduceParameter(Node* node) {
     // Constant-fold the function parameter {node}.
     Handle<JSFunction> function;
     if (closure().ToHandle(&function)) {
-      Node* value = jsgraph()->Constant(MakeRef(broker_, function));
+      Node* value =
+          jsgraph()->ConstantNoHole(MakeRef(broker_, function), broker());
       return Replace(value);
     }
   }
@@ -66,6 +78,24 @@ Reduction JSContextSpecialization::SimplifyJSLoadContext(Node* node,
   return Changed(node);
 }
 
+Reduction JSContextSpecialization::SimplifyJSLoadScriptContext(
+    Node* node, Node* new_context, size_t new_depth) {
+  DCHECK_EQ(IrOpcode::kJSLoadScriptContext, node->opcode());
+  const ContextAccess& access = ContextAccessOf(node->op());
+  DCHECK_LE(new_depth, access.depth());
+
+  if (new_depth == access.depth() &&
+      new_context == NodeProperties::GetContextInput(node)) {
+    return NoChange();
+  }
+
+  const Operator* op =
+      jsgraph_->javascript()->LoadScriptContext(new_depth, access.index());
+  NodeProperties::ReplaceContextInput(node, new_context);
+  NodeProperties::ChangeOp(node, op);
+  return Changed(node);
+}
+
 Reduction JSContextSpecialization::SimplifyJSStoreContext(Node* node,
                                                           Node* new_context,
                                                           size_t new_depth) {
@@ -85,6 +115,24 @@ Reduction JSContextSpecialization::SimplifyJSStoreContext(Node* node,
   return Changed(node);
 }
 
+Reduction JSContextSpecialization::SimplifyJSStoreScriptContext(
+    Node* node, Node* new_context, size_t new_depth) {
+  DCHECK_EQ(IrOpcode::kJSStoreScriptContext, node->opcode());
+  const ContextAccess& access = ContextAccessOf(node->op());
+  DCHECK_LE(new_depth, access.depth());
+
+  if (new_depth == access.depth() &&
+      new_context == NodeProperties::GetContextInput(node)) {
+    return NoChange();
+  }
+
+  const Operator* op =
+      jsgraph_->javascript()->StoreScriptContext(new_depth, access.index());
+  NodeProperties::ReplaceContextInput(node, new_context);
+  NodeProperties::ChangeOp(node, op);
+  return Changed(node);
+}
+
 namespace {
 
 bool IsContextParameter(Node* node) {
@@ -98,9 +146,9 @@ bool IsContextParameter(Node* node) {
 // context (which we want to read from or store to), try to return a
 // specialization context.  If successful, update {distance} to whatever
 // distance remains from the specialization context.
-base::Optional<ContextRef> GetSpecializationContext(
-    JSHeapBroker* broker, Node* node, size_t* distance,
-    Maybe<OuterContext> maybe_outer) {
+OptionalContextRef GetSpecializationContext(JSHeapBroker* broker, Node* node,
+                                            size_t* distance,
+                                            Maybe<OuterContext> maybe_outer) {
   switch (node->opcode()) {
     case IrOpcode::kHeapConstant: {
       // TODO(jgruber,chromium:1209798): Using kAssumeMemoryFence works around
@@ -128,7 +176,7 @@ base::Optional<ContextRef> GetSpecializationContext(
     default:
       break;
   }
-  return base::Optional<ContextRef>();
+  return OptionalContextRef();
 }
 
 }  // anonymous namespace
@@ -142,7 +190,7 @@ Reduction JSContextSpecialization::ReduceJSLoadContext(Node* node) {
   // First walk up the context chain in the graph as far as possible.
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  base::Optional<ContextRef> maybe_concrete =
+  OptionalContextRef maybe_concrete =
       GetSpecializationContext(broker(), context, &depth, outer());
   if (!maybe_concrete.has_value()) {
     // We do not have a concrete context object, so we can only partially reduce
@@ -152,48 +200,179 @@ Reduction JSContextSpecialization::ReduceJSLoadContext(Node* node) {
 
   // Now walk up the concrete context chain for the remaining depth.
   ContextRef concrete = maybe_concrete.value();
-  concrete = concrete.previous(&depth);
+  concrete = concrete.previous(broker(), &depth);
   if (depth > 0) {
     TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  if (!access.immutable()) {
+  if (!access.immutable() &&
+      !broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), ContextSidePropertyCell::kConst,
+          broker())) {
     // We found the requested context object but since the context slot is
     // mutable we can only partially reduce the load.
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
   // This will hold the final value, if we can figure it out.
-  base::Optional<ObjectRef> maybe_value;
-  maybe_value = concrete.get(static_cast<int>(access.index()));
+  OptionalObjectRef maybe_value;
+  maybe_value = concrete.get(broker(), static_cast<int>(access.index()));
 
   if (!maybe_value.has_value()) {
     TRACE_BROKER_MISSING(broker(), "slot value " << access.index()
                                                  << " for context "
                                                  << concrete);
-    return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  if (!maybe_value->IsSmi()) {
-    // Even though the context slot is immutable, the context might have escaped
-    // before the function to which it belongs has initialized the slot.
-    // We must be conservative and check if the value in the slot is currently
-    // the hole or undefined. Only if it is neither of these, can we be sure
-    // that it won't change anymore.
-    OddballType oddball_type = maybe_value->AsHeapObject().map().oddball_type();
-    if (oddball_type == OddballType::kUndefined ||
-        oddball_type == OddballType::kHole) {
-      return SimplifyJSLoadContext(node, jsgraph()->Constant(concrete), depth);
-    }
+  // Even though the context slot is immutable, the context might have escaped
+  // before the function to which it belongs has initialized the slot.
+  // We must be conservative and check if the value in the slot is currently
+  // the hole or undefined. Only if it is neither of these, can we be sure
+  // that it won't change anymore.
+  if (maybe_value->IsUndefined() || maybe_value->IsTheHole()) {
+    return SimplifyJSLoadContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
   // Success. The context load can be replaced with the constant.
-  Node* constant = jsgraph_->Constant(*maybe_value);
+  Node* constant = jsgraph_->ConstantNoHole(*maybe_value, broker());
   ReplaceWithValue(node, constant);
   return Replace(constant);
 }
 
+Reduction JSContextSpecialization::ReduceJSLoadScriptContext(Node* node) {
+  DCHECK_EQ(IrOpcode::kJSLoadScriptContext, node->opcode());
+
+  const ContextAccess& access = ContextAccessOf(node->op());
+  DCHECK(!access.immutable());
+  size_t depth = access.depth();
+
+  // First walk up the context chain in the graph as far as possible.
+  Node* effect = NodeProperties::GetEffectInput(node);
+  Node* control = NodeProperties::GetControlInput(node);
+  Node* context = NodeProperties::GetOuterContext(node, &depth);
+
+  OptionalContextRef maybe_concrete =
+      GetSpecializationContext(broker(), context, &depth, outer());
+  if (!maybe_concrete.has_value()) {
+    // We do not have a concrete context object, so we can only partially reduce
+    // the load by folding-in the outer context node.
+    return SimplifyJSLoadScriptContext(node, context, depth);
+  }
+
+  // Now walk up the concrete context chain for the remaining depth.
+  ContextRef concrete = maybe_concrete.value();
+  concrete = concrete.previous(broker(), &depth);
+  if (depth > 0) {
+    TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
+    return SimplifyJSLoadScriptContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+  }
+
+  DCHECK(concrete.object()->IsScriptContext());
+  auto maybe_property =
+      concrete.object()->GetScriptContextSideProperty(access.index());
+  if (!maybe_property) {
+    return SimplifyJSLoadScriptContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+  }
+  auto property = maybe_property.value();
+  switch (property) {
+    case ContextSidePropertyCell::kConst: {
+      OptionalObjectRef maybe_value =
+          concrete.get(broker(), static_cast<int>(access.index()));
+      if (!maybe_value.has_value()) {
+        TRACE_BROKER_MISSING(broker(), "slot value " << access.index()
+                                                     << " for context "
+                                                     << concrete);
+        return SimplifyJSLoadScriptContext(
+            node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+      }
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* constant = jsgraph_->ConstantNoHole(*maybe_value, broker());
+      ReplaceWithValue(node, constant, effect, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kSmi: {
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* load = effect = jsgraph_->graph()->NewNode(
+          jsgraph_->simplified()->LoadField(
+              AccessBuilder::ForContextSlotSmi(access.index())),
+          jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      ReplaceWithValue(node, load, effect, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kMutableInt32: {
+      Node* mutable_heap_number;
+      if (auto concrete_heap_number =
+              concrete.get(broker(), static_cast<int>(access.index()))) {
+        if (!concrete_heap_number->IsHeapNumber()) {
+          // TODO(victorgomes): In case the tag is out of date by now we could
+          // retry this reduction.
+          return NoChange();
+        }
+        mutable_heap_number = jsgraph_->ConstantMutableHeapNumber(
+            concrete_heap_number->AsHeapNumber(), broker());
+      } else {
+        mutable_heap_number = effect = jsgraph_->graph()->NewNode(
+            jsgraph_->simplified()->LoadField(
+                AccessBuilder::ForContextSlot(access.index())),
+            jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      }
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* int32_load = effect = jsgraph_->graph()->NewNode(
+          jsgraph_->simplified()->LoadField(AccessBuilder::ForHeapInt32Value()),
+          mutable_heap_number, effect, control);
+      ReplaceWithValue(node, int32_load, effect, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kMutableHeapNumber: {
+      Node* mutable_heap_number;
+      if (auto concrete_heap_number =
+              concrete.get(broker(), static_cast<int>(access.index()))) {
+        if (!concrete_heap_number->IsHeapNumber()) {
+          // TODO(victorgomes): In case the tag is out of date by now we could
+          // retry this reduction.
+          return NoChange();
+        }
+        mutable_heap_number = jsgraph_->ConstantMutableHeapNumber(
+            concrete_heap_number->AsHeapNumber(), broker());
+      } else {
+        mutable_heap_number = effect = jsgraph_->graph()->NewNode(
+            jsgraph_->simplified()->LoadField(
+                AccessBuilder::ForContextSlot(access.index())),
+            jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      }
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* double_load = effect =
+          jsgraph_->graph()->NewNode(jsgraph_->simplified()->LoadField(
+                                         AccessBuilder::ForHeapNumberValue()),
+                                     mutable_heap_number, effect, control);
+      ReplaceWithValue(node, double_load, effect, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kOther: {
+      // Do a normal context load.
+      Node* load = effect = jsgraph_->graph()->NewNode(
+          jsgraph_->simplified()->LoadField(
+              AccessBuilder::ForContextSlot(access.index())),
+          jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      ReplaceWithValue(node, load, effect, control);
+      return Changed(node);
+    }
+    default:
+      UNREACHABLE();
+  }
+}
 
 Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
   DCHECK_EQ(IrOpcode::kJSStoreContext, node->opcode());
@@ -205,7 +384,7 @@ Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
   // or hit a node that does not have a CreateXYZContext operator.
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  base::Optional<ContextRef> maybe_concrete =
+  OptionalContextRef maybe_concrete =
       GetSpecializationContext(broker(), context, &depth, outer());
   if (!maybe_concrete.has_value()) {
     // We do not have a concrete context object, so we can only partially reduce
@@ -215,24 +394,177 @@ Reduction JSContextSpecialization::ReduceJSStoreContext(Node* node) {
 
   // Now walk up the concrete context chain for the remaining depth.
   ContextRef concrete = maybe_concrete.value();
-  concrete = concrete.previous(&depth);
+  concrete = concrete.previous(broker(), &depth);
   if (depth > 0) {
     TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
-    return SimplifyJSStoreContext(node, jsgraph()->Constant(concrete), depth);
+    return SimplifyJSStoreContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
   }
 
-  return SimplifyJSStoreContext(node, jsgraph()->Constant(concrete), depth);
+  return SimplifyJSStoreContext(
+      node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
 }
 
-base::Optional<ContextRef> GetModuleContext(JSHeapBroker* broker, Node* node,
-                                            Maybe<OuterContext> maybe_context) {
+Reduction JSContextSpecialization::ReduceJSStoreScriptContext(Node* node) {
+  DCHECK(v8_flags.script_context_mutable_heap_number ||
+         v8_flags.const_tracking_let);
+  DCHECK_EQ(IrOpcode::kJSStoreScriptContext, node->opcode());
+
+  const ContextAccess& access = ContextAccessOf(node->op());
+  size_t depth = access.depth();
+
+  // First walk up the context chain in the graph until we reduce the depth to 0
+  // or hit a node that does not have a CreateXYZContext operator.
+  Node* context = NodeProperties::GetOuterContext(node, &depth);
+  Node* value = NodeProperties::GetValueInput(node, 0);
+  Effect effect{NodeProperties::GetEffectInput(node)};
+  Control control{NodeProperties::GetControlInput(node)};
+
+  OptionalContextRef maybe_concrete =
+      GetSpecializationContext(broker(), context, &depth, outer());
+  if (!maybe_concrete.has_value()) {
+    // We do not have a concrete context object, so we can only partially reduce
+    // the load by folding-in the outer context node.
+    return SimplifyJSStoreScriptContext(node, context, depth);
+  }
+
+  // Now walk up the concrete context chain for the remaining depth.
+  ContextRef concrete = maybe_concrete.value();
+  concrete = concrete.previous(broker(), &depth);
+  if (depth > 0) {
+    TRACE_BROKER_MISSING(broker(), "previous value for context " << concrete);
+    return SimplifyJSStoreScriptContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+  }
+  DCHECK(concrete.object()->IsScriptContext());
+  auto maybe_property =
+      concrete.object()->GetScriptContextSideProperty(access.index());
+  if (!maybe_property) {
+    return SimplifyJSStoreScriptContext(
+        node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+  }
+  auto property = maybe_property.value();
+  PropertyAccessBuilder access_builder(jsgraph(), broker());
+  if (property == ContextSidePropertyCell::kConst) {
+    compiler::OptionalObjectRef constant =
+        concrete.get(broker(), static_cast<int>(access.index()));
+    if (!constant.has_value() ||
+        (constant->IsString() && !constant->IsInternalizedString())) {
+      return SimplifyJSStoreScriptContext(
+          node, jsgraph()->ConstantNoHole(concrete, broker()), depth);
+    }
+    broker()->dependencies()->DependOnScriptContextSlotProperty(
+        concrete, access.index(), property, broker());
+    access_builder.BuildCheckValue(value, &effect, control, *constant);
+    ReplaceWithValue(node, effect, effect, control);
+    return Changed(node);
+  }
+
+  if (!v8_flags.script_context_mutable_heap_number) {
+    // Do a normal context store.
+    Node* store = jsgraph()->graph()->NewNode(
+        jsgraph()->simplified()->StoreField(
+            AccessBuilder::ForContextSlot(access.index())),
+        jsgraph()->ConstantNoHole(concrete, broker()), value, effect, control);
+    ReplaceWithValue(node, store, store, control);
+    return Changed(node);
+  }
+
+  switch (property) {
+    case ContextSidePropertyCell::kConst:
+      UNREACHABLE();
+    case ContextSidePropertyCell::kSmi: {
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* smi_value = access_builder.BuildCheckSmi(value, &effect, control);
+      Node* smi_store = jsgraph()->graph()->NewNode(
+          jsgraph()->simplified()->StoreField(
+              AccessBuilder::ForContextSlotSmi(access.index())),
+          jsgraph()->ConstantNoHole(concrete, broker()), smi_value, effect,
+          control);
+      ReplaceWithValue(node, smi_store, smi_store, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kMutableInt32: {
+      Node* mutable_heap_number;
+      if (auto concrete_heap_number =
+              concrete.get(broker(), static_cast<int>(access.index()))) {
+        if (!concrete_heap_number->IsHeapNumber()) {
+          // TODO(victorgomes): In case the tag is out of date by now we could
+          // retry this reduction.
+          return NoChange();
+        }
+        mutable_heap_number = jsgraph_->ConstantMutableHeapNumber(
+            concrete_heap_number->AsHeapNumber(), broker());
+      } else {
+        mutable_heap_number = effect = jsgraph_->graph()->NewNode(
+            jsgraph_->simplified()->LoadField(
+                AccessBuilder::ForContextSlot(access.index())),
+            jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      }
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* input_number =
+          access_builder.BuildCheckNumberFitsInt32(value, &effect, control);
+      Node* double_store = jsgraph()->graph()->NewNode(
+          jsgraph()->simplified()->StoreField(
+              AccessBuilder::ForHeapInt32Value()),
+          mutable_heap_number, input_number, effect, control);
+      ReplaceWithValue(node, double_store, double_store, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kMutableHeapNumber: {
+      Node* mutable_heap_number;
+      if (auto concrete_heap_number =
+              concrete.get(broker(), static_cast<int>(access.index()))) {
+        if (!concrete_heap_number->IsHeapNumber()) {
+          // TODO(victorgomes): In case the tag is out of date by now we could
+          // retry this reduction.
+          return NoChange();
+        }
+        mutable_heap_number = jsgraph_->ConstantMutableHeapNumber(
+            concrete_heap_number->AsHeapNumber(), broker());
+      } else {
+        mutable_heap_number = effect = jsgraph_->graph()->NewNode(
+            jsgraph_->simplified()->LoadField(
+                AccessBuilder::ForContextSlot(access.index())),
+            jsgraph_->ConstantNoHole(concrete, broker()), effect, control);
+      }
+      broker()->dependencies()->DependOnScriptContextSlotProperty(
+          concrete, access.index(), property, broker());
+      Node* input_number =
+          access_builder.BuildCheckNumber(value, &effect, control);
+      Node* double_store = jsgraph()->graph()->NewNode(
+          jsgraph()->simplified()->StoreField(
+              AccessBuilder::ForHeapNumberValue()),
+          mutable_heap_number, input_number, effect, control);
+      ReplaceWithValue(node, double_store, double_store, control);
+      return Changed(node);
+    }
+    case ContextSidePropertyCell::kOther: {
+      // Do a normal context store.
+      Node* store = jsgraph()->graph()->NewNode(
+          jsgraph()->simplified()->StoreField(
+              AccessBuilder::ForContextSlot(access.index())),
+          jsgraph()->ConstantNoHole(concrete, broker()), value, effect,
+          control);
+      ReplaceWithValue(node, store, store, control);
+      return Changed(node);
+    }
+    default:
+      UNREACHABLE();
+  }
+}
+
+OptionalContextRef GetModuleContext(JSHeapBroker* broker, Node* node,
+                                    Maybe<OuterContext> maybe_context) {
   size_t depth = std::numeric_limits<size_t>::max();
   Node* context = NodeProperties::GetOuterContext(node, &depth);
 
-  auto find_context = [](ContextRef c) {
-    while (c.map().instance_type() != MODULE_CONTEXT_TYPE) {
+  auto find_context = [broker](ContextRef c) {
+    while (c.map(broker).instance_type() != MODULE_CONTEXT_TYPE) {
       size_t depth = 1;
-      c = c.previous(&depth);
+      c = c.previous(broker, &depth);
       CHECK_EQ(depth, 0);
     }
     return c;
@@ -266,19 +598,18 @@ base::Optional<ContextRef> GetModuleContext(JSHeapBroker* broker, Node* node,
       break;
   }
 
-  return base::Optional<ContextRef>();
+  return OptionalContextRef();
 }
 
 Reduction JSContextSpecialization::ReduceJSGetImportMeta(Node* node) {
-  base::Optional<ContextRef> maybe_context =
-      GetModuleContext(broker(), node, outer());
+  OptionalContextRef maybe_context = GetModuleContext(broker(), node, outer());
   if (!maybe_context.has_value()) return NoChange();
 
   ContextRef context = maybe_context.value();
-  base::Optional<ObjectRef> module = context.get(Context::EXTENSION_INDEX);
+  OptionalObjectRef module = context.get(broker(), Context::EXTENSION_INDEX);
   if (!module.has_value()) return NoChange();
-  base::Optional<ObjectRef> import_meta =
-      module->AsSourceTextModule().import_meta();
+  OptionalObjectRef import_meta =
+      module->AsSourceTextModule().import_meta(broker());
   if (!import_meta.has_value()) return NoChange();
   if (!import_meta->IsJSObject()) {
     DCHECK(import_meta->IsTheHole());
@@ -287,7 +618,7 @@ Reduction JSContextSpecialization::ReduceJSGetImportMeta(Node* node) {
     return NoChange();
   }
 
-  Node* import_meta_const = jsgraph()->Constant(*import_meta);
+  Node* import_meta_const = jsgraph()->ConstantNoHole(*import_meta, broker());
   ReplaceWithValue(node, import_meta_const);
   return Changed(import_meta_const);
 }

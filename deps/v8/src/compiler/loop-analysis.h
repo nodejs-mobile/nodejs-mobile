@@ -8,11 +8,11 @@
 #include "src/base/iterator.h"
 #include "src/common/globals.h"
 #include "src/compiler/compiler-source-position-table.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/node-marker.h"
 #include "src/compiler/node-origin-table.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/zone/zone-containers.h"
 
 namespace v8 {
@@ -26,6 +26,7 @@ namespace compiler {
 static const int kAssumedLoopEntryIndex = 0;  // assume loops are entered here.
 
 class LoopFinderImpl;
+class AllNodes;
 
 using NodeRange = base::iterator_range<Node**>;
 
@@ -174,12 +175,14 @@ class LoopTree : public ZoneObject {
 class V8_EXPORT_PRIVATE LoopFinder {
  public:
   // Build a loop tree for the entire graph.
-  static LoopTree* BuildLoopTree(Graph* graph, TickCounter* tick_counter,
+  static LoopTree* BuildLoopTree(TFGraph* graph, TickCounter* tick_counter,
                                  Zone* temp_zone);
 
-  static bool HasMarkedExits(LoopTree* loop_tree_, const LoopTree::Loop* loop);
+  static bool HasMarkedExits(LoopTree* loop_tree, const LoopTree::Loop* loop);
 
 #if V8_ENABLE_WEBASSEMBLY
+  enum class Purpose { kLoopPeeling, kLoopUnrolling };
+
   // Find all nodes in the loop headed by {loop_header} if it contains no nested
   // loops.
   // Assumption: *if* this loop has no nested loops, all exits from the loop are
@@ -190,7 +193,8 @@ class V8_EXPORT_PRIVATE LoopFinder {
   //    calls to a set of wasm builtins,
   // 3) a nested loop is found in the loop.
   static ZoneUnorderedSet<Node*>* FindSmallInnermostLoopFromHeader(
-      Node* loop_header, Zone* zone, size_t max_size, bool calls_are_large);
+      Node* loop_header, AllNodes& all_nodes, Zone* zone, size_t max_size,
+      Purpose purpose);
 #endif
 };
 
@@ -201,7 +205,7 @@ class NodeCopier {
   //        the original nodes and all copies.
   // {p}: A vector that holds the original nodes and all copies.
   // {copy_count}: How many times the nodes should be copied.
-  NodeCopier(Graph* graph, uint32_t max, NodeVector* p, uint32_t copy_count)
+  NodeCopier(TFGraph* graph, uint32_t max, NodeVector* p, uint32_t copy_count)
       : node_map_(graph, max), copies_(p), copy_count_(copy_count) {
     DCHECK_GT(copy_count, 0);
   }
@@ -220,7 +224,7 @@ class NodeCopier {
   void Insert(Node* original, Node* copy);
 
   template <typename InputIterator>
-  void CopyNodes(Graph* graph, Zone* tmp_zone_, Node* dead,
+  void CopyNodes(TFGraph* graph, Zone* tmp_zone_, Node* dead,
                  base::iterator_range<InputIterator> nodes,
                  SourcePositionTable* source_positions,
                  NodeOriginTable* node_origins) {

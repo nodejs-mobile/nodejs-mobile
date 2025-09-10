@@ -28,7 +28,14 @@ class InjectedScriptHost;
 class V8ContextInfo;
 class V8InspectorImpl;
 
-enum class V8InternalValueType { kNone, kEntry, kScope, kScopeList };
+enum class V8InternalValueType {
+  kNone,
+  kEntry,
+  kScope,
+  kScopeList,
+  kPrivateMethodList,
+  kPrivateMethod
+};
 
 class InspectedContext {
  public:
@@ -64,6 +71,7 @@ class InspectedContext {
   friend class V8InspectorImpl;
   InspectedContext(V8InspectorImpl*, const V8ContextInfo&, int contextId);
 
+  class ContextCollectedCallbacks;
   class WeakCallbackData;
 
   V8InspectorImpl* m_inspector;

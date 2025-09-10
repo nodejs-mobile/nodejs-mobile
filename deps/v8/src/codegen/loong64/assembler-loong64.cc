@@ -7,10 +7,10 @@
 #if V8_TARGET_ARCH_LOONG64
 
 #include "src/base/cpu.h"
+#include "src/codegen/flush-instruction-cache.h"
 #include "src/codegen/loong64/assembler-loong64-inl.h"
 #include "src/codegen/machine-type.h"
 #include "src/codegen/safepoint-table.h"
-#include "src/codegen/string-constants.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/objects/heap-number-inl.h"
 
@@ -92,6 +92,7 @@ Register ToRegister(int num) {
 // Implementation of RelocInfo.
 
 const int RelocInfo::kApplyMask =
+    RelocInfo::ModeMask(RelocInfo::NEAR_BUILTIN_ENTRY) |
     RelocInfo::ModeMask(RelocInfo::INTERNAL_REFERENCE) |
     RelocInfo::ModeMask(RelocInfo::RELATIVE_CODE_TARGET);
 
@@ -123,15 +124,8 @@ Operand Operand::EmbeddedNumber(double value) {
   int32_t smi;
   if (DoubleToSmiInteger(value, &smi)) return Operand(Smi::FromInt(smi));
   Operand result(0, RelocInfo::FULL_EMBEDDED_OBJECT);
-  result.is_heap_object_request_ = true;
-  result.value_.heap_object_request = HeapObjectRequest(value);
-  return result;
-}
-
-Operand Operand::EmbeddedStringConstant(const StringConstantBase* str) {
-  Operand result(0, RelocInfo::FULL_EMBEDDED_OBJECT);
-  result.is_heap_object_request_ = true;
-  result.value_.heap_object_request = HeapObjectRequest(str);
+  result.is_heap_number_request_ = true;
+  result.value_.heap_number_request = HeapNumberRequest(value);
   return result;
 }
 
@@ -141,23 +135,19 @@ MemOperand::MemOperand(Register base, int32_t offset)
 MemOperand::MemOperand(Register base, Register index)
     : base_(base), index_(index), offset_(0) {}
 
-void Assembler::AllocateAndInstallRequestedHeapObjects(Isolate* isolate) {
-  DCHECK_IMPLIES(isolate == nullptr, heap_object_requests_.empty());
-  for (auto& request : heap_object_requests_) {
+void Assembler::AllocateAndInstallRequestedHeapNumbers(LocalIsolate* isolate) {
+  DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
+  for (auto& request : heap_number_requests_) {
     Handle<HeapObject> object;
-    switch (request.kind()) {
-      case HeapObjectRequest::kHeapNumber:
-        object = isolate->factory()->NewHeapNumber<AllocationType::kOld>(
-            request.heap_number());
-        break;
-      case HeapObjectRequest::kStringConstant:
-        const StringConstantBase* str = request.string();
-        CHECK_NOT_NULL(str);
-        object = str->AllocateStringConstant(isolate);
-        break;
-    }
+    object = isolate->factory()->NewHeapNumber<AllocationType::kOld>(
+        request.heap_number());
     Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
-    set_target_value_at(pc, reinterpret_cast<uint64_t>(object.location()));
+    EmbeddedObjectIndex index = AddEmbeddedObject(object);
+    if (IsLu32i_d(instr_at(pc + 2 * kInstrSize))) {
+      set_target_value_at(pc, static_cast<uint64_t>(index));
+    } else {
+      set_target_compressed_value_at(pc, static_cast<uint32_t>(index));
+    }
   }
 }
 
@@ -167,7 +157,8 @@ void Assembler::AllocateAndInstallRequestedHeapObjects(Isolate* isolate) {
 Assembler::Assembler(const AssemblerOptions& options,
                      std::unique_ptr<AssemblerBuffer> buffer)
     : AssemblerBase(options, std::move(buffer)),
-      scratch_register_list_({t7, t6}) {
+      scratch_register_list_({t6, t7, t8}),
+      scratch_fpregister_list_({f31}) {
   reloc_info_writer.Reposition(buffer_start_ + buffer_->size(), pc_);
 
   last_trampoline_pool_end_ = 0;
@@ -175,28 +166,31 @@ Assembler::Assembler(const AssemblerOptions& options,
   trampoline_pool_blocked_nesting_ = 0;
   // We leave space (16 * kTrampolineSlotsSize)
   // for BlockTrampolinePoolScope buffer.
-  next_buffer_check_ = FLAG_force_long_branches
+  next_buffer_check_ = v8_flags.force_long_branches
                            ? kMaxInt
                            : kMax16BranchOffset - kTrampolineSlotsSize * 16;
   internal_trampoline_exception_ = false;
   last_bound_pos_ = 0;
 
-  trampoline_emitted_ = FLAG_force_long_branches;
+  trampoline_emitted_ = v8_flags.force_long_branches;
   unbound_labels_count_ = 0;
   block_buffer_growth_ = false;
 }
 
-void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
-                        SafepointTableBuilder* safepoint_table_builder,
+void Assembler::GetCode(Isolate* isolate, CodeDesc* desc) {
+  GetCode(isolate->main_thread_local_isolate(), desc);
+}
+void Assembler::GetCode(LocalIsolate* isolate, CodeDesc* desc,
+                        SafepointTableBuilderBase* safepoint_table_builder,
                         int handler_table_offset) {
   // As a crutch to avoid having to add manual Align calls wherever we use a
-  // raw workflow to create Code objects (mostly in tests), add another Align
-  // call here. It does no harm - the end of the Code object is aligned to the
-  // (larger) kCodeAlignment anyways.
+  // raw workflow to create InstructionStream objects (mostly in tests), add
+  // another Align call here. It does no harm - the end of the InstructionStream
+  // object is aligned to the (larger) kCodeAlignment anyways.
   // TODO(jgruber): Consider moving responsibility for proper alignment to
   // metadata table builders (safepoint, handler, constant pool, code
   // comments).
-  DataAlign(Code::kMetadataAlignment);
+  DataAlign(InstructionStream::kMetadataAlignment);
 
   // EmitForbiddenSlotInstruction(); TODO:LOONG64 why?
 
@@ -204,15 +198,19 @@ void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
 
   DCHECK(pc_ <= reloc_info_writer.pos());  // No overlap.
 
-  AllocateAndInstallRequestedHeapObjects(isolate);
+  AllocateAndInstallRequestedHeapNumbers(isolate);
 
   // Set up code descriptor.
   // TODO(jgruber): Reconsider how these offsets and sizes are maintained up to
   // this point to make CodeDesc initialization less fiddly.
 
   static constexpr int kConstantPoolSize = 0;
+  static constexpr int kBuiltinJumpTableInfoSize = 0;
   const int instruction_size = pc_offset();
-  const int code_comments_offset = instruction_size - code_comments_size;
+  const int builtin_jump_table_info_offset =
+      instruction_size - kBuiltinJumpTableInfoSize;
+  const int code_comments_offset =
+      builtin_jump_table_info_offset - code_comments_size;
   const int constant_pool_offset = code_comments_offset - kConstantPoolSize;
   const int handler_table_offset2 = (handler_table_offset == kNoHandlerTable)
                                         ? constant_pool_offset
@@ -225,7 +223,8 @@ void Assembler::GetCode(Isolate* isolate, CodeDesc* desc,
       static_cast<int>(reloc_info_writer.pos() - buffer_->start());
   CodeDesc::Initialize(desc, this, safepoint_table_offset,
                        handler_table_offset2, constant_pool_offset,
-                       code_comments_offset, reloc_info_offset);
+                       code_comments_offset, builtin_jump_table_info_offset,
+                       reloc_info_offset);
 }
 
 void Assembler::Align(int m) {
@@ -367,10 +366,9 @@ bool Assembler::IsMov(Instr instr, Register rd, Register rj) {
   return instr == instr1;
 }
 
-bool Assembler::IsPcAddi(Instr instr, Register rd, int32_t si20) {
-  DCHECK(is_int20(si20));
-  Instr instr1 = PCADDI | (si20 & 0xfffff) << kRjShift | rd.code();
-  return instr == instr1;
+bool Assembler::IsPcAddi(Instr instr) {
+  uint32_t opcode = (instr >> 25) << 25;
+  return opcode == PCADDI;
 }
 
 bool Assembler::IsNop(Instr instr, unsigned int type) {
@@ -459,26 +457,23 @@ int Assembler::target_at(int pos, bool is_internal) {
     }
   }
 
-  // Check we have a branch or jump instruction.
-  DCHECK(IsBranch(instr) || IsPcAddi(instr, t8, 16));
+  // Check we have a branch, jump or pcaddi instruction.
+  DCHECK(IsBranch(instr) || IsPcAddi(instr));
   // Do NOT change this to <<2. We rely on arithmetic shifts here, assuming
   // the compiler uses arithmetic shifts for signed integers.
   if (IsBranch(instr)) {
     return AddBranchOffset(pos, instr);
-  } else {
-    DCHECK(IsPcAddi(instr, t8, 16));
-    // see BranchLong(Label* L) and BranchAndLinkLong ??
-    int32_t imm32;
-    Instr instr_lu12i_w = instr_at(pos + 1 * kInstrSize);
-    Instr instr_ori = instr_at(pos + 2 * kInstrSize);
-    DCHECK(IsLu12i_w(instr_lu12i_w));
-    imm32 = ((instr_lu12i_w >> 5) & 0xfffff) << 12;
-    imm32 |= ((instr_ori >> 10) & static_cast<int32_t>(kImm12Mask));
-    if (imm32 == kEndOfJumpChain) {
+  } else if (IsPcAddi(instr)) {
+    // see LoadLabelRelative
+    int32_t si20;
+    si20 = (instr >> kRjShift) & 0xfffff;
+    if (si20 == kEndOfJumpChain) {
       // EndOfChain sentinel is returned directly, not relative to pc or pos.
       return kEndOfChain;
     }
-    return pos + imm32;
+    return pos + (si20 << 2);
+  } else {
+    UNREACHABLE();
   }
 }
 
@@ -522,7 +517,20 @@ void Assembler::target_at_put(int pos, int target_pos, bool is_internal) {
     DCHECK(target_pos == kEndOfChain || target_pos >= 0);
     // Emitted label constant, not part of a branch.
     // Make label relative to Code pointer of generated Code object.
-    instr_at_put(pos, target_pos + (Code::kHeaderSize - kHeapObjectTag));
+    instr_at_put(
+        pos, target_pos + (InstructionStream::kHeaderSize - kHeapObjectTag));
+    return;
+  }
+
+  if (IsPcAddi(instr)) {
+    // For LoadLabelRelative function.
+    int32_t imm = target_pos - pos;
+    DCHECK_EQ(imm & 3, 0);
+    DCHECK(is_int22(imm));
+    uint32_t siMask = 0xfffff << kRjShift;
+    uint32_t si20 = ((imm >> 2) << kRjShift) & siMask;
+    instr = (instr & ~siMask) | si20;
+    instr_at_put(pos, instr);
     return;
   }
 
@@ -590,7 +598,7 @@ void Assembler::bind_to(Label* L, int pos) {
         target_at_put(fixup_pos, pos, false);
       } else {
         DCHECK(IsJ(instr) || IsLu12i_w(instr) || IsEmittedConstant(instr) ||
-               IsPcAddi(instr, t8, 8));
+               IsPcAddi(instr));
         target_at_put(fixup_pos, pos, false);
       }
     }
@@ -952,7 +960,8 @@ void Assembler::label_at_put(Label* L, int at_offset) {
   int target_pos;
   if (L->is_bound()) {
     target_pos = L->pos();
-    instr_at_put(at_offset, target_pos + (Code::kHeaderSize - kHeapObjectTag));
+    instr_at_put(at_offset, target_pos + (InstructionStream::kHeaderSize -
+                                          kHeapObjectTag));
   } else {
     if (L->is_linked()) {
       target_pos = L->pos();  // L's link.
@@ -2084,28 +2093,19 @@ void Assembler::AdjustBaseAndOffset(MemOperand* src) {
   src->offset_ = 0;
 }
 
-int Assembler::RelocateInternalReference(RelocInfo::Mode rmode, Address pc,
-                                         intptr_t pc_delta) {
-  DCHECK(RelocInfo::IsInternalReference(rmode));
-  int64_t* p = reinterpret_cast<int64_t*>(pc);
-  if (*p == kEndOfJumpChain) {
-    return 0;  // Number of instructions patched.
-  }
-  *p += pc_delta;
-  return 2;  // Number of instructions patched.
-}
-
-void Assembler::RelocateRelativeReference(RelocInfo::Mode rmode, Address pc,
-                                          intptr_t pc_delta) {
-  DCHECK(RelocInfo::IsRelativeCodeTarget(rmode));
+void Assembler::RelocateRelativeReference(
+    RelocInfo::Mode rmode, Address pc, intptr_t pc_delta,
+    WritableJitAllocation* jit_allocation) {
+  DCHECK(RelocInfo::IsRelativeCodeTarget(rmode) ||
+         RelocInfo::IsNearBuiltinEntry(rmode));
   Instr instr = instr_at(pc);
   int32_t offset = instr & kImm26Mask;
   offset = (((offset & 0x3ff) << 22 >> 6) | ((offset >> 10) & kImm16Mask)) << 2;
   offset -= pc_delta;
-  uint32_t* p = reinterpret_cast<uint32_t*>(pc);
   offset >>= 2;
   offset = ((offset & kImm16Mask) << kRkShift) | ((offset & kImm26Mask) >> 16);
-  *p = (instr & ~kImm26Mask) | offset;
+  Instr new_instr = (instr & ~kImm26Mask) | offset;
+  instr_at_put(pc, new_instr, jit_allocation);
   return;
 }
 
@@ -2123,7 +2123,7 @@ void Assembler::GrowBuffer() {
   // Set up new buffer.
   std::unique_ptr<AssemblerBuffer> new_buffer = buffer_->Grow(new_size);
   DCHECK_EQ(new_size, new_buffer->size());
-  byte* new_start = new_buffer->start();
+  uint8_t* new_start = new_buffer->start();
 
   // Copy the data.
   intptr_t pc_delta = new_start - buffer_start_;
@@ -2164,27 +2164,17 @@ void Assembler::db(uint8_t data) {
   pc_ += sizeof(uint8_t);
 }
 
-void Assembler::dd(uint32_t data, RelocInfo::Mode rmode) {
+void Assembler::dd(uint32_t data) {
   if (!is_buffer_growth_blocked()) {
     CheckBuffer();
-  }
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
-           RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
   }
   *reinterpret_cast<uint32_t*>(pc_) = data;
   pc_ += sizeof(uint32_t);
 }
 
-void Assembler::dq(uint64_t data, RelocInfo::Mode rmode) {
+void Assembler::dq(uint64_t data) {
   if (!is_buffer_growth_blocked()) {
     CheckBuffer();
-  }
-  if (!RelocInfo::IsNoInfo(rmode)) {
-    DCHECK(RelocInfo::IsDataEmbeddedObject(rmode) ||
-           RelocInfo::IsLiteralConstant(rmode));
-    RecordRelocInfo(rmode);
   }
   *reinterpret_cast<uint64_t*>(pc_) = data;
   pc_ += sizeof(uint64_t);
@@ -2209,7 +2199,7 @@ void Assembler::dd(Label* label) {
 void Assembler::RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data) {
   if (!ShouldRecordRelocInfo(rmode)) return;
   // We do not try to reuse pool constants.
-  RelocInfo rinfo(reinterpret_cast<Address>(pc_), rmode, data, Code());
+  RelocInfo rinfo(reinterpret_cast<Address>(pc_), rmode, data);
   DCHECK_GE(buffer_space(), kMaxRelocSize);  // Too late to grow buffer here.
   reloc_info_writer.Write(&rinfo);
 }
@@ -2283,7 +2273,7 @@ Address Assembler::target_address_at(Address pc) {
   Instr instr1 = instr_at(pc + 1 * kInstrSize);
   Instr instr2 = instr_at(pc + 2 * kInstrSize);
 
-  // Interpret 4 instructions for address generated by li: See listing in
+  // Interpret 3 instructions for address generated by li: See listing in
   // Assembler::set_target_address_at() just below.
   DCHECK((IsLu12i_w(instr0) && (IsOri(instr1)) && (IsLu32i_d(instr2))));
 
@@ -2298,6 +2288,22 @@ Address Assembler::target_address_at(Address pc) {
   return static_cast<Address>(addr);
 }
 
+uint32_t Assembler::target_compressed_address_at(Address pc) {
+  Instr instr0 = instr_at(pc);
+  Instr instr1 = instr_at(pc + 1 * kInstrSize);
+
+  // Interpret 2 instructions for address generated by li: See listing in
+  // Assembler::set_target_compressed_value_at just below.
+  DCHECK((IsLu12i_w(instr0) && (IsOri(instr1))));
+
+  // Assemble the 32 bit value.
+  uint32_t hi20 = ((uint32_t)(instr0 >> 5) & 0xfffff) << 12;
+  uint32_t low12 = ((uint32_t)(instr1 >> 10) & 0xfff);
+  uint32_t addr = static_cast<uint32_t>(hi20 | low12);
+
+  return addr;
+}
+
 // On loong64, a target address is stored in a 3-instruction sequence:
 //    0: lu12i_w(rd, (j.imm64_ >> 12) & kImm20Mask);
 //    1: ori(rd, rd, j.imm64_  & kImm12Mask);
@@ -2307,6 +2313,7 @@ Address Assembler::target_address_at(Address pc) {
 // and flush the i-cache.
 //
 void Assembler::set_target_value_at(Address pc, uint64_t target,
+                                    WritableJitAllocation* jit_allocation,
                                     ICacheFlushMode icache_flush_mode) {
   // There is an optimization where only 3 instructions are used to load address
   // in code on LOONG64 because only 48-bits of address is effectively used.
@@ -2318,18 +2325,18 @@ void Assembler::set_target_value_at(Address pc, uint64_t target,
   Instr instr0 = instr_at(pc);
   Instr instr1 = instr_at(pc + kInstrSize);
   Instr instr2 = instr_at(pc + kInstrSize * 2);
-  DCHECK(IsLu12i_w(instr0) && IsOri(instr1) && IsLu32i_d(instr2) ||
+  DCHECK((IsLu12i_w(instr0) && IsOri(instr1) && IsLu32i_d(instr2)) ||
          IsB(instr0));
 #endif
 
   Instr instr = instr_at(pc);
-  uint32_t* p = reinterpret_cast<uint32_t*>(pc);
   if (IsB(instr)) {
     int32_t offset = (target - pc) >> 2;
     CHECK(is_int26(offset));
     offset =
         ((offset & kImm16Mask) << kRkShift) | ((offset & kImm26Mask) >> 16);
-    *p = (instr & ~kImm26Mask) | offset;
+    Instr new_instr = (instr & ~kImm26Mask) | offset;
+    instr_at_put(pc, new_instr, jit_allocation);
     if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
       FlushInstructionCache(pc, kInstrSize);
     }
@@ -2341,31 +2348,47 @@ void Assembler::set_target_value_at(Address pc, uint64_t target,
   // lu12i_w rd, middle-20.
   // ori rd, rd, low-12.
   // lu32i_d rd, high-20.
-  *p = LU12I_W | (((target >> 12) & 0xfffff) << kRjShift) | rd_code;
-  *(p + 1) =
+  Instr new_instr0 =
+      LU12I_W | (((target >> 12) & 0xfffff) << kRjShift) | rd_code;
+  Instr new_instr1 =
       ORI | (target & 0xfff) << kRkShift | (rd_code << kRjShift) | rd_code;
-  *(p + 2) = LU32I_D | (((target >> 32) & 0xfffff) << kRjShift) | rd_code;
+  Instr new_instr2 =
+      LU32I_D | (((target >> 32) & 0xfffff) << kRjShift) | rd_code;
+  instr_at_put(pc, new_instr0, jit_allocation);
+  instr_at_put(pc + kInstrSize, new_instr1, jit_allocation);
+  instr_at_put(pc + kInstrSize * 2, new_instr2, jit_allocation);
 
   if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
     FlushInstructionCache(pc, 3 * kInstrSize);
   }
 }
 
-UseScratchRegisterScope::UseScratchRegisterScope(Assembler* assembler)
-    : available_(assembler->GetScratchRegisterList()),
-      old_available_(*available_) {}
+void Assembler::set_target_compressed_value_at(
+    Address pc, uint32_t target, WritableJitAllocation* jit_allocation,
+    ICacheFlushMode icache_flush_mode) {
+#ifdef DEBUG
+  // Check we have the result from a li macro-instruction.
+  Instr instr0 = instr_at(pc);
+  Instr instr1 = instr_at(pc + kInstrSize);
+  DCHECK(IsLu12i_w(instr0) && IsOri(instr1));
+#endif
 
-UseScratchRegisterScope::~UseScratchRegisterScope() {
-  *available_ = old_available_;
-}
+  Instr instr = instr_at(pc);
+  uint32_t rd_code = GetRd(instr);
 
-Register UseScratchRegisterScope::Acquire() {
-  DCHECK_NOT_NULL(available_);
-  return available_->PopFirst();
-}
+  // Must use 2 instructions to insure patchable code.
+  // lu12i_w rd, high-20.
+  // ori rd, rd, low-12.
+  Instr new_instr0 =
+      LU12I_W | (((target >> 12) & 0xfffff) << kRjShift) | rd_code;
+  Instr new_instr1 =
+      ORI | (target & 0xfff) << kRkShift | (rd_code << kRjShift) | rd_code;
+  instr_at_put(pc, new_instr0, jit_allocation);
+  instr_at_put(pc + kInstrSize, new_instr1, jit_allocation);
 
-bool UseScratchRegisterScope::hasAvailable() const {
-  return !available_->is_empty();
+  if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
+    FlushInstructionCache(pc, 2 * kInstrSize);
+  }
 }
 
 }  // namespace internal

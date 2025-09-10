@@ -33,8 +33,8 @@ class EmbedderDataArray
   }
 
   // Returns a grown copy if the index is bigger than the array's length.
-  static Handle<EmbedderDataArray> EnsureCapacity(
-      Isolate* isolate, Handle<EmbedderDataArray> array, int index);
+  static DirectHandle<EmbedderDataArray> EnsureCapacity(
+      Isolate* isolate, DirectHandle<EmbedderDataArray> array, int index);
 
   // Code Generation support.
   static constexpr int OffsetOfElementAt(int index) { return SizeFor(index); }
@@ -56,7 +56,7 @@ class EmbedderDataArray
       (kMaxSize - kHeaderSize) / kEmbedderDataSlotSize;
 
  private:
-  STATIC_ASSERT(kHeaderSize == Internals::kFixedArrayHeaderSize);
+  static_assert(kHeaderSize == Internals::kFixedArrayHeaderSize);
 
   TQ_OBJECT_CONSTRUCTORS(EmbedderDataArray)
 };

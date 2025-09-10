@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/execution/isolate.h"
 #include "src/interpreter/bytecodes.h"
 #include "src/interpreter/interpreter.h"
-#include "test/cctest/test-api.h"
+#include "test/cctest/cctest.h"
 
 namespace v8 {
 namespace internal {
@@ -42,7 +43,7 @@ class IgnitionStatisticsTester {
 };
 
 TEST(IgnitionStatisticsExtension) {
-  FLAG_expose_ignition_statistics = true;
+  v8_flags.expose_ignition_statistics = true;
   CcTest::InitializeVM();
   v8::Isolate* isolate = CcTest::isolate();
   v8::HandleScope scope(isolate);
@@ -54,8 +55,8 @@ TEST(IgnitionStatisticsExtension) {
 
   // Get the list of all bytecode names into a JavaScript array.
 #define BYTECODE_NAME_WITH_COMMA(Name, ...) "'" #Name "', "
-  const char* kBytecodeNames =
-      "var bytecodeNames = [" BYTECODE_LIST(BYTECODE_NAME_WITH_COMMA) "];";
+  const char* kBytecodeNames = "var bytecodeNames = [" BYTECODE_LIST(
+      BYTECODE_NAME_WITH_COMMA, BYTECODE_NAME_WITH_COMMA) "];";
 #undef BYTECODE_NAME_WITH_COMMA
   CompileRun(kBytecodeNames);
 

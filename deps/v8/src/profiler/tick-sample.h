@@ -21,14 +21,7 @@ struct V8_EXPORT TickSample {
   // samples don't care.
   enum RecordCEntryFrame { kIncludeCEntryFrame, kSkipCEntryFrame };
 
-  TickSample()
-      : state(OTHER),
-        embedder_state(EmbedderStateTag::EMPTY),
-        pc(nullptr),
-        external_callback_entry(nullptr),
-        frames_count(0),
-        has_external_callback(false),
-        update_stats_(true) {}
+  TickSample() {}
 
   /**
    * Initialize a tick sample from the isolate.
@@ -45,7 +38,8 @@ struct V8_EXPORT TickSample {
   void Init(Isolate* isolate, const v8::RegisterState& state,
             RecordCEntryFrame record_c_entry_frame, bool update_stats,
             bool use_simulator_reg_state = true,
-            base::TimeDelta sampling_interval = base::TimeDelta());
+            base::TimeDelta sampling_interval = base::TimeDelta(),
+            const std::optional<uint64_t> trace_id = std::nullopt);
   /**
    * Get a call stack sample from the isolate.
    * \param isolate The isolate.
@@ -82,24 +76,32 @@ struct V8_EXPORT TickSample {
 
   void print() const;
 
-  StateTag state;  // The state of the VM.
-  EmbedderStateTag embedder_state;
-  void* pc;        // Instruction pointer.
+  static constexpr unsigned kMaxFramesCountLog2 = 8;
+  static constexpr unsigned kMaxFramesCount = (1 << kMaxFramesCountLog2) - 1;
+
+  void* pc = nullptr;  // Instruction pointer.
   union {
     void* tos;  // Top stack value (*sp).
-    void* external_callback_entry;
+    void* external_callback_entry = nullptr;
   };
-  static const unsigned kMaxFramesCountLog2 = 8;
-  static const unsigned kMaxFramesCount = (1 << kMaxFramesCountLog2) - 1;
-  void* stack[kMaxFramesCount];     // Call stack.
   void* context = nullptr;          // Address of the incumbent native context.
   void* embedder_context = nullptr;  // Address of the embedder native context.
-  unsigned frames_count : kMaxFramesCountLog2;  // Number of captured frames.
-  bool has_external_callback : 1;
-  bool update_stats_ : 1;  // Whether the sample should update aggregated stats.
 
   base::TimeTicks timestamp;
   base::TimeDelta sampling_interval_;  // Sampling interval used to capture.
+
+  StateTag state = OTHER;  // The state of the VM.
+  EmbedderStateTag embedder_state = EmbedderStateTag::EMPTY;
+
+  uint16_t frames_count = 0;  // Number of captured frames.
+  static_assert(sizeof(frames_count) * kBitsPerByte >= kMaxFramesCountLog2);
+  bool has_external_callback = false;
+  // Whether the sample should update aggregated stats.
+  bool update_stats_ = true;
+  // An identifier to associate the sample with a trace event.
+  std::optional<uint64_t> trace_id_;
+
+  void* stack[kMaxFramesCount];  // Call stack.
 };
 
 }  // namespace internal

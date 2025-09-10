@@ -37,10 +37,6 @@ class TestCode : public HandleAndZoneScope {
     End();
     return pos;
   }
-  void Fallthru() {
-    Start();
-    End();
-  }
   int Branch(int ttarget, int ftarget) {
     Start();
     InstructionOperand ops[] = {UseRpo(ttarget), UseRpo(ftarget)};
@@ -65,6 +61,24 @@ class TestCode : public HandleAndZoneScope {
     Start();
     sequence_.AddInstruction(Instruction::New(main_zone(), kArchNop));
   }
+  template <int... T>
+  int Switch() {
+    Start();
+    int size = sizeof...(T);
+    InstructionOperand ops[] = {Immediate(T)...};
+    sequence_.AddInstruction(Instruction::New(main_zone(), kArchTableSwitch, 0,
+                                              nullptr, size, ops, 0, nullptr));
+    int pos = static_cast<int>(sequence_.instructions().size() - 1);
+    End();
+    return pos;
+  }
+  RpoNumber Case() {
+    CHECK_NULL(current_);
+    Start();
+    CHECK_NOT_NULL(current_);
+    current_->set_switch_target(true);
+    return rpo_number_;
+  }
   void RedundantMoves() {
     Start();
     sequence_.AddInstruction(Instruction::New(main_zone(), kArchNop));
@@ -82,11 +96,26 @@ class TestCode : public HandleAndZoneScope {
                AllocatedOperand(LocationOperand::REGISTER,
                                 MachineRepresentation::kWord32, 11));
   }
+  int JumpWithGapMove(int target, int id = 10) {
+    Start();
+    InstructionOperand ops[] = {UseRpo(target)};
+    sequence_.AddInstruction(Instruction::New(main_zone(), kArchJmp, 0, nullptr,
+                                              1, ops, 0, nullptr));
+    int index = static_cast<int>(sequence_.instructions().size()) - 1;
+    InstructionOperand from = AllocatedOperand(
+        LocationOperand::REGISTER, MachineRepresentation::kWord32, id);
+    InstructionOperand to = AllocatedOperand(
+        LocationOperand::REGISTER, MachineRepresentation::kWord32, id + 1);
+    AddGapMove(index, from, to);
+    End();
+    return index;
+  }
+
   void Other() {
     Start();
     sequence_.AddInstruction(Instruction::New(main_zone(), 155));
   }
-  void End() {
+  RpoNumber End() {
     Start();
     int end = static_cast<int>(sequence_.instructions().size());
     if (current_->code_start() == end) {  // Empty block.  Insert a nop.
@@ -94,7 +123,9 @@ class TestCode : public HandleAndZoneScope {
     }
     sequence_.EndBlock(current_->rpo_number());
     current_ = nullptr;
+    RpoNumber rpo_number = rpo_number_;
     rpo_number_ = RpoNumber::FromInt(rpo_number_.ToInt() + 1);
+    return rpo_number;
   }
   InstructionOperand UseRpo(int num) {
     return sequence_.AddImmediate(Constant(RpoNumber::FromInt(num)));
@@ -205,7 +236,7 @@ TEST(FwMoves2) {
 
   // B0
   code.RedundantMoves();
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.End();
 
@@ -220,7 +251,7 @@ TEST(FwMoves2b) {
 
   // B0
   code.NonRedundantMoves();
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.End();
 
@@ -228,6 +259,45 @@ TEST(FwMoves2b) {
   VerifyForwarding(&code, kBlockCount, expected);
 }
 
+TEST(FwMoves3a) {
+  constexpr size_t kBlockCount = 4;
+  TestCode code(kBlockCount);
+
+  // B0
+  code.JumpWithGapMove(3, 10);
+  // B1 (merge B1 into B0, because they have the same gap moves.)
+  code.JumpWithGapMove(3, 10);
+  // B2 (can not merge B2 into B0, because they have different gap moves.)
+  code.JumpWithGapMove(3, 11);
+  // B3
+  code.End();
+
+  static int expected[] = {0, 0, 2, 3};
+  VerifyForwarding(&code, kBlockCount, expected);
+}
+
+TEST(FwMoves3b) {
+  constexpr size_t kBlockCount = 7;
+  TestCode code(kBlockCount);
+
+  // B0
+  code.JumpWithGapMove(6);
+  // B1
+  code.Jump(2);
+  // B2
+  code.Jump(3);
+  // B3
+  code.JumpWithGapMove(6);
+  // B4
+  code.Jump(3);
+  // B5
+  code.Jump(2);
+  // B6
+  code.End();
+
+  static int expected[] = {0, 0, 0, 0, 0, 0, 6};
+  VerifyForwarding(&code, kBlockCount, expected);
+}
 
 TEST(FwOther2) {
   constexpr size_t kBlockCount = 2;
@@ -235,7 +305,7 @@ TEST(FwOther2) {
 
   // B0
   code.Other();
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.End();
 
@@ -249,7 +319,7 @@ TEST(FwNone2a) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.End();
 
@@ -289,7 +359,7 @@ TEST(FwLoop2) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.Jump(0);
 
@@ -303,9 +373,9 @@ TEST(FwLoop3) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Jump(0);
 
@@ -319,7 +389,7 @@ TEST(FwLoop1b) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
   code.Jump(1);
 
@@ -333,9 +403,9 @@ TEST(FwLoop2b) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Jump(1);
 
@@ -349,11 +419,11 @@ TEST(FwLoop3b) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
-  code.Fallthru();
+  code.Jump(3);
   // B3
   code.Jump(1);
 
@@ -367,11 +437,11 @@ TEST(FwLoop2_1a) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
-  code.Fallthru();
+  code.Jump(3);
   // B3
   code.Jump(1);
   // B4
@@ -387,9 +457,9 @@ TEST(FwLoop2_1b) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Jump(4);
   // B3
@@ -407,9 +477,9 @@ TEST(FwLoop2_1c) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Jump(4);
   // B3
@@ -427,9 +497,9 @@ TEST(FwLoop2_1d) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Jump(1);
   // B3
@@ -447,11 +517,11 @@ TEST(FwLoop3_1a) {
   TestCode code(kBlockCount);
 
   // B0
-  code.Fallthru();
+  code.Jump(1);
   // B1
-  code.Fallthru();
+  code.Jump(2);
   // B2
-  code.Fallthru();
+  code.Jump(3);
   // B3
   code.Jump(2);
   // B4
@@ -463,6 +533,35 @@ TEST(FwLoop3_1a) {
   VerifyForwarding(&code, kBlockCount, expected);
 }
 
+TEST(FwLoop4a) {
+  constexpr size_t kBlockCount = 2;
+  TestCode code(kBlockCount);
+
+  // B0
+  code.JumpWithGapMove(1);
+  // B1
+  code.JumpWithGapMove(0);
+
+  static int expected[] = {0, 1};
+  VerifyForwarding(&code, kBlockCount, expected);
+}
+
+TEST(FwLoop4b) {
+  constexpr size_t kBlockCount = 4;
+  TestCode code(kBlockCount);
+
+  // B0
+  code.Jump(3);
+  // B1
+  code.JumpWithGapMove(2);
+  // B2
+  code.Jump(0);
+  // B3
+  code.JumpWithGapMove(2);
+
+  static int expected[] = {3, 3, 3, 3};
+  VerifyForwarding(&code, kBlockCount, expected);
+}
 
 TEST(FwDiamonds) {
   constexpr size_t kBlockCount = 4;
@@ -696,6 +795,12 @@ void CheckBranch(TestCode* code, int pos, int t1, int t2) {
   CHECK_EQ(t2, code->sequence_.InputRpo(instr, 1).ToInt());
 }
 
+void CheckBlockSwitchTarget(TestCode* code, RpoNumber rpo,
+                            bool expect_switch_target) {
+  CHECK_EQ(code->sequence_.InstructionBlockAt(rpo)->IsSwitchTarget(),
+           expect_switch_target);
+}
+
 void CheckAssemblyOrder(TestCode* code, int size, int* expected) {
   int i = 0;
   for (auto const block : code->sequence_.instruction_blocks()) {
@@ -758,7 +863,7 @@ TEST(Rewire2_deferred) {
   int j1 = code.Jump(1);
   // B1
   code.Defer();
-  code.Fallthru();
+  code.Jump(2);
   // B2
   code.Defer();
   int j2 = code.Jump(3);
@@ -781,7 +886,7 @@ TEST(Rewire_deferred_diamond) {
   // B0
   int b1 = code.Branch(1, 2);
   // B1
-  code.Fallthru();  // To B3
+  code.Jump(3);
   // B2
   code.Defer();
   int j1 = code.Jump(3);
@@ -923,6 +1028,106 @@ TEST(DifferentSizeRet) {
 
   CheckRet(&code, j1);
   CheckRet(&code, j2);
+}
+
+TEST(RewireGapJump1) {
+  constexpr size_t kBlockCount = 4;
+  TestCode code(kBlockCount);
+
+  // B0
+  int j1 = code.JumpWithGapMove(3);
+  // B1
+  int j2 = code.JumpWithGapMove(3);
+  // B2
+  int j3 = code.JumpWithGapMove(3);
+  // B3
+  code.End();
+
+  int forward[] = {0, 0, 0, 3};
+  VerifyForwarding(&code, kBlockCount, forward);
+  ApplyForwarding(&code, kBlockCount, forward);
+  CheckJump(&code, j1, 3);
+  CheckNop(&code, j2);
+  CheckNop(&code, j3);
+
+  static int assembly[] = {0, 1, 1, 1};
+  CheckAssemblyOrder(&code, kBlockCount, assembly);
+}
+
+TEST(RewireGapJump2) {
+  constexpr size_t kBlockCount = 6;
+  TestCode code(kBlockCount);
+
+  // B0
+  int j1 = code.JumpWithGapMove(4);
+  // B1
+  int j2 = code.JumpWithGapMove(4);
+  // B2
+  code.Other();
+  int j3 = code.Jump(3);
+  // B3
+  int j4 = code.Jump(1);
+  // B4
+  int j5 = code.Jump(5);
+  // B5
+  code.End();
+
+  int forward[] = {0, 0, 2, 0, 5, 5};
+  VerifyForwarding(&code, kBlockCount, forward);
+  ApplyForwarding(&code, kBlockCount, forward);
+  CheckJump(&code, j1, 5);
+  CheckNop(&code, j2);
+  CheckJump(&code, j3, 0);
+  CheckNop(&code, j4);
+  CheckNop(&code, j5);
+
+  static int assembly[] = {0, 1, 1, 2, 2, 2};
+  CheckAssemblyOrder(&code, kBlockCount, assembly);
+}
+
+TEST(PropagateSwitchTarget) {
+  constexpr size_t kBlockCount = 6;
+  TestCode code(kBlockCount);
+
+  // B0
+  code.Switch<1, 2, 3, 4>();
+  // B1
+  auto b1 = code.Case();
+  int j1 = code.Jump(5);
+  // B2
+  auto b2 = code.Case();
+  int j2 = code.Jump(5);
+  // B3
+  auto b3 = code.Case();
+  int j3 = code.Jump(5);
+  // B4
+  auto b4 = code.Case();
+  int j4 = code.Jump(5);
+  // B5
+  auto b5 = code.End();
+
+  // All cases should forward to the end B5 block and be turned into nops.
+
+  int forward[] = {0, 5, 5, 5, 5, 5};
+  VerifyForwarding(&code, kBlockCount, forward);
+  ApplyForwarding(&code, kBlockCount, forward);
+
+  CheckNop(&code, j1);
+  CheckNop(&code, j2);
+  CheckNop(&code, j3);
+  CheckNop(&code, j4);
+
+  static int assembly[] = {0, 1, 1, 1, 1, 1};
+  CheckAssemblyOrder(&code, kBlockCount, assembly);
+
+  // If jump-threading elides a block, it should propagate the switch target
+  // property.
+  CheckBlockSwitchTarget(&code, b1, false);
+  CheckBlockSwitchTarget(&code, b2, false);
+  CheckBlockSwitchTarget(&code, b3, false);
+  CheckBlockSwitchTarget(&code, b4, false);
+
+  CheckBlockSwitchTarget(&code, b5, true);
 }
 
 }  // namespace compiler

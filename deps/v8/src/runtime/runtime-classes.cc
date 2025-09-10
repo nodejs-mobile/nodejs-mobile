@@ -9,19 +9,13 @@
 #include "src/builtins/accessors.h"
 #include "src/common/globals.h"
 #include "src/common/message-template.h"
-#include "src/debug/debug.h"
 #include "src/execution/arguments-inl.h"
-#include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
-#include "src/logging/counters.h"
 #include "src/logging/log.h"
-#include "src/objects/elements.h"
 #include "src/objects/hash-table-inl.h"
 #include "src/objects/literal-objects-inl.h"
 #include "src/objects/lookup-inl.h"
 #include "src/objects/smi.h"
-#include "src/objects/struct-inl.h"
-#include "src/runtime/runtime-utils.h"
 #include "src/runtime/runtime.h"
 
 namespace v8 {
@@ -39,13 +33,13 @@ RUNTIME_FUNCTION(Runtime_ThrowUnsupportedSuperError) {
 RUNTIME_FUNCTION(Runtime_ThrowConstructorNonCallableError) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  Handle<JSFunction> constructor = args.at<JSFunction>(0);
-  Handle<String> name(constructor->shared().Name(), isolate);
+  DirectHandle<JSFunction> constructor = args.at<JSFunction>(0);
+  DirectHandle<String> name(constructor->shared()->Name(), isolate);
 
-  Handle<Context> context = handle(constructor->native_context(), isolate);
-  DCHECK(context->IsNativeContext());
-  Handle<JSFunction> realm_type_error_function(
-      JSFunction::cast(context->get(Context::TYPE_ERROR_FUNCTION_INDEX)),
+  DirectHandle<Context> context(constructor->native_context(), isolate);
+  DCHECK(IsNativeContext(*context));
+  DirectHandle<JSFunction> realm_type_error_function(
+      Cast<JSFunction>(context->get(Context::TYPE_ERROR_FUNCTION_INDEX)),
       isolate);
   if (name->length() == 0) {
     THROW_NEW_ERROR_RETURN_FAILURE(
@@ -81,14 +75,15 @@ RUNTIME_FUNCTION(Runtime_ThrowSuperNotCalled) {
 
 namespace {
 
-Object ThrowNotSuperConstructor(Isolate* isolate, Handle<Object> constructor,
-                                Handle<JSFunction> function) {
-  Handle<String> super_name;
-  if (constructor->IsJSFunction()) {
+Tagged<Object> ThrowNotSuperConstructor(Isolate* isolate,
+                                        DirectHandle<Object> constructor,
+                                        DirectHandle<JSFunction> function) {
+  DirectHandle<String> super_name;
+  if (IsJSFunction(*constructor)) {
     super_name =
-        handle(Handle<JSFunction>::cast(constructor)->shared().Name(), isolate);
-  } else if (constructor->IsOddball()) {
-    DCHECK(constructor->IsNull(isolate));
+        direct_handle(Cast<JSFunction>(constructor)->shared()->Name(), isolate);
+  } else if (IsOddball(*constructor)) {
+    DCHECK(IsNull(*constructor, isolate));
     super_name = isolate->factory()->null_string();
   } else {
     super_name = Object::NoSideEffectsToString(isolate, constructor);
@@ -97,7 +92,7 @@ Object ThrowNotSuperConstructor(Isolate* isolate, Handle<Object> constructor,
   if (super_name->length() == 0) {
     super_name = isolate->factory()->null_string();
   }
-  Handle<String> function_name(function->shared().Name(), isolate);
+  Handle<String> function_name(function->shared()->Name(), isolate);
   // anonymous class
   if (function_name->length() == 0) {
     THROW_NEW_ERROR_RETURN_FAILURE(
@@ -115,8 +110,8 @@ Object ThrowNotSuperConstructor(Isolate* isolate, Handle<Object> constructor,
 RUNTIME_FUNCTION(Runtime_ThrowNotSuperConstructor) {
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
-  Handle<Object> constructor = args.at(0);
-  Handle<JSFunction> function = args.at<JSFunction>(1);
+  DirectHandle<Object> constructor = args.at(0);
+  DirectHandle<JSFunction> function = args.at<JSFunction>(1);
   return ThrowNotSuperConstructor(isolate, constructor, function);
 }
 
@@ -124,15 +119,15 @@ namespace {
 
 template <typename Dictionary>
 Handle<Name> KeyToName(Isolate* isolate, Handle<Object> key) {
-  STATIC_ASSERT((std::is_same<Dictionary, SwissNameDictionary>::value ||
-                 std::is_same<Dictionary, NameDictionary>::value));
-  DCHECK(key->IsName());
-  return Handle<Name>::cast(key);
+  static_assert((std::is_same_v<Dictionary, SwissNameDictionary> ||
+                 std::is_same_v<Dictionary, NameDictionary>));
+  DCHECK(IsName(*key));
+  return Cast<Name>(key);
 }
 
 template <>
 Handle<Name> KeyToName<NumberDictionary>(Isolate* isolate, Handle<Object> key) {
-  DCHECK(key->IsNumber());
+  DCHECK(IsNumber(*key));
   return isolate->factory()->NumberToString(key);
 }
 
@@ -143,10 +138,11 @@ Handle<Name> KeyToName<NumberDictionary>(Isolate* isolate, Handle<Object> key) {
 //    method's shared function info indicates that method does not have a
 //    shared name.
 template <typename Dictionary>
-MaybeHandle<Object> GetMethodAndSetName(Isolate* isolate,
-                                        RuntimeArguments& args, Smi index,
-                                        Handle<String> name_prefix,
-                                        Handle<Object> key) {
+MaybeDirectHandle<Object> GetMethodAndSetName(Isolate* isolate,
+                                              RuntimeArguments& args,
+                                              Tagged<Smi> index,
+                                              DirectHandle<String> name_prefix,
+                                              Handle<Object> key) {
   int int_index = index.value();
 
   // Class constructor and prototype values do not require post processing.
@@ -154,17 +150,17 @@ MaybeHandle<Object> GetMethodAndSetName(Isolate* isolate,
     return args.at<Object>(int_index);
   }
 
-  Handle<JSFunction> method = args.at<JSFunction>(int_index);
+  DirectHandle<JSFunction> method = args.at<JSFunction>(int_index);
 
-  if (!method->shared().HasSharedName()) {
+  if (!method->shared()->HasSharedName()) {
     // TODO(ishell): method does not have a shared name at this point only if
     // the key is a computed property name. However, the bytecode generator
     // explicitly generates ToName bytecodes to ensure that the computed
     // property name is properly converted to Name. So, we can actually be smart
     // here and avoid converting Smi keys back to Name.
-    Handle<Name> name = KeyToName<Dictionary>(isolate, key);
+    DirectHandle<Name> name = KeyToName<Dictionary>(isolate, key);
     if (!JSFunction::SetName(method, name, name_prefix)) {
-      return MaybeHandle<Object>();
+      return MaybeDirectHandle<Object>();
     }
   }
   return method;
@@ -175,8 +171,8 @@ MaybeHandle<Object> GetMethodAndSetName(Isolate* isolate,
 // This is a simplified version of GetMethodAndSetName()
 // function above that is used when it's guaranteed that the method has
 // shared name.
-Object GetMethodWithSharedName(Isolate* isolate, RuntimeArguments& args,
-                               Object index) {
+Tagged<Object> GetMethodWithSharedName(Isolate* isolate, RuntimeArguments& args,
+                                       Tagged<Object> index) {
   DisallowGarbageCollection no_gc;
   int int_index = Smi::ToInt(index);
 
@@ -185,21 +181,21 @@ Object GetMethodWithSharedName(Isolate* isolate, RuntimeArguments& args,
     return args[int_index];
   }
 
-  Handle<JSFunction> method = args.at<JSFunction>(int_index);
-  DCHECK(method->shared().HasSharedName());
+  DirectHandle<JSFunction> method = args.at<JSFunction>(int_index);
+  DCHECK(method->shared()->HasSharedName());
   return *method;
 }
 
 template <typename Dictionary>
 Handle<Dictionary> ShallowCopyDictionaryTemplate(
-    Isolate* isolate, Handle<Dictionary> dictionary_template) {
+    Isolate* isolate, DirectHandle<Dictionary> dictionary_template) {
   Handle<Dictionary> dictionary =
       Dictionary::ShallowCopy(isolate, dictionary_template);
   // Clone all AccessorPairs in the dictionary.
   for (InternalIndex i : dictionary->IterateEntries()) {
-    Object value = dictionary->ValueAt(i);
-    if (value.IsAccessorPair()) {
-      Handle<AccessorPair> pair(AccessorPair::cast(value), isolate);
+    Tagged<Object> value = dictionary->ValueAt(i);
+    if (IsAccessorPair(value)) {
+      DirectHandle<AccessorPair> pair(Cast<AccessorPair>(value), isolate);
       pair = AccessorPair::Copy(isolate, pair);
       dictionary->ValueAtPut(i, *pair);
     }
@@ -208,44 +204,44 @@ Handle<Dictionary> ShallowCopyDictionaryTemplate(
 }
 
 template <typename Dictionary>
-bool SubstituteValues(Isolate* isolate, Handle<Dictionary> dictionary,
+bool SubstituteValues(Isolate* isolate, DirectHandle<Dictionary> dictionary,
                       RuntimeArguments& args) {
   // Replace all indices with proper methods.
   ReadOnlyRoots roots(isolate);
   for (InternalIndex i : dictionary->IterateEntries()) {
-    Object maybe_key = dictionary->KeyAt(i);
+    Tagged<Object> maybe_key = dictionary->KeyAt(i);
     if (!Dictionary::IsKey(roots, maybe_key)) continue;
     Handle<Object> key(maybe_key, isolate);
     Handle<Object> value(dictionary->ValueAt(i), isolate);
-    if (value->IsAccessorPair()) {
-      Handle<AccessorPair> pair = Handle<AccessorPair>::cast(value);
-      Object tmp = pair->getter();
-      if (tmp.IsSmi()) {
-        Handle<Object> result;
+    if (IsAccessorPair(*value)) {
+      auto pair = Cast<AccessorPair>(value);
+      Tagged<Object> tmp = pair->getter();
+      if (IsSmi(tmp)) {
+        DirectHandle<Object> result;
         ASSIGN_RETURN_ON_EXCEPTION_VALUE(
             isolate, result,
-            GetMethodAndSetName<Dictionary>(isolate, args, Smi::cast(tmp),
+            GetMethodAndSetName<Dictionary>(isolate, args, Cast<Smi>(tmp),
                                             isolate->factory()->get_string(),
                                             key),
             false);
         pair->set_getter(*result);
       }
       tmp = pair->setter();
-      if (tmp.IsSmi()) {
-        Handle<Object> result;
+      if (IsSmi(tmp)) {
+        DirectHandle<Object> result;
         ASSIGN_RETURN_ON_EXCEPTION_VALUE(
             isolate, result,
-            GetMethodAndSetName<Dictionary>(isolate, args, Smi::cast(tmp),
+            GetMethodAndSetName<Dictionary>(isolate, args, Cast<Smi>(tmp),
                                             isolate->factory()->set_string(),
                                             key),
             false);
         pair->set_setter(*result);
       }
-    } else if (value->IsSmi()) {
-      Handle<Object> result;
+    } else if (IsSmi(*value)) {
+      DirectHandle<Object> result;
       ASSIGN_RETURN_ON_EXCEPTION_VALUE(
           isolate, result,
-          GetMethodAndSetName<Dictionary>(isolate, args, Smi::cast(*value),
+          GetMethodAndSetName<Dictionary>(isolate, args, Cast<Smi>(*value),
                                           isolate->factory()->empty_string(),
                                           key),
           false);
@@ -256,37 +252,37 @@ bool SubstituteValues(Isolate* isolate, Handle<Dictionary> dictionary,
 }
 
 template <typename Dictionary>
-void UpdateProtectors(Isolate* isolate, Handle<JSObject> receiver,
-                      Handle<Dictionary> properties_dictionary) {
+void UpdateProtectors(Isolate* isolate, DirectHandle<JSObject> receiver,
+                      DirectHandle<Dictionary> properties_dictionary) {
   ReadOnlyRoots roots(isolate);
   for (InternalIndex i : properties_dictionary->IterateEntries()) {
-    Object maybe_key = properties_dictionary->KeyAt(i);
+    Tagged<Object> maybe_key = properties_dictionary->KeyAt(i);
     if (!Dictionary::IsKey(roots, maybe_key)) continue;
-    Handle<Name> name(Name::cast(maybe_key), isolate);
+    DirectHandle<Name> name(Cast<Name>(maybe_key), isolate);
     LookupIterator::UpdateProtector(isolate, receiver, name);
   }
 }
 
-void UpdateProtectors(Isolate* isolate, Handle<JSObject> receiver,
-                      Handle<DescriptorArray> properties_template) {
+void UpdateProtectors(Isolate* isolate, DirectHandle<JSObject> receiver,
+                      DirectHandle<DescriptorArray> properties_template) {
   int nof_descriptors = properties_template->number_of_descriptors();
   for (InternalIndex i : InternalIndex::Range(nof_descriptors)) {
-    Handle<Name> name(properties_template->GetKey(i), isolate);
+    DirectHandle<Name> name(properties_template->GetKey(i), isolate);
     LookupIterator::UpdateProtector(isolate, receiver, name);
   }
 }
 
 bool AddDescriptorsByTemplate(
-    Isolate* isolate, Handle<Map> map,
-    Handle<DescriptorArray> descriptors_template,
-    Handle<NumberDictionary> elements_dictionary_template,
-    Handle<JSObject> receiver, RuntimeArguments& args) {
+    Isolate* isolate, DirectHandle<Map> map,
+    DirectHandle<DescriptorArray> descriptors_template,
+    DirectHandle<NumberDictionary> elements_dictionary_template,
+    DirectHandle<JSObject> receiver, RuntimeArguments& args) {
   int nof_descriptors = descriptors_template->number_of_descriptors();
 
-  Handle<DescriptorArray> descriptors =
+  DirectHandle<DescriptorArray> descriptors =
       DescriptorArray::Allocate(isolate, nof_descriptors, 0);
 
-  Handle<NumberDictionary> elements_dictionary =
+  DirectHandle<NumberDictionary> elements_dictionary =
       *elements_dictionary_template ==
               ReadOnlyRoots(isolate).empty_slow_element_dictionary()
           ? elements_dictionary_template
@@ -303,48 +299,53 @@ bool AddDescriptorsByTemplate(
       count++;
     }
   }
-  Handle<PropertyArray> property_array =
+  DirectHandle<PropertyArray> property_array =
       isolate->factory()->NewPropertyArray(count);
 
   // Read values from |descriptors_template| and store possibly post-processed
   // values into "instantiated" |descriptors| array.
   int field_index = 0;
   for (InternalIndex i : InternalIndex::Range(nof_descriptors)) {
-    Object value = descriptors_template->GetStrongValue(i);
-    if (value.IsAccessorPair()) {
-      Handle<AccessorPair> pair = AccessorPair::Copy(
-          isolate, handle(AccessorPair::cast(value), isolate));
+    Tagged<Object> value = descriptors_template->GetStrongValue(i);
+    if (IsAccessorPair(value)) {
+      DirectHandle<AccessorPair> pair = AccessorPair::Copy(
+          isolate, direct_handle(Cast<AccessorPair>(value), isolate));
       value = *pair;
     }
     DisallowGarbageCollection no_gc;
-    Name name = descriptors_template->GetKey(i);
-    DCHECK(name.IsUniqueName());
+    Tagged<Name> name = descriptors_template->GetKey(i);
+    // TODO(v8:5799): consider adding a ClassBoilerplate flag
+    // "has_interesting_properties".
+    if (name->IsInteresting(isolate)) {
+      map->set_may_have_interesting_properties(true);
+    }
+    DCHECK(IsUniqueName(name));
     PropertyDetails details = descriptors_template->GetDetails(i);
     if (details.location() == PropertyLocation::kDescriptor) {
       if (details.kind() == PropertyKind::kData) {
-        if (value.IsSmi()) {
+        if (IsSmi(value)) {
           value = GetMethodWithSharedName(isolate, args, value);
         }
         details = details.CopyWithRepresentation(
-            value.OptimalRepresentation(isolate));
+            Object::OptimalRepresentation(value, isolate));
       } else {
         DCHECK_EQ(PropertyKind::kAccessor, details.kind());
-        if (value.IsAccessorPair()) {
-          AccessorPair pair = AccessorPair::cast(value);
-          Object tmp = pair.getter();
-          if (tmp.IsSmi()) {
-            pair.set_getter(GetMethodWithSharedName(isolate, args, tmp));
+        if (IsAccessorPair(value)) {
+          Tagged<AccessorPair> pair = Cast<AccessorPair>(value);
+          Tagged<Object> tmp = pair->getter();
+          if (IsSmi(tmp)) {
+            pair->set_getter(GetMethodWithSharedName(isolate, args, tmp));
           }
-          tmp = pair.setter();
-          if (tmp.IsSmi()) {
-            pair.set_setter(GetMethodWithSharedName(isolate, args, tmp));
+          tmp = pair->setter();
+          if (IsSmi(tmp)) {
+            pair->set_setter(GetMethodWithSharedName(isolate, args, tmp));
           }
         }
       }
     } else {
       UNREACHABLE();
     }
-    DCHECK(value.FitsRepresentation(details.representation()));
+    DCHECK(Object::FitsRepresentation(value, details.representation()));
     if (details.location() == PropertyLocation::kDescriptor &&
         details.kind() == PropertyKind::kData) {
       details =
@@ -355,10 +356,9 @@ bool AddDescriptorsByTemplate(
 
       property_array->set(field_index, value);
       field_index++;
-      descriptors->Set(i, name, MaybeObject::FromObject(FieldType::Any()),
-                       details);
+      descriptors->Set(i, name, FieldType::Any(), details);
     } else {
-      descriptors->Set(i, name, MaybeObject::FromObject(value), details);
+      descriptors->Set(i, name, value, details);
     }
   }
 
@@ -374,7 +374,7 @@ bool AddDescriptorsByTemplate(
   }
 
   // Atomically commit the changes.
-  receiver->set_map(*map, kReleaseStore);
+  receiver->set_map(isolate, *map, kReleaseStore);
   if (elements_dictionary->NumberOfElements() > 0) {
     receiver->set_elements(*elements_dictionary);
   }
@@ -389,21 +389,21 @@ bool AddDescriptorsByTemplate(
 // OrderedNameDictionary::Add returns MaybeHandle, NameDictionary::Add returns
 // Handle.
 template <typename T>
-Handle<T> ToHandle(Handle<T> h) {
+DirectHandle<T> ToHandle(Handle<T> h) {
   return h;
 }
 template <typename T>
-Handle<T> ToHandle(MaybeHandle<T> h) {
+DirectHandle<T> ToHandle(MaybeHandle<T> h) {
   return h.ToHandleChecked();
 }
 
 template <typename Dictionary>
 bool AddDescriptorsByTemplate(
-    Isolate* isolate, Handle<Map> map,
-    Handle<Dictionary> properties_dictionary_template,
-    Handle<NumberDictionary> elements_dictionary_template,
-    Handle<FixedArray> computed_properties, Handle<JSObject> receiver,
-    RuntimeArguments& args) {
+    Isolate* isolate, DirectHandle<Map> map,
+    DirectHandle<Dictionary> properties_dictionary_template,
+    DirectHandle<NumberDictionary> elements_dictionary_template,
+    DirectHandle<FixedArray> computed_properties,
+    DirectHandle<JSObject> receiver, RuntimeArguments& args) {
   int computed_properties_length = computed_properties->length();
 
   // Shallow-copy properties template.
@@ -423,12 +423,12 @@ bool AddDescriptorsByTemplate(
 
     ValueKind value_kind = ComputedEntryFlags::ValueKindBits::decode(flags);
     int key_index = ComputedEntryFlags::KeyIndexBits::decode(flags);
-    Smi value = Smi::FromInt(key_index + 1);  // Value follows name.
+    Tagged<Smi> value = Smi::FromInt(key_index + 1);  // Value follows name.
 
     Handle<Object> key = args.at(key_index);
-    DCHECK(key->IsName());
+    DCHECK(IsName(*key));
     uint32_t element;
-    Handle<Name> name = Handle<Name>::cast(key);
+    Handle<Name> name = Cast<Name>(key);
     if (name->AsArrayIndex(&element)) {
       ClassBoilerplate::AddToElementsTemplate(
           isolate, elements_dictionary, element, key_index, value_kind, value);
@@ -437,6 +437,12 @@ bool AddDescriptorsByTemplate(
       name = isolate->factory()->InternalizeName(name);
       ClassBoilerplate::AddToPropertiesTemplate(
           isolate, properties_dictionary, name, key_index, value_kind, value);
+      if (name->IsInteresting(isolate)) {
+        // TODO(pthier): Add flags to swiss dictionaries.
+        if constexpr (!V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
+          properties_dictionary->set_may_have_interesting_properties(true);
+        }
+      }
     }
   }
 
@@ -445,7 +451,8 @@ bool AddDescriptorsByTemplate(
     return false;
   }
 
-  UpdateProtectors(isolate, receiver, properties_dictionary);
+  UpdateProtectors(isolate, receiver,
+                   DirectHandle<Dictionary>(properties_dictionary));
 
   if (elements_dictionary->NumberOfElements() > 0) {
     if (!SubstituteValues<NumberDictionary>(isolate, elements_dictionary,
@@ -456,7 +463,7 @@ bool AddDescriptorsByTemplate(
   }
 
   // Atomically commit the changes.
-  receiver->set_map(*map, kReleaseStore);
+  receiver->set_map(isolate, *map, kReleaseStore);
   receiver->set_raw_properties_or_hash(*properties_dictionary, kRelaxedStore);
   if (elements_dictionary->NumberOfElements() > 0) {
     receiver->set_elements(*elements_dictionary);
@@ -464,41 +471,41 @@ bool AddDescriptorsByTemplate(
   return true;
 }
 
-Handle<JSObject> CreateClassPrototype(Isolate* isolate) {
+DirectHandle<JSObject> CreateClassPrototype(Isolate* isolate) {
   // For constant tracking we want to avoid the hassle of handling
   // in-object properties, so create a map with no in-object
   // properties.
 
   // TODO(ishell) Support caching of zero in-object properties map
   // by ObjectLiteralMapFromCache().
-  Handle<Map> map = Map::Create(isolate, 0);
+  DirectHandle<Map> map = Map::Create(isolate, 0);
   return isolate->factory()->NewJSObjectFromMap(map);
 }
 
 bool InitClassPrototype(Isolate* isolate,
-                        Handle<ClassBoilerplate> class_boilerplate,
-                        Handle<JSObject> prototype,
-                        Handle<HeapObject> prototype_parent,
-                        Handle<JSFunction> constructor,
+                        DirectHandle<ClassBoilerplate> class_boilerplate,
+                        DirectHandle<JSObject> prototype,
+                        DirectHandle<JSPrototype> prototype_parent,
+                        DirectHandle<JSFunction> constructor,
                         RuntimeArguments& args) {
-  Handle<Map> map(prototype->map(), isolate);
+  DirectHandle<Map> map(prototype->map(), isolate);
   map = Map::CopyDropDescriptors(isolate, map);
   map->set_is_prototype_map(true);
   Map::SetPrototype(isolate, map, prototype_parent);
+  isolate->UpdateProtectorsOnSetPrototype(prototype, prototype_parent);
   constructor->set_prototype_or_initial_map(*prototype, kReleaseStore);
   map->SetConstructor(*constructor);
-  Handle<FixedArray> computed_properties(
+  DirectHandle<FixedArray> computed_properties(
       class_boilerplate->instance_computed_properties(), isolate);
-  Handle<NumberDictionary> elements_dictionary_template(
-      NumberDictionary::cast(class_boilerplate->instance_elements_template()),
+  DirectHandle<NumberDictionary> elements_dictionary_template(
+      Cast<NumberDictionary>(class_boilerplate->instance_elements_template()),
       isolate);
 
   Handle<Object> properties_template(
       class_boilerplate->instance_properties_template(), isolate);
 
-  if (properties_template->IsDescriptorArray()) {
-    Handle<DescriptorArray> descriptors_template =
-        Handle<DescriptorArray>::cast(properties_template);
+  if (IsDescriptorArray(*properties_template)) {
+    auto descriptors_template = Cast<DescriptorArray>(properties_template);
 
     // The size of the prototype object is known at this point.
     // So we can create it now and then add the rest instance methods to the
@@ -509,31 +516,23 @@ bool InitClassPrototype(Isolate* isolate,
   } else {
     map->set_is_dictionary_map(true);
     map->set_is_migration_target(false);
-    map->set_may_have_interesting_symbols(true);
+    map->set_may_have_interesting_properties(true);
     map->set_construction_counter(Map::kNoSlackTracking);
 
-    if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
-      Handle<SwissNameDictionary> properties_dictionary_template =
-          Handle<SwissNameDictionary>::cast(properties_template);
-      return AddDescriptorsByTemplate(
-          isolate, map, properties_dictionary_template,
-          elements_dictionary_template, computed_properties, prototype, args);
-    } else {
-      Handle<NameDictionary> properties_dictionary_template =
-          Handle<NameDictionary>::cast(properties_template);
-      return AddDescriptorsByTemplate(
-          isolate, map, properties_dictionary_template,
-          elements_dictionary_template, computed_properties, prototype, args);
-    }
+    DirectHandle<PropertyDictionary> properties_dictionary_template =
+        Cast<PropertyDictionary>(properties_template);
+    return AddDescriptorsByTemplate(
+        isolate, map, properties_dictionary_template,
+        elements_dictionary_template, computed_properties, prototype, args);
   }
 }
 
 bool InitClassConstructor(Isolate* isolate,
-                          Handle<ClassBoilerplate> class_boilerplate,
-                          Handle<HeapObject> constructor_parent,
-                          Handle<JSFunction> constructor,
+                          DirectHandle<ClassBoilerplate> class_boilerplate,
+                          DirectHandle<JSPrototype> constructor_parent,
+                          DirectHandle<JSFunction> constructor,
                           RuntimeArguments& args) {
-  Handle<Map> map(constructor->map(), isolate);
+  DirectHandle<Map> map(constructor->map(), isolate);
   map = Map::CopyDropDescriptors(isolate, map);
   DCHECK(map->is_prototype_map());
 
@@ -545,18 +544,17 @@ bool InitClassConstructor(Isolate* isolate,
     JSObject::MakePrototypesFast(constructor_parent, kStartAtReceiver, isolate);
   }
 
-  Handle<NumberDictionary> elements_dictionary_template(
-      NumberDictionary::cast(class_boilerplate->static_elements_template()),
+  DirectHandle<NumberDictionary> elements_dictionary_template(
+      Cast<NumberDictionary>(class_boilerplate->static_elements_template()),
       isolate);
-  Handle<FixedArray> computed_properties(
+  DirectHandle<FixedArray> computed_properties(
       class_boilerplate->static_computed_properties(), isolate);
 
   Handle<Object> properties_template(
       class_boilerplate->static_properties_template(), isolate);
 
-  if (properties_template->IsDescriptorArray()) {
-    Handle<DescriptorArray> descriptors_template =
-        Handle<DescriptorArray>::cast(properties_template);
+  if (IsDescriptorArray(*properties_template)) {
+    auto descriptors_template = Cast<DescriptorArray>(properties_template);
 
     return AddDescriptorsByTemplate(isolate, map, descriptors_template,
                                     elements_dictionary_template, constructor,
@@ -566,19 +564,19 @@ bool InitClassConstructor(Isolate* isolate,
     map->InitializeDescriptors(isolate,
                                ReadOnlyRoots(isolate).empty_descriptor_array());
     map->set_is_migration_target(false);
-    map->set_may_have_interesting_symbols(true);
+    map->set_may_have_interesting_properties(true);
     map->set_construction_counter(Map::kNoSlackTracking);
 
-    if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
-      Handle<SwissNameDictionary> properties_dictionary_template =
-          Handle<SwissNameDictionary>::cast(properties_template);
+    if constexpr (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
+      DirectHandle<SwissNameDictionary> properties_dictionary_template =
+          Cast<SwissNameDictionary>(properties_template);
 
       return AddDescriptorsByTemplate(
           isolate, map, properties_dictionary_template,
           elements_dictionary_template, computed_properties, constructor, args);
     } else {
-      Handle<NameDictionary> properties_dictionary_template =
-          Handle<NameDictionary>::cast(properties_template);
+      DirectHandle<NameDictionary> properties_dictionary_template =
+          Cast<NameDictionary>(properties_template);
       return AddDescriptorsByTemplate(
           isolate, map, properties_dictionary_template,
           elements_dictionary_template, computed_properties, constructor, args);
@@ -586,48 +584,45 @@ bool InitClassConstructor(Isolate* isolate,
   }
 }
 
-MaybeHandle<Object> DefineClass(Isolate* isolate,
-                                Handle<ClassBoilerplate> class_boilerplate,
-                                Handle<Object> super_class,
-                                Handle<JSFunction> constructor,
-                                RuntimeArguments& args) {
-  Handle<Object> prototype_parent;
-  Handle<HeapObject> constructor_parent;
+MaybeDirectHandle<Object> DefineClass(
+    Isolate* isolate, DirectHandle<ClassBoilerplate> class_boilerplate,
+    DirectHandle<Object> super_class, DirectHandle<JSFunction> constructor,
+    RuntimeArguments& args) {
+  DirectHandle<JSPrototype> prototype_parent;
+  DirectHandle<JSPrototype> constructor_parent;
 
-  if (super_class->IsTheHole(isolate)) {
+  if (IsTheHole(*super_class, isolate)) {
     prototype_parent = isolate->initial_object_prototype();
   } else {
-    if (super_class->IsNull(isolate)) {
+    if (IsNull(*super_class, isolate)) {
       prototype_parent = isolate->factory()->null_value();
-    } else if (super_class->IsConstructor()) {
-      DCHECK(!super_class->IsJSFunction() ||
+    } else if (IsConstructor(*super_class)) {
+      DCHECK(!IsJSFunction(*super_class) ||
              !IsResumableFunction(
-                 Handle<JSFunction>::cast(super_class)->shared().kind()));
+                 Cast<JSFunction>(super_class)->shared()->kind()));
+      DirectHandle<Object> maybe_prototype_parent;
       ASSIGN_RETURN_ON_EXCEPTION(
-          isolate, prototype_parent,
-          Runtime::GetObjectProperty(isolate, super_class,
-                                     isolate->factory()->prototype_string()),
-          Object);
-      if (!prototype_parent->IsNull(isolate) &&
-          !prototype_parent->IsJSReceiver()) {
+          isolate, maybe_prototype_parent,
+          Runtime::GetObjectProperty(isolate, Cast<JSAny>(super_class),
+                                     isolate->factory()->prototype_string()));
+      if (!TryCast(maybe_prototype_parent, &prototype_parent)) {
         THROW_NEW_ERROR(
             isolate, NewTypeError(MessageTemplate::kPrototypeParentNotAnObject,
-                                  prototype_parent),
-            Object);
+                                  maybe_prototype_parent));
       }
       // Create new handle to avoid |constructor_parent| corruption because of
       // |super_class| handle value overwriting via storing to
       // args[ClassBoilerplate::kPrototypeArgumentIndex] below.
-      constructor_parent = handle(HeapObject::cast(*super_class), isolate);
+      constructor_parent =
+          direct_handle(Cast<JSPrototype>(*super_class), isolate);
     } else {
       THROW_NEW_ERROR(isolate,
                       NewTypeError(MessageTemplate::kExtendsValueNotConstructor,
-                                   super_class),
-                      Object);
+                                   super_class));
     }
   }
 
-  Handle<JSObject> prototype = CreateClassPrototype(isolate);
+  DirectHandle<JSObject> prototype = CreateClassPrototype(isolate);
   DCHECK_EQ(*constructor, args[ClassBoilerplate::kConstructorArgumentIndex]);
   // Temporarily change ClassBoilerplate::kPrototypeArgumentIndex for the
   // subsequent calls, but use a scope to make sure to change it back before
@@ -639,21 +634,21 @@ MaybeHandle<Object> DefineClass(Isolate* isolate,
   if (!InitClassConstructor(isolate, class_boilerplate, constructor_parent,
                             constructor, args) ||
       !InitClassPrototype(isolate, class_boilerplate, prototype,
-                          Handle<HeapObject>::cast(prototype_parent),
-                          constructor, args)) {
-    DCHECK(isolate->has_pending_exception());
-    return MaybeHandle<Object>();
+                          prototype_parent, constructor, args)) {
+    DCHECK(isolate->has_exception());
+    return MaybeDirectHandle<Object>();
   }
-  if (FLAG_log_maps) {
-    Handle<Map> empty_map;
+  if (v8_flags.log_maps) {
+    DirectHandle<Map> empty_map;
     LOG(isolate,
-        MapEvent("InitialMap", empty_map, handle(constructor->map(), isolate),
+        MapEvent("InitialMap", empty_map,
+                 direct_handle(constructor->map(), isolate),
                  "init class constructor",
                  SharedFunctionInfo::DebugName(
-                     handle(constructor->shared(), isolate))));
-    LOG(isolate,
-        MapEvent("InitialMap", empty_map, handle(prototype->map(), isolate),
-                 "init class prototype"));
+                     isolate, direct_handle(constructor->shared(), isolate))));
+    LOG(isolate, MapEvent("InitialMap", empty_map,
+                          direct_handle(prototype->map(), isolate),
+                          "init class prototype"));
   }
 
   return prototype;
@@ -664,9 +659,10 @@ MaybeHandle<Object> DefineClass(Isolate* isolate,
 RUNTIME_FUNCTION(Runtime_DefineClass) {
   HandleScope scope(isolate);
   DCHECK_LE(ClassBoilerplate::kFirstDynamicArgumentIndex, args.length());
-  Handle<ClassBoilerplate> class_boilerplate = args.at<ClassBoilerplate>(0);
-  Handle<JSFunction> constructor = args.at<JSFunction>(1);
-  Handle<Object> super_class = args.at(2);
+  DirectHandle<ClassBoilerplate> class_boilerplate =
+      args.at<ClassBoilerplate>(0);
+  DirectHandle<JSFunction> constructor = args.at<JSFunction>(1);
+  DirectHandle<Object> super_class = args.at(2);
   DCHECK_EQ(class_boilerplate->arguments_count(), args.length());
 
   RETURN_RESULT_OR_FAILURE(
@@ -678,38 +674,39 @@ namespace {
 
 enum class SuperMode { kLoad, kStore };
 
-MaybeHandle<JSReceiver> GetSuperHolder(Isolate* isolate,
-                                       Handle<JSObject> home_object,
-                                       SuperMode mode, PropertyKey* key) {
-  if (home_object->IsAccessCheckNeeded() &&
-      !isolate->MayAccess(handle(isolate->context(), isolate), home_object)) {
-    isolate->ReportFailedAccessCheck(home_object);
-    RETURN_EXCEPTION_IF_SCHEDULED_EXCEPTION(isolate, JSReceiver);
+MaybeDirectHandle<JSReceiver> GetSuperHolder(Isolate* isolate,
+                                             DirectHandle<JSObject> home_object,
+                                             SuperMode mode, PropertyKey* key) {
+  if (IsAccessCheckNeeded(*home_object) &&
+      !isolate->MayAccess(isolate->native_context(), home_object)) {
+    RETURN_ON_EXCEPTION(isolate, isolate->ReportFailedAccessCheck(home_object));
+    UNREACHABLE();
   }
 
   PrototypeIterator iter(isolate, home_object);
-  Handle<Object> proto = PrototypeIterator::GetCurrent(iter);
-  if (!proto->IsJSReceiver()) {
+  DirectHandle<Object> proto = PrototypeIterator::GetCurrent(iter);
+  if (!IsJSReceiver(*proto)) {
     MessageTemplate message =
         mode == SuperMode::kLoad
             ? MessageTemplate::kNonObjectPropertyLoadWithProperty
             : MessageTemplate::kNonObjectPropertyStoreWithProperty;
-    Handle<Name> name = key->GetName(isolate);
-    THROW_NEW_ERROR(isolate, NewTypeError(message, proto, name), JSReceiver);
+    DirectHandle<Name> name = key->GetName(isolate);
+    THROW_NEW_ERROR(isolate, NewTypeError(message, proto, name));
   }
-  return Handle<JSReceiver>::cast(proto);
+  return Cast<JSReceiver>(proto);
 }
 
-MaybeHandle<Object> LoadFromSuper(Isolate* isolate, Handle<Object> receiver,
-                                  Handle<JSObject> home_object,
-                                  PropertyKey* key) {
-  Handle<JSReceiver> holder;
+MaybeDirectHandle<Object> LoadFromSuper(Isolate* isolate,
+                                        DirectHandle<JSAny> receiver,
+                                        DirectHandle<JSObject> home_object,
+                                        PropertyKey* key) {
+  DirectHandle<JSReceiver> holder;
   ASSIGN_RETURN_ON_EXCEPTION(
       isolate, holder,
-      GetSuperHolder(isolate, home_object, SuperMode::kLoad, key), Object);
+      GetSuperHolder(isolate, home_object, SuperMode::kLoad, key));
   LookupIterator it(isolate, receiver, *key, holder);
-  Handle<Object> result;
-  ASSIGN_RETURN_ON_EXCEPTION(isolate, result, Object::GetProperty(&it), Object);
+  DirectHandle<Object> result;
+  ASSIGN_RETURN_ON_EXCEPTION(isolate, result, Object::GetProperty(&it));
   return result;
 }
 
@@ -718,9 +715,9 @@ MaybeHandle<Object> LoadFromSuper(Isolate* isolate, Handle<Object> receiver,
 RUNTIME_FUNCTION(Runtime_LoadFromSuper) {
   HandleScope scope(isolate);
   DCHECK_EQ(3, args.length());
-  Handle<Object> receiver = args.at(0);
-  Handle<JSObject> home_object = args.at<JSObject>(1);
-  Handle<Name> name = args.at<Name>(2);
+  DirectHandle<JSAny> receiver = args.at<JSAny>(0);
+  DirectHandle<JSObject> home_object = args.at<JSObject>(1);
+  DirectHandle<Name> name = args.at<Name>(2);
 
   PropertyKey key(isolate, name);
 
@@ -732,11 +729,11 @@ RUNTIME_FUNCTION(Runtime_LoadFromSuper) {
 RUNTIME_FUNCTION(Runtime_LoadKeyedFromSuper) {
   HandleScope scope(isolate);
   DCHECK_EQ(3, args.length());
-  Handle<Object> receiver = args.at(0);
-  Handle<JSObject> home_object = args.at<JSObject>(1);
+  DirectHandle<JSAny> receiver = args.at<JSAny>(0);
+  DirectHandle<JSObject> home_object = args.at<JSObject>(1);
   // TODO(ishell): To improve performance, consider performing the to-string
   // conversion of {key} before calling into the runtime.
-  Handle<Object> key = args.at(2);
+  DirectHandle<Object> key = args.at(2);
 
   bool success;
   PropertyKey lookup_key(isolate, key, &success);
@@ -748,17 +745,19 @@ RUNTIME_FUNCTION(Runtime_LoadKeyedFromSuper) {
 
 namespace {
 
-MaybeHandle<Object> StoreToSuper(Isolate* isolate, Handle<JSObject> home_object,
-                                 Handle<Object> receiver, PropertyKey* key,
-                                 Handle<Object> value,
-                                 StoreOrigin store_origin) {
-  Handle<JSReceiver> holder;
+MaybeDirectHandle<Object> StoreToSuper(Isolate* isolate,
+                                       DirectHandle<JSObject> home_object,
+                                       DirectHandle<JSAny> receiver,
+                                       PropertyKey* key,
+                                       DirectHandle<Object> value,
+                                       StoreOrigin store_origin) {
+  DirectHandle<JSReceiver> holder;
   ASSIGN_RETURN_ON_EXCEPTION(
       isolate, holder,
-      GetSuperHolder(isolate, home_object, SuperMode::kStore, key), Object);
+      GetSuperHolder(isolate, home_object, SuperMode::kStore, key));
   LookupIterator it(isolate, receiver, *key, holder);
   MAYBE_RETURN(Object::SetSuperProperty(&it, value, store_origin),
-               MaybeHandle<Object>());
+               MaybeDirectHandle<Object>());
   return value;
 }
 
@@ -767,10 +766,10 @@ MaybeHandle<Object> StoreToSuper(Isolate* isolate, Handle<JSObject> home_object,
 RUNTIME_FUNCTION(Runtime_StoreToSuper) {
   HandleScope scope(isolate);
   DCHECK_EQ(4, args.length());
-  Handle<Object> receiver = args.at(0);
-  Handle<JSObject> home_object = args.at<JSObject>(1);
-  Handle<Name> name = args.at<Name>(2);
-  Handle<Object> value = args.at(3);
+  DirectHandle<JSAny> receiver = args.at<JSAny>(0);
+  DirectHandle<JSObject> home_object = args.at<JSObject>(1);
+  DirectHandle<Name> name = args.at<Name>(2);
+  DirectHandle<Object> value = args.at(3);
 
   PropertyKey key(isolate, name);
 
@@ -782,12 +781,12 @@ RUNTIME_FUNCTION(Runtime_StoreToSuper) {
 RUNTIME_FUNCTION(Runtime_StoreKeyedToSuper) {
   HandleScope scope(isolate);
   DCHECK_EQ(4, args.length());
-  Handle<Object> receiver = args.at(0);
-  Handle<JSObject> home_object = args.at<JSObject>(1);
+  DirectHandle<JSAny> receiver = args.at<JSAny>(0);
+  DirectHandle<JSObject> home_object = args.at<JSObject>(1);
   // TODO(ishell): To improve performance, consider performing the to-string
   // conversion of {key} before calling into the runtime.
-  Handle<Object> key = args.at(2);
-  Handle<Object> value = args.at(3);
+  DirectHandle<Object> key = args.at(2);
+  DirectHandle<Object> value = args.at(3);
 
   bool success;
   PropertyKey lookup_key(isolate, key, &success);

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 function dummy_func(val) {
@@ -25,7 +23,7 @@ function testGrowInternalExternRefTable(table_index) {
   const initial_size = 5;
   // Add 10 tables, we only test one.
   for (let i = 0; i < 10; ++i) {
-    builder.addTable(kWasmExternRef, initial_size).index;
+    builder.addTable(kWasmExternRef, initial_size);
   }
   builder.addFunction('grow', kSig_i_ri)
     .addBody([kExprLocalGet, 0,

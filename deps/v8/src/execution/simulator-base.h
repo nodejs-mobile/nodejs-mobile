@@ -7,9 +7,11 @@
 
 #include <type_traits>
 
-#ifdef V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64 || \
+    V8_TARGET_ARCH_RISCV64
 #include "include/v8-fast-api-calls.h"
-#endif  // V8_TARGET_ARCH_ARM64
+#endif  // V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_MIPS64 || \
+        // V8_TARGET_ARCH_LOONG64 || V8_TARGET_ARCH_RISCV64
 #include "src/base/hashmap.h"
 #include "src/common/globals.h"
 #include "src/execution/isolate.h"
@@ -35,9 +37,13 @@ class SimulatorBase {
   static base::Mutex* i_cache_mutex() { return i_cache_mutex_; }
   static base::CustomMatcherHashMap* i_cache() { return i_cache_; }
 
-  // Runtime call support.
+  // Runtime/C function call support.
+  // Creates a trampoline to a given C function callable from generated code.
   static Address RedirectExternalReference(Address external_function,
                                            ExternalReference::Type type);
+
+  // Extracts the target C function address from a given redirection trampoline.
+  static Address UnwrapRedirection(Address redirection_trampoline);
 
  protected:
   template <typename Return, typename SimT, typename CallImpl, typename... Args>
@@ -52,62 +58,64 @@ class SimulatorBase {
 
   // Convert back integral return types. This is always a narrowing conversion.
   template <typename T>
-  static typename std::enable_if<std::is_integral<T>::value, T>::type
-  ConvertReturn(intptr_t ret) {
+  static T ConvertReturn(intptr_t ret)
+    requires std::is_integral<T>::value
+  {
     static_assert(sizeof(T) <= sizeof(intptr_t), "type bigger than ptrsize");
     return static_cast<T>(ret);
   }
 
   // Convert back pointer-typed return types.
   template <typename T>
-  static typename std::enable_if<std::is_pointer<T>::value, T>::type
-  ConvertReturn(intptr_t ret) {
+  static T ConvertReturn(intptr_t ret)
+    requires std::is_pointer<T>::value
+  {
     return reinterpret_cast<T>(ret);
   }
 
   template <typename T>
-  static typename std::enable_if<std::is_base_of<Object, T>::value, T>::type
-  ConvertReturn(intptr_t ret) {
-    return Object(ret);
+  static T ConvertReturn(intptr_t ret)
+    requires std::is_base_of<Object, T>::value
+  {
+    return Tagged<Object>(ret);
   }
 
-#ifdef V8_TARGET_ARCH_ARM64
+#if V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64 || \
+    V8_TARGET_ARCH_RISCV64
   template <typename T>
-  static typename std::enable_if<std::is_same<T, v8::AnyCType>::value, T>::type
-  ConvertReturn(intptr_t ret) {
+  static T ConvertReturn(intptr_t ret)
+    requires std::is_same<T, v8::AnyCType>::value
+  {
     v8::AnyCType result;
     result.int64_value = static_cast<int64_t>(ret);
     return result;
   }
-#endif  // V8_TARGET_ARCH_ARM64
+#endif  // V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_MIPS64 || \
+        // V8_TARGET_ARCH_LOONG64 || V8_TARGET_ARCH_RISCV64
 
   // Convert back void return type (i.e. no return).
   template <typename T>
-  static typename std::enable_if<std::is_void<T>::value, T>::type ConvertReturn(
-      intptr_t ret) {}
-
- private:
-  static base::Mutex* redirection_mutex_;
-  static Redirection* redirection_;
-
-  static base::Mutex* i_cache_mutex_;
-  static base::CustomMatcherHashMap* i_cache_;
+  static T ConvertReturn(intptr_t ret)
+    requires std::is_void<T>::value
+  {}
 
   // Helper methods to convert arbitrary integer or pointer arguments to the
   // needed generic argument type intptr_t.
 
   // Convert integral argument to intptr_t.
   template <typename T>
-  static typename std::enable_if<std::is_integral<T>::value, intptr_t>::type
-  ConvertArg(T arg) {
+  static intptr_t ConvertArg(T arg)
+    requires std::is_integral<T>::value
+  {
     static_assert(sizeof(T) <= sizeof(intptr_t), "type bigger than ptrsize");
-#if V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_RISCV64 || V8_TARGET_ARCH_LOONG64
+#if V8_TARGET_ARCH_MIPS64 || V8_TARGET_ARCH_LOONG64 || \
+    V8_TARGET_ARCH_RISCV32 || V8_TARGET_ARCH_RISCV64
     // The MIPS64, LOONG64 and RISCV64 calling convention is to sign extend all
     // values, even unsigned ones.
     using signed_t = typename std::make_signed<T>::type;
     return static_cast<intptr_t>(static_cast<signed_t>(arg));
 #else
-    // Standard C++ convertion: Sign-extend signed values, zero-extend unsigned
+    // Standard C++ conversion: Sign-extend signed values, zero-extend unsigned
     // values.
     return static_cast<intptr_t>(arg);
 #endif
@@ -115,17 +123,25 @@ class SimulatorBase {
 
   // Convert pointer-typed argument to intptr_t.
   template <typename T>
-  static typename std::enable_if<std::is_pointer<T>::value, intptr_t>::type
-  ConvertArg(T arg) {
+  static intptr_t ConvertArg(T arg)
+    requires std::is_pointer<T>::value
+  {
     return reinterpret_cast<intptr_t>(arg);
   }
 
   template <typename T>
-  static
-      typename std::enable_if<std::is_floating_point<T>::value, intptr_t>::type
-      ConvertArg(T arg) {
+  static intptr_t ConvertArg(T arg)
+    requires std::is_floating_point<T>::value
+  {
     UNREACHABLE();
   }
+
+ private:
+  static base::Mutex* redirection_mutex_;
+  static Redirection* redirection_;
+
+  static base::Mutex* i_cache_mutex_;
+  static base::CustomMatcherHashMap* i_cache_;
 };
 
 // When the generated code calls an external reference we need to catch that in
@@ -139,11 +155,9 @@ class SimulatorBase {
 // The following are trapping instructions used for various architectures:
 //  - V8_TARGET_ARCH_ARM: svc (Supervisor Call)
 //  - V8_TARGET_ARCH_ARM64: svc (Supervisor Call)
-//  - V8_TARGET_ARCH_MIPS: swi (software-interrupt)
 //  - V8_TARGET_ARCH_MIPS64: swi (software-interrupt)
-//  - V8_TARGET_ARCH_PPC: svc (Supervisor Call)
 //  - V8_TARGET_ARCH_PPC64: svc (Supervisor Call)
-//  - V8_TARGET_ARCH_S390: svc (Supervisor Call)
+//  - V8_TARGET_ARCH_S390X: svc (Supervisor Call)
 //  - V8_TARGET_ARCH_RISCV64: ecall (Supervisor Call)
 class Redirection {
  public:
@@ -172,7 +186,7 @@ class Redirection {
     return reinterpret_cast<Redirection*>(addr_of_redirection);
   }
 
-  static void* ReverseRedirection(intptr_t reg) {
+  static void* UnwrapRedirection(intptr_t reg) {
     Redirection* redirection = FromInstruction(
         reinterpret_cast<Instruction*>(reinterpret_cast<void*>(reg)));
     return redirection->external_function();

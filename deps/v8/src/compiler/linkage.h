@@ -5,26 +5,23 @@
 #ifndef V8_COMPILER_LINKAGE_H_
 #define V8_COMPILER_LINKAGE_H_
 
+#include <optional>
+
 #include "src/base/compiler-specific.h"
 #include "src/base/flags.h"
 #include "src/codegen/interface-descriptors.h"
+#include "src/codegen/linkage-location.h"
 #include "src/codegen/machine-type.h"
 #include "src/codegen/register.h"
 #include "src/codegen/reglist.h"
 #include "src/codegen/signature.h"
 #include "src/common/globals.h"
 #include "src/compiler/frame.h"
+#include "src/compiler/globals.h"
 #include "src/compiler/operator.h"
 #include "src/execution/encoded-c-signature.h"
 #include "src/runtime/runtime.h"
 #include "src/zone/zone.h"
-
-#if !defined(__clang__) && defined(_M_ARM64)
-// _M_ARM64 is an MSVC-specific macro that clang-cl emulates.
-#define NO_INLINE_FOR_ARM64_MSVC __declspec(noinline)
-#else
-#define NO_INLINE_FOR_ARM64_MSVC
-#endif
 
 namespace v8 {
 class CFunctionInfo;
@@ -41,151 +38,6 @@ constexpr DoubleRegList kNoCalleeSavedFp;
 
 class OsrHelper;
 
-// Describes the location for a parameter or a return value to a call.
-class LinkageLocation {
- public:
-  bool operator==(const LinkageLocation& other) const {
-    return bit_field_ == other.bit_field_ &&
-           machine_type_ == other.machine_type_;
-  }
-
-  bool operator!=(const LinkageLocation& other) const {
-    return !(*this == other);
-  }
-
-  static bool IsSameLocation(const LinkageLocation& a,
-                             const LinkageLocation& b) {
-    // Different MachineTypes may end up at the same physical location. With the
-    // sub-type check we make sure that types like {AnyTagged} and
-    // {TaggedPointer} which would end up with the same physical location are
-    // considered equal here.
-    return (a.bit_field_ == b.bit_field_) &&
-           (IsSubtype(a.machine_type_.representation(),
-                      b.machine_type_.representation()) ||
-            IsSubtype(b.machine_type_.representation(),
-                      a.machine_type_.representation()));
-  }
-
-  static LinkageLocation ForAnyRegister(
-      MachineType type = MachineType::None()) {
-    return LinkageLocation(REGISTER, ANY_REGISTER, type);
-  }
-
-  static LinkageLocation ForRegister(int32_t reg,
-                                     MachineType type = MachineType::None()) {
-    DCHECK_LE(0, reg);
-    return LinkageLocation(REGISTER, reg, type);
-  }
-
-  static LinkageLocation ForCallerFrameSlot(int32_t slot, MachineType type) {
-    DCHECK_GT(0, slot);
-    return LinkageLocation(STACK_SLOT, slot, type);
-  }
-
-  static LinkageLocation ForCalleeFrameSlot(int32_t slot, MachineType type) {
-    // TODO(titzer): bailout instead of crashing here.
-    DCHECK(slot >= 0 && slot < LinkageLocation::MAX_STACK_SLOT);
-    return LinkageLocation(STACK_SLOT, slot, type);
-  }
-
-  static LinkageLocation ForSavedCallerReturnAddress() {
-    return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
-                               StandardFrameConstants::kCallerPCOffset) /
-                                  kSystemPointerSize,
-                              MachineType::Pointer());
-  }
-
-  static LinkageLocation ForSavedCallerFramePtr() {
-    return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
-                               StandardFrameConstants::kCallerFPOffset) /
-                                  kSystemPointerSize,
-                              MachineType::Pointer());
-  }
-
-  static LinkageLocation ForSavedCallerConstantPool() {
-    DCHECK(V8_EMBEDDED_CONSTANT_POOL);
-    return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
-                               StandardFrameConstants::kConstantPoolOffset) /
-                                  kSystemPointerSize,
-                              MachineType::AnyTagged());
-  }
-
-  static LinkageLocation ForSavedCallerFunction() {
-    return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
-                               StandardFrameConstants::kFunctionOffset) /
-                                  kSystemPointerSize,
-                              MachineType::AnyTagged());
-  }
-
-  static LinkageLocation ConvertToTailCallerLocation(
-      LinkageLocation caller_location, int stack_param_delta) {
-    if (!caller_location.IsRegister()) {
-      return LinkageLocation(STACK_SLOT,
-                             caller_location.GetLocation() + stack_param_delta,
-                             caller_location.GetType());
-    }
-    return caller_location;
-  }
-
-  MachineType GetType() const { return machine_type_; }
-
-  int GetSizeInPointers() const {
-    return ElementSizeInPointers(GetType().representation());
-  }
-
-  int32_t GetLocation() const {
-    // We can't use LocationField::decode here because it doesn't work for
-    // negative values!
-    return static_cast<int32_t>(bit_field_ & LocationField::kMask) >>
-           LocationField::kShift;
-  }
-
-  NO_INLINE_FOR_ARM64_MSVC bool IsRegister() const {
-    return TypeField::decode(bit_field_) == REGISTER;
-  }
-  bool IsAnyRegister() const {
-    return IsRegister() && GetLocation() == ANY_REGISTER;
-  }
-  bool IsCallerFrameSlot() const { return !IsRegister() && GetLocation() < 0; }
-  bool IsCalleeFrameSlot() const { return !IsRegister() && GetLocation() >= 0; }
-
-  int32_t AsRegister() const {
-    DCHECK(IsRegister());
-    return GetLocation();
-  }
-  int32_t AsCallerFrameSlot() const {
-    DCHECK(IsCallerFrameSlot());
-    return GetLocation();
-  }
-  int32_t AsCalleeFrameSlot() const {
-    DCHECK(IsCalleeFrameSlot());
-    return GetLocation();
-  }
-
- private:
-  enum LocationType { REGISTER, STACK_SLOT };
-
-  using TypeField = base::BitField<LocationType, 0, 1>;
-  using LocationField = TypeField::Next<int32_t, 31>;
-
-  static constexpr int32_t ANY_REGISTER = -1;
-  static constexpr int32_t MAX_STACK_SLOT = 32767;
-
-  LinkageLocation(LocationType type, int32_t location,
-                  MachineType machine_type) {
-    bit_field_ = TypeField::encode(type) |
-                 // {location} can be -1 (ANY_REGISTER).
-                 ((static_cast<uint32_t>(location) << LocationField::kShift) &
-                  LocationField::kMask);
-    machine_type_ = machine_type;
-  }
-
-  int32_t bit_field_;
-  MachineType machine_type_;
-};
-
-using LocationSignature = Signature<LinkageLocation>;
-
 // Describes a call to various parts of the compiler. Every call has the notion
 // of a "target", which is the first input to the call.
 class V8_EXPORT_PRIVATE CallDescriptor final
@@ -199,7 +51,9 @@ class V8_EXPORT_PRIVATE CallDescriptor final
 #if V8_ENABLE_WEBASSEMBLY    // ↓ WebAssembly only
     kCallWasmCapiFunction,   // target is a Wasm C API function
     kCallWasmFunction,       // target is a wasm function
-    kCallWasmImportWrapper,  // target is a wasm import wrapper
+    kCallWasmFunctionIndirect,  // target is a wasm function that will be called
+                                // indirectly
+    kCallWasmImportWrapper,     // target is a wasm import wrapper
 #endif                       // ↑ WebAssembly only
     kCallBuiltinPointer,     // target is a builtin pointer
   };
@@ -233,7 +87,7 @@ class V8_EXPORT_PRIVATE CallDescriptor final
     // 3. JS runtime arguments are not attached as inputs to the TailCall node.
     // 4. Prior to the tail call, frame and register state is torn down to just
     //    before the caller frame was constructed.
-    // 5. Unlike normal tail calls, arguments adaptor frames (if present) are
+    // 5. Unlike normal tail calls, inlined arguments frames (if present) are
     //    *not* torn down.
     //
     // In other words, behavior is identical to a jmp instruction prior caller
@@ -250,19 +104,18 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   };
   using Flags = base::Flags<Flag>;
 
-  CallDescriptor(Kind kind, MachineType target_type, LinkageLocation target_loc,
-                 LocationSignature* location_sig, size_t param_slot_count,
-                 Operator::Properties properties,
+  CallDescriptor(Kind kind, CodeEntrypointTag tag, MachineType target_type,
+                 LinkageLocation target_loc, LocationSignature* location_sig,
+                 size_t param_slot_count, Operator::Properties properties,
                  RegList callee_saved_registers,
                  DoubleRegList callee_saved_fp_registers, Flags flags,
                  const char* debug_name = "",
                  StackArgumentOrder stack_order = StackArgumentOrder::kDefault,
-#if V8_ENABLE_WEBASSEMBLY
-                 const wasm::FunctionSig* wasm_sig = nullptr,
-#endif
                  const RegList allocatable_registers = {},
-                 size_t return_slot_count = 0)
+                 size_t return_slot_count = 0,
+                 uint64_t signature_hash = kInvalidWasmSignatureHash)
       : kind_(kind),
+        tag_(tag),
         target_type_(target_type),
         target_loc_(target_loc),
         location_sig_(location_sig),
@@ -274,10 +127,13 @@ class V8_EXPORT_PRIVATE CallDescriptor final
         allocatable_registers_(allocatable_registers),
         flags_(flags),
         stack_order_(stack_order),
-#if V8_ENABLE_WEBASSEMBLY
-        wasm_sig_(wasm_sig),
+        debug_name_(debug_name),
+        signature_hash_(signature_hash) {
+#ifdef V8_ENABLE_WEBASSEMBLY
+    if (kind == Kind::kCallWasmFunctionIndirect) {
+      CHECK_NE(signature_hash, kInvalidWasmSignatureHash);
+    }
 #endif
-        debug_name_(debug_name) {
   }
 
   CallDescriptor(const CallDescriptor&) = delete;
@@ -286,6 +142,21 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   // Returns the kind of this call.
   Kind kind() const { return kind_; }
 
+  // Returns the entrypoint tag for this call.
+  CodeEntrypointTag tag() const { return tag_; }
+
+  uint64_t signature_hash() const;
+
+  // Returns the entrypoint tag for this call, shifted to the right by
+  // kCodeEntrypointTagShift so that it fits into a 32-bit immediate.
+  uint32_t shifted_tag() const {
+    static_assert(kCodeEntrypointTagShift >= 32);
+    return tag_ >> kCodeEntrypointTagShift;
+  }
+
+  // Returns {true} if this descriptor is a call to a Code object.
+  bool IsCodeObjectCall() const { return kind_ == kCallCodeObject; }
+
   // Returns {true} if this descriptor is a call to a C function.
   bool IsCFunctionCall() const { return kind_ == kCallAddress; }
 
@@ -293,27 +164,41 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   bool IsJSFunctionCall() const { return kind_ == kCallJSFunction; }
 
 #if V8_ENABLE_WEBASSEMBLY
-  // Returns {true} if this descriptor is a call to a WebAssembly function.
-  bool IsWasmFunctionCall() const { return kind_ == kCallWasmFunction; }
+  // Returns {true} if this descriptor is a direct call to a WebAssembly
+  // function.
+  bool IsDirectWasmFunctionCall() const { return kind_ == kCallWasmFunction; }
+
+  // Returns {true} if this descriptor is a indirect call to a WebAssembly
+  // function.
+  bool IsIndirectWasmFunctionCall() const {
+    return kind_ == kCallWasmFunctionIndirect;
+  }
+
+  // Returns {true} if this descriptor is either a direct or an indirect call to
+  // a WebAssembly function.
+  bool IsAnyWasmFunctionCall() const {
+    return IsDirectWasmFunctionCall() || IsIndirectWasmFunctionCall();
+  }
 
   // Returns {true} if this descriptor is a call to a WebAssembly function.
   bool IsWasmImportWrapper() const { return kind_ == kCallWasmImportWrapper; }
 
   // Returns {true} if this descriptor is a call to a Wasm C API function.
   bool IsWasmCapiFunction() const { return kind_ == kCallWasmCapiFunction; }
-
-  // Returns the wasm signature for this call based on the real parameter types.
-  const wasm::FunctionSig* wasm_sig() const { return wasm_sig_; }
 #endif  // V8_ENABLE_WEBASSEMBLY
+
+  bool IsBuiltinPointerCall() const { return kind_ == kCallBuiltinPointer; }
 
   bool RequiresFrameAsIncoming() const {
     if (IsCFunctionCall() || IsJSFunctionCall()) return true;
 #if V8_ENABLE_WEBASSEMBLY
-    if (IsWasmFunctionCall()) return true;
+    if (IsAnyWasmFunctionCall()) return true;
 #endif  // V8_ENABLE_WEBASSEMBLY
     if (CalleeSavedRegisters() != kNoCalleeSaved) return true;
     return false;
   }
+
+  bool RequiresEntrypointTagForCall() const { return IsCodeObjectCall(); }
 
   // The number of return values from this call.
   size_t ReturnCount() const { return location_sig_->return_count(); }
@@ -457,6 +342,7 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   friend class Linkage;
 
   const Kind kind_;
+  const CodeEntrypointTag tag_;
   const MachineType target_type_;
   const LinkageLocation target_loc_;
   const LocationSignature* const location_sig_;
@@ -470,13 +356,12 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   const RegList allocatable_registers_;
   const Flags flags_;
   const StackArgumentOrder stack_order_;
-#if V8_ENABLE_WEBASSEMBLY
-  const wasm::FunctionSig* wasm_sig_;
-#endif
   const char* const debug_name_;
 
-  mutable base::Optional<size_t> gp_param_count_;
-  mutable base::Optional<size_t> fp_param_count_;
+  uint64_t signature_hash_;
+
+  mutable std::optional<size_t> gp_param_count_;
+  mutable std::optional<size_t> fp_param_count_;
 };
 
 DEFINE_OPERATORS_FOR_FLAGS(CallDescriptor::Flags)
@@ -484,6 +369,13 @@ DEFINE_OPERATORS_FOR_FLAGS(CallDescriptor::Flags)
 std::ostream& operator<<(std::ostream& os, const CallDescriptor& d);
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                            const CallDescriptor::Kind& k);
+
+#if V8_ENABLE_WEBASSEMBLY
+// Lowers a wasm CallDescriptor for 32 bit platforms by replacing i64 parameters
+// and returns with two i32s each.
+V8_EXPORT_PRIVATE CallDescriptor* GetI32WasmCallDescriptor(
+    Zone* zone, const CallDescriptor* call_descriptor);
+#endif
 
 // Defines the linkage for a compilation, including the calling conventions
 // for incoming parameters and return value(s) as well as the outgoing calling
@@ -511,13 +403,17 @@ class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
   // The call descriptor for this compilation unit describes the locations
   // of incoming parameters and the outgoing return value(s).
   CallDescriptor* GetIncomingDescriptor() const { return incoming_; }
-  static CallDescriptor* GetJSCallDescriptor(Zone* zone, bool is_osr,
-                                             int parameter_count,
-                                             CallDescriptor::Flags flags);
+  // Calls to JSFunctions should never overwrite the {properties}, but calls to
+  // known builtins might.
+  static CallDescriptor* GetJSCallDescriptor(
+      Zone* zone, bool is_osr, int parameter_count, CallDescriptor::Flags flags,
+      Operator::Properties properties =
+          Operator::kNoProperties /* use with care! */);
 
   static CallDescriptor* GetRuntimeCallDescriptor(
       Zone* zone, Runtime::FunctionId function, int js_parameter_count,
-      Operator::Properties properties, CallDescriptor::Flags flags);
+      Operator::Properties properties, CallDescriptor::Flags flags,
+      LazyDeoptOnThrow lazy_deopt_on_throw = LazyDeoptOnThrow::kNo);
 
   static CallDescriptor* GetCEntryStubCallDescriptor(
       Zone* zone, int return_count, int js_parameter_count,
@@ -541,7 +437,8 @@ class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
   // structs, pointers to members, etc.
   static CallDescriptor* GetSimplifiedCDescriptor(
       Zone* zone, const MachineSignature* sig,
-      CallDescriptor::Flags flags = CallDescriptor::kNoFlags);
+      CallDescriptor::Flags flags = CallDescriptor::kNoFlags,
+      Operator::Properties properties = Operator::kNoThrow);
 
   // Get the location of an (incoming) parameter to this function.
   LinkageLocation GetParameterLocation(int index) const {
@@ -573,26 +470,39 @@ class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
 
   // A special {Parameter} index for Stub Calls that represents context.
   static int GetStubCallContextParamIndex(int parameter_count) {
-    return parameter_count + 0;  // Parameter (arity + 0) is special.
+    return parameter_count + 0;
   }
 
   // A special {Parameter} index for JSCalls that represents the new target.
   static constexpr int GetJSCallNewTargetParamIndex(int parameter_count) {
-    return parameter_count + 0;  // Parameter (arity + 0) is special.
+    return parameter_count + 0;
   }
 
   // A special {Parameter} index for JSCalls that represents the argument count.
   static constexpr int GetJSCallArgCountParamIndex(int parameter_count) {
-    return parameter_count + 1;  // Parameter (arity + 1) is special.
+    return GetJSCallNewTargetParamIndex(parameter_count) + 1;
   }
+
+#ifdef V8_JS_LINKAGE_INCLUDES_DISPATCH_HANDLE
+  // A special {Parameter} index for JSCalls that represents the dispatch
+  // handle.
+  static constexpr int GetJSCallDispatchHandleParamIndex(int parameter_count) {
+    return GetJSCallArgCountParamIndex(parameter_count) + 1;
+  }
+#endif
 
   // A special {Parameter} index for JSCalls that represents the context.
   static constexpr int GetJSCallContextParamIndex(int parameter_count) {
-    return parameter_count + 2;  // Parameter (arity + 2) is special.
+#ifdef V8_JS_LINKAGE_INCLUDES_DISPATCH_HANDLE
+    return GetJSCallDispatchHandleParamIndex(parameter_count) + 1;
+#else
+    return GetJSCallArgCountParamIndex(parameter_count) + 1;
+#endif
   }
 
   // A special {Parameter} index for JSCalls that represents the closure.
-  static constexpr int kJSCallClosureParamIndex = -1;
+  static constexpr int kJSCallClosureParamIndex = kJSCallClosureParameterIndex;
+  static_assert(kJSCallClosureParamIndex == -1);
 
   // A special {OsrValue} index to indicate the context spill slot.
   static const int kOsrContextSpillSlotIndex = -1;

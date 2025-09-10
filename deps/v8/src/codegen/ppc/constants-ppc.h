@@ -9,6 +9,7 @@
 
 #include "src/base/logging.h"
 #include "src/base/macros.h"
+#include "src/common/code-memory-access.h"
 #include "src/common/globals.h"
 
 // UNIMPLEMENTED_ macro for PPC.
@@ -20,7 +21,7 @@
 #define UNIMPLEMENTED_PPC()
 #endif
 
-#if (V8_HOST_ARCH_PPC || V8_HOST_ARCH_PPC64) &&                    \
+#if V8_HOST_ARCH_PPC64 &&                                          \
     (V8_OS_AIX || (V8_TARGET_ARCH_PPC64 && V8_TARGET_BIG_ENDIAN && \
                    (!defined(_CALL_ELF) || _CALL_ELF == 1)))
 #define ABI_USES_FUNCTION_DESCRIPTORS 1
@@ -28,30 +29,28 @@
 #define ABI_USES_FUNCTION_DESCRIPTORS 0
 #endif
 
-#if !(V8_HOST_ARCH_PPC || V8_HOST_ARCH_PPC64) || V8_OS_AIX || \
-    V8_TARGET_ARCH_PPC64
+#if !V8_HOST_ARCH_PPC64 || V8_OS_AIX || V8_TARGET_ARCH_PPC64
 #define ABI_PASSES_HANDLES_IN_REGS 1
 #else
 #define ABI_PASSES_HANDLES_IN_REGS 0
 #endif
 
-#if !(V8_HOST_ARCH_PPC || V8_HOST_ARCH_PPC64) || !V8_TARGET_ARCH_PPC64 || \
-    V8_TARGET_LITTLE_ENDIAN || (defined(_CALL_ELF) && _CALL_ELF == 2)
+#if !V8_HOST_ARCH_PPC64 || !V8_TARGET_ARCH_PPC64 || V8_TARGET_LITTLE_ENDIAN || \
+    (defined(_CALL_ELF) && _CALL_ELF == 2)
 #define ABI_RETURNS_OBJECT_PAIRS_IN_REGS 1
 #else
 #define ABI_RETURNS_OBJECT_PAIRS_IN_REGS 0
 #endif
 
-#if !(V8_HOST_ARCH_PPC || V8_HOST_ARCH_PPC64) || \
-    (V8_TARGET_ARCH_PPC64 &&                     \
+#if !V8_HOST_ARCH_PPC64 ||   \
+    (V8_TARGET_ARCH_PPC64 && \
      (V8_TARGET_LITTLE_ENDIAN || (defined(_CALL_ELF) && _CALL_ELF == 2)))
 #define ABI_CALL_VIA_IP 1
 #else
 #define ABI_CALL_VIA_IP 0
 #endif
 
-#if !(V8_HOST_ARCH_PPC || V8_HOST_ARCH_PPC64) || V8_OS_AIX || \
-    V8_TARGET_ARCH_PPC64
+#if !V8_HOST_ARCH_PPC64 || V8_OS_AIX || V8_TARGET_ARCH_PPC64
 #define ABI_TOC_REGISTER 2
 #else
 #define ABI_TOC_REGISTER 13
@@ -81,9 +80,8 @@ const int kNoRegister = -1;
 const int kLoadPtrMaxReachBits = 15;
 const int kLoadDoubleMaxReachBits = 15;
 
-// Actual value of root register is offset from the root array's start
+// The actual value of the kRootRegister is offset from the IsolateData's start
 // to take advantage of negative displacement values.
-// TODO(sigurds): Choose best value.
 constexpr int kRootRegisterBias = 128;
 
 // sign-extend the least significant 5-bits of value <imm>
@@ -117,7 +115,7 @@ constexpr int kRootRegisterBias = 128;
 
 // Constants for specific fields are defined in their respective named enums.
 // General constants are in an anonymous enum in class Instr.
-enum Condition {
+enum Condition : int {
   kNoCondition = -1,
   eq = 0,         // Equal.
   ne = 1,         // Not equal.
@@ -129,8 +127,72 @@ enum Condition {
   ordered = 7,
   overflow = 8,  // Summary overflow
   nooverflow = 9,
-  al = 10  // Always.
+  al = 10,  // Always.
+
+  // Unified cross-platform condition names/aliases.
+  // Do not set unsigned constants equal to their signed variants.
+  // We need to be able to differentiate between signed and unsigned enum
+  // constants in order to emit the right instructions (i.e CmpS64 vs CmpU64).
+  kEqual = eq,
+  kNotEqual = ne,
+  kLessThan = lt,
+  kGreaterThan = gt,
+  kLessThanEqual = le,
+  kGreaterThanEqual = ge,
+  kUnsignedLessThan = 11,
+  kUnsignedGreaterThan = 12,
+  kUnsignedLessThanEqual = 13,
+  kUnsignedGreaterThanEqual = 14,
+  kOverflow = overflow,
+  kNoOverflow = nooverflow,
+  kZero = 15,
+  kNotZero = 16,
 };
+
+inline Condition to_condition(Condition cond) {
+  switch (cond) {
+    case kUnsignedLessThan:
+      return lt;
+    case kUnsignedGreaterThan:
+      return gt;
+    case kUnsignedLessThanEqual:
+      return le;
+    case kUnsignedGreaterThanEqual:
+      return ge;
+    case kZero:
+      return eq;
+    case kNotZero:
+      return ne;
+    default:
+      break;
+  }
+  return cond;
+}
+
+inline bool is_signed(Condition cond) {
+  switch (cond) {
+    case kEqual:
+    case kNotEqual:
+    case kLessThan:
+    case kGreaterThan:
+    case kLessThanEqual:
+    case kGreaterThanEqual:
+    case kOverflow:
+    case kNoOverflow:
+    case kZero:
+    case kNotZero:
+      return true;
+
+    case kUnsignedLessThan:
+    case kUnsignedGreaterThan:
+    case kUnsignedLessThanEqual:
+    case kUnsignedGreaterThanEqual:
+      return false;
+
+    default:
+      UNREACHABLE();
+  }
+}
 
 inline Condition NegateCondition(Condition cond) {
   DCHECK(cond != al);
@@ -210,17 +272,19 @@ using Instr = uint32_t;
   /* VSX Scalar Test for software Divide Double-Precision */          \
   V(xstdivdp, XSTDIVDP, 0xF00001E8)
 
-#define PPC_XX3_OPCODE_VECTOR_LIST(V)                                         \
+#define PPC_XX3_OPCODE_VECTOR_A_FORM_LIST(V)         \
+  /* VSX Vector Compare Equal To Single-Precision */ \
+  V(xvcmpeqsp, XVCMPEQSP, 0xF0000218)                \
+  /* VSX Vector Compare Equal To Double-Precision */ \
+  V(xvcmpeqdp, XVCMPEQDP, 0xF0000318)
+
+#define PPC_XX3_OPCODE_VECTOR_B_FORM_LIST(V)                                  \
   /* VSX Vector Add Double-Precision */                                       \
   V(xvadddp, XVADDDP, 0xF0000300)                                             \
   /* VSX Vector Add Single-Precision */                                       \
   V(xvaddsp, XVADDSP, 0xF0000200)                                             \
-  /* VSX Vector Compare Equal To Double-Precision */                          \
-  V(xvcmpeqdp, XVCMPEQDP, 0xF0000318)                                         \
   /* VSX Vector Compare Equal To Double-Precision & record CR6 */             \
   V(xvcmpeqdpx, XVCMPEQDPx, 0xF0000718)                                       \
-  /* VSX Vector Compare Equal To Single-Precision */                          \
-  V(xvcmpeqsp, XVCMPEQSP, 0xF0000218)                                         \
   /* VSX Vector Compare Equal To Single-Precision & record CR6 */             \
   V(xvcmpeqspx, XVCMPEQSPx, 0xF0000618)                                       \
   /* VSX Vector Compare Greater Than or Equal To Double-Precision */          \
@@ -329,6 +393,10 @@ using Instr = uint32_t;
   V(xxsldwi, XXSLDWI, 0xF0000010)                                             \
   /* VSX Splat Word */                                                        \
   V(xxspltw, XXSPLTW, 0xF0000290)
+
+#define PPC_XX3_OPCODE_VECTOR_LIST(V)  \
+  PPC_XX3_OPCODE_VECTOR_A_FORM_LIST(V) \
+  PPC_XX3_OPCODE_VECTOR_B_FORM_LIST(V)
 
 #define PPC_Z23_OPCODE_LIST(V)                                    \
   /* Decimal Quantize */                                          \
@@ -1965,6 +2033,8 @@ using Instr = uint32_t;
   V(vmladduhm, VMLADDUHM, 0x10000022)                           \
   /* Vector Select */                                           \
   V(vsel, VSEL, 0x1000002A)                                     \
+  /* Vector Multiply-Sum Mixed Byte Modulo */                   \
+  V(vmsummbm, VMSUMMBM, 0x10000025)                             \
   /* Vector Multiply-Sum Signed Halfword Modulo */              \
   V(vmsumshm, VMSUMSHM, 0x10000028)                             \
   /* Vector Multiply-High-Round-Add Signed Halfword Saturate */ \
@@ -1979,8 +2049,6 @@ using Instr = uint32_t;
   V(vmaddfp, VMADDFP, 0x1000002E)                                \
   /* Vector Multiply-High-Add Signed Halfword Saturate */        \
   V(vmhaddshs, VMHADDSHS, 0x10000020)                            \
-  /* Vector Multiply-Sum Mixed Byte Modulo */                    \
-  V(vmsummbm, VMSUMMBM, 0x10000025)                              \
   /* Vector Multiply-Sum Signed Halfword Saturate */             \
   V(vmsumshs, VMSUMSHS, 0x10000029)                              \
   /* Vector Multiply-Sum Unsigned Byte Modulo */                 \
@@ -2681,7 +2749,8 @@ immediate-specified index */                 \
 #define PPC_PREFIX_OPCODE_TYPE_00_LIST(V)        \
   V(pload_store_8ls, PLOAD_STORE_8LS, 0x4000000) \
   V(pplwa, PPLWA, 0xA4000000)                    \
-  V(ppld, PPLD, 0xE4000000)
+  V(ppld, PPLD, 0xE4000000)                      \
+  V(ppstd, PPSTD, 0xF4000000)
 
 #define PPC_PREFIX_OPCODE_TYPE_10_LIST(V) \
   V(pload_store_mls, PLOAD_STORE_MLS, 0x6000000)
@@ -2915,7 +2984,7 @@ const Instr rtCallRedirInstr = TWI;
 // Example: Test whether the instruction at ptr does set the condition code
 // bits.
 //
-// bool InstructionSetsConditionCodes(byte* ptr) {
+// bool InstructionSetsConditionCodes(uint8_t* ptr) {
 //   Instruction* instr = Instruction::At(ptr);
 //   int type = instr->TypeValue();
 //   return ((type == 0) || (type == 1)) && instr->HasS();
@@ -2944,9 +3013,8 @@ class Instruction {
   }
 
   // Set the raw instruction bits to value.
-  inline void SetInstructionBits(Instr value) {
-    *reinterpret_cast<Instr*>(this) = value;
-  }
+  V8_EXPORT_PRIVATE void SetInstructionBits(
+      Instr value, WritableJitAllocation* jit_allocation = nullptr);
 
   // Read one particular bit out of the instruction bits.
   inline int Bit(int nr) const { return (InstructionBits() >> nr) & 1; }
@@ -3086,10 +3154,15 @@ class Instruction {
       PPC_XS_OPCODE_LIST(OPCODE_CASES)
       return static_cast<Opcode>(opcode);
     }
+    opcode = extcode | BitField(9, 3);
+    switch (opcode) {
+      PPC_XX3_OPCODE_VECTOR_A_FORM_LIST(OPCODE_CASES)
+      return static_cast<Opcode>(opcode);
+    }
     opcode = extcode | BitField(10, 3);
     switch (opcode) {
       PPC_EVS_OPCODE_LIST(OPCODE_CASES)
-      PPC_XX3_OPCODE_VECTOR_LIST(OPCODE_CASES)
+      PPC_XX3_OPCODE_VECTOR_B_FORM_LIST(OPCODE_CASES)
       PPC_XX3_OPCODE_SCALAR_LIST(OPCODE_CASES)
       return static_cast<Opcode>(opcode);
     }
@@ -3148,7 +3221,7 @@ class Instruction {
   // reference to an instruction is to convert a pointer. There is no way
   // to allocate or create instances of class Instruction.
   // Use the At(pc) function to create references to Instruction.
-  static Instruction* At(byte* pc) {
+  static Instruction* At(uint8_t* pc) {
     return reinterpret_cast<Instruction*>(pc);
   }
 

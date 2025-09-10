@@ -6,6 +6,7 @@
 #define V8_BUILTINS_BUILTINS_STRING_GEN_H_
 
 #include "src/codegen/code-stub-assembler.h"
+#include "src/objects/string.h"
 
 namespace v8 {
 namespace internal {
@@ -33,6 +34,10 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
   TNode<Int32T> LoadSurrogatePairAt(TNode<String> string, TNode<IntPtrT> length,
                                     TNode<IntPtrT> index,
                                     UnicodeEncoding encoding);
+  TNode<BoolT> HasUnpairedSurrogate(TNode<String> string, Label* if_indirect);
+
+  void ReplaceUnpairedSurrogates(TNode<String> source, TNode<String> dest,
+                                 Label* if_indirect);
 
   TNode<String> StringFromSingleUTF16EncodedCodePoint(TNode<Int32T> codepoint);
 
@@ -84,7 +89,22 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
       const TNode<RawPtrT> subject_ptr, const TNode<IntPtrT> subject_length,
       const TNode<RawPtrT> search_ptr, const TNode<IntPtrT> start_position);
 
+  TNode<Smi> IndexOfDollarChar(const TNode<Context> context,
+                               const TNode<String> string);
+
  protected:
+  enum class StringComparison {
+    kLessThan,
+    kLessThanOrEqual,
+    kGreaterThan,
+    kGreaterThanOrEqual,
+    kCompare
+  };
+
+  void StringEqual_FastLoop(TNode<String> lhs, TNode<Word32T> lhs_instance_type,
+                            TNode<String> rhs, TNode<Word32T> rhs_instance_type,
+                            TNode<IntPtrT> byte_length, Label* if_equal,
+                            Label* if_not_equal);
   void StringEqual_Loop(TNode<String> lhs, TNode<Word32T> lhs_instance_type,
                         MachineType lhs_type, TNode<String> rhs,
                         TNode<Word32T> rhs_instance_type, MachineType rhs_type,
@@ -100,15 +120,11 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
                                      const TNode<IntPtrT> search_length,
                                      const TNode<IntPtrT> start_position);
 
-  void GenerateStringEqual(TNode<String> left, TNode<String> right);
+  void GenerateStringEqual(TNode<String> left, TNode<String> right,
+                           TNode<IntPtrT> length);
   void GenerateStringRelationalComparison(TNode<String> left,
-                                          TNode<String> right, Operation op);
-
-  using StringAtAccessor = std::function<TNode<Object>(
-      TNode<String> receiver, TNode<IntPtrT> length, TNode<IntPtrT> index)>;
-
-  const TNode<Smi> IndexOfDollarChar(const TNode<Context> context,
-                                     const TNode<String> string);
+                                          TNode<String> right,
+                                          StringComparison op);
 
   TNode<JSArray> StringToArray(TNode<NativeContext> context,
                                TNode<String> subject_string,
@@ -168,7 +184,7 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
   using DescriptorIndexNameValue =
       PrototypeCheckAssembler::DescriptorIndexNameValue;
   void MaybeCallFunctionAtSymbol(
-      const TNode<Context> context, const TNode<Object> object,
+      const TNode<Context> context, const TNode<JSAny> object,
       const TNode<Object> maybe_string, Handle<Symbol> symbol,
       DescriptorIndexNameValue additional_property_to_check,
       const NodeFunction0& regexp_call, const NodeFunction1& generic_call);
@@ -176,7 +192,7 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
  private:
   template <typename T>
   TNode<String> AllocAndCopyStringCharacters(TNode<T> from,
-                                             TNode<Int32T> from_instance_type,
+                                             TNode<BoolT> from_is_one_byte,
                                              TNode<IntPtrT> from_index,
                                              TNode<IntPtrT> character_count);
 };

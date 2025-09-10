@@ -63,9 +63,9 @@ TEST(0) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+  auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(3, 4, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
   CHECK_EQ(7, static_cast<int>(res));
@@ -99,9 +99,9 @@ TEST(1) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+  auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(100, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
   CHECK_EQ(5050, static_cast<int>(res));
@@ -147,9 +147,9 @@ TEST(2) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+  auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(10, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
   CHECK_EQ(3628800, static_cast<int>(res));
@@ -216,9 +216,9 @@ TEST(3) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F_piiii>::FromCode(*code);
+  auto f = GeneratedCode<F_piiii>::FromCode(isolate, *code);
   t.i = 100000;
   t.c = 10;
   t.s = 1000;
@@ -325,15 +325,15 @@ TEST(4) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto f = GeneratedCode<F_piiii>::FromCode(*code);
+    auto f = GeneratedCode<F_piiii>::FromCode(isolate, *code);
     t.a = 1.5;
     t.b = 2.75;
     t.c = 17.17;
@@ -385,15 +385,15 @@ TEST(5) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+    auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
     int res = reinterpret_cast<int>(f.Call(0xAAAAAAAA, 0, 0, 0, 0));
     ::printf("f() = %d\n", res);
     CHECK_EQ(-7, res);
@@ -420,15 +420,15 @@ TEST(6) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+    auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
     int res = reinterpret_cast<int>(f.Call(0xFFFF, 0, 0, 0, 0));
     ::printf("f() = %d\n", res);
     CHECK_EQ(382, res);
@@ -495,15 +495,15 @@ static void TestRoundingMode(VCVTTypes types,
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+    auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
     int res = reinterpret_cast<int>(f.Call(0, 0, 0, 0, 0));
     ::printf("res = %d\n", res);
     CHECK_EQ(expected, res);
@@ -682,15 +682,15 @@ TEST(8) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto fn = GeneratedCode<F_ppiii>::FromCode(*code);
+    auto fn = GeneratedCode<F_ppiii>::FromCode(isolate, *code);
     d.a = 1.1;
     d.b = 2.2;
     d.c = 3.3;
@@ -797,15 +797,15 @@ TEST(9) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto fn = GeneratedCode<F_ppiii>::FromCode(*code);
+    auto fn = GeneratedCode<F_ppiii>::FromCode(isolate, *code);
     d.a = 1.1;
     d.b = 2.2;
     d.c = 3.3;
@@ -908,15 +908,15 @@ TEST(10) {
 
     CodeDesc desc;
     assm.GetCode(isolate, &desc);
-    Object code = isolate->heap()->CreateCode(
+    Tagged<Object> code = isolate->heap()->CreateCode(
         desc,
         CodeKind::FOR_TESTING,
         Handle<Code>())->ToObjectChecked();
     CHECK(code->IsCode());
 #ifdef DEBUG
-    Code::cast(code)->Print();
+    Cast<Code>(code)->Print();
 #endif
-    auto fn = GeneratedCode<F_ppiii>::FromCode(*code);
+    auto fn = GeneratedCode<F_ppiii>::FromCode(isolate, *code);
     d.a = 1.1;
     d.b = 2.2;
     d.c = 3.3;
@@ -1005,15 +1005,15 @@ TEST(11) {
 
   CodeDesc desc;
   assm.GetCode(isolate, &desc);
-  Object code = isolate->heap()->CreateCode(
+  Tagged<Object> code = isolate->heap()->CreateCode(
       desc,
       CodeKind::FOR_TESTING,
       Handle<Code>())->ToObjectChecked();
   CHECK(code->IsCode());
 #ifdef DEBUG
-  Code::cast(code)->Print();
+  Cast<Code>(code)->Print();
 #endif
-  auto f = GeneratedCode<F_piiii>::FromCode(*code);
+  auto f = GeneratedCode<F_piiii>::FromCode(isolate, *code);
   f.Call(&i, 0, 0, 0, 0);
 
   CHECK_EQ(0xABCD0001, i.a);
@@ -1075,9 +1075,9 @@ TEST(WordSizedVectorInstructions) {
   Handle<Code> code =
       Factory::CodeBuilder(isolate, desc, CodeKind::FOR_TESTING).Build();
 #ifdef DEBUG
-  code->Print();
+  Print(*code);
 #endif
-  auto f = GeneratedCode<F_iiiii>::FromCode(*code);
+  auto f = GeneratedCode<F_iiiii>::FromCode(isolate, *code);
   intptr_t res = reinterpret_cast<intptr_t>(f.Call(0, 0, 0, 0, 0));
   ::printf("f() = %" V8PRIdPTR "\n", res);
   CHECK_EQ(173, static_cast<int>(res));

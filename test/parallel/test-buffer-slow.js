@@ -1,11 +1,17 @@
 'use strict';
 
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const buffer = require('buffer');
 const SlowBuffer = buffer.SlowBuffer;
 
 const ones = [1, 1, 1, 1];
+
+common.expectWarning(
+  'DeprecationWarning',
+  'SlowBuffer() is deprecated. Please use Buffer.allocUnsafeSlow()',
+  'DEP0030'
+);
 
 // Should create a Buffer
 let sb = SlowBuffer(4);
@@ -30,14 +36,6 @@ for (const [key, value] of sb.entries()) {
 
 // Should work with edge cases
 assert.strictEqual(SlowBuffer(0).length, 0);
-try {
-  assert.strictEqual(
-    SlowBuffer(buffer.kMaxLength).length, buffer.kMaxLength);
-} catch (e) {
-  // Don't match on message as it is from the JavaScript engine. V8 and
-  // ChakraCore provide different messages.
-  assert.strictEqual(e.name, 'RangeError');
-}
 
 // Should throw with invalid length type
 const bufferInvalidTypeMsg = {
@@ -52,9 +50,8 @@ assert.throws(() => SlowBuffer(true), bufferInvalidTypeMsg);
 
 // Should throw with invalid length value
 const bufferMaxSizeMsg = {
-  code: 'ERR_INVALID_ARG_VALUE',
+  code: 'ERR_OUT_OF_RANGE',
   name: 'RangeError',
-  message: /^The argument 'size' is invalid\. Received [^"]*$/
 };
 assert.throws(() => SlowBuffer(NaN), bufferMaxSizeMsg);
 assert.throws(() => SlowBuffer(Infinity), bufferMaxSizeMsg);

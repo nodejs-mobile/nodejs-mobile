@@ -19,19 +19,20 @@ constexpr bool ShouldPadArguments(int argument_count) {
   return ArgumentPaddingSlots(argument_count) != 0;
 }
 
-#ifdef DEBUG
-template <typename... RegTypes,
-          // All arguments must be either Register or DoubleRegister.
-          typename = typename std::enable_if_t<
-              std::conjunction_v<std::is_same<Register, RegTypes>...> ||
-              std::conjunction_v<std::is_same<DoubleRegister, RegTypes>...>>>
-inline constexpr bool AreAliased(RegTypes... regs) {
+template <typename... RegTypes>
+inline constexpr bool AreAliased(RegTypes... regs)
+  requires(std::conjunction_v<std::is_same<Register, RegTypes>...> ||
+           std::conjunction_v<std::is_same<DoubleRegister, RegTypes>...>
+#ifdef V8_TARGET_ARCH_X64
+           || std::conjunction_v<std::is_same<YMMRegister, RegTypes>...>
+#endif  // V8_TARGET_ARCH_X64
+  )
+{
   using FirstRegType = std::tuple_element_t<0, std::tuple<RegTypes...>>;
   int num_different_regs = RegListBase<FirstRegType>{regs...}.Count();
   int num_given_regs = (... + (regs.is_valid() ? 1 : 0));
   return num_different_regs < num_given_regs;
 }
-#endif
 
 }  // namespace internal
 }  // namespace v8

@@ -5,17 +5,19 @@
 #ifndef V8_SANDBOX_SANDBOXED_POINTER_INL_H_
 #define V8_SANDBOX_SANDBOXED_POINTER_INL_H_
 
-#include "include/v8-internal.h"
-#include "src/common/ptr-compr.h"
-#include "src/execution/isolate.h"
 #include "src/sandbox/sandboxed-pointer.h"
+// Include the non-inl header before the rest of the headers.
+
+#include "include/v8-internal.h"
+#include "src/common/ptr-compr-inl.h"
+#include "src/sandbox/sandbox.h"
 
 namespace v8 {
 namespace internal {
 
 V8_INLINE Address ReadSandboxedPointerField(Address field_address,
                                             PtrComprCageBase cage_base) {
-#ifdef V8_SANDBOXED_POINTERS
+#ifdef V8_ENABLE_SANDBOX
   SandboxedPointer_t sandboxed_pointer =
       base::ReadUnalignedValue<SandboxedPointer_t>(field_address);
 
@@ -30,9 +32,9 @@ V8_INLINE Address ReadSandboxedPointerField(Address field_address,
 V8_INLINE void WriteSandboxedPointerField(Address field_address,
                                           PtrComprCageBase cage_base,
                                           Address pointer) {
-#ifdef V8_SANDBOXED_POINTERS
+#ifdef V8_ENABLE_SANDBOX
   // The pointer must point into the sandbox.
-  CHECK(GetProcessWideSandbox()->Contains(pointer));
+  CHECK(Sandbox::current()->Contains(pointer));
 
   Address offset = pointer - cage_base.address();
   SandboxedPointer_t sandboxed_pointer = offset << kSandboxedPointerShift;

@@ -4,9 +4,10 @@
 
 #include "src/builtins/builtins-proxy-gen.h"
 
+#include "src/builtins/builtins-inl.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins-utils.h"
-#include "src/builtins/builtins.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/common/globals.h"
 #include "src/logging/counters.h"
 #include "src/objects/js-proxy.h"
@@ -15,6 +16,8 @@
 
 namespace v8 {
 namespace internal {
+
+#include "src/codegen/define-code-stub-assembler-macros.inc"
 
 TNode<JSProxy> ProxiesCodeStubAssembler::AllocateProxy(
     TNode<Context> context, TNode<JSReceiver> target,
@@ -74,15 +77,10 @@ TNode<Context> ProxiesCodeStubAssembler::CreateProxyRevokeFunctionContext(
 TNode<JSFunction> ProxiesCodeStubAssembler::AllocateProxyRevokeFunction(
     TNode<Context> context, TNode<JSProxy> proxy) {
   const TNode<NativeContext> native_context = LoadNativeContext(context);
-
   const TNode<Context> proxy_context =
       CreateProxyRevokeFunctionContext(proxy, native_context);
-  const TNode<Map> revoke_map = CAST(LoadContextElement(
-      native_context, Context::STRICT_FUNCTION_WITHOUT_PROTOTYPE_MAP_INDEX));
-  const TNode<SharedFunctionInfo> revoke_info = ProxyRevokeSharedFunConstant();
-
-  return AllocateFunctionWithMapAndContext(revoke_map, revoke_info,
-                                           proxy_context);
+  return AllocateRootFunctionWithContext(RootIndex::kProxyRevokeSharedFun,
+                                         proxy_context, native_context);
 }
 
 TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
@@ -99,12 +97,11 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
       trap_undefined(this);
 
   // 1. Let handler be the value of the [[ProxyHandler]] internal slot of O.
-  TNode<HeapObject> handler =
+  TNode<Union<Null, JSReceiver>> handler =
       CAST(LoadObjectField(proxy, JSProxy::kHandlerOffset));
 
   // 2. If handler is null, throw a TypeError exception.
-  CSA_DCHECK(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  GotoIf(IsNull(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
   CSA_DCHECK(this, IsJSReceiver(handler));
@@ -118,7 +115,7 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
   TNode<Object> trap = GetMethod(context, handler, trap_name, &trap_undefined);
 
   CodeStubArguments args(this, argc_ptr);
-  TNode<Object> receiver = args.GetReceiver();
+  TNode<JSAny> receiver = args.GetReceiver();
 
   // 7. Let argArray be CreateArrayFromList(argumentsList).
   TNode<JSArray> array = EmitFastNewAllArguments(
@@ -128,12 +125,12 @@ TF_BUILTIN(CallProxy, ProxiesCodeStubAssembler) {
 
   // 8. Return Call(trap, handler, «target, thisArgument, argArray»).
   TNode<Object> result = Call(context, trap, handler, target, receiver, array);
-  args.PopAndReturn(result);
+  args.PopAndReturn(CAST(result));
 
   BIND(&trap_undefined);
   {
     // 6.a. Return Call(target, thisArgument, argumentsList).
-    TailCallStub(CodeFactory::Call(isolate()), context, target, argc);
+    TailCallBuiltin(Builtins::Call(), context, target, argc);
   }
 
   BIND(&throw_proxy_handler_revoked);
@@ -149,16 +146,17 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
 
   CSA_DCHECK(this, IsCallable(proxy));
 
+  PerformStackCheck(context);
+
   Label throw_proxy_handler_revoked(this, Label::kDeferred),
       trap_undefined(this), not_an_object(this, Label::kDeferred);
 
   // 1. Let handler be the value of the [[ProxyHandler]] internal slot of O.
-  TNode<HeapObject> handler =
+  TNode<Union<Null, JSReceiver>> handler =
       CAST(LoadObjectField(proxy, JSProxy::kHandlerOffset));
 
   // 2. If handler is null, throw a TypeError exception.
-  CSA_DCHECK(this, IsNullOrJSReceiver(handler));
-  GotoIfNot(IsJSReceiver(handler), &throw_proxy_handler_revoked);
+  GotoIf(IsNull(handler), &throw_proxy_handler_revoked);
 
   // 3. Assert: Type(handler) is Object.
   CSA_DCHECK(this, IsJSReceiver(handler));
@@ -180,12 +178,12 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
       UncheckedCast<IntPtrT>(args.GetLengthWithoutReceiver()));
 
   // 8. Let newObj be ? Call(trap, handler, « target, argArray, newTarget »).
-  TNode<Object> new_obj =
+  TNode<JSAny> new_obj =
       Call(context, trap, handler, target, array, new_target);
 
   // 9. If Type(newObj) is not Object, throw a TypeError exception.
   GotoIf(TaggedIsSmi(new_obj), &not_an_object);
-  GotoIfNot(IsJSReceiver(CAST(new_obj)), &not_an_object);
+  GotoIfNot(JSAnyIsNotPrimitive(CAST(new_obj)), &not_an_object);
 
   // 10. Return newObj.
   args.PopAndReturn(new_obj);
@@ -201,8 +199,7 @@ TF_BUILTIN(ConstructProxy, ProxiesCodeStubAssembler) {
     CSA_DCHECK(this, IsConstructor(CAST(target)));
 
     // 6.b. Return ? Construct(target, argumentsList, newTarget).
-    TailCallStub(CodeFactory::Construct(isolate()), context, target, new_target,
-                 argc);
+    TailCallBuiltin(Builtin::kConstruct, context, target, new_target, argc);
   }
 
   BIND(&throw_proxy_handler_revoked);
@@ -428,6 +425,8 @@ void ProxiesCodeStubAssembler::CheckDeleteTrapResult(TNode<Context> context,
 
   BIND(&check_passed);
 }
+
+#include "src/codegen/undef-code-stub-assembler-macros.inc"
 
 }  // namespace internal
 }  // namespace v8

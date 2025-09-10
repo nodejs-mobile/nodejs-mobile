@@ -45,7 +45,7 @@ assert.strictEqual(
   search: '?que=ry',
   searchParams: URLSearchParams { 'que' => 'ry' },
   hash: '#hash',
-  [Symbol(context)]: URLContext {
+  Symbol(context): URLContext {
     href: 'https://username:password@host.name:8080/path/name/?que=ry#hash',
     protocol_end: 6,
     username_end: 16,
@@ -64,7 +64,7 @@ assert.strictEqual(
 
 assert.strictEqual(
   util.inspect({ a: url }, { depth: 0 }),
-  '{ a: [URL] }');
+  '{ a: URL {} }');
 
 class MyURL extends URL {}
 assert(util.inspect(new MyURL(url.href)).startsWith('MyURL {'));

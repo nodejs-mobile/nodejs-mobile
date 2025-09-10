@@ -36,10 +36,25 @@ const packument = (nv, opts) => {
       _id: 'blue',
       name: 'blue',
       'dist-tags': {
+        v1: '1.0.0',
+        next: '1.0.1',
+        prev: '1.0.0',
         latest: '1.0.0',
+        a: '1.0.0',
+        c: '1.0.0',
+        b: '1.0.0',
+        d: '1.0.0',
+        f: '1.0.1',
+        g: '1.0.1',
+        h: '1.0.1',
+        e: '1.0.1',
+        z: '1.0.0',
+        x: '1.0.1',
+        y: '1.0.0',
       },
       time: {
         '1.0.0': yesterday,
+        '1.0.1': '2012-12-20T00:00:00.000Z',
       },
       versions: {
         '1.0.0': {
@@ -64,10 +79,61 @@ const packument = (nv, opts) => {
         },
       },
     },
+    // package with no time attribute
+    gray: {
+      _id: 'gray',
+      name: 'gray',
+      'dist-tags': {
+        latest: '1.1.0',
+        beta: '1.2.0-beta',
+        alpha: '1.2.0-alpha',
+        old: '1.0.0',
+        stable: '1.1.0',
+      },
+      versions: {
+        '1.1.0': {
+          name: 'gray',
+          version: '1.1.0',
+          dist: {
+            shasum: 'b',
+            tarball: 'http://gray/1.1.0.tgz',
+            fileCount: 1,
+          },
+        },
+      },
+    },
     cyan: {
       _npmUser: {
         name: 'claudia',
         email: 'claudia@cyan.com',
+      },
+      name: 'cyan',
+      'dist-tags': {
+        latest: '1.0.0',
+      },
+      versions: {
+        '1.0.0': {
+          version: '1.0.0',
+          name: 'cyan',
+          dist: {
+            shasum: '123',
+            tarball: 'http://hm.cyan.com/1.0.0.tgz',
+            integrity: '---',
+            fileCount: 1,
+            unpackedSize: 1000000,
+          },
+        },
+        '1.0.1': {},
+      },
+    },
+    'cyan-oidc': {
+      _npmUser: {
+        name: 'claudia',
+        email: 'claudia@cyan.com',
+        trustedPublisher: {
+          id: 'github',
+          oidcConfigId: 'oidc:a0e127d0-8d66-45d0-8264-e4f8372c7249',
+        },
       },
       name: 'cyan',
       'dist-tags': {
@@ -252,14 +318,63 @@ const packument = (nv, opts) => {
         },
       },
     },
+    'single-version': {
+      _id: 'single-version',
+      name: 'single-version',
+      'dist-tags': {
+        latest: '1.0.0',
+      },
+      versions: {
+        '1.0.0': {
+          name: 'single-version',
+          version: '1.0.0',
+          dist: {
+            shasum: '123',
+            tarball: 'http://hm.single-version.com/1.0.0.tgz',
+            fileCount: 1,
+          },
+        },
+      },
+    },
+    // this is a packaged named error which will conflict with
+    // the error key in json output
+    error: {
+      _id: 'error',
+      name: 'error',
+      'dist-tags': {
+        latest: '1.0.0',
+      },
+      versions: {
+        '1.0.0': {
+          name: 'error',
+          version: '1.0.0',
+          dist: {
+            shasum: '123',
+            tarball: 'http://hm.error.com/1.0.0.tgz',
+            fileCount: 1,
+          },
+        },
+      },
+    },
   }
+
   if (nv.type === 'git') {
     return mocks[nv.hosted.project]
   }
+
   if (nv.raw === './blue') {
     return mocks.blue
   }
-  return mocks[nv.name]
+
+  if (mocks[nv.name]) {
+    return mocks[nv.name]
+  }
+
+  if (nv.name === 'unknown-error') {
+    throw new Error('Unknown error')
+  }
+
+  throw Object.assign(new Error('404'), { code: 'E404' })
 }
 
 const loadMockNpm = async function (t, opts = {}) {
@@ -351,10 +466,43 @@ t.test('package with --json and semver range', async t => {
   t.matchSnapshot(joinedOutput())
 })
 
+t.test('package with _npmUser.trustedPublisher shows cleaned up property with --json', async t => {
+  const { view, joinedOutput } = await loadMockNpm(t, { config: { json: true } })
+  await view.exec(['cyan-oidc@^1.0.0'])
+  t.match(joinedOutput(), /claudia <claudia@cyan.com>/, 'uses oidc trustedPublisher info for _npmUser')
+})
+
 t.test('package with --json and no versions', async t => {
   const { view, joinedOutput } = await loadMockNpm(t, { config: { json: true } })
   await view.exec(['brown'])
   t.equal(joinedOutput(), '', 'no info to display')
+})
+
+t.test('package with --json and single string arg', async t => {
+  const { view, joinedOutput } = await loadMockNpm(t, { config: { json: true } })
+  await view.exec(['blue', 'dist-tags.latest'])
+  t.equal(JSON.parse(joinedOutput()), '1.0.0', 'no info to display')
+})
+
+t.test('package with single version', async t => {
+  t.test('full json', async t => {
+    const { view, joinedOutput } = await loadMockNpm(t, { config: { json: true } })
+    await view.exec(['single-version'])
+    t.matchSnapshot(joinedOutput())
+  })
+
+  t.test('json and versions arg', async t => {
+    const { view, joinedOutput } = await loadMockNpm(t, { config: { json: true } })
+    await view.exec(['single-version', 'versions'])
+    const parsed = JSON.parse(joinedOutput())
+    t.strictSame(parsed, ['1.0.0'], 'does not unwrap single item arrays in json')
+  })
+
+  t.test('no json and versions arg', async t => {
+    const { view, joinedOutput } = await loadMockNpm(t, { config: { json: false } })
+    await view.exec(['single-version', 'versions'])
+    t.strictSame(joinedOutput(), '1.0.0', 'unwraps single item arrays in basic mode')
+  })
 })
 
 t.test('package in cwd', async t => {
@@ -504,6 +652,33 @@ t.test('workspaces', async t => {
     },
   }
 
+  const prefixDir404 = {
+    'test-workspace-b': {
+      'package.json': JSON.stringify({
+        name: 'missing-package',
+        version: '1.2.3',
+      }),
+    },
+  }
+
+  const prefixDirError = {
+    'test-workspace-b': {
+      'package.json': JSON.stringify({
+        name: 'unknown-error',
+        version: '1.2.3',
+      }),
+    },
+  }
+
+  const prefixPackageNamedError = {
+    'test-workspace-a': {
+      'package.json': JSON.stringify({
+        name: 'error',
+        version: '1.2.3',
+      }),
+    },
+  }
+
   t.test('all workspaces', async t => {
     const { view, joinedOutput } = await loadMockNpm(t, {
       prefixDir,
@@ -585,6 +760,56 @@ t.test('workspaces', async t => {
     t.matchSnapshot(joinedOutput())
     t.matchSnapshot(logs.warn, 'should have warning of ignoring workspaces')
   })
+
+  t.test('404 workspaces', async t => {
+    t.test('basic', async t => {
+      const { view, joinedFullOutput } = await loadMockNpm(t, {
+        prefixDir: { ...prefixDir, ...prefixDir404 },
+        config: { workspaces: true, loglevel: 'error' },
+      })
+      await view.exec([])
+      t.matchSnapshot(joinedFullOutput())
+      t.equal(process.exitCode, 1)
+    })
+
+    t.test('json', async t => {
+      const { view, joinedFullOutput } = await loadMockNpm(t, {
+        prefixDir: { ...prefixDir, ...prefixDir404 },
+        config: { workspaces: true, json: true, loglevel: 'error' },
+      })
+      await view.exec([])
+      t.matchSnapshot(joinedFullOutput())
+      t.equal(process.exitCode, 1)
+    })
+
+    t.test('json with package named error', async t => {
+      const { view, joinedFullOutput } = await loadMockNpm(t, {
+        prefixDir: { ...prefixDir, ...prefixDir404, ...prefixPackageNamedError },
+        config: { workspaces: true, json: true, loglevel: 'warn' },
+      })
+      await view.exec([])
+      t.matchSnapshot(joinedFullOutput())
+      t.equal(process.exitCode, 1)
+    })
+
+    t.test('non-404 error rejects', async t => {
+      const { view, joinedFullOutput } = await loadMockNpm(t, {
+        prefixDir: { ...prefixDir, ...prefixDirError },
+        config: { workspaces: true, loglevel: 'error' },
+      })
+      await t.rejects(view.exec([]))
+      t.matchSnapshot(joinedFullOutput())
+    })
+
+    t.test('non-404 error rejects with single arg', async t => {
+      const { view, joinedFullOutput } = await loadMockNpm(t, {
+        prefixDir: { ...prefixDir, ...prefixDirError },
+        config: { workspaces: true, loglevel: 'error' },
+      })
+      await t.rejects(view.exec(['.', 'version']))
+      t.matchSnapshot(joinedFullOutput())
+    })
+  })
 })
 
 t.test('completion', async t => {
@@ -600,4 +825,10 @@ t.test('no package completion', async t => {
   const res = await view.completion({ conf: { argv: { remain: ['npm', 'view'] } } })
   t.notOk(res, 'there is no package completion')
   t.end()
+})
+
+t.test('package with multiple dist‑tags and no time', async t => {
+  const { view, joinedOutput } = await loadMockNpm(t, { config: { unicode: false } })
+  await view.exec(['https://github.com/npm/gray'])
+  t.matchSnapshot(joinedOutput())
 })

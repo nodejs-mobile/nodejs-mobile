@@ -44,11 +44,14 @@
 #include "src/codegen/compiler.h"
 #include "src/codegen/optimized-compilation-info.h"
 #include "src/common/globals.h"
+#include "src/init/v8.h"
+#ifdef V8_ENABLE_TURBOFAN
 #include "src/compiler/pipeline.h"
-#include "src/debug/debug.h"
+#endif  // V8_ENABLE_TURBOFAN
 #include "src/flags/flags.h"
 #include "src/objects/objects-inl.h"
 #include "src/trap-handler/trap-handler.h"
+#include "test/cctest/heap/heap-utils.h"
 #include "test/cctest/print-extension.h"
 #include "test/cctest/profiler-extension.h"
 #include "test/cctest/trace-extension.h"
@@ -118,11 +121,13 @@ void CcTest::Run(const char* snapshot_directory) {
   } else {
     platform = std::move(underlying_default_platform);
   }
-  v8::V8::InitializePlatform(platform.get());
-#ifdef V8_SANDBOX
-  CHECK(v8::V8::InitializeSandbox());
-#endif
+  i::V8::InitializePlatformForTesting(platform.get());
   cppgc::InitializeProcess(platform->GetPageAllocator());
+
+  // Allow changing flags in cctests.
+  // TODO(12887): Fix tests to avoid changing flag values after initialization.
+  i::v8_flags.freeze_flags_after_init = false;
+
   v8::V8::Initialize();
   v8::V8::InitializeExternalStartupData(snapshot_directory);
 
@@ -194,28 +199,6 @@ void CcTest::AddGlobalFunction(v8::Local<v8::Context> env, const char* name,
       func_template->GetFunction(env).ToLocalChecked();
   func->SetName(v8_str(name));
   env->Global()->Set(env, v8_str(name), func).FromJust();
-}
-
-void CcTest::CollectGarbage(i::AllocationSpace space, i::Isolate* isolate) {
-  i::Isolate* iso = isolate ? isolate : i_isolate();
-  iso->heap()->CollectGarbage(space, i::GarbageCollectionReason::kTesting);
-}
-
-void CcTest::CollectAllGarbage(i::Isolate* isolate) {
-  i::Isolate* iso = isolate ? isolate : i_isolate();
-  iso->heap()->CollectAllGarbage(i::Heap::kNoGCFlags,
-                                 i::GarbageCollectionReason::kTesting);
-}
-
-void CcTest::CollectAllAvailableGarbage(i::Isolate* isolate) {
-  i::Isolate* iso = isolate ? isolate : i_isolate();
-  iso->heap()->CollectAllAvailableGarbage(i::GarbageCollectionReason::kTesting);
-}
-
-void CcTest::PreciseCollectAllGarbage(i::Isolate* isolate) {
-  i::Isolate* iso = isolate ? isolate : i_isolate();
-  iso->heap()->PreciseCollectAllGarbage(i::Heap::kNoGCFlags,
-                                        i::GarbageCollectionReason::kTesting);
 }
 
 i::Handle<i::String> CcTest::MakeString(const char* str) {
@@ -304,9 +287,10 @@ HandleAndZoneScope::HandleAndZoneScope(bool support_zone_compression)
 
 HandleAndZoneScope::~HandleAndZoneScope() = default;
 
-i::Handle<i::JSFunction> Optimize(
-    i::Handle<i::JSFunction> function, i::Zone* zone, i::Isolate* isolate,
-    uint32_t flags, std::unique_ptr<i::compiler::JSHeapBroker>* out_broker) {
+#ifdef V8_ENABLE_TURBOFAN
+i::Handle<i::JSFunction> Optimize(i::Handle<i::JSFunction> function,
+                                  i::Zone* zone, i::Isolate* isolate,
+                                  uint32_t flags) {
   i::Handle<i::SharedFunctionInfo> shared(function->shared(), isolate);
   i::IsCompiledScope is_compiled_scope(shared->is_compiled_scope(isolate));
   CHECK(is_compiled_scope.is_compiled() ||
@@ -316,7 +300,7 @@ i::Handle<i::JSFunction> Optimize(
   CHECK_NOT_NULL(zone);
 
   i::OptimizedCompilationInfo info(zone, isolate, shared, function,
-                                   i::CodeKind::TURBOFAN);
+                                   i::CodeKind::TURBOFAN_JS);
 
   if (flags & ~i::OptimizedCompilationInfo::kInlining) UNIMPLEMENTED();
   if (flags & i::OptimizedCompilationInfo::kInlining) {
@@ -326,19 +310,21 @@ i::Handle<i::JSFunction> Optimize(
   CHECK(info.shared_info()->HasBytecodeArray());
   i::JSFunction::EnsureFeedbackVector(isolate, function, &is_compiled_scope);
 
-  i::Handle<i::CodeT> code = i::ToCodeT(
-      i::compiler::Pipeline::GenerateCodeForTesting(&info, isolate, out_broker)
-          .ToHandleChecked(),
-      isolate);
-  info.native_context().AddOptimizedCode(*code);
-  function->set_code(*code, v8::kReleaseStore);
+  i::DirectHandle<i::Code> code =
+      i::compiler::Pipeline::GenerateCodeForTesting(&info, isolate)
+          .ToHandleChecked();
+  function->UpdateOptimizedCode(isolate, *code);
   return function;
 }
+#endif  // V8_ENABLE_TURBOFAN
 
 static void PrintTestList() {
+  int test_num = 0;
   for (const auto& entry : g_cctests.Get()) {
-    printf("%s\n", entry.first.c_str());
+    printf("**>Test: %s\n", entry.first.c_str());
+    test_num++;
   }
+  printf("\nTotal number of tests: %d\n", test_num);
 }
 
 int main(int argc, char* argv[]) {
@@ -412,51 +398,16 @@ int main(int argc, char* argv[]) {
   return 0;
 }
 
-RegisterThreadedTest* RegisterThreadedTest::first_ = nullptr;
-int RegisterThreadedTest::count_ = 0;
+std::vector<const RegisterThreadedTest*> RegisterThreadedTest::tests_;
 
 bool IsValidUnwrapObject(v8::Object* object) {
-  i::Address addr = *reinterpret_cast<i::Address*>(object);
+  i::Address addr = i::ValueHelper::ValueAsAddress(object);
   auto instance_type = i::Internals::GetInstanceType(addr);
   return (v8::base::IsInRange(instance_type,
                               i::Internals::kFirstJSApiObjectType,
                               i::Internals::kLastJSApiObjectType) ||
           instance_type == i::Internals::kJSObjectType ||
           instance_type == i::Internals::kJSSpecialApiObjectType);
-}
-
-ManualGCScope::ManualGCScope(i::Isolate* isolate)
-    : flag_concurrent_marking_(i::FLAG_concurrent_marking),
-      flag_concurrent_sweeping_(i::FLAG_concurrent_sweeping),
-      flag_stress_concurrent_allocation_(i::FLAG_stress_concurrent_allocation),
-      flag_stress_incremental_marking_(i::FLAG_stress_incremental_marking),
-      flag_parallel_marking_(i::FLAG_parallel_marking),
-      flag_detect_ineffective_gcs_near_heap_limit_(
-          i::FLAG_detect_ineffective_gcs_near_heap_limit) {
-  // Some tests run threaded (back-to-back) and thus the GC may already be
-  // running by the time a ManualGCScope is created. Finalizing existing marking
-  // prevents any undefined/unexpected behavior.
-  if (isolate && isolate->heap()->incremental_marking()->IsMarking()) {
-    CcTest::CollectGarbage(i::OLD_SPACE, isolate);
-  }
-
-  i::FLAG_concurrent_marking = false;
-  i::FLAG_concurrent_sweeping = false;
-  i::FLAG_stress_incremental_marking = false;
-  i::FLAG_stress_concurrent_allocation = false;
-  // Parallel marking has a dependency on concurrent marking.
-  i::FLAG_parallel_marking = false;
-  i::FLAG_detect_ineffective_gcs_near_heap_limit = false;
-}
-
-ManualGCScope::~ManualGCScope() {
-  i::FLAG_concurrent_marking = flag_concurrent_marking_;
-  i::FLAG_concurrent_sweeping = flag_concurrent_sweeping_;
-  i::FLAG_stress_concurrent_allocation = flag_stress_concurrent_allocation_;
-  i::FLAG_stress_incremental_marking = flag_stress_incremental_marking_;
-  i::FLAG_parallel_marking = flag_parallel_marking_;
-  i::FLAG_detect_ineffective_gcs_near_heap_limit =
-      flag_detect_ineffective_gcs_near_heap_limit_;
 }
 
 v8::PageAllocator* TestPlatform::GetPageAllocator() {
@@ -467,32 +418,33 @@ void TestPlatform::OnCriticalMemoryPressure() {
   CcTest::default_platform()->OnCriticalMemoryPressure();
 }
 
-bool TestPlatform::OnCriticalMemoryPressure(size_t length) {
-  return CcTest::default_platform()->OnCriticalMemoryPressure(length);
-}
-
 int TestPlatform::NumberOfWorkerThreads() {
   return CcTest::default_platform()->NumberOfWorkerThreads();
 }
 
 std::shared_ptr<v8::TaskRunner> TestPlatform::GetForegroundTaskRunner(
-    v8::Isolate* isolate) {
-  return CcTest::default_platform()->GetForegroundTaskRunner(isolate);
+    v8::Isolate* isolate, v8::TaskPriority priority) {
+  return CcTest::default_platform()->GetForegroundTaskRunner(isolate, priority);
 }
 
-void TestPlatform::CallOnWorkerThread(std::unique_ptr<v8::Task> task) {
-  CcTest::default_platform()->CallOnWorkerThread(std::move(task));
+void TestPlatform::PostTaskOnWorkerThreadImpl(
+    v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+    const v8::SourceLocation& location) {
+  CcTest::default_platform()->PostTaskOnWorkerThread(priority, std::move(task));
 }
 
-void TestPlatform::CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
-                                             double delay_in_seconds) {
-  CcTest::default_platform()->CallDelayedOnWorkerThread(std::move(task),
-                                                        delay_in_seconds);
+void TestPlatform::PostDelayedTaskOnWorkerThreadImpl(
+    v8::TaskPriority priority, std::unique_ptr<v8::Task> task,
+    double delay_in_seconds, const v8::SourceLocation& location) {
+  CcTest::default_platform()->PostDelayedTaskOnWorkerThread(
+      priority, std::move(task), delay_in_seconds);
 }
 
-std::unique_ptr<v8::JobHandle> TestPlatform::PostJob(
-    v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task) {
-  return CcTest::default_platform()->PostJob(priority, std::move(job_task));
+std::unique_ptr<v8::JobHandle> TestPlatform::CreateJobImpl(
+    v8::TaskPriority priority, std::unique_ptr<v8::JobTask> job_task,
+    const v8::SourceLocation& location) {
+  return CcTest::default_platform()->CreateJob(priority, std::move(job_task),
+                                               location);
 }
 
 double TestPlatform::MonotonicallyIncreasingTime() {

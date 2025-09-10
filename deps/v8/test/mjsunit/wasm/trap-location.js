@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 // Collect the Callsite objects instead of just a string:
@@ -36,7 +34,7 @@ function testTrapLocations(instance, expected_stack_length) {
 }
 
 var builder = new WasmModuleBuilder();
-builder.addMemory(0, 1, false);
+builder.addMemory(0, 1);
 var sig_index = builder.addType(kSig_i_v)
 
 // Build a function to resemble this code:

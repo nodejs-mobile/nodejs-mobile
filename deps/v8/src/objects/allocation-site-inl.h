@@ -5,9 +5,12 @@
 #ifndef V8_OBJECTS_ALLOCATION_SITE_INL_H_
 #define V8_OBJECTS_ALLOCATION_SITE_INL_H_
 
+#include "src/objects/allocation-site.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/common/globals.h"
 #include "src/heap/heap-write-barrier-inl.h"
-#include "src/objects/allocation-site.h"
+#include "src/objects/dependent-code-inl.h"
 #include "src/objects/js-objects-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -23,39 +26,40 @@ OBJECT_CONSTRUCTORS_IMPL(AllocationSite, Struct)
 
 NEVER_READ_ONLY_SPACE_IMPL(AllocationSite)
 
-CAST_ACCESSOR(AllocationSite)
-
-ACCESSORS(AllocationSite, transition_info_or_boilerplate, Object,
+ACCESSORS(AllocationSite, transition_info_or_boilerplate, Tagged<Object>,
           kTransitionInfoOrBoilerplateOffset)
 RELEASE_ACQUIRE_ACCESSORS(AllocationSite, transition_info_or_boilerplate,
-                          Object, kTransitionInfoOrBoilerplateOffset)
-ACCESSORS(AllocationSite, nested_site, Object, kNestedSiteOffset)
+                          Tagged<Object>, kTransitionInfoOrBoilerplateOffset)
+ACCESSORS(AllocationSite, nested_site, Tagged<Object>, kNestedSiteOffset)
 RELAXED_INT32_ACCESSORS(AllocationSite, pretenure_data, kPretenureDataOffset)
 INT32_ACCESSORS(AllocationSite, pretenure_create_count,
                 kPretenureCreateCountOffset)
-ACCESSORS(AllocationSite, dependent_code, DependentCode, kDependentCodeOffset)
-ACCESSORS_CHECKED(AllocationSite, weak_next, Object, kWeakNextOffset,
+ACCESSORS(AllocationSite, dependent_code, Tagged<DependentCode>,
+          kDependentCodeOffset)
+ACCESSORS_CHECKED(AllocationSite, weak_next, Tagged<Object>, kWeakNextOffset,
                   HasWeakNext())
-ACCESSORS(AllocationMemento, allocation_site, Object, kAllocationSiteOffset)
+ACCESSORS(AllocationMemento, allocation_site, Tagged<Object>,
+          kAllocationSiteOffset)
 
-JSObject AllocationSite::boilerplate() const {
+Tagged<JSObject> AllocationSite::boilerplate() const {
   DCHECK(PointsToLiteral());
-  return JSObject::cast(transition_info_or_boilerplate());
+  return Cast<JSObject>(transition_info_or_boilerplate());
 }
 
-JSObject AllocationSite::boilerplate(AcquireLoadTag tag) const {
+Tagged<JSObject> AllocationSite::boilerplate(AcquireLoadTag tag) const {
   DCHECK(PointsToLiteral());
-  return JSObject::cast(transition_info_or_boilerplate(tag));
+  return Cast<JSObject>(transition_info_or_boilerplate(tag));
 }
 
-void AllocationSite::set_boilerplate(JSObject value, ReleaseStoreTag tag,
+void AllocationSite::set_boilerplate(Tagged<JSObject> value,
+                                     ReleaseStoreTag tag,
                                      WriteBarrierMode mode) {
   set_transition_info_or_boilerplate(value, tag, mode);
 }
 
 int AllocationSite::transition_info() const {
   DCHECK(!PointsToLiteral());
-  return Smi::cast(transition_info_or_boilerplate(kAcquireLoad)).value();
+  return Cast<Smi>(transition_info_or_boilerplate(kAcquireLoad)).value();
 }
 
 void AllocationSite::set_transition_info(int value) {
@@ -113,10 +117,9 @@ void AllocationSite::SetDoNotInlineCall() {
 }
 
 bool AllocationSite::PointsToLiteral() const {
-  Object raw_value = transition_info_or_boilerplate(kAcquireLoad);
-  DCHECK_EQ(!raw_value.IsSmi(),
-            raw_value.IsJSArray() || raw_value.IsJSObject());
-  return !raw_value.IsSmi();
+  Tagged<Object> raw_value = transition_info_or_boilerplate(kAcquireLoad);
+  DCHECK_EQ(!IsSmi(raw_value), IsJSArray(raw_value) || IsJSObject(raw_value));
+  return !IsSmi(raw_value);
 }
 
 // Heuristic: We only need to create allocation site info if the boilerplate
@@ -128,7 +131,7 @@ bool AllocationSite::ShouldTrack(ElementsKind boilerplate_elements_kind) {
 
 inline bool AllocationSite::CanTrack(InstanceType type) {
   if (!V8_ALLOCATION_SITE_TRACKING_BOOL) return false;
-  if (FLAG_allocation_site_pretenuring) {
+  if (v8_flags.allocation_site_pretenuring) {
     // TurboFan doesn't care at all about String pretenuring feedback,
     // so don't bother even trying to track that.
     return type == JS_ARRAY_TYPE || type == JS_OBJECT_TYPE;
@@ -180,28 +183,28 @@ void AllocationSite::set_memento_create_count(int count) {
   set_pretenure_create_count(count);
 }
 
-bool AllocationSite::IncrementMementoFoundCount(int increment) {
-  if (IsZombie()) return false;
+int AllocationSite::IncrementMementoFoundCount(int increment) {
+  DCHECK(!IsZombie());
 
-  int value = memento_found_count();
-  set_memento_found_count(value + increment);
-  return memento_found_count() >= kPretenureMinimumCreated;
+  int new_value = memento_found_count() + increment;
+  set_memento_found_count(new_value);
+  return new_value;
 }
 
 inline void AllocationSite::IncrementMementoCreateCount() {
-  DCHECK(FLAG_allocation_site_pretenuring);
+  DCHECK(v8_flags.allocation_site_pretenuring);
   int value = memento_create_count();
   set_memento_create_count(value + 1);
 }
 
 bool AllocationMemento::IsValid() const {
-  return allocation_site().IsAllocationSite() &&
-         !AllocationSite::cast(allocation_site()).IsZombie();
+  return IsAllocationSite(allocation_site()) &&
+         !Cast<AllocationSite>(allocation_site())->IsZombie();
 }
 
-AllocationSite AllocationMemento::GetAllocationSite() const {
+Tagged<AllocationSite> AllocationMemento::GetAllocationSite() const {
   DCHECK(IsValid());
-  return AllocationSite::cast(allocation_site());
+  return Cast<AllocationSite>(allocation_site());
 }
 
 Address AllocationMemento::GetAllocationSiteUnchecked() const {
@@ -209,13 +212,14 @@ Address AllocationMemento::GetAllocationSiteUnchecked() const {
 }
 
 template <AllocationSiteUpdateMode update_or_check>
-bool AllocationSite::DigestTransitionFeedback(Handle<AllocationSite> site,
+bool AllocationSite::DigestTransitionFeedback(DirectHandle<AllocationSite> site,
                                               ElementsKind to_kind) {
   Isolate* isolate = site->GetIsolate();
   bool result = false;
 
-  if (site->PointsToLiteral() && site->boilerplate().IsJSArray()) {
-    Handle<JSArray> boilerplate(JSArray::cast(site->boilerplate()), isolate);
+  if (site->PointsToLiteral() && IsJSArray(site->boilerplate())) {
+    DirectHandle<JSArray> boilerplate(Cast<JSArray>(site->boilerplate()),
+                                      isolate);
     ElementsKind kind = boilerplate->GetElementsKind();
     // if kind is holey ensure that to_kind is as well.
     if (IsHoleyElementsKind(kind)) {
@@ -225,12 +229,12 @@ bool AllocationSite::DigestTransitionFeedback(Handle<AllocationSite> site,
       // If the array is huge, it's not likely to be defined in a local
       // function, so we shouldn't make new instances of it very often.
       uint32_t length = 0;
-      CHECK(boilerplate->length().ToArrayLength(&length));
+      CHECK(Object::ToArrayLength(boilerplate->length(), &length));
       if (length <= kMaximumArrayBytesToPretransition) {
         if (update_or_check == AllocationSiteUpdateMode::kCheckOnly) {
           return true;
         }
-        if (FLAG_trace_track_allocation_sites) {
+        if (v8_flags.trace_track_allocation_sites) {
           bool is_nested = site->IsNested();
           PrintF("AllocationSite: JSArray %p boilerplate %supdated %s->%s\n",
                  reinterpret_cast<void*>(site->ptr()),
@@ -239,8 +243,9 @@ bool AllocationSite::DigestTransitionFeedback(Handle<AllocationSite> site,
         }
         CHECK_NE(to_kind, DICTIONARY_ELEMENTS);
         JSObject::TransitionElementsKind(boilerplate, to_kind);
-        site->dependent_code().DeoptimizeDependentCodeGroup(
-            isolate, DependentCode::kAllocationSiteTransitionChangedGroup);
+        DependentCode::DeoptimizeDependencyGroups(
+            isolate, *site,
+            DependentCode::kAllocationSiteTransitionChangedGroup);
         result = true;
       }
     }
@@ -253,14 +258,14 @@ bool AllocationSite::DigestTransitionFeedback(Handle<AllocationSite> site,
     }
     if (IsMoreGeneralElementsKindTransition(kind, to_kind)) {
       if (update_or_check == AllocationSiteUpdateMode::kCheckOnly) return true;
-      if (FLAG_trace_track_allocation_sites) {
+      if (v8_flags.trace_track_allocation_sites) {
         PrintF("AllocationSite: JSArray %p site updated %s->%s\n",
                reinterpret_cast<void*>(site->ptr()), ElementsKindToString(kind),
                ElementsKindToString(to_kind));
       }
       site->SetElementsKind(to_kind);
-      site->dependent_code().DeoptimizeDependentCodeGroup(
-          isolate, DependentCode::kAllocationSiteTransitionChangedGroup);
+      DependentCode::DeoptimizeDependencyGroups(
+          isolate, *site, DependentCode::kAllocationSiteTransitionChangedGroup);
       result = true;
     }
   }

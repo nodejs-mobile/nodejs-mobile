@@ -4,6 +4,9 @@
 
 #include "src/compiler/common-operator.h"
 
+#include <optional>
+
+#include "src/base/hashing.h"
 #include "src/base/lazy-instance.h"
 #include "src/compiler/linkage.h"
 #include "src/compiler/node.h"
@@ -14,7 +17,6 @@
 
 namespace v8 {
 namespace internal {
-namespace compiler {
 
 std::ostream& operator<<(std::ostream& os, BranchHint hint) {
   switch (hint) {
@@ -28,6 +30,21 @@ std::ostream& operator<<(std::ostream& os, BranchHint hint) {
   UNREACHABLE();
 }
 
+namespace compiler {
+
+std::ostream& operator<<(std::ostream& os, BranchSemantics semantics) {
+  switch (semantics) {
+    case BranchSemantics::kJS:
+      return os << "JS";
+    case BranchSemantics::kMachine:
+      return os << "Machine";
+    case BranchSemantics::kUnspecified:
+      return os << "Unspecified";
+  }
+  UNREACHABLE();
+}
+
+#if V8_ENABLE_WEBASSEMBLY
 std::ostream& operator<<(std::ostream& os, TrapId trap_id) {
   switch (trap_id) {
 #define TRAP_CASE(Name) \
@@ -35,8 +52,6 @@ std::ostream& operator<<(std::ostream& os, TrapId trap_id) {
     return os << #Name;
     FOREACH_WASM_TRAPREASON(TRAP_CASE)
 #undef TRAP_CASE
-    case TrapId::kInvalid:
-      return os << "Invalid";
   }
   UNREACHABLE();
 }
@@ -46,17 +61,63 @@ TrapId TrapIdOf(const Operator* const op) {
          op->opcode() == IrOpcode::kTrapUnless);
   return OpParameter<TrapId>(op);
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+bool operator==(const BranchParameters& lhs, const BranchParameters& rhs) {
+  return lhs.semantics() == rhs.semantics() && lhs.hint() == rhs.hint();
+}
+
+size_t hash_value(const BranchParameters& p) {
+  return base::hash_combine(p.semantics(), p.hint());
+}
+
+std::ostream& operator<<(std::ostream& os, const BranchParameters& p) {
+  return os << p.semantics() << ", " << p.hint();
+}
+
+const BranchParameters& BranchParametersOf(const Operator* const op) {
+  DCHECK_EQ(op->opcode(), IrOpcode::kBranch);
+  return OpParameter<BranchParameters>(op);
+}
 
 BranchHint BranchHintOf(const Operator* const op) {
   switch (op->opcode()) {
     case IrOpcode::kIfValue:
       return IfValueParametersOf(op).hint();
     case IrOpcode::kIfDefault:
-    case IrOpcode::kBranch:
       return OpParameter<BranchHint>(op);
+    // TODO(nicohartmann@): Should remove all uses of BranchHintOf for branches
+    // and replace with BranchParametersOf.
+    case IrOpcode::kBranch:
+      return BranchParametersOf(op).hint();
     default:
       UNREACHABLE();
   }
+}
+
+bool operator==(const AssertParameters& lhs, const AssertParameters& rhs) {
+  return lhs.semantics() == rhs.semantics() &&
+         strcmp(lhs.condition_string(), rhs.condition_string()) == 0 &&
+         strcmp(lhs.file(), rhs.file()) == 0 && lhs.line() == rhs.line();
+}
+
+size_t hash_value(const AssertParameters& p) {
+  return base::hash_combine(
+      p.semantics(),
+      base::hash_range(
+          p.condition_string(),
+          p.condition_string() + std::strlen(p.condition_string())),
+      base::hash_range(p.file(), p.file() + std::strlen(p.file())), p.line());
+}
+
+std::ostream& operator<<(std::ostream& os, const AssertParameters& p) {
+  return os << p.semantics() << ", " << p.condition_string() << ", " << p.file()
+            << ", " << p.line();
+}
+
+const AssertParameters& AssertParametersOf(const Operator* const op) {
+  DCHECK_EQ(op->opcode(), IrOpcode::kAssert);
+  return OpParameter<AssertParameters>(op);
 }
 
 int ValueInputCountOfReturn(Operator const* const op) {
@@ -90,16 +151,9 @@ DeoptimizeParameters const& DeoptimizeParametersOf(Operator const* const op) {
   return OpParameter<DeoptimizeParameters>(op);
 }
 
-const Operator* CommonOperatorBuilder::DelayedStringConstant(
-    const StringConstantBase* str) {
-  return zone()->New<Operator1<const StringConstantBase*>>(
-      IrOpcode::kDelayedStringConstant, Operator::kPure,
-      "DelayedStringConstant", 0, 0, 0, 1, 0, 0, str);
-}
-
 bool operator==(SelectParameters const& lhs, SelectParameters const& rhs) {
   return lhs.representation() == rhs.representation() &&
-         lhs.hint() == rhs.hint();
+         lhs.hint() == rhs.hint() && lhs.semantics() == rhs.semantics();
 }
 
 
@@ -109,12 +163,12 @@ bool operator!=(SelectParameters const& lhs, SelectParameters const& rhs) {
 
 
 size_t hash_value(SelectParameters const& p) {
-  return base::hash_combine(p.representation(), p.hint());
+  return base::hash_combine(p.representation(), p.hint(), p.semantics());
 }
 
 
 std::ostream& operator<<(std::ostream& os, SelectParameters const& p) {
-  return os << p.representation() << ", " << p.hint();
+  return os << p.representation() << ", " << p.hint() << ", " << p.semantics();
 }
 
 
@@ -426,8 +480,8 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& out,
   } else {
     out << "nullptr";
   }
-  out << ", ";
   if (const auto& t = p.override_output_type()) {
+    out << ", ";
     t->PrintTo(out);
   } else {
     out << ", nullopt";
@@ -438,6 +492,27 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& out,
 const SLVerifierHintParameters& SLVerifierHintParametersOf(const Operator* op) {
   DCHECK_EQ(op->opcode(), IrOpcode::kSLVerifierHint);
   return OpParameter<SLVerifierHintParameters>(op);
+}
+
+V8_EXPORT_PRIVATE bool operator==(const ExitMachineGraphParameters& lhs,
+                                  const ExitMachineGraphParameters& rhs) {
+  return lhs.output_representation() == rhs.output_representation() &&
+         lhs.output_type().Equals(rhs.output_type());
+}
+
+size_t hash_value(const ExitMachineGraphParameters& p) {
+  return base::hash_combine(p.output_representation(), p.output_type());
+}
+
+V8_EXPORT_PRIVATE std::ostream& operator<<(
+    std::ostream& os, const ExitMachineGraphParameters& p) {
+  return os << p.output_representation() << ", " << p.output_type();
+}
+
+const ExitMachineGraphParameters& ExitMachineGraphParametersOf(
+    const Operator* op) {
+  DCHECK_EQ(op->opcode(), IrOpcode::kExitMachineGraph);
+  return OpParameter<ExitMachineGraphParameters>(op);
 }
 
 #define COMMON_CACHED_OP_LIST(V)                          \
@@ -459,9 +534,15 @@ const SLVerifierHintParameters& SLVerifierHintParametersOf(const Operator* op) {
 #define CACHED_LOOP_EXIT_VALUE_LIST(V) V(kTagged)
 
 #define CACHED_BRANCH_LIST(V) \
-  V(None)                     \
-  V(True)                     \
-  V(False)
+  V(JS, None)                 \
+  V(JS, True)                 \
+  V(JS, False)                \
+  V(Machine, None)            \
+  V(Machine, True)            \
+  V(Machine, False)           \
+  V(Unspecified, None)        \
+  V(Unspecified, True)        \
+  V(Unspecified, False)
 
 #define CACHED_RETURN_LIST(V) \
   V(1)                        \
@@ -632,17 +713,18 @@ struct CommonOperatorGlobalCache final {
   CACHED_RETURN_LIST(CACHED_RETURN)
 #undef CACHED_RETURN
 
-  template <BranchHint hint>
-  struct BranchOperator final : public Operator1<BranchHint> {
+  template <BranchSemantics semantics, BranchHint hint>
+  struct BranchOperator final : public Operator1<BranchParameters> {
     BranchOperator()
-        : Operator1<BranchHint>(                      // --
+        : Operator1<BranchParameters>(                // --
               IrOpcode::kBranch, Operator::kKontrol,  // opcode
               "Branch",                               // name
               1, 0, 1, 0, 0, 2,                       // counts
-              hint) {}                                // parameter
+              {semantics, hint}) {}                   // parameter
   };
-#define CACHED_BRANCH(Hint) \
-  BranchOperator<BranchHint::k##Hint> kBranch##Hint##Operator;
+#define CACHED_BRANCH(Semantics, Hint)                               \
+  BranchOperator<BranchSemantics::k##Semantics, BranchHint::k##Hint> \
+      kBranch##Semantics##Hint##Operator;
   CACHED_BRANCH_LIST(CACHED_BRANCH)
 #undef CACHED_BRANCH
 
@@ -760,35 +842,51 @@ struct CommonOperatorGlobalCache final {
   CACHED_DEOPTIMIZE_UNLESS_LIST(CACHED_DEOPTIMIZE_UNLESS)
 #undef CACHED_DEOPTIMIZE_UNLESS
 
-  template <TrapId trap_id>
+#if V8_ENABLE_WEBASSEMBLY
+  template <TrapId trap_id, bool has_frame_state>
   struct TrapIfOperator final : public Operator1<TrapId> {
     TrapIfOperator()
         : Operator1<TrapId>(                             // --
               IrOpcode::kTrapIf,                         // opcode
               Operator::kFoldable | Operator::kNoThrow,  // properties
               "TrapIf",                                  // name
-              1, 1, 1, 0, 0, 1,                          // counts
+              1 + has_frame_state, 1, 1, 0, 1, 1,        // counts
               trap_id) {}                                // parameter
   };
 #define CACHED_TRAP_IF(Trap) \
-  TrapIfOperator<TrapId::k##Trap> kTrapIf##Trap##Operator;
+  TrapIfOperator<TrapId::k##Trap, true> kTrapIf##Trap##OperatorWithFrameState;
   CACHED_TRAP_IF_LIST(CACHED_TRAP_IF)
 #undef CACHED_TRAP_IF
 
-  template <TrapId trap_id>
+#define CACHED_TRAP_IF(Trap)             \
+  TrapIfOperator<TrapId::k##Trap, false> \
+      kTrapIf##Trap##OperatorWithoutFrameState;
+  CACHED_TRAP_IF_LIST(CACHED_TRAP_IF)
+#undef CACHED_TRAP_IF
+
+  template <TrapId trap_id, bool has_frame_state>
   struct TrapUnlessOperator final : public Operator1<TrapId> {
     TrapUnlessOperator()
         : Operator1<TrapId>(                             // --
               IrOpcode::kTrapUnless,                     // opcode
               Operator::kFoldable | Operator::kNoThrow,  // properties
               "TrapUnless",                              // name
-              1, 1, 1, 0, 0, 1,                          // counts
+              1 + has_frame_state, 1, 1, 0, 1, 1,        // counts
               trap_id) {}                                // parameter
   };
-#define CACHED_TRAP_UNLESS(Trap) \
-  TrapUnlessOperator<TrapId::k##Trap> kTrapUnless##Trap##Operator;
+#define CACHED_TRAP_UNLESS(Trap)            \
+  TrapUnlessOperator<TrapId::k##Trap, true> \
+      kTrapUnless##Trap##OperatorWithFrameState;
   CACHED_TRAP_UNLESS_LIST(CACHED_TRAP_UNLESS)
 #undef CACHED_TRAP_UNLESS
+
+#define CACHED_TRAP_UNLESS(Trap)             \
+  TrapUnlessOperator<TrapId::k##Trap, false> \
+      kTrapUnless##Trap##OperatorWithoutFrameState;
+  CACHED_TRAP_UNLESS_LIST(CACHED_TRAP_UNLESS)
+#undef CACHED_TRAP_UNLESS
+
+#endif  // V8_ENABLE_WEBASSEMBLY
 
   template <MachineRepresentation kRep, int kInputCount>
   struct PhiOperator final : public Operator1<MachineRepresentation> {
@@ -924,16 +1022,18 @@ const Operator* CommonOperatorBuilder::StaticAssert(const char* source) {
 
 const Operator* CommonOperatorBuilder::SLVerifierHint(
     const Operator* semantics,
-    const base::Optional<Type>& override_output_type) {
+    const std::optional<Type>& override_output_type) {
   return zone()->New<Operator1<SLVerifierHintParameters>>(
       IrOpcode::kSLVerifierHint, Operator::kNoProperties, "SLVerifierHint", 1,
       0, 0, 1, 0, 0, SLVerifierHintParameters(semantics, override_output_type));
 }
 
-const Operator* CommonOperatorBuilder::Branch(BranchHint hint) {
-#define CACHED_BRANCH(Hint)                 \
-  if (hint == BranchHint::k##Hint) {        \
-    return &cache_.kBranch##Hint##Operator; \
+const Operator* CommonOperatorBuilder::Branch(BranchHint hint,
+                                              BranchSemantics semantics) {
+#define CACHED_BRANCH(Semantics, Hint)                 \
+  if (semantics == BranchSemantics::k##Semantics &&    \
+      hint == BranchHint::k##Hint) {                   \
+    return &cache_.kBranch##Semantics##Hint##Operator; \
   }
   CACHED_BRANCH_LIST(CACHED_BRANCH)
 #undef CACHED_BRANCH
@@ -994,11 +1094,28 @@ const Operator* CommonOperatorBuilder::DeoptimizeUnless(
       parameter);                                       // parameter
 }
 
-const Operator* CommonOperatorBuilder::TrapIf(TrapId trap_id) {
+const Operator* CommonOperatorBuilder::Assert(BranchSemantics semantics,
+                                              const char* condition_string,
+                                              const char* file, int line) {
+  AssertParameters parameter(semantics, condition_string, file, line);
+  return zone()->New<Operator1<AssertParameters>>(  // --
+      IrOpcode::kAssert,                            // opcode
+      Operator::kFoldable | Operator::kNoThrow,     // properties
+      "Assert",                                     // name
+      1, 1, 1, 0, 1, 0,                             // counts
+      parameter);                                   // parameter
+}
+
+#if V8_ENABLE_WEBASSEMBLY
+const Operator* CommonOperatorBuilder::TrapIf(TrapId trap_id,
+                                              bool has_frame_state) {
   switch (trap_id) {
-#define CACHED_TRAP_IF(Trap) \
-  case TrapId::k##Trap:      \
-    return &cache_.kTrapIf##Trap##Operator;
+#define CACHED_TRAP_IF(Trap)                                        \
+  case TrapId::k##Trap:                                             \
+    return has_frame_state                                          \
+               ? static_cast<const Operator*>(                      \
+                     &cache_.kTrapIf##Trap##OperatorWithFrameState) \
+               : &cache_.kTrapIf##Trap##OperatorWithoutFrameState;
     CACHED_TRAP_IF_LIST(CACHED_TRAP_IF)
 #undef CACHED_TRAP_IF
     default:
@@ -1009,15 +1126,19 @@ const Operator* CommonOperatorBuilder::TrapIf(TrapId trap_id) {
       IrOpcode::kTrapIf,                         // opcode
       Operator::kFoldable | Operator::kNoThrow,  // properties
       "TrapIf",                                  // name
-      1, 1, 1, 0, 0, 1,                          // counts
+      1 + has_frame_state, 1, 1, 0, 1, 1,        // counts
       trap_id);                                  // parameter
 }
 
-const Operator* CommonOperatorBuilder::TrapUnless(TrapId trap_id) {
+const Operator* CommonOperatorBuilder::TrapUnless(TrapId trap_id,
+                                                  bool has_frame_state) {
   switch (trap_id) {
-#define CACHED_TRAP_UNLESS(Trap) \
-  case TrapId::k##Trap:          \
-    return &cache_.kTrapUnless##Trap##Operator;
+#define CACHED_TRAP_UNLESS(Trap)                                        \
+  case TrapId::k##Trap:                                                 \
+    return has_frame_state                                              \
+               ? static_cast<const Operator*>(                          \
+                     &cache_.kTrapUnless##Trap##OperatorWithFrameState) \
+               : &cache_.kTrapUnless##Trap##OperatorWithoutFrameState;
     CACHED_TRAP_UNLESS_LIST(CACHED_TRAP_UNLESS)
 #undef CACHED_TRAP_UNLESS
     default:
@@ -1028,9 +1149,11 @@ const Operator* CommonOperatorBuilder::TrapUnless(TrapId trap_id) {
       IrOpcode::kTrapUnless,                     // opcode
       Operator::kFoldable | Operator::kNoThrow,  // properties
       "TrapUnless",                              // name
-      1, 1, 1, 0, 0, 1,                          // counts
+      1 + has_frame_state, 1, 1, 0, 1, 1,        // counts
       trap_id);                                  // parameter
 }
+
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 const Operator* CommonOperatorBuilder::Switch(size_t control_output_count) {
   return zone()->New<Operator>(               // --
@@ -1173,7 +1296,7 @@ const Operator* CommonOperatorBuilder::TaggedIndexConstant(int32_t value) {
       value);                                           // parameter
 }
 
-const Operator* CommonOperatorBuilder::Float32Constant(volatile float value) {
+const Operator* CommonOperatorBuilder::Float32Constant(float value) {
   return zone()->New<Operator1<float>>(             // --
       IrOpcode::kFloat32Constant, Operator::kPure,  // opcode
       "Float32Constant",                            // name
@@ -1182,7 +1305,7 @@ const Operator* CommonOperatorBuilder::Float32Constant(volatile float value) {
 }
 
 
-const Operator* CommonOperatorBuilder::Float64Constant(volatile double value) {
+const Operator* CommonOperatorBuilder::Float64Constant(double value) {
   return zone()->New<Operator1<double>>(            // --
       IrOpcode::kFloat64Constant, Operator::kPure,  // opcode
       "Float64Constant",                            // name
@@ -1201,7 +1324,7 @@ const Operator* CommonOperatorBuilder::ExternalConstant(
 }
 
 
-const Operator* CommonOperatorBuilder::NumberConstant(volatile double value) {
+const Operator* CommonOperatorBuilder::NumberConstant(double value) {
   return zone()->New<Operator1<double>>(           // --
       IrOpcode::kNumberConstant, Operator::kPure,  // opcode
       "NumberConstant",                            // name
@@ -1219,31 +1342,36 @@ const Operator* CommonOperatorBuilder::PointerConstant(intptr_t value) {
 
 const Operator* CommonOperatorBuilder::HeapConstant(
     const Handle<HeapObject>& value) {
-  return zone()->New<Operator1<Handle<HeapObject>>>(  // --
-      IrOpcode::kHeapConstant, Operator::kPure,       // opcode
-      "HeapConstant",                                 // name
-      0, 0, 0, 1, 0, 0,                               // counts
-      value);                                         // parameter
+  return zone()->New<Operator1<IndirectHandle<HeapObject>>>(  // --
+      IrOpcode::kHeapConstant, Operator::kPure,               // opcode
+      "HeapConstant",                                         // name
+      0, 0, 0, 1, 0, 0,                                       // counts
+      value);                                                 // parameter
 }
 
 const Operator* CommonOperatorBuilder::CompressedHeapConstant(
     const Handle<HeapObject>& value) {
-  return zone()->New<Operator1<Handle<HeapObject>>>(       // --
-      IrOpcode::kCompressedHeapConstant, Operator::kPure,  // opcode
-      "CompressedHeapConstant",                            // name
-      0, 0, 0, 1, 0, 0,                                    // counts
-      value);                                              // parameter
+  return zone()->New<Operator1<IndirectHandle<HeapObject>>>(  // --
+      IrOpcode::kCompressedHeapConstant, Operator::kPure,     // opcode
+      "CompressedHeapConstant",                               // name
+      0, 0, 0, 1, 0, 0,                                       // counts
+      value);                                                 // parameter
+}
+
+const Operator* CommonOperatorBuilder::TrustedHeapConstant(
+    const Handle<HeapObject>& value) {
+  return zone()->New<Operator1<IndirectHandle<HeapObject>>>(  // --
+      IrOpcode::kTrustedHeapConstant, Operator::kPure,        // opcode
+      "TrustedHeapConstant",                                  // name
+      0, 0, 0, 1, 0, 0,                                       // counts
+      value);                                                 // parameter
 }
 
 Handle<HeapObject> HeapConstantOf(const Operator* op) {
   DCHECK(IrOpcode::kHeapConstant == op->opcode() ||
-         IrOpcode::kCompressedHeapConstant == op->opcode());
-  return OpParameter<Handle<HeapObject>>(op);
-}
-
-const StringConstantBase* StringConstantBaseOf(const Operator* op) {
-  DCHECK_EQ(IrOpcode::kDelayedStringConstant, op->opcode());
-  return OpParameter<const StringConstantBase*>(op);
+         IrOpcode::kCompressedHeapConstant == op->opcode() ||
+         IrOpcode::kTrustedHeapConstant == op->opcode());
+  return OpParameter<IndirectHandle<HeapObject>>(op);
 }
 
 const char* StaticAssertSourceOf(const Operator* op) {
@@ -1278,14 +1406,14 @@ const Operator* CommonOperatorBuilder::ObjectId(uint32_t object_id) {
 }
 
 const Operator* CommonOperatorBuilder::Select(MachineRepresentation rep,
-                                              BranchHint hint) {
+                                              BranchHint hint,
+                                              BranchSemantics semantics) {
   return zone()->New<Operator1<SelectParameters>>(  // --
       IrOpcode::kSelect, Operator::kPure,           // opcode
       "Select",                                     // name
       3, 0, 0, 1, 0, 0,                             // counts
-      SelectParameters(rep, hint));                 // parameter
+      SelectParameters(rep, hint, semantics));      // parameter
 }
-
 
 const Operator* CommonOperatorBuilder::Phi(MachineRepresentation rep,
                                            int value_input_count) {
@@ -1313,11 +1441,17 @@ const Operator* CommonOperatorBuilder::TypeGuard(Type type) {
       type);                                  // parameter
 }
 
-const Operator* CommonOperatorBuilder::FoldConstant() {
-  return zone()->New<Operator>(                  // --
-      IrOpcode::kFoldConstant, Operator::kPure,  // opcode
-      "FoldConstant",                            // name
-      2, 0, 0, 1, 0, 0);                         // counts
+const Operator* CommonOperatorBuilder::EnterMachineGraph(UseInfo use_info) {
+  return zone()->New<Operator1<UseInfo>>(IrOpcode::kEnterMachineGraph,
+                                         Operator::kPure, "EnterMachineGraph",
+                                         1, 0, 0, 1, 0, 0, use_info);
+}
+
+const Operator* CommonOperatorBuilder::ExitMachineGraph(
+    MachineRepresentation output_representation, Type output_type) {
+  return zone()->New<Operator1<ExitMachineGraphParameters>>(
+      IrOpcode::kExitMachineGraph, Operator::kPure, "ExitMachineGraph", 1, 0, 0,
+      1, 0, 0, ExitMachineGraphParameters{output_representation, output_type});
 }
 
 const Operator* CommonOperatorBuilder::EffectPhi(int effect_input_count) {
@@ -1557,24 +1691,49 @@ const Operator* CommonOperatorBuilder::ResizeMergeOrPhi(const Operator* op,
 
 const FrameStateFunctionInfo*
 CommonOperatorBuilder::CreateFrameStateFunctionInfo(
-    FrameStateType type, int parameter_count, int local_count,
-    Handle<SharedFunctionInfo> shared_info) {
-  return zone()->New<FrameStateFunctionInfo>(type, parameter_count, local_count,
-                                             shared_info);
+    FrameStateType type, uint16_t parameter_count, uint16_t max_arguments,
+    int local_count, IndirectHandle<SharedFunctionInfo> shared_info,
+    IndirectHandle<BytecodeArray> bytecode_array) {
+  return zone()->New<FrameStateFunctionInfo>(type, parameter_count,
+                                             max_arguments, local_count,
+                                             shared_info, bytecode_array);
 }
 
 #if V8_ENABLE_WEBASSEMBLY
 const FrameStateFunctionInfo*
 CommonOperatorBuilder::CreateJSToWasmFrameStateFunctionInfo(
-    FrameStateType type, int parameter_count, int local_count,
+    FrameStateType type, uint16_t parameter_count, int local_count,
     Handle<SharedFunctionInfo> shared_info,
-    const wasm::FunctionSig* signature) {
+    const wasm::CanonicalSig* signature) {
   DCHECK_EQ(type, FrameStateType::kJSToWasmBuiltinContinuation);
   DCHECK_NOT_NULL(signature);
   return zone()->New<JSToWasmFrameStateFunctionInfo>(
       type, parameter_count, local_count, shared_info, signature);
 }
 #endif  // V8_ENABLE_WEBASSEMBLY
+
+const Operator* CommonOperatorBuilder::Chained(const Operator* op) {
+  // Use Chained only for operators that are not on the effect chain already.
+  DCHECK_EQ(op->EffectInputCount(), 0);
+  DCHECK_EQ(op->ControlInputCount(), 0);
+  const char* mnemonic;
+  switch (op->opcode()) {
+    case IrOpcode::kChangeInt64ToBigInt:
+      mnemonic = "Chained[ChangeInt64ToBigInt]";
+      break;
+    case IrOpcode::kChangeUint64ToBigInt:
+      mnemonic = "Chained[ChangeUint64ToBigInt]";
+      break;
+    default:
+      UNREACHABLE();
+  }
+  // TODO(nicohartmann@): Need to store operator properties once we have to
+  // support Operator1 operators.
+  Operator::Properties properties = op->properties();
+  return zone()->New<Operator>(op->opcode(), properties, mnemonic,
+                               op->ValueInputCount(), 1, 1,
+                               op->ValueOutputCount(), 1, 0);
+}
 
 const Operator* CommonOperatorBuilder::DeadValue(MachineRepresentation rep) {
   return zone()->New<Operator1<MachineRepresentation>>(  // --

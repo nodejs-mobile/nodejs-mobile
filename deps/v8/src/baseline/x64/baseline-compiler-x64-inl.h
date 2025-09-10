@@ -15,14 +15,21 @@ namespace baseline {
 
 #define __ basm_.
 
+// A builtin call/jump mode that is used then short builtin calls feature is
+// not enabled.
+constexpr BuiltinCallJumpMode kFallbackBuiltinCallJumpModeForBaseline =
+    BuiltinCallJumpMode::kIndirect;
+
 void BaselineCompiler::Prologue() {
   ASM_CODE_COMMENT(&masm_);
   DCHECK_EQ(kJSFunctionRegister, kJavaScriptCallTargetRegister);
-  int max_frame_size =
-      bytecode_->frame_size() + max_call_args_ * kSystemPointerSize;
+  int max_frame_size = bytecode_->max_frame_size();
   CallBuiltin<Builtin::kBaselineOutOfLinePrologue>(
       kContextRegister, kJSFunctionRegister, kJavaScriptCallArgCountRegister,
       max_frame_size, kJavaScriptCallNewTargetRegister, bytecode_);
+#ifdef V8_ENABLE_CET_SHADOW_STACK
+  __ MaybeEmitPlaceHolderForDeopt();
+#endif  // V8_ENABLE_CET_SHADOW_STACK
 
   PrologueFillFrame();
 }
@@ -32,7 +39,7 @@ void BaselineCompiler::PrologueFillFrame() {
   // Inlined register frame fill
   interpreter::Register new_target_or_generator_register =
       bytecode_->incoming_new_target_or_generator_register();
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     __ masm()->Cmp(kInterpreterAccumulatorRegister,
                    handle(ReadOnlyRoots(local_isolate_).undefined_value(),
                           local_isolate_));

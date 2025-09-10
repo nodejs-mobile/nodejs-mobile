@@ -6,8 +6,8 @@ const ciInfo = require('ci-info')
 const gt = require('semver/functions/gt')
 const gte = require('semver/functions/gte')
 const parse = require('semver/functions/parse')
-const { stat, writeFile } = require('fs/promises')
-const { resolve } = require('path')
+const { stat, writeFile } = require('node:fs/promises')
+const { resolve } = require('node:path')
 
 // update check frequency
 const DAILY = 1000 * 60 * 60 * 24
@@ -40,7 +40,7 @@ const updateCheck = async (npm, spec, version, current) => {
   // and should get the updates from that release train.
   // Note that this isn't another http request over the network, because
   // the packument will be cached by pacote from previous request.
-  if (gt(version, latest) && spec === 'latest') {
+  if (gt(version, latest) && spec === '*') {
     return updateNotifier(npm, `^${version}`)
   }
 
@@ -71,7 +71,7 @@ const updateCheck = async (npm, spec, version, current) => {
   return message
 }
 
-const updateNotifier = async (npm, spec = 'latest') => {
+const updateNotifier = async (npm, spec = '*') => {
   // if we're on a prerelease train, then updates are coming fast
   // check for a new one daily.  otherwise, weekly.
   const { version } = npm
@@ -83,7 +83,7 @@ const updateNotifier = async (npm, spec = 'latest') => {
   }
 
   // while on a beta train, get updates daily
-  const duration = spec !== 'latest' ? DAILY : WEEKLY
+  const duration = current.prerelease.length ? DAILY : WEEKLY
 
   const t = new Date(Date.now() - duration)
   // if we don't have a file, then definitely check it.

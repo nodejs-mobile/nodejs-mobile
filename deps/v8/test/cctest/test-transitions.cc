@@ -2,20 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <stdlib.h>
-#include <utility>
+#include "test/cctest/test-transitions.h"
 
-#include "src/init/v8.h"
+#include <stdlib.h>
+
+#include <utility>
 
 #include "src/codegen/compilation-cache.h"
 #include "src/execution/execution.h"
-#include "src/handles/global-handles.h"
 #include "src/heap/factory.h"
 #include "src/objects/field-type.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/transitions-inl.h"
 #include "test/cctest/cctest.h"
-#include "test/cctest/test-transitions.h"
 
 namespace v8 {
 namespace internal {
@@ -26,23 +25,23 @@ TEST(TransitionArray_SimpleFieldTransitions) {
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
 
-  Handle<String> name1 = factory->InternalizeUtf8String("foo");
-  Handle<String> name2 = factory->InternalizeUtf8String("bar");
+  DirectHandle<String> name1 = factory->InternalizeUtf8String("foo");
+  DirectHandle<String> name2 = factory->InternalizeUtf8String("bar");
   PropertyAttributes attributes = NONE;
 
-  Handle<Map> map0 = Map::Create(isolate, 0);
-  Handle<Map> map1 =
+  DirectHandle<Map> map0 = Map::Create(isolate, 0);
+  DirectHandle<Map> map1 =
       Map::CopyWithField(isolate, map0, name1, FieldType::Any(isolate),
                          attributes, PropertyConstness::kMutable,
                          Representation::Tagged(), OMIT_TRANSITION)
           .ToHandleChecked();
-  Handle<Map> map2 =
+  DirectHandle<Map> map2 =
       Map::CopyWithField(isolate, map0, name2, FieldType::Any(isolate),
                          attributes, PropertyConstness::kMutable,
                          Representation::Tagged(), OMIT_TRANSITION)
           .ToHandleChecked();
 
-  CHECK(map0->raw_transitions()->IsSmi());
+  CHECK(IsSmi(map0->raw_transitions()));
 
   {
     TransitionsAccessor::Insert(isolate, map0, name1, map1,
@@ -72,8 +71,8 @@ TEST(TransitionArray_SimpleFieldTransitions) {
                                                  attributes));
     CHECK_EQ(2, transitions.NumberOfTransitions());
     for (int i = 0; i < 2; i++) {
-      Name key = transitions.GetKey(i);
-      Map target = transitions.GetTarget(i);
+      Tagged<Name> key = transitions.GetKey(i);
+      Tagged<Map> target = transitions.GetTarget(i);
       CHECK((key == *name1 && target == *map1) ||
             (key == *name2 && target == *map2));
     }
@@ -89,23 +88,23 @@ TEST(TransitionArray_FullFieldTransitions) {
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
 
-  Handle<String> name1 = factory->InternalizeUtf8String("foo");
-  Handle<String> name2 = factory->InternalizeUtf8String("bar");
+  DirectHandle<String> name1 = factory->InternalizeUtf8String("foo");
+  DirectHandle<String> name2 = factory->InternalizeUtf8String("bar");
   PropertyAttributes attributes = NONE;
 
-  Handle<Map> map0 = Map::Create(isolate, 0);
-  Handle<Map> map1 =
+  DirectHandle<Map> map0 = Map::Create(isolate, 0);
+  DirectHandle<Map> map1 =
       Map::CopyWithField(isolate, map0, name1, FieldType::Any(isolate),
                          attributes, PropertyConstness::kMutable,
                          Representation::Tagged(), OMIT_TRANSITION)
           .ToHandleChecked();
-  Handle<Map> map2 =
+  DirectHandle<Map> map2 =
       Map::CopyWithField(isolate, map0, name2, FieldType::Any(isolate),
                          attributes, PropertyConstness::kMutable,
                          Representation::Tagged(), OMIT_TRANSITION)
           .ToHandleChecked();
 
-  CHECK(map0->raw_transitions()->IsSmi());
+  CHECK(IsSmi(map0->raw_transitions()));
 
   {
     TransitionsAccessor::Insert(isolate, map0, name1, map1,
@@ -135,8 +134,8 @@ TEST(TransitionArray_FullFieldTransitions) {
                                                  attributes));
     CHECK_EQ(2, transitions.NumberOfTransitions());
     for (int i = 0; i < 2; i++) {
-      Name key = transitions.GetKey(i);
-      Map target = transitions.GetTarget(i);
+      Tagged<Name> key = transitions.GetKey(i);
+      Tagged<Map> target = transitions.GetTarget(i);
       CHECK((key == *name1 && target == *map1) ||
             (key == *name2 && target == *map2));
     }
@@ -157,8 +156,8 @@ TEST(TransitionArray_DifferentFieldNames) {
   Handle<Map> maps[PROPS_COUNT];
   PropertyAttributes attributes = NONE;
 
-  Handle<Map> map0 = Map::Create(isolate, 0);
-  CHECK(map0->raw_transitions()->IsSmi());
+  DirectHandle<Map> map0 = Map::Create(isolate, 0);
+  CHECK(IsSmi(map0->raw_transitions()));
 
   for (int i = 0; i < PROPS_COUNT; i++) {
     base::EmbeddedVector<char, 64> buffer;
@@ -181,8 +180,8 @@ TEST(TransitionArray_DifferentFieldNames) {
                            *names[i], PropertyKind::kData, attributes));
   }
   for (int i = 0; i < PROPS_COUNT; i++) {
-    Name key = transitions.GetKey(i);
-    Map target = transitions.GetTarget(i);
+    Tagged<Name> key = transitions.GetKey(i);
+    Tagged<Map> target = transitions.GetTarget(i);
     for (int j = 0; j < PROPS_COUNT; j++) {
       if (*names[i] == key) {
         CHECK_EQ(*maps[i], target);
@@ -201,13 +200,13 @@ TEST(TransitionArray_SameFieldNamesDifferentAttributesSimple) {
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
 
-  Handle<Map> map0 = Map::Create(isolate, 0);
-  CHECK(map0->raw_transitions()->IsSmi());
+  DirectHandle<Map> map0 = Map::Create(isolate, 0);
+  CHECK(IsSmi(map0->raw_transitions()));
 
   const int ATTRS_COUNT = (READ_ONLY | DONT_ENUM | DONT_DELETE) + 1;
-  STATIC_ASSERT(ATTRS_COUNT == 8);
+  static_assert(ATTRS_COUNT == 8);
   Handle<Map> attr_maps[ATTRS_COUNT];
-  Handle<String> name = factory->InternalizeUtf8String("foo");
+  DirectHandle<String> name = factory->InternalizeUtf8String("foo");
 
   // Add transitions for same field name but different attributes.
   for (int i = 0; i < ATTRS_COUNT; i++) {
@@ -248,8 +247,8 @@ TEST(TransitionArray_SameFieldNamesDifferentAttributes) {
   Handle<String> names[PROPS_COUNT];
   Handle<Map> maps[PROPS_COUNT];
 
-  Handle<Map> map0 = Map::Create(isolate, 0);
-  CHECK(map0->raw_transitions()->IsSmi());
+  DirectHandle<Map> map0 = Map::Create(isolate, 0);
+  CHECK(IsSmi(map0->raw_transitions()));
 
   // Some number of fields.
   for (int i = 0; i < PROPS_COUNT; i++) {
@@ -268,9 +267,9 @@ TEST(TransitionArray_SameFieldNamesDifferentAttributes) {
   }
 
   const int ATTRS_COUNT = (READ_ONLY | DONT_ENUM | DONT_DELETE) + 1;
-  STATIC_ASSERT(ATTRS_COUNT == 8);
+  static_assert(ATTRS_COUNT == 8);
   Handle<Map> attr_maps[ATTRS_COUNT];
-  Handle<String> name = factory->InternalizeUtf8String("foo");
+  DirectHandle<String> name = factory->InternalizeUtf8String("foo");
 
   // Add transitions for same field name but different attributes.
   for (int i = 0; i < ATTRS_COUNT; i++) {
@@ -297,12 +296,12 @@ TEST(TransitionArray_SameFieldNamesDifferentAttributes) {
   // Ensure that info about the other fields still valid.
   CHECK_EQ(PROPS_COUNT + ATTRS_COUNT, transitions.NumberOfTransitions());
   for (int i = 0; i < PROPS_COUNT + ATTRS_COUNT; i++) {
-    Name key = transitions.GetKey(i);
-    Map target = transitions.GetTarget(i);
+    Tagged<Name> key = transitions.GetKey(i);
+    Tagged<Map> target = transitions.GetTarget(i);
     if (key == *name) {
       // Attributes transition.
       PropertyAttributes attributes =
-          target.GetLastDescriptorDetails(isolate).attributes();
+          target->GetLastDescriptorDetails(isolate).attributes();
       CHECK_EQ(*attr_maps[static_cast<int>(attributes)], target);
     } else {
       for (int j = 0; j < PROPS_COUNT; j++) {

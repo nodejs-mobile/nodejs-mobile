@@ -75,7 +75,7 @@ _test_flag() {
 }
 
 complete -F _d8_flag -f d8 v8 v8-debug
-complete -F _test_flag -f cctest unittests
+complete -F _test_flag -f cctest v8_unittests
 
 # Many distros set up their own GDB completion scripts. The logic below is
 # careful to wrap any such functions (with additional logic), rather than
@@ -105,7 +105,7 @@ _maybe_setup_gdb_completions() {
         if [ "$next" = "d8" ] ; then
           _d8_flag
           return 0
-        elif [ "$next" = "unittests" ] || [ "$next" = "cctest" ]; then
+        elif [ "$next" = "v8_unittests" ] || [ "$next" = "cctest" ]; then
           _test_flag
           return 0
         fi
@@ -126,6 +126,10 @@ _get_gm_flags() {
   find "$v8_source/test/cctest/" -type f -name 'test-*' | \
     xargs basename -a -s ".cc" | \
     while read -r item; do echo "cctest/$item/*"; done
+
+  # Find all out/* directories that have an args.gn file.
+  find out/ -maxdepth 1 -type d | \
+    while read -r dir; do [[ -f "$dir/args.gn" ]] && echo $dir; done
 }
 
 _gm_flag() {

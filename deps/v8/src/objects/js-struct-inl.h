@@ -5,9 +5,11 @@
 #ifndef V8_OBJECTS_JS_STRUCT_INL_H_
 #define V8_OBJECTS_JS_STRUCT_INL_H_
 
+#include "src/objects/js-struct.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/api/api-inl.h"
 #include "src/heap/heap-write-barrier-inl.h"
-#include "src/objects/js-struct.h"
 #include "src/objects/smi-inl.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -18,9 +20,9 @@ namespace internal {
 
 #include "torque-generated/src/objects/js-struct-tq-inl.inc"
 
-TQ_OBJECT_CONSTRUCTORS_IMPL(JSSharedStruct)
+TQ_OBJECT_CONSTRUCTORS_IMPL(AlwaysSharedSpaceJSObject)
 
-CAST_ACCESSOR(JSSharedStruct)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSSharedStruct)
 
 }  // namespace internal
 }  // namespace v8

@@ -80,6 +80,10 @@ class Source {
     this.controller = controller;
   }
 
+  async cancel() {
+    await this.file.close();
+  }
+
   async pull(controller) {
     const byobRequest = controller.byobRequest;
     assert.match(inspect(byobRequest), /ReadableStreamBYOBRequest/);
@@ -184,7 +188,7 @@ class Source {
       throw error;
   }
 
-  assert.rejects(read(stream), error);
+  assert.rejects(read(stream), error).then(common.mustCall());
 }
 
 {
@@ -212,10 +216,10 @@ class Source {
   reader.releaseLock();
   assert.rejects(reader.read(new Uint8Array(10)), {
     code: 'ERR_INVALID_STATE',
-  });
+  }).then(common.mustCall());
   assert.rejects(reader.cancel(), {
     code: 'ERR_INVALID_STATE',
-  });
+  }).then(common.mustCall());
 }
 
 {

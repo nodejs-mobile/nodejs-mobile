@@ -4,13 +4,9 @@
 
 #include "src/baseline/baseline-batch-compiler.h"
 
-// TODO(v8:11421): Remove #if once baseline compiler is ported to other
-// architectures.
-#include "src/flags/flags.h"
-#if ENABLE_SPARKPLUG
-
 #include <algorithm>
 
+#include "src/base/fpu.h"
 #include "src/baseline/baseline-compiler.h"
 #include "src/codegen/compiler.h"
 #include "src/execution/isolate.h"
@@ -27,18 +23,19 @@ namespace v8 {
 namespace internal {
 namespace baseline {
 
-static bool CanCompileWithConcurrentBaseline(SharedFunctionInfo shared,
+static bool CanCompileWithConcurrentBaseline(Tagged<SharedFunctionInfo> shared,
                                              Isolate* isolate) {
-  return !shared.HasBaselineCode() && CanCompileWithBaseline(isolate, shared);
+  return !shared->HasBaselineCode() && CanCompileWithBaseline(isolate, shared);
 }
 
 class BaselineCompilerTask {
  public:
   BaselineCompilerTask(Isolate* isolate, PersistentHandles* handles,
-                       SharedFunctionInfo sfi)
+                       Tagged<SharedFunctionInfo> sfi)
       : shared_function_info_(handles->NewHandle(sfi)),
-        bytecode_(handles->NewHandle(sfi.GetBytecodeArray(isolate))) {
-    DCHECK(sfi.is_compiled());
+        bytecode_(handles->NewHandle(sfi->GetBytecodeArray(isolate))) {
+    DCHECK(sfi->is_compiled());
+    shared_function_info_->set_is_sparkplug_compiling(true);
   }
 
   BaselineCompilerTask(const BaselineCompilerTask&) V8_NOEXCEPT = delete;
@@ -46,69 +43,79 @@ class BaselineCompilerTask {
 
   // Executed in the background thread.
   void Compile(LocalIsolate* local_isolate) {
+    RCS_SCOPE(local_isolate, RuntimeCallCounterId::kCompileBackgroundBaseline);
+    base::ScopedTimer timer(v8_flags.log_function_events ? &time_taken_
+                                                         : nullptr);
     BaselineCompiler compiler(local_isolate, shared_function_info_, bytecode_);
     compiler.GenerateCode();
-    maybe_code_ = local_isolate->heap()->NewPersistentMaybeHandle(
-        compiler.Build(local_isolate));
-    Handle<Code> code;
-    if (maybe_code_.ToHandle(&code)) {
-      local_isolate->heap()->RegisterCodeObject(code);
-    }
+    maybe_code_ =
+        local_isolate->heap()->NewPersistentMaybeHandle(compiler.Build());
   }
 
   // Executed in the main thread.
   void Install(Isolate* isolate) {
+    shared_function_info_->set_is_sparkplug_compiling(false);
     Handle<Code> code;
     if (!maybe_code_.ToHandle(&code)) return;
-    if (FLAG_print_code) {
-      code->Print();
+    if (v8_flags.print_code) {
+      Print(*code);
     }
     // Don't install the code if the bytecode has been flushed or has
     // already some baseline code installed.
     if (!CanCompileWithConcurrentBaseline(*shared_function_info_, isolate)) {
       return;
     }
-    shared_function_info_->set_baseline_code(ToCodeT(*code), kReleaseStore);
-    if (V8_LIKELY(FLAG_use_osr)) {
-      shared_function_info_->GetBytecodeArray(isolate)
-          .RequestOsrAtNextOpportunity();
-    }
-    if (FLAG_trace_baseline_concurrent_compilation) {
+
+    shared_function_info_->set_baseline_code(*code, kReleaseStore);
+    shared_function_info_->set_age(0);
+    if (v8_flags.trace_baseline) {
       CodeTracer::Scope scope(isolate->GetCodeTracer());
       std::stringstream ss;
       ss << "[Concurrent Sparkplug Off Thread] Function ";
-      shared_function_info_->ShortPrint(ss);
+      ShortPrint(*shared_function_info_, ss);
       ss << " installed\n";
       OFStream os(scope.file());
       os << ss.str();
     }
+    if (IsScript(shared_function_info_->script())) {
+      Compiler::LogFunctionCompilation(
+          isolate, LogEventListener::CodeTag::kFunction,
+          direct_handle(Cast<Script>(shared_function_info_->script()), isolate),
+          shared_function_info_, DirectHandle<FeedbackVector>(),
+          Cast<AbstractCode>(code), CodeKind::BASELINE,
+          time_taken_.InMillisecondsF());
+    }
   }
 
  private:
-  Handle<SharedFunctionInfo> shared_function_info_;
-  Handle<BytecodeArray> bytecode_;
-  MaybeHandle<Code> maybe_code_;
+  IndirectHandle<SharedFunctionInfo> shared_function_info_;
+  IndirectHandle<BytecodeArray> bytecode_;
+  MaybeIndirectHandle<Code> maybe_code_;
+  base::TimeDelta time_taken_;
 };
 
 class BaselineBatchCompilerJob {
  public:
-  BaselineBatchCompilerJob(Isolate* isolate, Handle<WeakFixedArray> task_queue,
+  BaselineBatchCompilerJob(Isolate* isolate,
+                           DirectHandle<WeakFixedArray> task_queue,
                            int batch_size) {
     handles_ = isolate->NewPersistentHandles();
     tasks_.reserve(batch_size);
     for (int i = 0; i < batch_size; i++) {
-      MaybeObject maybe_sfi = task_queue->Get(i);
+      Tagged<MaybeObject> maybe_sfi = task_queue->get(i);
       // TODO(victorgomes): Do I need to clear the value?
-      task_queue->Set(i, HeapObjectReference::ClearedValue(isolate));
-      HeapObject obj;
+      task_queue->set(i, ClearedValue(isolate));
+      Tagged<HeapObject> obj;
       // Skip functions where weak reference is no longer valid.
       if (!maybe_sfi.GetHeapObjectIfWeak(&obj)) continue;
       // Skip functions where the bytecode has been flushed.
-      SharedFunctionInfo shared = SharedFunctionInfo::cast(obj);
+      Tagged<SharedFunctionInfo> shared = Cast<SharedFunctionInfo>(obj);
       if (!CanCompileWithConcurrentBaseline(shared, isolate)) continue;
+      // Skip functions that are already being compiled.
+      if (shared->is_sparkplug_compiling()) continue;
       tasks_.emplace_back(isolate, handles_.get(), shared);
     }
-    if (FLAG_trace_baseline_concurrent_compilation) {
+    if (v8_flags.trace_baseline) {
       CodeTracer::Scope scope(isolate->GetCodeTracer());
       PrintF(scope.file(), "[Concurrent Sparkplug] compiling %zu functions\n",
              tasks_.size());
@@ -127,6 +134,7 @@ class BaselineBatchCompilerJob {
 
   // Executed in the main thread.
   void Install(Isolate* isolate) {
+    HandleScope local_scope(isolate);
     for (auto& task : tasks_) {
       task.Install(isolate);
     }
@@ -150,13 +158,11 @@ class ConcurrentBaselineCompiler {
           outgoing_queue_(outcoming_queue) {}
 
     void Run(JobDelegate* delegate) override {
+      base::FlushDenormalsScope flush_denormals_scope(
+          isolate_->flush_denormals());
       LocalIsolate local_isolate(isolate_, ThreadKind::kBackground);
       UnparkedScope unparked_scope(&local_isolate);
       LocalHandleScope handle_scope(&local_isolate);
-
-      // Since we're going to compile an entire batch, this guarantees that
-      // we only switch back the memory chunks to RX at the end.
-      CodePageCollectionMemoryModificationScope batch_alloc(isolate_->heap());
 
       while (!incoming_queue_->IsEmpty() && !delegate->ShouldYield()) {
         std::unique_ptr<BaselineBatchCompilerJob> job;
@@ -169,11 +175,12 @@ class ConcurrentBaselineCompiler {
     }
 
     size_t GetMaxConcurrency(size_t worker_count) const override {
-      size_t max_threads = FLAG_concurrent_sparkplug_max_threads;
+      size_t max_threads = v8_flags.concurrent_sparkplug_max_threads;
+      size_t num_tasks = incoming_queue_->size() + worker_count;
       if (max_threads > 0) {
-        return std::min(max_threads, incoming_queue_->size());
+        return std::min(max_threads, num_tasks);
       }
-      return incoming_queue_->size();
+      return num_tasks;
     }
 
    private:
@@ -183,11 +190,14 @@ class ConcurrentBaselineCompiler {
   };
 
   explicit ConcurrentBaselineCompiler(Isolate* isolate) : isolate_(isolate) {
-    if (FLAG_concurrent_sparkplug) {
+    if (v8_flags.concurrent_sparkplug) {
+      TaskPriority priority =
+          v8_flags.concurrent_sparkplug_high_priority_threads
+              ? TaskPriority::kUserBlocking
+              : TaskPriority::kUserVisible;
       job_handle_ = V8::GetCurrentPlatform()->PostJob(
-          TaskPriority::kUserVisible,
-          std::make_unique<JobDispatcher>(isolate_, &incoming_queue_,
-                                          &outgoing_queue_));
+          priority, std::make_unique<JobDispatcher>(isolate_, &incoming_queue_,
+                                                    &outgoing_queue_));
     }
   }
 
@@ -200,7 +210,7 @@ class ConcurrentBaselineCompiler {
   }
 
   void CompileBatch(Handle<WeakFixedArray> task_queue, int batch_size) {
-    DCHECK(FLAG_concurrent_sparkplug);
+    DCHECK(v8_flags.concurrent_sparkplug);
     RCS_SCOPE(isolate_, RuntimeCallCounterId::kCompileBaseline);
     incoming_queue_.Enqueue(std::make_unique<BaselineBatchCompilerJob>(
         isolate_, task_queue, batch_size));
@@ -228,7 +238,7 @@ BaselineBatchCompiler::BaselineBatchCompiler(Isolate* isolate)
       last_index_(0),
       estimated_instruction_size_(0),
       enabled_(true) {
-  if (FLAG_concurrent_sparkplug) {
+  if (v8_flags.concurrent_sparkplug) {
     concurrent_compiler_ =
         std::make_unique<ConcurrentBaselineCompiler>(isolate_);
   }
@@ -241,51 +251,24 @@ BaselineBatchCompiler::~BaselineBatchCompiler() {
   }
 }
 
-void BaselineBatchCompiler::EnqueueFunction(Handle<JSFunction> function) {
-  Handle<SharedFunctionInfo> shared(function->shared(), isolate_);
-  // Early return if the function is compiled with baseline already or it is not
-  // suitable for baseline compilation.
-  if (shared->HasBaselineCode()) return;
-  if (!CanCompileWithBaseline(isolate_, *shared)) return;
+bool BaselineBatchCompiler::concurrent() const {
+  return v8_flags.concurrent_sparkplug &&
+         !isolate_->EfficiencyModeEnabledForTiering();
+}
 
+void BaselineBatchCompiler::EnqueueFunction(DirectHandle<JSFunction> function) {
+  DirectHandle<SharedFunctionInfo> shared(function->shared(), isolate_);
   // Immediately compile the function if batch compilation is disabled.
   if (!is_enabled()) {
     IsCompiledScope is_compiled_scope(
-        function->shared().is_compiled_scope(isolate_));
+        function->shared()->is_compiled_scope(isolate_));
     Compiler::CompileBaseline(isolate_, function, Compiler::CLEAR_EXCEPTION,
                               &is_compiled_scope);
     return;
   }
-
-  int estimated_size;
-  {
-    DisallowHeapAllocation no_gc;
-    estimated_size = BaselineCompiler::EstimateInstructionSize(
-        shared->GetBytecodeArray(isolate_));
-  }
-  estimated_instruction_size_ += estimated_size;
-  if (FLAG_trace_baseline_batch_compilation) {
-    CodeTracer::Scope trace_scope(isolate_->GetCodeTracer());
-    PrintF(trace_scope.file(),
-           "[Baseline batch compilation] Enqueued function ");
-    function->PrintName(trace_scope.file());
-    PrintF(trace_scope.file(),
-           " with estimated size %d (current budget: %d/%d)\n", estimated_size,
-           estimated_instruction_size_,
-           FLAG_baseline_batch_compilation_threshold);
-  }
-  if (ShouldCompileBatch()) {
-    if (FLAG_trace_baseline_batch_compilation) {
-      CodeTracer::Scope trace_scope(isolate_->GetCodeTracer());
-      PrintF(trace_scope.file(),
-             "[Baseline batch compilation] Compiling current batch of %d "
-             "functions\n",
-             (last_index_ + 1));
-    }
-    if (FLAG_concurrent_sparkplug) {
-      Enqueue(shared);
-      concurrent_compiler_->CompileBatch(compilation_queue_, last_index_);
-      ClearBatch();
+  if (ShouldCompileBatch(*shared)) {
+    if (concurrent()) {
+      CompileBatchConcurrent(*shared);
     } else {
       CompileBatch(function);
     }
@@ -294,13 +277,22 @@ void BaselineBatchCompiler::EnqueueFunction(Handle<JSFunction> function) {
   }
 }
 
-void BaselineBatchCompiler::Enqueue(Handle<SharedFunctionInfo> shared) {
+void BaselineBatchCompiler::EnqueueSFI(Tagged<SharedFunctionInfo> shared) {
+  if (!v8_flags.concurrent_sparkplug || !is_enabled()) return;
+  if (ShouldCompileBatch(shared)) {
+    CompileBatchConcurrent(shared);
+  } else {
+    Enqueue(DirectHandle<SharedFunctionInfo>(shared, isolate_));
+  }
+}
+
+void BaselineBatchCompiler::Enqueue(DirectHandle<SharedFunctionInfo> shared) {
   EnsureQueueCapacity();
-  compilation_queue_->Set(last_index_++, HeapObjectReference::Weak(*shared));
+  compilation_queue_->set(last_index_++, MakeWeak(*shared));
 }
 
 void BaselineBatchCompiler::InstallBatch() {
-  DCHECK(FLAG_concurrent_sparkplug);
+  DCHECK(v8_flags.concurrent_sparkplug);
   concurrent_compiler_->InstallBatch();
 }
 
@@ -312,7 +304,7 @@ void BaselineBatchCompiler::EnsureQueueCapacity() {
     return;
   }
   if (last_index_ >= compilation_queue_->length()) {
-    Handle<WeakFixedArray> new_queue =
+    DirectHandle<WeakFixedArray> new_queue =
         isolate_->factory()->CopyWeakFixedArrayAndGrow(compilation_queue_,
                                                        last_index_);
     GlobalHandles::Destroy(compilation_queue_.location());
@@ -320,33 +312,74 @@ void BaselineBatchCompiler::EnsureQueueCapacity() {
   }
 }
 
-void BaselineBatchCompiler::CompileBatch(Handle<JSFunction> function) {
-  CodePageCollectionMemoryModificationScope batch_allocation(isolate_->heap());
+void BaselineBatchCompiler::CompileBatch(DirectHandle<JSFunction> function) {
   {
     IsCompiledScope is_compiled_scope(
-        function->shared().is_compiled_scope(isolate_));
+        function->shared()->is_compiled_scope(isolate_));
     Compiler::CompileBaseline(isolate_, function, Compiler::CLEAR_EXCEPTION,
                               &is_compiled_scope);
   }
   for (int i = 0; i < last_index_; i++) {
-    MaybeObject maybe_sfi = compilation_queue_->Get(i);
+    Tagged<MaybeObject> maybe_sfi = compilation_queue_->get(i);
     MaybeCompileFunction(maybe_sfi);
-    compilation_queue_->Set(i, HeapObjectReference::ClearedValue(isolate_));
+    compilation_queue_->set(i, ClearedValue(isolate_));
   }
   ClearBatch();
 }
 
-bool BaselineBatchCompiler::ShouldCompileBatch() const {
-  return estimated_instruction_size_ >=
-         FLAG_baseline_batch_compilation_threshold;
+void BaselineBatchCompiler::CompileBatchConcurrent(
+    Tagged<SharedFunctionInfo> shared) {
+  Enqueue(DirectHandle<SharedFunctionInfo>(shared, isolate_));
+  concurrent_compiler_->CompileBatch(compilation_queue_, last_index_);
+  ClearBatch();
 }
 
-bool BaselineBatchCompiler::MaybeCompileFunction(MaybeObject maybe_sfi) {
-  HeapObject heapobj;
+bool BaselineBatchCompiler::ShouldCompileBatch(
+    Tagged<SharedFunctionInfo> shared) {
+  // Early return if the function is compiled with baseline already or it is not
+  // suitable for baseline compilation.
+  if (shared->HasBaselineCode()) return false;
+  // If we're already compiling this function, return.
+  if (shared->is_sparkplug_compiling()) return false;
+  if (!CanCompileWithBaseline(isolate_, shared)) return false;
+
+  int estimated_size;
+  {
+    DisallowHeapAllocation no_gc;
+    estimated_size = BaselineCompiler::EstimateInstructionSize(
+        shared->GetBytecodeArray(isolate_));
+  }
+  estimated_instruction_size_ += estimated_size;
+  if (v8_flags.trace_baseline_batch_compilation) {
+    CodeTracer::Scope trace_scope(isolate_->GetCodeTracer());
+    PrintF(trace_scope.file(), "[Baseline batch compilation] Enqueued SFI %s",
+           shared->DebugNameCStr().get());
+    PrintF(trace_scope.file(),
+           " with estimated size %d (current budget: %d/%d)\n", estimated_size,
+           estimated_instruction_size_,
+           v8_flags.baseline_batch_compilation_threshold.value());
+  }
+  if (estimated_instruction_size_ >=
+      v8_flags.baseline_batch_compilation_threshold) {
+    if (v8_flags.trace_baseline_batch_compilation) {
+      CodeTracer::Scope trace_scope(isolate_->GetCodeTracer());
+      PrintF(trace_scope.file(),
+             "[Baseline batch compilation] Compiling current batch of %d "
+             "functions\n",
+             (last_index_ + 1));
+    }
+    return true;
+  }
+  return false;
+}
+
+bool BaselineBatchCompiler::MaybeCompileFunction(
+    Tagged<MaybeObject> maybe_sfi) {
+  Tagged<HeapObject> heapobj;
   // Skip functions where the weak reference is no longer valid.
   if (!maybe_sfi.GetHeapObjectIfWeak(&heapobj)) return false;
   Handle<SharedFunctionInfo> shared =
-      handle(SharedFunctionInfo::cast(heapobj), isolate_);
+      handle(Cast<SharedFunctionInfo>(heapobj), isolate_);
   // Skip functions where the bytecode has been flushed.
   if (!shared->is_compiled()) return false;
 
@@ -363,33 +396,3 @@ void BaselineBatchCompiler::ClearBatch() {
 }  // namespace baseline
 }  // namespace internal
 }  // namespace v8
-
-#else
-
-namespace v8 {
-namespace internal {
-namespace baseline {
-
-class ConcurrentBaselineCompiler {};
-
-BaselineBatchCompiler::BaselineBatchCompiler(Isolate* isolate)
-    : isolate_(isolate),
-      compilation_queue_(Handle<WeakFixedArray>::null()),
-      last_index_(0),
-      estimated_instruction_size_(0),
-      enabled_(false) {}
-
-BaselineBatchCompiler::~BaselineBatchCompiler() {
-  if (!compilation_queue_.is_null()) {
-    GlobalHandles::Destroy(compilation_queue_.location());
-    compilation_queue_ = Handle<WeakFixedArray>::null();
-  }
-}
-
-void BaselineBatchCompiler::InstallBatch() { UNREACHABLE(); }
-
-}  // namespace baseline
-}  // namespace internal
-}  // namespace v8
-
-#endif

@@ -30,14 +30,28 @@ macro FastCopy(
     goto IfSlow;
   }
 
+  // Since the source typed array already exists, the byte size can't be too
+  // big, so the error case is unreachable.
   const countBytes: uintptr = destInfo.CalculateByteLength(count)
       otherwise unreachable;
   const startOffset: uintptr = destInfo.CalculateByteLength(k)
       otherwise unreachable;
   const srcPtr: RawPtr = src.data_ptr + Convert<intptr>(startOffset);
 
-  dcheck(countBytes <= dest.byte_length);
-  dcheck(countBytes <= src.byte_length - startOffset);
+  @if(DEBUG) {
+    const srcLength =
+        LoadJSTypedArrayLengthAndCheckDetached(src) otherwise unreachable;
+    const srcByteLength = GetTypedArrayElementsInfo(src).CalculateByteLength(
+        srcLength) otherwise unreachable;
+
+    const destLength =
+        LoadJSTypedArrayLengthAndCheckDetached(dest) otherwise unreachable;
+    const destByteLength = GetTypedArrayElementsInfo(dest).CalculateByteLength(
+        destLength) otherwise unreachable;
+
+    dcheck(countBytes <= destByteLength);
+    dcheck(countBytes <= srcByteLength - startOffset);
+  }
 
   if (IsSharedArrayBuffer(src.buffer)) {
     // SABs need a relaxed memmove to preserve atomicity.
@@ -47,8 +61,9 @@ macro FastCopy(
   }
 }
 
-macro SlowCopy(implicit context: Context)(
-    src: JSTypedArray, dest: JSTypedArray, k: uintptr, final: uintptr): void {
+macro SlowCopy(
+    implicit context: Context)(src: JSTypedArray, dest: JSTypedArray,
+    k: uintptr, final: uintptr): void {
   if (typed_array::IsBigInt64ElementsKind(src.elements_kind) !=
       typed_array::IsBigInt64ElementsKind(dest.elements_kind))
     deferred {
@@ -76,7 +91,7 @@ transitioning javascript builtin TypedArrayPrototypeSlice(
   //    else let k be min(relativeStart, len).
   const start = arguments[0];
   const k: uintptr =
-      start != Undefined ? ConvertToRelativeIndex(start, len) : 0;
+      start != Undefined ? ConvertAndClampRelativeIndex(start, len) : 0;
 
   // 6. If end is undefined, let relativeEnd be len;
   //    else let relativeEnd be ? ToInteger(end).
@@ -84,7 +99,7 @@ transitioning javascript builtin TypedArrayPrototypeSlice(
   //    else let final be min(relativeEnd, len).
   const end = arguments[1];
   let final: uintptr =
-      end != Undefined ? ConvertToRelativeIndex(end, len) : len;
+      end != Undefined ? ConvertAndClampRelativeIndex(end, len) : len;
 
   // 8. Let count be max(final - k, 0).
   let count: uintptr = Unsigned(IntPtrMax(Signed(final - k), 0));

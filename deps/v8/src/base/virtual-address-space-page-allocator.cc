@@ -57,6 +57,12 @@ bool VirtualAddressSpacePageAllocator::SetPermissions(
                                   static_cast<PagePermissions>(access));
 }
 
+bool VirtualAddressSpacePageAllocator::RecommitPages(
+    void* address, size_t size, PageAllocator::Permission access) {
+  return vas_->RecommitPages(reinterpret_cast<Address>(address), size,
+                             static_cast<PagePermissions>(access));
+}
+
 bool VirtualAddressSpacePageAllocator::DiscardSystemPages(void* address,
                                                           size_t size) {
   return vas_->DiscardSystemPages(reinterpret_cast<Address>(address), size);
@@ -65,6 +71,10 @@ bool VirtualAddressSpacePageAllocator::DiscardSystemPages(void* address,
 bool VirtualAddressSpacePageAllocator::DecommitPages(void* address,
                                                      size_t size) {
   return vas_->DecommitPages(reinterpret_cast<Address>(address), size);
+}
+
+bool VirtualAddressSpacePageAllocator::SealPages(void* address, size_t size) {
+  return false;
 }
 
 }  // namespace base

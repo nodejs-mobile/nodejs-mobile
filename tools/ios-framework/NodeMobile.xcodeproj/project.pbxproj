@@ -7,38 +7,41 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		33300EB6240437620019E302 /* libhistogram.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAB240437620019E302 /* libhistogram.a */; };
-		33300EB7240437620019E302 /* libllhttp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAC240437620019E302 /* libllhttp.a */; };
-		33300EB8240437620019E302 /* libv8_initializers.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAD240437620019E302 /* libv8_initializers.a */; };
-		33300EB9240437620019E302 /* libv8_libplatform.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAE240437620019E302 /* libv8_libplatform.a */; };
-		33300EBA240437620019E302 /* libbrotli.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAF240437620019E302 /* libbrotli.a */; };
-		33300EBB240437620019E302 /* libuvwasi.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB0240437620019E302 /* libuvwasi.a */; };
-		33300EBC240437620019E302 /* libv8_libbase.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB1240437620019E302 /* libv8_libbase.a */; };
-		33300EBE240437620019E302 /* libv8_base_without_compiler.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB3240437620019E302 /* libv8_base_without_compiler.a */; };
-		33300EC2240437AB0019E302 /* libv8_compiler.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EC0240437AB0019E302 /* libv8_compiler.a */; };
-		33300EC3240437AB0019E302 /* libv8_snapshot.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EC1240437AB0019E302 /* libv8_snapshot.a */; };
 		3C02AFD41FA919C30053C191 /* NodeMobile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3C02AFD31FA919C30053C191 /* NodeMobile.cpp */; };
+		A36728C72E5355E6004DF2FB /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C62E5355E5004DF2FB /* Security.framework */; };
+		A36728E72E53580A004DF2FB /* libabseil.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BF2E530EF7004DF2FB /* libabseil.a */; };
+		A36728E82E53580A004DF2FB /* libada.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE02ACD491900070ED3 /* libada.a */; };
+		A36728E92E53580A004DF2FB /* libbrotli.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAF240437620019E302 /* libbrotli.a */; };
+		A36728EA2E53580A004DF2FB /* libcares.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C9191EC3922F0007AD59 /* libcares.a */; };
+		A36728EB2E53580A004DF2FB /* libcrdtp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BB2E530EF7004DF2FB /* libcrdtp.a */; };
+		A36728EC2E53580A004DF2FB /* libgtest_main.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C42E530EF7004DF2FB /* libgtest_main.a */; };
+		A36728ED2E53580A004DF2FB /* libgtest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BE2E530EF7004DF2FB /* libgtest.a */; };
+		A36728EE2E53580A004DF2FB /* libhighway.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BD2E530EF7004DF2FB /* libhighway.a */; };
+		A36728EF2E53580A004DF2FB /* libhistogram.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAB240437620019E302 /* libhistogram.a */; };
+		A36728F02E53580A004DF2FB /* libllhttp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAC240437620019E302 /* libllhttp.a */; };
+		A36728F12E53580A004DF2FB /* libnbytes.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C02E530EF7004DF2FB /* libnbytes.a */; };
+		A36728F22E53580A004DF2FB /* libncrypto.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C12E530EF7004DF2FB /* libncrypto.a */; };
+		A36728F32E53580A004DF2FB /* libnghttp2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 334822141F6AFBD200CF403E /* libnghttp2.a */; };
+		A36728F42E53580A004DF2FB /* libnode.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91D1EC3922F0007AD59 /* libnode.a */; };
+		A36728F52E53580A004DF2FB /* libopenssl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91E1EC3922F0007AD59 /* libopenssl.a */; };
+		A36728F62E53580A004DF2FB /* libsimdjson.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BA2E530EF7004DF2FB /* libsimdjson.a */; };
+		A36728F72E53580A004DF2FB /* libsimdutf.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE62ACD493C00070ED3 /* libsimdutf.a */; };
+		A36728F82E53580A004DF2FB /* libuv.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91F1EC3922F0007AD59 /* libuv.a */; };
+		A36728F92E53580A004DF2FB /* libuvwasi.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB0240437620019E302 /* libuvwasi.a */; };
+		A36728FA2E53580A004DF2FB /* libv8_base_without_compiler.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB3240437620019E302 /* libv8_base_without_compiler.a */; };
+		A36728FB2E53580A004DF2FB /* libv8_compiler.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EC0240437AB0019E302 /* libv8_compiler.a */; };
+		A36728FC2E53580A004DF2FB /* libv8_initializers_slow.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C22E530EF7004DF2FB /* libv8_initializers_slow.a */; };
+		A36728FD2E53580A004DF2FB /* libv8_initializers.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAD240437620019E302 /* libv8_initializers.a */; };
+		A36728FE2E53580A004DF2FB /* libv8_libbase.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EB1240437620019E302 /* libv8_libbase.a */; };
+		A36728FF2E53580A004DF2FB /* libv8_libplatform.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EAE240437620019E302 /* libv8_libplatform.a */; };
+		A36729002E53580A004DF2FB /* libv8_snapshot.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 33300EC1240437AB0019E302 /* libv8_snapshot.a */; };
+		A36729012E53580A004DF2FB /* libv8_zlib.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7E29756DCD0049F595 /* libv8_zlib.a */; };
+		A36729022E53580A004DF2FB /* libzlib_data_chunk_simd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728C32E530EF7004DF2FB /* libzlib_data_chunk_simd.a */; };
+		A36729032E53580A004DF2FB /* libzlib.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C9201EC3922F0007AD59 /* libzlib.a */; };
+		A36729042E53580A004DF2FB /* libzstd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A36728BC2E530EF7004DF2FB /* libzstd.a */; };
+		A3F2E7592E716AB00001C23B /* libsqlite.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A3F2E7582E716AA30001C23B /* libsqlite.a */; };
 		D9A7619D1F7C63A8006AFE86 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 331917C21EC4702A00F93D52 /* CoreFoundation.framework */; };
-		D9A7619E1F7C63A8006AFE86 /* libcares.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C9191EC3922F0007AD59 /* libcares.a */; };
-		D9A761A21F7C63A8006AFE86 /* libnghttp2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 334822141F6AFBD200CF403E /* libnghttp2.a */; };
-		D9A761A31F7C63A8006AFE86 /* libnode.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91D1EC3922F0007AD59 /* libnode.a */; };
-		D9A761A41F7C63A8006AFE86 /* libopenssl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91E1EC3922F0007AD59 /* libopenssl.a */; };
-		D9A761A51F7C63A8006AFE86 /* libuv.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C91F1EC3922F0007AD59 /* libuv.a */; };
-		D9A761A61F7C63A8006AFE86 /* libzlib.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3376C9201EC3922F0007AD59 /* libzlib.a */; };
 		D9A762281F7C675E006097B1 /* NodeMobile.h in Headers */ = {isa = PBXBuildFile; fileRef = D9A762261F7C674F006097B1 /* NodeMobile.h */; settings = {ATTRIBUTES = (Public, ); }; };
-		F63BCE7B29756D9B0049F595 /* libnghttp3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7A29756D920049F595 /* libnghttp3.a */; };
-		F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7C29756DAA0049F595 /* libngtcp2.a */; };
-		F63BCE7F29756DCF0049F595 /* libv8_zlib.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F63BCE7E29756DCD0049F595 /* libv8_zlib.a */; };
-		F6860EE12ACD491900070ED3 /* libada.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE02ACD491900070ED3 /* libada.a */; };
-		F6860EE32ACD492E00070ED3 /* libbase64_neon64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */; };
-		F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE42ACD493400070ED3 /* libbase64.a */; };
-		F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE62ACD493C00070ED3 /* libsimdutf.a */; };
-		F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */; };
-		F6D008C32AD14FAE00FB3D3D /* libbase64_sse41.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */; };
-		F6D008C42AD14FAE00FB3D3D /* libbase64_avx.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */; };
-		F6D008C52AD14FAE00FB3D3D /* libbase64_ssse3.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */; };
-		F6D008C62AD14FAE00FB3D3D /* libbase64_sse42.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */; };
-		F6D008C72AD14FAE00FB3D3D /* libbase64_avx2.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,22 +63,25 @@
 		3376C91F1EC3922F0007AD59 /* libuv.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libuv.a; path = bin/libuv.a; sourceTree = "<group>"; };
 		3376C9201EC3922F0007AD59 /* libzlib.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib.a; path = bin/libzlib.a; sourceTree = "<group>"; };
 		3C02AFD31FA919C30053C191 /* NodeMobile.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = NodeMobile.cpp; sourceTree = "<group>"; };
+		A36728BA2E530EF7004DF2FB /* libsimdjson.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsimdjson.a; path = bin/libsimdjson.a; sourceTree = "<group>"; };
+		A36728BB2E530EF7004DF2FB /* libcrdtp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libcrdtp.a; path = bin/libcrdtp.a; sourceTree = "<group>"; };
+		A36728BC2E530EF7004DF2FB /* libzstd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzstd.a; path = bin/libzstd.a; sourceTree = "<group>"; };
+		A36728BD2E530EF7004DF2FB /* libhighway.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libhighway.a; path = bin/libhighway.a; sourceTree = "<group>"; };
+		A36728BE2E530EF7004DF2FB /* libgtest.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libgtest.a; path = bin/libgtest.a; sourceTree = "<group>"; };
+		A36728BF2E530EF7004DF2FB /* libabseil.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libabseil.a; path = bin/libabseil.a; sourceTree = "<group>"; };
+		A36728C02E530EF7004DF2FB /* libnbytes.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libnbytes.a; path = bin/libnbytes.a; sourceTree = "<group>"; };
+		A36728C12E530EF7004DF2FB /* libncrypto.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libncrypto.a; path = bin/libncrypto.a; sourceTree = "<group>"; };
+		A36728C22E530EF7004DF2FB /* libv8_initializers_slow.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libv8_initializers_slow.a; path = bin/libv8_initializers_slow.a; sourceTree = "<group>"; };
+		A36728C32E530EF7004DF2FB /* libzlib_data_chunk_simd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib_data_chunk_simd.a; path = bin/libzlib_data_chunk_simd.a; sourceTree = "<group>"; };
+		A36728C42E530EF7004DF2FB /* libgtest_main.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libgtest_main.a; path = bin/libgtest_main.a; sourceTree = "<group>"; };
+		A36728C62E5355E5004DF2FB /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Security.framework; sourceTree = DEVELOPER_DIR; };
+		A3F2E7582E716AA30001C23B /* libsqlite.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsqlite.a; path = bin/libsqlite.a; sourceTree = "<group>"; };
 		D9A761AE1F7C63A8006AFE86 /* NodeMobile.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = NodeMobile.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		D9A762251F7C674F006097B1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D9A762261F7C674F006097B1 /* NodeMobile.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NodeMobile.h; sourceTree = "<group>"; };
-		F63BCE7A29756D920049F595 /* libnghttp3.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libnghttp3.a; path = bin/libnghttp3.a; sourceTree = "<group>"; };
-		F63BCE7C29756DAA0049F595 /* libngtcp2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libngtcp2.a; path = bin/libngtcp2.a; sourceTree = "<group>"; };
 		F63BCE7E29756DCD0049F595 /* libv8_zlib.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libv8_zlib.a; path = bin/libv8_zlib.a; sourceTree = "<group>"; };
 		F6860EE02ACD491900070ED3 /* libada.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libada.a; path = bin/libada.a; sourceTree = "<group>"; };
-		F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_neon64.a; path = bin/libbase64_neon64.a; sourceTree = "<group>"; };
-		F6860EE42ACD493400070ED3 /* libbase64.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64.a; path = bin/libbase64.a; sourceTree = "<group>"; };
 		F6860EE62ACD493C00070ED3 /* libsimdutf.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libsimdutf.a; path = bin/libsimdutf.a; sourceTree = "<group>"; };
-		F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libzlib_inflate_chunk_simd.a; path = bin/libzlib_inflate_chunk_simd.a; sourceTree = "<group>"; };
-		F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_sse41.a; path = bin/libbase64_sse41.a; sourceTree = "<group>"; };
-		F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_avx.a; path = bin/libbase64_avx.a; sourceTree = "<group>"; };
-		F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_ssse3.a; path = bin/libbase64_ssse3.a; sourceTree = "<group>"; };
-		F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_sse42.a; path = bin/libbase64_sse42.a; sourceTree = "<group>"; };
-		F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libbase64_avx2.a; path = bin/libbase64_avx2.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,36 +89,39 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F6D008C62AD14FAE00FB3D3D /* libbase64_sse42.a in Frameworks */,
-				F6D008C42AD14FAE00FB3D3D /* libbase64_avx.a in Frameworks */,
-				33300EC2240437AB0019E302 /* libv8_compiler.a in Frameworks */,
-				33300EC3240437AB0019E302 /* libv8_snapshot.a in Frameworks */,
-				F63BCE7D29756DAC0049F595 /* libngtcp2.a in Frameworks */,
-				33300EB6240437620019E302 /* libhistogram.a in Frameworks */,
-				F6D008C52AD14FAE00FB3D3D /* libbase64_ssse3.a in Frameworks */,
-				33300EB7240437620019E302 /* libllhttp.a in Frameworks */,
-				33300EB8240437620019E302 /* libv8_initializers.a in Frameworks */,
-				33300EB9240437620019E302 /* libv8_libplatform.a in Frameworks */,
-				33300EBA240437620019E302 /* libbrotli.a in Frameworks */,
-				33300EBB240437620019E302 /* libuvwasi.a in Frameworks */,
-				F63BCE7F29756DCF0049F595 /* libv8_zlib.a in Frameworks */,
-				33300EBC240437620019E302 /* libv8_libbase.a in Frameworks */,
-				33300EBE240437620019E302 /* libv8_base_without_compiler.a in Frameworks */,
-				F63BCE7B29756D9B0049F595 /* libnghttp3.a in Frameworks */,
+				A36728EC2E53580A004DF2FB /* libgtest_main.a in Frameworks */,
+				A36728F52E53580A004DF2FB /* libopenssl.a in Frameworks */,
+				A36728F32E53580A004DF2FB /* libnghttp2.a in Frameworks */,
+				A36729022E53580A004DF2FB /* libzlib_data_chunk_simd.a in Frameworks */,
+				A36729002E53580A004DF2FB /* libv8_snapshot.a in Frameworks */,
+				A36728F02E53580A004DF2FB /* libllhttp.a in Frameworks */,
+				A36728E82E53580A004DF2FB /* libada.a in Frameworks */,
+				A36728E92E53580A004DF2FB /* libbrotli.a in Frameworks */,
+				A36728FA2E53580A004DF2FB /* libv8_base_without_compiler.a in Frameworks */,
+				A36728FC2E53580A004DF2FB /* libv8_initializers_slow.a in Frameworks */,
+				A36728FE2E53580A004DF2FB /* libv8_libbase.a in Frameworks */,
+				A36728F42E53580A004DF2FB /* libnode.a in Frameworks */,
+				A36728FF2E53580A004DF2FB /* libv8_libplatform.a in Frameworks */,
+				A36728F12E53580A004DF2FB /* libnbytes.a in Frameworks */,
+				A36728F82E53580A004DF2FB /* libuv.a in Frameworks */,
+				A3F2E7592E716AB00001C23B /* libsqlite.a in Frameworks */,
+				A36728EA2E53580A004DF2FB /* libcares.a in Frameworks */,
+				A36728F72E53580A004DF2FB /* libsimdutf.a in Frameworks */,
+				A36728E72E53580A004DF2FB /* libabseil.a in Frameworks */,
+				A36728F92E53580A004DF2FB /* libuvwasi.a in Frameworks */,
+				A36728FD2E53580A004DF2FB /* libv8_initializers.a in Frameworks */,
+				A36729042E53580A004DF2FB /* libzstd.a in Frameworks */,
+				A36728EE2E53580A004DF2FB /* libhighway.a in Frameworks */,
+				A36728EF2E53580A004DF2FB /* libhistogram.a in Frameworks */,
+				A36728F62E53580A004DF2FB /* libsimdjson.a in Frameworks */,
+				A36729012E53580A004DF2FB /* libv8_zlib.a in Frameworks */,
+				A36728ED2E53580A004DF2FB /* libgtest.a in Frameworks */,
+				A36728C72E5355E6004DF2FB /* Security.framework in Frameworks */,
+				A36728EB2E53580A004DF2FB /* libcrdtp.a in Frameworks */,
+				A36728FB2E53580A004DF2FB /* libv8_compiler.a in Frameworks */,
 				D9A7619D1F7C63A8006AFE86 /* CoreFoundation.framework in Frameworks */,
-				F6860EE72ACD493C00070ED3 /* libsimdutf.a in Frameworks */,
-				D9A7619E1F7C63A8006AFE86 /* libcares.a in Frameworks */,
-				D9A761A21F7C63A8006AFE86 /* libnghttp2.a in Frameworks */,
-				F6860EE32ACD492E00070ED3 /* libbase64_neon64.a in Frameworks */,
-				F6860EE12ACD491900070ED3 /* libada.a in Frameworks */,
-				D9A761A31F7C63A8006AFE86 /* libnode.a in Frameworks */,
-				F6D008C32AD14FAE00FB3D3D /* libbase64_sse41.a in Frameworks */,
-				D9A761A41F7C63A8006AFE86 /* libopenssl.a in Frameworks */,
-				F6860EE52ACD493400070ED3 /* libbase64.a in Frameworks */,
-				F6D008C72AD14FAE00FB3D3D /* libbase64_avx2.a in Frameworks */,
-				D9A761A51F7C63A8006AFE86 /* libuv.a in Frameworks */,
-				F6860EE92ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a in Frameworks */,
-				D9A761A61F7C63A8006AFE86 /* libzlib.a in Frameworks */,
+				A36728F22E53580A004DF2FB /* libncrypto.a in Frameworks */,
+				A36729032E53580A004DF2FB /* libzlib.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,21 +148,25 @@
 		3376C9181EC3922E0007AD59 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A3F2E7582E716AA30001C23B /* libsqlite.a */,
+				A36728C62E5355E5004DF2FB /* Security.framework */,
+				A36728BF2E530EF7004DF2FB /* libabseil.a */,
+				A36728BB2E530EF7004DF2FB /* libcrdtp.a */,
+				A36728BE2E530EF7004DF2FB /* libgtest.a */,
+				A36728C42E530EF7004DF2FB /* libgtest_main.a */,
+				A36728BD2E530EF7004DF2FB /* libhighway.a */,
+				A36728C02E530EF7004DF2FB /* libnbytes.a */,
+				A36728C12E530EF7004DF2FB /* libncrypto.a */,
+				A36728BA2E530EF7004DF2FB /* libsimdjson.a */,
+				A36728C22E530EF7004DF2FB /* libv8_initializers_slow.a */,
+				A36728C32E530EF7004DF2FB /* libzlib_data_chunk_simd.a */,
+				A36728BC2E530EF7004DF2FB /* libzstd.a */,
 				F6860EE02ACD491900070ED3 /* libada.a */,
-				F6D008BE2AD14FAD00FB3D3D /* libbase64_avx.a */,
-				F6D008C12AD14FAD00FB3D3D /* libbase64_avx2.a */,
-				F6860EE22ACD492E00070ED3 /* libbase64_neon64.a */,
-				F6D008BD2AD14FAD00FB3D3D /* libbase64_sse41.a */,
-				F6D008C02AD14FAD00FB3D3D /* libbase64_sse42.a */,
-				F6D008BF2AD14FAD00FB3D3D /* libbase64_ssse3.a */,
-				F6860EE42ACD493400070ED3 /* libbase64.a */,
 				33300EAF240437620019E302 /* libbrotli.a */,
 				3376C9191EC3922F0007AD59 /* libcares.a */,
 				33300EAB240437620019E302 /* libhistogram.a */,
 				33300EAC240437620019E302 /* libllhttp.a */,
 				334822141F6AFBD200CF403E /* libnghttp2.a */,
-				F63BCE7A29756D920049F595 /* libnghttp3.a */,
-				F63BCE7C29756DAA0049F595 /* libngtcp2.a */,
 				3376C91D1EC3922F0007AD59 /* libnode.a */,
 				3376C91E1EC3922F0007AD59 /* libopenssl.a */,
 				F6860EE62ACD493C00070ED3 /* libsimdutf.a */,
@@ -166,7 +179,6 @@
 				33300EAE240437620019E302 /* libv8_libplatform.a */,
 				33300EC1240437AB0019E302 /* libv8_snapshot.a */,
 				F63BCE7E29756DCD0049F595 /* libv8_zlib.a */,
-				F6860EE82ACD494B00070ED3 /* libzlib_inflate_chunk_simd.a */,
 				3376C9201EC3922F0007AD59 /* libzlib.a */,
 				331917C21EC4702A00F93D52 /* CoreFoundation.framework */,
 			);
@@ -397,7 +409,7 @@
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = NodeMobile/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
@@ -435,7 +447,7 @@
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = NodeMobile/Info.plist;
 				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",

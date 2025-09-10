@@ -1,6 +1,5 @@
 'use strict';
 
-// TODO@PI: Run all tests
 const common = require('../common');
 const assert = require('assert');
 const { createServer, request } = require('http');
@@ -65,6 +64,10 @@ const server = createServer(
       res.write('BODY');
       res.end();
 
+      assert.throws(() => res.appendHeader(), {
+        code: 'ERR_HTTP_HEADERS_SENT',
+      });
+
       assert.deepStrictEqual(res.getHeader('X-Res-a'), ['AAA', 'BBB', 'CCC']);
       assert.deepStrictEqual(res.getHeader('x-res-a'), ['AAA', 'BBB', 'CCC']);
       assert.deepStrictEqual(
@@ -81,7 +84,7 @@ const server = createServer(
         ['X-Res-a', 'X-Res-b', 'Connection', 'x-res-c', 'x-res-d']
       );
 
-      const headers = Object.create(null);
+      const headers = { __proto__: null };
       Object.assign(headers, {
         'x-res-a': [ 'AAA', 'BBB', 'CCC' ],
         'x-res-b': [ 'DDD', 'EEE', 'FFF', 'GGG' ],

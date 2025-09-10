@@ -18,6 +18,7 @@
 #include "src/objects/objects-inl.h"
 #include "src/objects/smi.h"
 #include "src/objects/struct-inl.h"
+#include "src/sandbox/isolate.h"
 
 namespace v8 {
 namespace internal {
@@ -26,7 +27,7 @@ namespace {
 
 // The enumeration order index in the property details is unused if they are
 // stored in a SwissNameDictionary or NumberDictionary (because they handle
-// propery ordering differently). We then use this dummy value instead.
+// property ordering differently). We then use this dummy value instead.
 constexpr int kDummyEnumerationIndex = 0;
 
 inline int EncodeComputedEntry(ClassBoilerplate::ValueKind value_kind,
@@ -37,17 +38,51 @@ inline int EncodeComputedEntry(ClassBoilerplate::ValueKind value_kind,
   return flags;
 }
 
-constexpr AccessorComponent ToAccessorComponent(
-    ClassBoilerplate::ValueKind value_kind) {
-  return value_kind == ClassBoilerplate::kGetter ? ACCESSOR_GETTER
-                                                 : ACCESSOR_SETTER;
+void SetAccessorPlaceholderIndices(Tagged<AccessorPair> pair,
+                                   ClassBoilerplate::ValueKind value_kind,
+                                   Tagged<Smi> index) {
+  switch (value_kind) {
+    case ClassBoilerplate::kGetter:
+      pair->set_getter(index);
+      break;
+    case ClassBoilerplate::kSetter:
+      pair->set_setter(index);
+      break;
+    case ClassBoilerplate::kAutoAccessor:
+      // Auto-accessor set the pair of consecutive indices in a single call.
+      pair->set_getter(index);
+      pair->set_setter(Smi::FromInt(Smi::ToInt(index) + 1));
+      break;
+    default:
+      UNREACHABLE();
+  }
+}
+
+void SetAccessorPlaceholderIndices(Tagged<AccessorPair> pair,
+                                   ClassBoilerplate::ValueKind value_kind,
+                                   Tagged<Smi> index, ReleaseStoreTag tag) {
+  switch (value_kind) {
+    case ClassBoilerplate::kGetter:
+      pair->set_getter(index, tag);
+      break;
+    case ClassBoilerplate::kSetter:
+      pair->set_setter(index, tag);
+      break;
+    case ClassBoilerplate::kAutoAccessor:
+      // Auto-accessor set the pair of consecutive indices in a single call.
+      pair->set_getter(index, tag);
+      pair->set_setter(Smi::FromInt(Smi::ToInt(index) + 1), tag);
+      break;
+    default:
+      UNREACHABLE();
+  }
 }
 
 template <typename IsolateT>
 void AddToDescriptorArrayTemplate(
-    IsolateT* isolate, Handle<DescriptorArray> descriptor_array_template,
-    Handle<Name> name, ClassBoilerplate::ValueKind value_kind,
-    Handle<Object> value) {
+    IsolateT* isolate, DirectHandle<DescriptorArray> descriptor_array_template,
+    DirectHandle<Name> name, ClassBoilerplate::ValueKind value_kind,
+    DirectHandle<Object> value) {
   InternalIndex entry = descriptor_array_template->Search(
       *name, descriptor_array_template->number_of_descriptors());
   // TODO(ishell): deduplicate properties at AST level, this will allow us to
@@ -59,9 +94,10 @@ void AddToDescriptorArrayTemplate(
       d = Descriptor::DataConstant(name, value, DONT_ENUM);
     } else {
       DCHECK(value_kind == ClassBoilerplate::kGetter ||
-             value_kind == ClassBoilerplate::kSetter);
-      Handle<AccessorPair> pair = isolate->factory()->NewAccessorPair();
-      pair->set(ToAccessorComponent(value_kind), *value);
+             value_kind == ClassBoilerplate::kSetter ||
+             value_kind == ClassBoilerplate::kAutoAccessor);
+      DirectHandle<AccessorPair> pair = isolate->factory()->NewAccessorPair();
+      SetAccessorPlaceholderIndices(*pair, value_kind, Cast<Smi>(*value));
       d = Descriptor::AccessorConstant(name, pair, DONT_ENUM);
     }
     descriptor_array_template->Append(&d);
@@ -75,28 +111,32 @@ void AddToDescriptorArrayTemplate(
       descriptor_array_template->Set(entry, &d);
     } else {
       DCHECK(value_kind == ClassBoilerplate::kGetter ||
-             value_kind == ClassBoilerplate::kSetter);
-      Object raw_accessor = descriptor_array_template->GetStrongValue(entry);
-      AccessorPair pair;
-      if (raw_accessor.IsAccessorPair()) {
-        pair = AccessorPair::cast(raw_accessor);
+             value_kind == ClassBoilerplate::kSetter ||
+             value_kind == ClassBoilerplate::kAutoAccessor);
+      Tagged<Object> raw_accessor =
+          descriptor_array_template->GetStrongValue(entry);
+      Tagged<AccessorPair> pair;
+      if (IsAccessorPair(raw_accessor)) {
+        pair = Cast<AccessorPair>(raw_accessor);
       } else {
-        Handle<AccessorPair> new_pair = isolate->factory()->NewAccessorPair();
+        DirectHandle<AccessorPair> new_pair =
+            isolate->factory()->NewAccessorPair();
         Descriptor d = Descriptor::AccessorConstant(name, new_pair, DONT_ENUM);
         d.SetSortedKeyIndex(sorted_index);
         descriptor_array_template->Set(entry, &d);
         pair = *new_pair;
       }
-      pair.set(ToAccessorComponent(value_kind), *value, kReleaseStore);
+      SetAccessorPlaceholderIndices(*pair, value_kind, Cast<Smi>(*value),
+                                    kReleaseStore);
     }
   }
 }
 
 template <typename IsolateT>
 Handle<NameDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
-    IsolateT* isolate, Handle<NameDictionary> dictionary, Handle<Name> name,
-    Handle<Object> value, PropertyDetails details,
-    InternalIndex* entry_out = nullptr) {
+    IsolateT* isolate, Handle<NameDictionary> dictionary,
+    DirectHandle<Name> name, DirectHandle<Object> value,
+    PropertyDetails details, InternalIndex* entry_out = nullptr) {
   return NameDictionary::AddNoUpdateNextEnumerationIndex(
       isolate, dictionary, name, value, details, entry_out);
 }
@@ -104,17 +144,17 @@ Handle<NameDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
 template <typename IsolateT>
 Handle<SwissNameDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
     IsolateT* isolate, Handle<SwissNameDictionary> dictionary,
-    Handle<Name> name, Handle<Object> value, PropertyDetails details,
-    InternalIndex* entry_out = nullptr) {
+    DirectHandle<Name> name, DirectHandle<Object> value,
+    PropertyDetails details, InternalIndex* entry_out = nullptr) {
   // SwissNameDictionary does not maintain the enumeration order in property
   // details, so it's a normal Add().
   return SwissNameDictionary::Add(isolate, dictionary, name, value, details);
 }
 
 template <typename IsolateT>
-Handle<NumberDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
+DirectHandle<NumberDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
     IsolateT* isolate, Handle<NumberDictionary> dictionary, uint32_t element,
-    Handle<Object> value, PropertyDetails details,
+    DirectHandle<Object> value, PropertyDetails details,
     InternalIndex* entry_out = nullptr) {
   // NumberDictionary does not maintain the enumeration order, so it's
   // a normal Add().
@@ -122,17 +162,22 @@ Handle<NumberDictionary> DictionaryAddNoUpdateNextEnumerationIndex(
                                entry_out);
 }
 
-template <typename Dictionary>
-void DictionaryUpdateMaxNumberKey(Handle<Dictionary> dictionary,
-                                  Handle<Name> name) {
-  STATIC_ASSERT((std::is_same<Dictionary, SwissNameDictionary>::value ||
-                 std::is_same<Dictionary, NameDictionary>::value));
+// TODO(42203211): The first parameter should be just DirectHandle<Dictionary>
+// but now it does not compile with implicit Handle to DirectHandle conversions.
+template <template <typename> typename HandleType, typename Dictionary>
+void DictionaryUpdateMaxNumberKey(HandleType<Dictionary> dictionary,
+                                  DirectHandle<Name> name)
+  requires(
+      std::is_convertible_v<HandleType<Dictionary>, DirectHandle<Dictionary>>)
+{
+  static_assert((std::is_same_v<Dictionary, SwissNameDictionary> ||
+                 std::is_same_v<Dictionary, NameDictionary>));
   // No-op for (ordered) name dictionaries.
 }
 
-void DictionaryUpdateMaxNumberKey(Handle<NumberDictionary> dictionary,
+void DictionaryUpdateMaxNumberKey(DirectHandle<NumberDictionary> dictionary,
                                   uint32_t element) {
-  dictionary->UpdateMaxNumberKey(element, Handle<JSObject>());
+  dictionary->UpdateMaxNumberKey(element, DirectHandle<JSObject>());
   dictionary->set_requires_slow_elements();
 }
 
@@ -147,22 +192,22 @@ constexpr int ComputeEnumerationIndex(int value_index) {
 
 constexpr int kAccessorNotDefined = -1;
 
-inline int GetExistingValueIndex(Object value) {
-  return value.IsSmi() ? Smi::ToInt(value) : kAccessorNotDefined;
+inline int GetExistingValueIndex(Tagged<Object> value) {
+  return IsSmi(value) ? Smi::ToInt(value) : kAccessorNotDefined;
 }
 
 template <typename IsolateT, typename Dictionary, typename Key>
 void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
                              Key key, int key_index,
                              ClassBoilerplate::ValueKind value_kind,
-                             Smi value) {
+                             Tagged<Smi> value) {
   InternalIndex entry = dictionary->FindEntry(isolate, key);
 
   const bool is_elements_dictionary =
-      std::is_same<Dictionary, NumberDictionary>::value;
-  STATIC_ASSERT(is_elements_dictionary !=
-                (std::is_same<Dictionary, NameDictionary>::value ||
-                 std::is_same<Dictionary, SwissNameDictionary>::value));
+      std::is_same_v<Dictionary, NumberDictionary>;
+  static_assert(is_elements_dictionary !=
+                (std::is_same_v<Dictionary, NameDictionary> ||
+                 std::is_same_v<Dictionary, SwissNameDictionary>));
 
   if (entry.is_not_found()) {
     // Entry not found, add new one.
@@ -170,21 +215,24 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
         Dictionary::kIsOrderedDictionaryType || is_elements_dictionary
             ? kDummyEnumerationIndex
             : ComputeEnumerationIndex(key_index);
-    Handle<Object> value_handle;
+    DirectHandle<Object> value_handle;
     PropertyDetails details(
         value_kind != ClassBoilerplate::kData ? PropertyKind::kAccessor
                                               : PropertyKind::kData,
         DONT_ENUM, PropertyDetails::kConstIfDictConstnessTracking, enum_order);
     if (value_kind == ClassBoilerplate::kData) {
-      value_handle = handle(value, isolate);
+      value_handle = direct_handle(value, isolate);
     } else {
-      Handle<AccessorPair> pair(isolate->factory()->NewAccessorPair());
-      pair->set(ToAccessorComponent(value_kind), value);
+      DCHECK(value_kind == ClassBoilerplate::kGetter ||
+             value_kind == ClassBoilerplate::kSetter ||
+             value_kind == ClassBoilerplate::kAutoAccessor);
+      DirectHandle<AccessorPair> pair(isolate->factory()->NewAccessorPair());
+      SetAccessorPlaceholderIndices(*pair, value_kind, Cast<Smi>(value));
       value_handle = pair;
     }
 
     // Add value to the dictionary without updating next enumeration index.
-    Handle<Dictionary> dict = DictionaryAddNoUpdateNextEnumerationIndex(
+    DirectHandle<Dictionary> dict = DictionaryAddNoUpdateNextEnumerationIndex(
         isolate, dictionary, key, value_handle, details, &entry);
     // It is crucial to avoid dictionary reallocations because it may remove
     // potential gaps in enumeration indices values that are necessary for
@@ -204,18 +252,18 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
             ? kDummyEnumerationIndex
             : ComputeEnumerationIndex(key_index);
 
-    Object existing_value = dictionary->ValueAt(entry);
+    Tagged<Object> existing_value = dictionary->ValueAt(entry);
     if (value_kind == ClassBoilerplate::kData) {
       // Computed value is a normal method.
-      if (existing_value.IsAccessorPair()) {
-        AccessorPair current_pair = AccessorPair::cast(existing_value);
+      if (IsAccessorPair(existing_value)) {
+        Tagged<AccessorPair> current_pair = Cast<AccessorPair>(existing_value);
 
         int existing_getter_index =
-            GetExistingValueIndex(current_pair.getter());
+            GetExistingValueIndex(current_pair->getter());
         int existing_setter_index =
-            GetExistingValueIndex(current_pair.setter());
+            GetExistingValueIndex(current_pair->setter());
         // At least one of the accessors must already be defined.
-        STATIC_ASSERT(kAccessorNotDefined < 0);
+        static_assert(kAccessorNotDefined < 0);
         DCHECK(existing_getter_index >= 0 || existing_setter_index >= 0);
         if (existing_getter_index < key_index &&
             existing_setter_index < key_index) {
@@ -236,7 +284,7 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
           // and then it was overwritten by the current computed method which
           // in turn was later overwritten by the setter method. So we clear
           // the getter.
-          current_pair.set_getter(*isolate->factory()->null_value());
+          current_pair->set_getter(*isolate->factory()->null_value());
 
         } else if (existing_setter_index != kAccessorNotDefined &&
                    existing_setter_index < key_index) {
@@ -245,7 +293,7 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
           // and then it was overwritten by the current computed method which
           // in turn was later overwritten by the getter method. So we clear
           // the setter.
-          current_pair.set_setter(*isolate->factory()->null_value());
+          current_pair->set_setter(*isolate->factory()->null_value());
 
         } else {
           // One of the following cases holds:
@@ -273,14 +321,13 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
       } else {  // if (existing_value.IsAccessorPair()) ends here
         DCHECK(value_kind == ClassBoilerplate::kData);
 
-        DCHECK_IMPLIES(!existing_value.IsSmi(),
-                       existing_value.IsAccessorInfo());
-        DCHECK_IMPLIES(!existing_value.IsSmi(),
-                       AccessorInfo::cast(existing_value).name() ==
+        DCHECK_IMPLIES(!IsSmi(existing_value), IsAccessorInfo(existing_value));
+        DCHECK_IMPLIES(!IsSmi(existing_value),
+                       Cast<AccessorInfo>(existing_value)->name() ==
                                *isolate->factory()->length_string() ||
-                           AccessorInfo::cast(existing_value).name() ==
+                           Cast<AccessorInfo>(existing_value)->name() ==
                                *isolate->factory()->name_string());
-        if (!existing_value.IsSmi() || Smi::ToInt(existing_value) < key_index) {
+        if (!IsSmi(existing_value) || Smi::ToInt(existing_value) < key_index) {
           // Overwrite existing value because it was defined before the computed
           // one (AccessorInfo "length" and "name" properties are always defined
           // before).
@@ -307,16 +354,55 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
         }
       }
     } else {  // if (value_kind == ClassBoilerplate::kData) ends here
-      AccessorComponent component = ToAccessorComponent(value_kind);
-      if (existing_value.IsAccessorPair()) {
+      if (IsAccessorPair(existing_value)) {
         // Update respective component of existing AccessorPair.
-        AccessorPair current_pair = AccessorPair::cast(existing_value);
+        Tagged<AccessorPair> current_pair = Cast<AccessorPair>(existing_value);
 
-        int existing_component_index =
-            GetExistingValueIndex(current_pair.get(component));
-        if (existing_component_index < key_index) {
-          current_pair.set(component, value, kReleaseStore);
-        } else {
+        bool updated = false;
+        switch (value_kind) {
+          case ClassBoilerplate::kAutoAccessor: {
+            int existing_get_component_index =
+                GetExistingValueIndex(current_pair->get(ACCESSOR_GETTER));
+            int existing_set_component_index =
+                GetExistingValueIndex(current_pair->get(ACCESSOR_SETTER));
+            if (existing_get_component_index < key_index &&
+                existing_set_component_index < key_index) {
+              SetAccessorPlaceholderIndices(current_pair, value_kind, value,
+                                            kReleaseStore);
+              updated = true;
+            } else {
+              if (existing_get_component_index < key_index) {
+                SetAccessorPlaceholderIndices(current_pair,
+                                              ClassBoilerplate::kGetter, value,
+                                              kReleaseStore);
+                updated = true;
+              } else if (existing_set_component_index < key_index) {
+                SetAccessorPlaceholderIndices(
+                    current_pair, ClassBoilerplate::kSetter,
+                    Smi::FromInt(Smi::ToInt(value) + 1), kReleaseStore);
+                updated = true;
+              }
+            }
+            break;
+          }
+          case ClassBoilerplate::kGetter:
+          case ClassBoilerplate::kSetter: {
+            AccessorComponent component =
+                value_kind == ClassBoilerplate::kGetter ? ACCESSOR_GETTER
+                                                        : ACCESSOR_SETTER;
+            int existing_component_index =
+                GetExistingValueIndex(current_pair->get(component));
+            if (existing_component_index < key_index) {
+              SetAccessorPlaceholderIndices(current_pair, value_kind, value,
+                                            kReleaseStore);
+              updated = true;
+            }
+            break;
+          }
+          default:
+            UNREACHABLE();
+        }
+        if (!updated) {
           // The existing accessor property overwrites the computed one, update
           // its enumeration order accordingly.
 
@@ -334,14 +420,15 @@ void AddToDictionaryTemplate(IsolateT* isolate, Handle<Dictionary> dictionary,
         }
 
       } else {
-        DCHECK(!existing_value.IsAccessorPair());
+        DCHECK(!IsAccessorPair(existing_value));
         DCHECK(value_kind != ClassBoilerplate::kData);
 
-        if (!existing_value.IsSmi() || Smi::ToInt(existing_value) < key_index) {
+        if (!IsSmi(existing_value) || Smi::ToInt(existing_value) < key_index) {
           // Overwrite the existing data property because it was defined before
           // the computed accessor property.
-          Handle<AccessorPair> pair(isolate->factory()->NewAccessorPair());
-          pair->set(component, value);
+          DirectHandle<AccessorPair> pair(
+              isolate->factory()->NewAccessorPair());
+          SetAccessorPlaceholderIndices(*pair, value_kind, value);
           PropertyDetails details(
               PropertyKind::kAccessor, DONT_ENUM,
               PropertyDetails::kConstIfDictConstnessTracking,
@@ -390,9 +477,8 @@ class ObjectDescriptor {
   }
 
   Handle<Object> properties_template() const {
-    return HasDictionaryProperties()
-               ? properties_dictionary_template_
-               : Handle<Object>::cast(descriptor_array_template_);
+    return HasDictionaryProperties() ? properties_dictionary_template_
+                                     : Cast<Object>(descriptor_array_template_);
   }
 
   Handle<NumberDictionary> elements_template() const {
@@ -445,10 +531,10 @@ class ObjectDescriptor {
     temp_handle_ = handle(Smi::zero(), isolate);
   }
 
-  void AddConstant(IsolateT* isolate, Handle<Name> name, Handle<Object> value,
-                   PropertyAttributes attribs) {
-    bool is_accessor = value->IsAccessorInfo();
-    DCHECK(!value->IsAccessorPair());
+  void AddConstant(IsolateT* isolate, DirectHandle<Name> name,
+                   DirectHandle<Object> value, PropertyAttributes attribs) {
+    bool is_accessor = IsAccessorInfo(*value);
+    DCHECK(!IsAccessorPair(*value));
     if (HasDictionaryProperties()) {
       PropertyKind kind =
           is_accessor ? i::PropertyKind::kAccessor : i::PropertyKind::kData;
@@ -479,7 +565,7 @@ class ObjectDescriptor {
   void AddNamedProperty(IsolateT* isolate, Handle<Name> name,
                         ClassBoilerplate::ValueKind value_kind,
                         int value_index) {
-    Smi value = Smi::FromInt(value_index);
+    Tagged<Smi> value = Smi::FromInt(value_index);
     if (HasDictionaryProperties()) {
       UpdateNextEnumerationIndex(value_index);
       if (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
@@ -500,7 +586,7 @@ class ObjectDescriptor {
   void AddIndexedProperty(IsolateT* isolate, uint32_t element,
                           ClassBoilerplate::ValueKind value_kind,
                           int value_index) {
-    Smi value = Smi::FromInt(value_index);
+    Tagged<Smi> value = Smi::FromInt(value_index);
     AddToDictionaryTemplate(isolate, elements_dictionary_template_, element,
                             value_index, value_kind, value);
   }
@@ -533,11 +619,11 @@ class ObjectDescriptor {
 
  private:
   Handle<NameDictionary> properties_dictionary_template() const {
-    return Handle<NameDictionary>::cast(properties_dictionary_template_);
+    return Cast<NameDictionary>(properties_dictionary_template_);
   }
 
   Handle<SwissNameDictionary> properties_ordered_dictionary_template() const {
-    return Handle<SwissNameDictionary>::cast(properties_dictionary_template_);
+    return Cast<SwissNameDictionary>(properties_dictionary_template_);
   }
 
   const int property_slack_;
@@ -561,37 +647,39 @@ class ObjectDescriptor {
 template <typename IsolateT, typename PropertyDict>
 void ClassBoilerplate::AddToPropertiesTemplate(
     IsolateT* isolate, Handle<PropertyDict> dictionary, Handle<Name> name,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value) {
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value) {
   AddToDictionaryTemplate(isolate, dictionary, name, key_index, value_kind,
                           value);
 }
 template void ClassBoilerplate::AddToPropertiesTemplate(
     Isolate* isolate, Handle<NameDictionary> dictionary, Handle<Name> name,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value);
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value);
 template void ClassBoilerplate::AddToPropertiesTemplate(
     LocalIsolate* isolate, Handle<NameDictionary> dictionary, Handle<Name> name,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value);
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value);
 template void ClassBoilerplate::AddToPropertiesTemplate(
     Isolate* isolate, Handle<SwissNameDictionary> dictionary, Handle<Name> name,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value);
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value);
 
 template <typename IsolateT>
 void ClassBoilerplate::AddToElementsTemplate(
     IsolateT* isolate, Handle<NumberDictionary> dictionary, uint32_t key,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value) {
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value) {
   AddToDictionaryTemplate(isolate, dictionary, key, key_index, value_kind,
                           value);
 }
 template void ClassBoilerplate::AddToElementsTemplate(
     Isolate* isolate, Handle<NumberDictionary> dictionary, uint32_t key,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value);
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value);
 template void ClassBoilerplate::AddToElementsTemplate(
     LocalIsolate* isolate, Handle<NumberDictionary> dictionary, uint32_t key,
-    int key_index, ClassBoilerplate::ValueKind value_kind, Smi value);
+    int key_index, ClassBoilerplate::ValueKind value_kind, Tagged<Smi> value);
 
+// static
 template <typename IsolateT>
-Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
-    IsolateT* isolate, ClassLiteral* expr) {
+Handle<ClassBoilerplate> ClassBoilerplate::New(IsolateT* isolate,
+                                               ClassLiteral* expr,
+                                               AllocationType allocation) {
   // Create a non-caching handle scope to ensure that the temporary handle used
   // by ObjectDescriptor for passing Smis around does not corrupt handle cache
   // in CanonicalHandleScope.
@@ -621,7 +709,7 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
   // Initialize class object template.
   //
   static_desc.CreateTemplates(isolate);
-  STATIC_ASSERT(JSFunction::kLengthDescriptorIndex == 0);
+  static_assert(JSFunction::kLengthDescriptorIndex == 0);
   {
     // Add length_accessor.
     PropertyAttributes attribs =
@@ -645,7 +733,7 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
                             factory->function_prototype_accessor(), attribs);
   }
   {
-    Handle<ClassPositions> class_positions = factory->NewClassPositions(
+    DirectHandle<ClassPositions> class_positions = factory->NewClassPositions(
         expr->start_position(), expr->end_position());
     static_desc.AddConstant(isolate, factory->class_positions_symbol(),
                             class_positions, DONT_ENUM);
@@ -656,7 +744,7 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
   //
   instance_desc.CreateTemplates(isolate);
   {
-    Handle<Object> value(
+    DirectHandle<Object> value(
         Smi::FromInt(ClassBoilerplate::kConstructorArgumentIndex), isolate);
     instance_desc.AddConstant(isolate, factory->constructor_string(), value,
                               DONT_ENUM);
@@ -670,6 +758,7 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
   for (int i = 0; i < expr->public_members()->length(); i++) {
     ClassLiteral::Property* property = expr->public_members()->at(i);
     ClassBoilerplate::ValueKind value_kind;
+    int value_index = dynamic_argument_index;
     switch (property->kind()) {
       case ClassLiteral::Property::METHOD:
         value_kind = ClassBoilerplate::kData;
@@ -686,17 +775,21 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
           ++dynamic_argument_index;
         }
         continue;
+      case ClassLiteral::Property::AUTO_ACCESSOR:
+        value_kind = ClassBoilerplate::kAutoAccessor;
+        // Auto-accessors have two arguments (getter and setter).
+        ++dynamic_argument_index;
     }
 
     ObjectDescriptor<IsolateT>& desc =
         property->is_static() ? static_desc : instance_desc;
     if (property->is_computed_name()) {
-      int computed_name_index = dynamic_argument_index;
+      int computed_name_index = value_index;
       dynamic_argument_index += 2;  // Computed name and value indices.
       desc.AddComputed(value_kind, computed_name_index);
       continue;
     }
-    int value_index = dynamic_argument_index++;
+    dynamic_argument_index++;
 
     Literal* key_literal = property->key()->AsLiteral();
     uint32_t index;
@@ -705,7 +798,7 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
 
     } else {
       Handle<String> name = key_literal->AsRawPropertyName()->string();
-      DCHECK(name->IsInternalizedString());
+      DCHECK(IsInternalizedString(*name));
       desc.AddNamedProperty(isolate, name, value_kind, value_index);
     }
   }
@@ -713,32 +806,28 @@ Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
   static_desc.Finalize(isolate);
   instance_desc.Finalize(isolate);
 
-  Handle<ClassBoilerplate> class_boilerplate = Handle<ClassBoilerplate>::cast(
-      factory->NewFixedArray(kBoilerplateLength, AllocationType::kOld));
+  auto result = Cast<ClassBoilerplate>(
+      factory->NewStruct(CLASS_BOILERPLATE_TYPE, allocation));
 
-  class_boilerplate->set_arguments_count(dynamic_argument_index);
+  result->set_arguments_count(dynamic_argument_index);
 
-  class_boilerplate->set_static_properties_template(
-      *static_desc.properties_template());
-  class_boilerplate->set_static_elements_template(
-      *static_desc.elements_template());
-  class_boilerplate->set_static_computed_properties(
-      *static_desc.computed_properties());
+  result->set_static_properties_template(*static_desc.properties_template());
+  result->set_static_elements_template(*static_desc.elements_template());
+  result->set_static_computed_properties(*static_desc.computed_properties());
 
-  class_boilerplate->set_instance_properties_template(
+  result->set_instance_properties_template(
       *instance_desc.properties_template());
-  class_boilerplate->set_instance_elements_template(
-      *instance_desc.elements_template());
-  class_boilerplate->set_instance_computed_properties(
+  result->set_instance_elements_template(*instance_desc.elements_template());
+  result->set_instance_computed_properties(
       *instance_desc.computed_properties());
 
-  return scope.CloseAndEscape(class_boilerplate);
+  return scope.CloseAndEscape(result);
 }
 
-template Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
-    Isolate* isolate, ClassLiteral* expr);
-template Handle<ClassBoilerplate> ClassBoilerplate::BuildClassBoilerplate(
-    LocalIsolate* isolate, ClassLiteral* expr);
+template Handle<ClassBoilerplate> ClassBoilerplate::New(
+    Isolate* isolate, ClassLiteral* expr, AllocationType allocation);
+template Handle<ClassBoilerplate> ClassBoilerplate::New(
+    LocalIsolate* isolate, ClassLiteral* expr, AllocationType allocation);
 
 void ArrayBoilerplateDescription::BriefPrintDetails(std::ostream& os) {
   os << " " << ElementsKindToString(elements_kind()) << ", "
@@ -747,12 +836,14 @@ void ArrayBoilerplateDescription::BriefPrintDetails(std::ostream& os) {
 
 void RegExpBoilerplateDescription::BriefPrintDetails(std::ostream& os) {
   // Note: keep boilerplate layout synced with JSRegExp layout.
-  STATIC_ASSERT(JSRegExp::kDataOffset == JSObject::kHeaderSize);
-  STATIC_ASSERT(JSRegExp::kSourceOffset == JSRegExp::kDataOffset + kTaggedSize);
-  STATIC_ASSERT(JSRegExp::kFlagsOffset ==
+  static_assert(JSRegExp::kDataOffset == JSObject::kHeaderSize);
+  static_assert(JSRegExp::kSourceOffset == JSRegExp::kDataOffset + kTaggedSize);
+  static_assert(JSRegExp::kFlagsOffset ==
                 JSRegExp::kSourceOffset + kTaggedSize);
-  STATIC_ASSERT(JSRegExp::kHeaderSize == JSRegExp::kFlagsOffset + kTaggedSize);
-  os << " " << Brief(data()) << ", " << Brief(source()) << ", " << flags();
+  static_assert(JSRegExp::kHeaderSize == JSRegExp::kFlagsOffset + kTaggedSize);
+  IsolateForSandbox isolate = GetIsolateForSandbox(*this);
+  os << " " << Brief(data(isolate)) << ", " << Brief(source()) << ", "
+     << flags();
 }
 
 }  // namespace internal

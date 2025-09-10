@@ -8,9 +8,8 @@
 #include "src/ast/ast-value-factory.h"
 #include "src/common/globals.h"
 #include "src/handles/handles.h"
-#include "src/interpreter/bytecodes.h"
+#include "src/interpreter/bytecode-operands.h"
 #include "src/objects/smi.h"
-#include "src/utils/identity-map.h"
 #include "src/zone/zone-containers.h"
 
 namespace v8 {
@@ -54,7 +53,7 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
   // Generate a fixed array of constant handles based on inserted objects.
   template <typename IsolateT>
   EXPORT_TEMPLATE_DECLARE(V8_EXPORT_PRIVATE)
-  Handle<FixedArray> ToFixedArray(IsolateT* isolate);
+  Handle<TrustedFixedArray> ToFixedArray(IsolateT* isolate);
 
   // Returns the object, as a handle in |isolate|, that is in the constant pool
   // array at index |index|. Returns null if there is no handle at this index.
@@ -68,9 +67,10 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
 
   // Insert an object into the constants array if it is not already present.
   // Returns the array index associated with the object.
-  size_t Insert(Smi smi);
+  size_t Insert(Tagged<Smi> smi);
   size_t Insert(double number);
   size_t Insert(const AstRawString* raw_string);
+  size_t Insert(const AstConsString* cons_string);
   size_t Insert(AstBigInt bigint);
   size_t Insert(const Scope* scope);
 #define INSERT_ENTRY(NAME, ...) size_t Insert##NAME();
@@ -92,16 +92,17 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
 
   // Sets the jump table entry at |index| to |smi|. Note that |index| is the
   // constant pool index, not the switch case value.
-  void SetJumpTableSmi(size_t index, Smi smi);
+  void SetJumpTableSmi(size_t index, Tagged<Smi> smi);
 
   // Creates a reserved entry in the constant pool and returns
   // the size of the operand that'll be required to hold the entry
   // when committed.
-  OperandSize CreateReservedEntry();
+  OperandSize CreateReservedEntry(
+      OperandSize minimum_operand_size = OperandSize::kNone);
 
   // Commit reserved entry and returns the constant pool index for the
   // SMI value.
-  size_t CommitReservedEntry(OperandSize operand_size, Smi value);
+  size_t CommitReservedEntry(OperandSize operand_size, Tagged<Smi> value);
 
   // Discards constant pool reservation.
   void DiscardReservedEntry(OperandSize operand_size);
@@ -116,11 +117,13 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
     enum class Tag : uint8_t;
 
    public:
-    explicit Entry(Smi smi) : smi_(smi), tag_(Tag::kSmi) {}
+    explicit Entry(Tagged<Smi> smi) : smi_(smi), tag_(Tag::kSmi) {}
     explicit Entry(double heap_number)
         : heap_number_(heap_number), tag_(Tag::kHeapNumber) {}
     explicit Entry(const AstRawString* raw_string)
         : raw_string_(raw_string), tag_(Tag::kRawString) {}
+    explicit Entry(const AstConsString* cons_string)
+        : cons_string_(cons_string), tag_(Tag::kConsString) {}
     explicit Entry(AstBigInt bigint) : bigint_(bigint), tag_(Tag::kBigInt) {}
     explicit Entry(const Scope* scope) : scope_(scope), tag_(Tag::kScope) {}
 
@@ -148,7 +151,7 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
       handle_ = handle;
     }
 
-    void SetJumpTableSmi(Smi smi) {
+    void SetJumpTableSmi(Tagged<Smi> smi) {
       DCHECK_EQ(tag_, Tag::kUninitializedJumpTableSmi);
       tag_ = Tag::kJumpTableSmi;
       smi_ = smi;
@@ -161,10 +164,11 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
     explicit Entry(Tag tag) : tag_(tag) {}
 
     union {
-      Handle<Object> handle_;
-      Smi smi_;
+      IndirectHandle<Object> handle_;
+      Tagged<Smi> smi_;
       double heap_number_;
       const AstRawString* raw_string_;
+      const AstConsString* cons_string_;
       AstBigInt bigint_;
       const Scope* scope_;
     };
@@ -174,6 +178,7 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
       kHandle,
       kSmi,
       kRawString,
+      kConsString,
       kHeapNumber,
       kBigInt,
       kScope,
@@ -192,7 +197,7 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
 
   index_t AllocateIndex(Entry constant_entry);
   index_t AllocateIndexArray(Entry constant_entry, size_t size);
-  index_t AllocateReservedEntry(Smi value);
+  index_t AllocateReservedEntry(Tagged<Smi> value);
 
   struct ConstantArraySlice final : public ZoneObject {
     ConstantArraySlice(Zone* zone, size_t start_index, size_t capacity,
@@ -235,8 +240,8 @@ class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
                             base::KeyEqualityMatcher<intptr_t>,
                             ZoneAllocationPolicy>
       constants_map_;
-  ZoneMap<Smi, index_t> smi_map_;
-  ZoneVector<std::pair<Smi, index_t>> smi_pairs_;
+  ZoneMap<Tagged<Smi>, index_t> smi_map_;
+  ZoneVector<std::pair<Tagged<Smi>, index_t>> smi_pairs_;
   ZoneMap<double, index_t> heap_number_map_;
 
 #define SINGLETON_ENTRY_FIELD(NAME, LOWER_NAME) int LOWER_NAME##_ = -1;

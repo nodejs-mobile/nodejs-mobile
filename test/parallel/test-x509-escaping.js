@@ -1,15 +1,16 @@
 'use strict';
 
 const common = require('../common');
-if (!common.hasCrypto)
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
 
 const assert = require('assert');
 const { X509Certificate } = require('crypto');
 const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
-const { hasOpenSSL3 } = common;
+const { hasOpenSSL3 } = require('../common/crypto');
 
 // Test that all certificate chains provided by the reporter are rejected.
 {
@@ -239,7 +240,7 @@ const { hasOpenSSL3 } = common;
         checkServerIdentity: (hostname, peerCert) => {
           assert.strictEqual(hostname, 'example.com');
           assert.deepStrictEqual(peerCert.infoAccess,
-                                 Object.assign(Object.create(null),
+                                 Object.assign({ __proto__: null },
                                                expected.legacy));
 
           // toLegacyObject() should also produce the same properties. However,
@@ -352,7 +353,7 @@ const { hasOpenSSL3 } = common;
         servername: 'example.com',
         checkServerIdentity: (hostname, peerCert) => {
           assert.strictEqual(hostname, 'example.com');
-          const expectedObject = Object.assign(Object.create(null),
+          const expectedObject = Object.assign({ __proto__: null },
                                                expected.legacy);
           assert.deepStrictEqual(peerCert.subject, expectedObject);
           // The issuer MUST be the same as the subject since the cert is

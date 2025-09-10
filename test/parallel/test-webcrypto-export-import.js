@@ -6,12 +6,11 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { webcrypto } = require('crypto');
-const { subtle } = webcrypto;
+const { subtle } = globalThis.crypto;
 
 {
   async function test() {
-    const keyData = webcrypto.getRandomValues(new Uint8Array(32));
+    const keyData = globalThis.crypto.getRandomValues(new Uint8Array(32));
     await Promise.all([1, null, undefined, {}, []].map((format) =>
       assert.rejects(
         subtle.importKey(format, keyData, {}, false, ['wrapKey']), {
@@ -23,6 +22,11 @@ const { subtle } = webcrypto;
         code: 'ERR_INVALID_ARG_VALUE'
       });
     await assert.rejects(
+      subtle.importKey('KeyObject', keyData, {}, false, ['wrapKey']), {
+        message: /'KeyObject' is not a valid enum value of type KeyFormat/,
+        code: 'ERR_INVALID_ARG_VALUE'
+      });
+    await assert.rejects(
       subtle.importKey('raw', 1, {}, false, ['deriveBits']), {
         code: 'ERR_INVALID_ARG_TYPE'
       });
@@ -31,6 +35,15 @@ const { subtle } = webcrypto;
         name: 'HMAC'
       }, false, ['sign', 'verify']), {
         code: 'ERR_MISSING_OPTION'
+      });
+    await assert.rejects(
+      subtle.importKey('raw', keyData, {
+        name: 'HMAC',
+        hash: 'SHA-256',
+        length: 384,
+      }, false, ['sign', 'verify']), {
+        name: 'DataError',
+        message: 'Invalid key length'
       });
     await assert.rejects(
       subtle.importKey('raw', keyData, {
@@ -55,8 +68,8 @@ const { subtle } = webcrypto;
         hash: 'SHA-256',
         length: 1
       }, false, ['sign', 'verify']), {
-        name: 'DataError',
-        message: 'Invalid key length'
+        name: 'NotSupportedError',
+        message: 'Unsupported algorithm.length'
       });
     await assert.rejects(
       subtle.importKey('jwk', null, {
@@ -74,13 +87,17 @@ const { subtle } = webcrypto;
 // Import/Export HMAC Secret Key
 {
   async function test() {
-    const keyData = webcrypto.getRandomValues(new Uint8Array(32));
+    const keyData = globalThis.crypto.getRandomValues(new Uint8Array(32));
     const key = await subtle.importKey(
       'raw',
       keyData, {
         name: 'HMAC',
         hash: 'SHA-256'
       }, true, ['sign', 'verify']);
+
+
+    assert.strictEqual(key.algorithm, key.algorithm);
+    assert.strictEqual(key.usages, key.usages);
 
     const raw = await subtle.exportKey('raw', key);
 
@@ -116,13 +133,15 @@ const { subtle } = webcrypto;
 // Import/Export AES Secret Key
 {
   async function test() {
-    const keyData = webcrypto.getRandomValues(new Uint8Array(32));
+    const keyData = globalThis.crypto.getRandomValues(new Uint8Array(32));
     const key = await subtle.importKey(
       'raw',
       keyData, {
         name: 'AES-CTR',
         length: 256,
       }, true, ['encrypt', 'decrypt']);
+    assert.strictEqual(key.algorithm, key.algorithm);
+    assert.strictEqual(key.usages, key.usages);
 
     const raw = await subtle.exportKey('raw', key);
 

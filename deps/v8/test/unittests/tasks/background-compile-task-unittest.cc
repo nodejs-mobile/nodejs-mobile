@@ -50,11 +50,12 @@ class BackgroundCompileTaskTest : public TestWithNativeContext {
 
   BackgroundCompileTask* NewBackgroundCompileTask(
       Isolate* isolate, Handle<SharedFunctionInfo> shared,
-      size_t stack_size = FLAG_stack_size) {
+      size_t stack_size = v8_flags.stack_size) {
     return new BackgroundCompileTask(
         isolate, shared, test::SourceCharacterStreamForShared(isolate, shared),
         isolate->counters()->worker_thread_runtime_call_stats(),
-        isolate->counters()->compile_function_on_background(), FLAG_stack_size);
+        isolate->counters()->compile_function_on_background(),
+        v8_flags.stack_size);
   }
 
  private:
@@ -73,7 +74,8 @@ TEST_F(BackgroundCompileTaskTest, Construct) {
 }
 
 TEST_F(BackgroundCompileTaskTest, SyntaxError) {
-  test::ScriptResource* script = new test::ScriptResource("^^^", strlen("^^^"));
+  test::ScriptResource* script =
+      new test::ScriptResource("^^^", strlen("^^^"), JSParameterCount(0));
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(isolate(), script);
   std::unique_ptr<BackgroundCompileTask> task(
@@ -82,9 +84,9 @@ TEST_F(BackgroundCompileTaskTest, SyntaxError) {
   task->RunOnMainThread(isolate());
   ASSERT_FALSE(Compiler::FinalizeBackgroundCompileTask(
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
-  ASSERT_TRUE(isolate()->has_pending_exception());
+  ASSERT_TRUE(isolate()->has_exception());
 
-  isolate()->clear_pending_exception();
+  isolate()->clear_exception();
 }
 
 TEST_F(BackgroundCompileTaskTest, CompileAndRun) {
@@ -97,9 +99,9 @@ TEST_F(BackgroundCompileTaskTest, CompileAndRun) {
       "  return f;\n"
       "}\n"
       "g();";
-  test::ScriptResource* script =
-      new test::ScriptResource(raw_script, strlen(raw_script));
-  Handle<JSFunction> f = RunJS<JSFunction>(script);
+  test::ScriptResource* script = new test::ScriptResource(
+      raw_script, strlen(raw_script), JSParameterCount(0));
+  DirectHandle<JSFunction> f = RunJS<JSFunction>(script);
   Handle<SharedFunctionInfo> shared = handle(f->shared(), isolate());
   ASSERT_FALSE(shared->is_compiled());
   std::unique_ptr<BackgroundCompileTask> task(
@@ -110,7 +112,7 @@ TEST_F(BackgroundCompileTaskTest, CompileAndRun) {
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
   ASSERT_TRUE(shared->is_compiled());
 
-  Smi value = Smi::cast(*RunJS("f(100);"));
+  Tagged<Smi> value = Cast<Smi>(*RunJS("f(100);"));
   ASSERT_TRUE(value == Smi::FromInt(160));
 }
 
@@ -124,8 +126,8 @@ TEST_F(BackgroundCompileTaskTest, CompileFailure) {
     raw_script += "'x' + 'x' - ";
   }
   raw_script += " 'x'; }";
-  test::ScriptResource* script =
-      new test::ScriptResource(raw_script.c_str(), strlen(raw_script.c_str()));
+  test::ScriptResource* script = new test::ScriptResource(
+      raw_script.c_str(), strlen(raw_script.c_str()), JSParameterCount(0));
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(isolate(), script);
   std::unique_ptr<BackgroundCompileTask> task(
@@ -134,9 +136,9 @@ TEST_F(BackgroundCompileTaskTest, CompileFailure) {
   task->RunOnMainThread(isolate());
   ASSERT_FALSE(Compiler::FinalizeBackgroundCompileTask(
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
-  ASSERT_TRUE(isolate()->has_pending_exception());
+  ASSERT_TRUE(isolate()->has_exception());
 
-  isolate()->clear_pending_exception();
+  isolate()->clear_exception();
 }
 
 class CompileTask : public Task {
@@ -165,8 +167,8 @@ TEST_F(BackgroundCompileTaskTest, CompileOnBackgroundThread) {
       "  var d = { foo: 100, bar : bar() }\n"
       "  return bar;"
       "}";
-  test::ScriptResource* script =
-      new test::ScriptResource(raw_script, strlen(raw_script));
+  test::ScriptResource* script = new test::ScriptResource(
+      raw_script, strlen(raw_script), JSParameterCount(2));
   Handle<SharedFunctionInfo> shared =
       test::CreateSharedFunctionInfo(isolate(), script);
   std::unique_ptr<BackgroundCompileTask> task(
@@ -175,7 +177,8 @@ TEST_F(BackgroundCompileTaskTest, CompileOnBackgroundThread) {
   base::Semaphore semaphore(0);
   auto background_task = std::make_unique<CompileTask>(task.get(), &semaphore);
 
-  V8::GetCurrentPlatform()->CallOnWorkerThread(std::move(background_task));
+  V8::GetCurrentPlatform()->PostTaskOnWorkerThread(TaskPriority::kUserVisible,
+                                                   std::move(background_task));
   semaphore.Wait();
   ASSERT_TRUE(Compiler::FinalizeBackgroundCompileTask(
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
@@ -193,9 +196,9 @@ TEST_F(BackgroundCompileTaskTest, EagerInnerFunctions) {
       "  return f;\n"
       "}\n"
       "g();";
-  test::ScriptResource* script =
-      new test::ScriptResource(raw_script, strlen(raw_script));
-  Handle<JSFunction> f = RunJS<JSFunction>(script);
+  test::ScriptResource* script = new test::ScriptResource(
+      raw_script, strlen(raw_script), JSParameterCount(0));
+  DirectHandle<JSFunction> f = RunJS<JSFunction>(script);
   Handle<SharedFunctionInfo> shared = handle(f->shared(), isolate());
   ASSERT_FALSE(shared->is_compiled());
   std::unique_ptr<BackgroundCompileTask> task(
@@ -206,9 +209,9 @@ TEST_F(BackgroundCompileTaskTest, EagerInnerFunctions) {
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
   ASSERT_TRUE(shared->is_compiled());
 
-  Handle<JSFunction> e = RunJS<JSFunction>("f();");
+  DirectHandle<JSFunction> e = RunJS<JSFunction>("f();");
 
-  ASSERT_TRUE(e->shared().is_compiled());
+  ASSERT_TRUE(e->shared()->is_compiled());
 }
 
 TEST_F(BackgroundCompileTaskTest, LazyInnerFunctions) {
@@ -221,9 +224,9 @@ TEST_F(BackgroundCompileTaskTest, LazyInnerFunctions) {
       "  return f;\n"
       "}\n"
       "g();";
-  test::ScriptResource* script =
-      new test::ScriptResource(raw_script, strlen(raw_script));
-  Handle<JSFunction> f = RunJS<JSFunction>(script);
+  test::ScriptResource* script = new test::ScriptResource(
+      raw_script, strlen(raw_script), JSParameterCount(0));
+  DirectHandle<JSFunction> f = RunJS<JSFunction>(script);
   Handle<SharedFunctionInfo> shared = handle(f->shared(), isolate());
   ASSERT_FALSE(shared->is_compiled());
   std::unique_ptr<BackgroundCompileTask> task(
@@ -236,9 +239,9 @@ TEST_F(BackgroundCompileTaskTest, LazyInnerFunctions) {
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
   ASSERT_TRUE(shared->is_compiled());
 
-  Handle<JSFunction> e = RunJS<JSFunction>("f();");
+  DirectHandle<JSFunction> e = RunJS<JSFunction>("f();");
 
-  ASSERT_FALSE(e->shared().is_compiled());
+  ASSERT_FALSE(e->shared()->is_compiled());
 }
 
 }  // namespace internal

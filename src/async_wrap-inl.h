@@ -49,6 +49,9 @@ inline double AsyncWrap::get_trigger_async_id() const {
   return trigger_async_id_;
 }
 
+inline v8::Local<v8::Value> AsyncWrap::context_frame() const {
+  return context_frame_.Get(env()->isolate());
+}
 
 inline v8::MaybeLocal<v8::Value> AsyncWrap::MakeCallback(
     const v8::Local<v8::String> symbol,
@@ -78,6 +81,12 @@ inline v8::MaybeLocal<v8::Value> AsyncWrap::MakeCallback(
     return Undefined(isolate);
   }
   return MakeCallback(cb_v.As<v8::Function>(), argc, argv);
+}
+
+// static
+inline v8::Local<v8::FunctionTemplate> AsyncWrap::GetConstructorTemplate(
+    Environment* env) {
+  return GetConstructorTemplate(env->isolate_data());
 }
 
 }  // namespace node

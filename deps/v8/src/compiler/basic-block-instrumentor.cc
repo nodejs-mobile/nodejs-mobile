@@ -8,11 +8,15 @@
 
 #include "src/codegen/optimized-compilation-info.h"
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
+#include "src/compiler/linkage.h"
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node.h"
 #include "src/compiler/operator-properties.h"
 #include "src/compiler/schedule.h"
+#include "src/compiler/turbofan-graph.h"
+#include "src/compiler/turboshaft/graph.h"
+#include "src/compiler/turboshaft/operation-matcher.h"
+#include "src/compiler/turboshaft/operations.h"
 #include "src/objects/objects-inl.h"
 
 namespace v8 {
@@ -52,19 +56,19 @@ static const Operator* PointerConstant(CommonOperatorBuilder* common,
 }
 
 BasicBlockProfilerData* BasicBlockInstrumentor::Instrument(
-    OptimizedCompilationInfo* info, Graph* graph, Schedule* schedule,
+    OptimizedCompilationInfo* info, TFGraph* graph, Schedule* schedule,
     Isolate* isolate) {
   // Basic block profiling disables concurrent compilation, so handle deref is
   // fine.
   AllowHandleDereference allow_handle_dereference;
   // Skip the exit block in profiles, since the register allocator can't handle
   // it and entry into it means falling off the end of the function anyway.
-  size_t n_blocks = schedule->RpoBlockCount() - 1;
+  size_t n_blocks = schedule->RpoBlockCount();
   BasicBlockProfilerData* data = BasicBlockProfiler::Get()->NewData(n_blocks);
   // Set the function name.
   data->SetFunctionName(info->GetDebugName());
   // Capture the schedule string before instrumentation.
-  if (FLAG_turbo_profiling_verbose) {
+  if (v8_flags.turbo_profiling_verbose) {
     std::ostringstream os;
     os << *schedule;
     data->SetSchedule(os);
@@ -84,7 +88,7 @@ BasicBlockProfilerData* BasicBlockInstrumentor::Instrument(
     // PatchBasicBlockCountersReference). An important and subtle point: we
     // cannot use the root handle basic_block_counters_marker_handle() and must
     // create a new separate handle. Otherwise
-    // TurboAssemblerBase::IndirectLoadConstant would helpfully emit a
+    // MacroAssemblerBase::IndirectLoadConstant would helpfully emit a
     // root-relative load rather than putting this value in the constants table
     // where we expect it to be for patching.
     counters_array = graph->NewNode(common.HeapConstant(Handle<HeapObject>::New(
@@ -99,6 +103,7 @@ BasicBlockProfilerData* BasicBlockInstrumentor::Instrument(
   for (BasicBlockVector::iterator it = blocks->begin(); block_number < n_blocks;
        ++it, ++block_number) {
     BasicBlock* block = (*it);
+    if (block == schedule->end()) continue;
     // Iteration is already in reverse post-order.
     DCHECK_EQ(block->rpo_number(), block_number);
     data->SetBlockId(block_number, block->id().ToInt());
@@ -107,7 +112,8 @@ BasicBlockProfilerData* BasicBlockInstrumentor::Instrument(
     // Construct increment operation.
     int offset_to_counter_value = static_cast<int>(block_number) * kInt32Size;
     if (on_heap_counters) {
-      offset_to_counter_value += ByteArray::kHeaderSize - kHeapObjectTag;
+      offset_to_counter_value +=
+          OFFSET_OF_DATA_START(ByteArray) - kHeapObjectTag;
     }
     Node* offset_to_counter =
         graph->NewNode(IntPtrConstant(&common, offset_to_counter_value));
@@ -143,8 +149,121 @@ BasicBlockProfilerData* BasicBlockInstrumentor::Instrument(
     for (int i = insertion_start; i < kArraySize; ++i) {
       schedule->SetBlockForNode(block, to_insert[i]);
     }
+    // The exit block is not instrumented and so we must ignore that block
+    // count.
+    if (block->control() == BasicBlock::kBranch &&
+        block->successors()[0] != schedule->end() &&
+        block->successors()[1] != schedule->end()) {
+      data->AddBranch(block->successors()[0]->id().ToInt(),
+                      block->successors()[1]->id().ToInt());
+    }
   }
   return data;
+}
+
+namespace {
+
+void StoreBuiltinCallForNode(Node* n, Builtin builtin, int block_id,
+                             BuiltinsCallGraph* bcc_profiler) {
+  if (n == nullptr) return;
+  IrOpcode::Value opcode = n->opcode();
+  if (opcode == IrOpcode::kCall || opcode == IrOpcode::kTailCall) {
+    const CallDescriptor* des = CallDescriptorOf(n->op());
+    if (des->kind() == CallDescriptor::kCallCodeObject) {
+      Node* callee = n->InputAt(0);
+      Operator* op = const_cast<Operator*>(callee->op());
+      if (op->opcode() == IrOpcode::kHeapConstant) {
+        IndirectHandle<HeapObject> para =
+            OpParameter<IndirectHandle<HeapObject>>(op);
+        if (IsCode(*para)) {
+          DirectHandle<Code> code = Cast<Code>(para);
+          if (code->is_builtin()) {
+            bcc_profiler->AddBuiltinCall(builtin, code->builtin_id(), block_id);
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+
+}  // namespace
+
+void BasicBlockCallGraphProfiler::StoreCallGraph(OptimizedCompilationInfo* info,
+                                                 Schedule* schedule) {
+  CHECK(Builtins::IsBuiltinId(info->builtin()));
+  BasicBlockVector* blocks = schedule->rpo_order();
+  size_t block_number = 0;
+  size_t n_blocks = schedule->RpoBlockCount();
+  for (BasicBlockVector::iterator it = blocks->begin(); block_number < n_blocks;
+       ++it, ++block_number) {
+    BasicBlock* block = (*it);
+    if (block == schedule->end()) continue;
+    // Iteration is already in reverse post-order.
+    DCHECK_EQ(block->rpo_number(), block_number);
+    int block_id = block->id().ToInt();
+
+    BuiltinsCallGraph* profiler = BuiltinsCallGraph::Get();
+
+    for (Node* node : *block) {
+      StoreBuiltinCallForNode(node, info->builtin(), block_id, profiler);
+    }
+
+    BasicBlock::Control control = block->control();
+    if (control != BasicBlock::kNone) {
+      Node* cnt_node = block->control_input();
+      StoreBuiltinCallForNode(cnt_node, info->builtin(), block_id, profiler);
+    }
+  }
+}
+
+bool IsBuiltinCall(const turboshaft::Operation& op,
+                   const turboshaft::Graph& graph, Builtin* called_builtin) {
+  using namespace turboshaft;  // NOLINT(build/namespaces)
+  DCHECK_NOT_NULL(called_builtin);
+  const TSCallDescriptor* ts_descriptor;
+  V<CallTarget> callee_index;
+  if (const auto* call_op = op.TryCast<CallOp>()) {
+    ts_descriptor = call_op->descriptor;
+    callee_index = call_op->callee();
+  } else if (const auto* tail_call_op = op.TryCast<TailCallOp>()) {
+    ts_descriptor = tail_call_op->descriptor;
+    callee_index = tail_call_op->callee();
+  } else {
+    return false;
+  }
+
+  DCHECK_NOT_NULL(ts_descriptor);
+  if (ts_descriptor->descriptor->kind() != CallDescriptor::kCallCodeObject) {
+    return false;
+  }
+
+  OperationMatcher matcher(graph);
+  Handle<HeapObject> heap_constant;
+  if (!matcher.MatchHeapConstant(callee_index, &heap_constant)) return false;
+  if (!IsCode(*heap_constant)) return false;
+  DirectHandle<Code> code = Cast<Code>(heap_constant);
+  if (!code->is_builtin()) return false;
+
+  *called_builtin = code->builtin_id();
+  return true;
+}
+
+void BasicBlockCallGraphProfiler::StoreCallGraph(
+    OptimizedCompilationInfo* info, const turboshaft::Graph& graph) {
+  using namespace turboshaft;  // NOLINT(build/namespaces)
+  CHECK(Builtins::IsBuiltinId(info->builtin()));
+  BuiltinsCallGraph* profiler = BuiltinsCallGraph::Get();
+
+  for (const Block* block : graph.blocks_vector()) {
+    const int block_id = block->index().id();
+    for (const auto& op : graph.operations(*block)) {
+      Builtin called_builtin;
+      if (IsBuiltinCall(op, graph, &called_builtin)) {
+        profiler->AddBuiltinCall(info->builtin(), called_builtin, block_id);
+      }
+    }
+  }
 }
 
 }  // namespace compiler

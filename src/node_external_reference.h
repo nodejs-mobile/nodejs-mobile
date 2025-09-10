@@ -10,8 +10,6 @@
 
 namespace node {
 
-using CFunctionCallback = void (*)(v8::Local<v8::Value> receiver);
-
 // This class manages the external references from the V8 heap
 // to the C++ addresses in Node.js.
 class ExternalReferenceRegistry {
@@ -19,28 +17,33 @@ class ExternalReferenceRegistry {
   ExternalReferenceRegistry();
 
 #define ALLOWED_EXTERNAL_REFERENCE_TYPES(V)                                    \
-  V(CFunctionCallback)                                                         \
-  V(const v8::CFunctionInfo*)                                                  \
   V(v8::FunctionCallback)                                                      \
-  V(v8::AccessorGetterCallback)                                                \
-  V(v8::AccessorSetterCallback)                                                \
   V(v8::AccessorNameGetterCallback)                                            \
   V(v8::AccessorNameSetterCallback)                                            \
-  V(v8::GenericNamedPropertyDefinerCallback)                                   \
-  V(v8::GenericNamedPropertyDeleterCallback)                                   \
-  V(v8::GenericNamedPropertyEnumeratorCallback)                                \
-  V(v8::GenericNamedPropertyQueryCallback)                                     \
-  V(v8::GenericNamedPropertySetterCallback)                                    \
-  V(v8::IndexedPropertySetterCallback)                                         \
-  V(v8::IndexedPropertyDefinerCallback)                                        \
-  V(v8::IndexedPropertyDeleterCallback)                                        \
-  V(v8::IndexedPropertyQueryCallback)                                          \
-  V(v8::IndexedPropertyDescriptorCallback)
+  V(v8::NamedPropertyGetterCallback)                                           \
+  V(v8::NamedPropertyDefinerCallback)                                          \
+  V(v8::NamedPropertyDeleterCallback)                                          \
+  V(v8::NamedPropertyEnumeratorCallback)                                       \
+  V(v8::NamedPropertyQueryCallback)                                            \
+  V(v8::NamedPropertySetterCallback)                                           \
+  V(v8::IndexedPropertyGetterCallbackV2)                                       \
+  V(v8::IndexedPropertySetterCallbackV2)                                       \
+  V(v8::IndexedPropertyDefinerCallbackV2)                                      \
+  V(v8::IndexedPropertyDeleterCallbackV2)                                      \
+  V(v8::IndexedPropertyQueryCallbackV2)                                        \
+  V(const v8::String::ExternalStringResourceBase*)
 
 #define V(ExternalReferenceType)                                               \
   void Register(ExternalReferenceType addr) { RegisterT(addr); }
   ALLOWED_EXTERNAL_REFERENCE_TYPES(V)
 #undef V
+
+  // Registers both the underlying function pointer
+  // and the corresponding CFunctionInfo.
+  void Register(const v8::CFunction& c_func) {
+    RegisterT(c_func.GetAddress());
+    RegisterT(c_func.GetTypeInfo());
+  }
 
   // This can be called only once.
   const std::vector<intptr_t>& external_references();
@@ -63,8 +66,10 @@ class ExternalReferenceRegistry {
   V(buffer)                                                                    \
   V(builtins)                                                                  \
   V(cares_wrap)                                                                \
+  V(config)                                                                    \
   V(contextify)                                                                \
   V(credentials)                                                               \
+  V(encoding_binding)                                                          \
   V(env_var)                                                                   \
   V(errors)                                                                    \
   V(fs)                                                                        \
@@ -72,19 +77,27 @@ class ExternalReferenceRegistry {
   V(fs_event_wrap)                                                             \
   V(handle_wrap)                                                               \
   V(heap_utils)                                                                \
+  V(http_parser)                                                               \
+  V(internal_only_v8)                                                          \
+  V(locks)                                                                     \
   V(messaging)                                                                 \
   V(mksnapshot)                                                                \
   V(module_wrap)                                                               \
+  V(modules)                                                                   \
   V(options)                                                                   \
   V(os)                                                                        \
   V(performance)                                                               \
+  V(permission)                                                                \
   V(process_methods)                                                           \
   V(process_object)                                                            \
+  V(process_wrap)                                                              \
   V(report)                                                                    \
   V(task_queue)                                                                \
   V(tcp_wrap)                                                                  \
   V(tty_wrap)                                                                  \
+  V(udp_wrap)                                                                  \
   V(url)                                                                       \
+  V(url_pattern)                                                               \
   V(util)                                                                      \
   V(pipe_wrap)                                                                 \
   V(sea)                                                                       \
@@ -92,6 +105,7 @@ class ExternalReferenceRegistry {
   V(string_decoder)                                                            \
   V(stream_wrap)                                                               \
   V(signal_wrap)                                                               \
+  V(spawn_sync)                                                                \
   V(trace_events)                                                              \
   V(timers)                                                                    \
   V(types)                                                                     \
@@ -115,24 +129,24 @@ class ExternalReferenceRegistry {
 #define EXTERNAL_REFERENCE_BINDING_LIST_INSPECTOR(V)
 #endif  // HAVE_INSPECTOR
 
-#if HAVE_DTRACE || HAVE_ETW
-#define EXTERNAL_REFERENCE_BINDING_LIST_DTRACE(V) V(dtrace)
-#else
-#define EXTERNAL_REFERENCE_BINDING_LIST_DTRACE(V)
-#endif
-
 #if HAVE_OPENSSL
 #define EXTERNAL_REFERENCE_BINDING_LIST_CRYPTO(V) V(crypto) V(tls_wrap)
 #else
 #define EXTERNAL_REFERENCE_BINDING_LIST_CRYPTO(V)
 #endif  // HAVE_OPENSSL
 
+#if HAVE_OPENSSL && NODE_OPENSSL_HAS_QUIC
+#define EXTERNAL_REFERENCE_BINDING_LIST_QUIC(V) V(quic)
+#else
+#define EXTERNAL_REFERENCE_BINDING_LIST_QUIC(V)
+#endif
+
 #define EXTERNAL_REFERENCE_BINDING_LIST(V)                                     \
   EXTERNAL_REFERENCE_BINDING_LIST_BASE(V)                                      \
   EXTERNAL_REFERENCE_BINDING_LIST_INSPECTOR(V)                                 \
   EXTERNAL_REFERENCE_BINDING_LIST_I18N(V)                                      \
-  EXTERNAL_REFERENCE_BINDING_LIST_DTRACE(V)                                    \
-  EXTERNAL_REFERENCE_BINDING_LIST_CRYPTO(V)
+  EXTERNAL_REFERENCE_BINDING_LIST_CRYPTO(V)                                    \
+  EXTERNAL_REFERENCE_BINDING_LIST_QUIC(V)
 
 }  // namespace node
 

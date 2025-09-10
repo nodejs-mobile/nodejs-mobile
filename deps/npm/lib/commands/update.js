@@ -1,4 +1,4 @@
-const path = require('path')
+const path = require('node:path')
 const { log } = require('proc-log')
 const reifyFinish = require('../utils/reify-finish.js')
 const ArboristWorkspaceCmd = require('../arborist-cmd.js')
@@ -20,6 +20,7 @@ class Update extends ArboristWorkspaceCmd {
     'foreground-scripts',
     'ignore-scripts',
     'audit',
+    'before',
     'bin-links',
     'fund',
     'dry-run',

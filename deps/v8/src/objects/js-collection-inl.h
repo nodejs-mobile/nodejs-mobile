@@ -5,10 +5,12 @@
 #ifndef V8_OBJECTS_JS_COLLECTION_INL_H_
 #define V8_OBJECTS_JS_COLLECTION_INL_H_
 
+#include "src/objects/js-collection.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/heap-object-inl.h"
 #include "src/objects/js-collection-iterator-inl.h"
-#include "src/objects/js-collection.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/ordered-hash-table-inl.h"
 #include "src/roots/roots-inl.h"
@@ -35,24 +37,21 @@ OrderedHashTableIterator<Derived, TableType>::OrderedHashTableIterator(
 
 JSMapIterator::JSMapIterator(Address ptr)
     : OrderedHashTableIterator<JSMapIterator, OrderedHashMap>(ptr) {
-  SLOW_DCHECK(IsJSMapIterator());
+  SLOW_DCHECK(IsJSMapIterator(*this));
 }
 
 JSSetIterator::JSSetIterator(Address ptr)
     : OrderedHashTableIterator<JSSetIterator, OrderedHashSet>(ptr) {
-  SLOW_DCHECK(IsJSSetIterator());
+  SLOW_DCHECK(IsJSSetIterator(*this));
 }
 
-CAST_ACCESSOR(JSSetIterator)
-CAST_ACCESSOR(JSMapIterator)
-
-Object JSMapIterator::CurrentValue() {
-  OrderedHashMap table = OrderedHashMap::cast(this->table());
+Tagged<Object> JSMapIterator::CurrentValue() {
+  Tagged<OrderedHashMap> table = Cast<OrderedHashMap>(this->table());
   int index = Smi::ToInt(this->index());
   DCHECK_GE(index, 0);
   InternalIndex entry(index);
-  Object value = table.ValueAt(entry);
-  DCHECK(!value.IsTheHole());
+  Tagged<Object> value = table->ValueAt(entry);
+  DCHECK(!IsHashTableHole(value));
   return value;
 }
 

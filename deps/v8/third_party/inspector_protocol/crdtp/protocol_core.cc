@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -280,10 +280,10 @@ bool ProtocolTypeTraits<std::unique_ptr<DeferredMessage>>::Deserialize(
   return true;
 }
 
-void ProtocolTypeTraits<std::unique_ptr<DeferredMessage>>::Serialize(
-    const std::unique_ptr<DeferredMessage>& value,
+void ProtocolTypeTraits<DeferredMessage>::Serialize(
+    const DeferredMessage& value,
     std::vector<uint8_t>* bytes) {
-  value->AppendSerialized(bytes);
+  value.AppendSerialized(bytes);
 }
 
 }  // namespace v8_crdtp

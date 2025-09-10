@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "src/base/lazy-instance.h"
+#include "src/builtins/profile-data-reader.h"
 #include "src/heap/heap-inl.h"
 #include "src/objects/shared-function-info-inl.h"
 
@@ -16,6 +17,7 @@ namespace v8 {
 namespace internal {
 
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(BasicBlockProfiler, BasicBlockProfiler::Get)
+DEFINE_LAZY_LEAKY_OBJECT_GETTER(BuiltinsCallGraph, BuiltinsCallGraph::Get)
 
 BasicBlockProfilerData::BasicBlockProfilerData(size_t n_blocks)
     : block_ids_(n_blocks), counts_(n_blocks, 0) {}
@@ -45,6 +47,11 @@ void BasicBlockProfilerData::ResetCounts() {
   }
 }
 
+void BasicBlockProfilerData::AddBranch(int32_t true_block_id,
+                                       int32_t false_block_id) {
+  branches_.emplace_back(true_block_id, false_block_id);
+}
+
 BasicBlockProfilerData* BasicBlockProfiler::NewData(size_t n_blocks) {
   base::MutexGuard lock(&data_list_mutex_);
   auto data = std::make_unique<BasicBlockProfilerData>(n_blocks);
@@ -54,7 +61,8 @@ BasicBlockProfilerData* BasicBlockProfiler::NewData(size_t n_blocks) {
 }
 
 namespace {
-Handle<String> CopyStringToJSHeap(const std::string& source, Isolate* isolate) {
+DirectHandle<String> CopyStringToJSHeap(const std::string& source,
+                                        Isolate* isolate) {
   return isolate->factory()->NewStringFromAsciiChecked(source.c_str(),
                                                        AllocationType::kOld);
 }
@@ -64,43 +72,49 @@ constexpr int kBlockCountSlotSize = kInt32Size;
 }  // namespace
 
 BasicBlockProfilerData::BasicBlockProfilerData(
-    Handle<OnHeapBasicBlockProfilerData> js_heap_data, Isolate* isolate) {
+    DirectHandle<OnHeapBasicBlockProfilerData> js_heap_data, Isolate* isolate) {
   DisallowHeapAllocation no_gc;
   CopyFromJSHeap(*js_heap_data);
 }
 
 BasicBlockProfilerData::BasicBlockProfilerData(
-    OnHeapBasicBlockProfilerData js_heap_data) {
+    Tagged<OnHeapBasicBlockProfilerData> js_heap_data) {
   CopyFromJSHeap(js_heap_data);
 }
 
 void BasicBlockProfilerData::CopyFromJSHeap(
-    OnHeapBasicBlockProfilerData js_heap_data) {
-  function_name_ = js_heap_data.name().ToCString().get();
-  schedule_ = js_heap_data.schedule().ToCString().get();
-  code_ = js_heap_data.code().ToCString().get();
-  ByteArray counts(js_heap_data.counts());
-  for (int i = 0; i < counts.length() / kBlockCountSlotSize; ++i) {
-    counts_.push_back(counts.get_uint32(i));
+    Tagged<OnHeapBasicBlockProfilerData> js_heap_data) {
+  function_name_ = js_heap_data->name()->ToCString().get();
+  schedule_ = js_heap_data->schedule()->ToCString().get();
+  code_ = js_heap_data->code()->ToCString().get();
+  Tagged<FixedUInt32Array> counts =
+      Cast<FixedUInt32Array>(js_heap_data->counts());
+  for (int i = 0; i < counts->length() / kBlockCountSlotSize; ++i) {
+    counts_.push_back(counts->get(i));
   }
-  ByteArray block_ids(js_heap_data.block_ids());
-  for (int i = 0; i < block_ids.length() / kBlockIdSlotSize; ++i) {
-    block_ids_.push_back(block_ids.get_int(i));
+  Tagged<FixedInt32Array> block_ids(js_heap_data->block_ids());
+  for (int i = 0; i < block_ids->length() / kBlockIdSlotSize; ++i) {
+    block_ids_.push_back(block_ids->get(i));
+  }
+  Tagged<PodArray<std::pair<int32_t, int32_t>>> branches =
+      js_heap_data->branches();
+  for (int i = 0; i < branches->length(); ++i) {
+    branches_.push_back(branches->get(i));
   }
   CHECK_EQ(block_ids_.size(), counts_.size());
-  hash_ = js_heap_data.hash();
+  hash_ = js_heap_data->hash();
 }
 
-Handle<OnHeapBasicBlockProfilerData> BasicBlockProfilerData::CopyToJSHeap(
+DirectHandle<OnHeapBasicBlockProfilerData> BasicBlockProfilerData::CopyToJSHeap(
     Isolate* isolate) {
   int id_array_size_in_bytes = static_cast<int>(n_blocks() * kBlockIdSlotSize);
   CHECK(id_array_size_in_bytes >= 0 &&
         static_cast<size_t>(id_array_size_in_bytes) / kBlockIdSlotSize ==
             n_blocks());  // Overflow
-  Handle<ByteArray> block_ids = isolate->factory()->NewByteArray(
-      id_array_size_in_bytes, AllocationType::kOld);
+  DirectHandle<FixedInt32Array> block_ids = FixedInt32Array::New(
+      isolate, id_array_size_in_bytes, AllocationType::kOld);
   for (int i = 0; i < static_cast<int>(n_blocks()); ++i) {
-    block_ids->set_int(i, block_ids_[i]);
+    block_ids->set(i, block_ids_[i]);
   }
 
   int counts_array_size_in_bytes =
@@ -108,17 +122,25 @@ Handle<OnHeapBasicBlockProfilerData> BasicBlockProfilerData::CopyToJSHeap(
   CHECK(counts_array_size_in_bytes >= 0 &&
         static_cast<size_t>(counts_array_size_in_bytes) / kBlockCountSlotSize ==
             n_blocks());  // Overflow
-  Handle<ByteArray> counts = isolate->factory()->NewByteArray(
-      counts_array_size_in_bytes, AllocationType::kOld);
+  DirectHandle<FixedUInt32Array> counts = FixedUInt32Array::New(
+      isolate, counts_array_size_in_bytes, AllocationType::kOld);
   for (int i = 0; i < static_cast<int>(n_blocks()); ++i) {
-    counts->set_uint32(i, counts_[i]);
+    counts->set(i, counts_[i]);
   }
-  Handle<String> name = CopyStringToJSHeap(function_name_, isolate);
-  Handle<String> schedule = CopyStringToJSHeap(schedule_, isolate);
-  Handle<String> code = CopyStringToJSHeap(code_, isolate);
+
+  DirectHandle<PodArray<std::pair<int32_t, int32_t>>> branches =
+      PodArray<std::pair<int32_t, int32_t>>::New(
+          isolate, static_cast<int>(branches_.size()), AllocationType::kOld);
+  for (int i = 0; i < static_cast<int>(branches_.size()); ++i) {
+    branches->set(i, branches_[i]);
+  }
+  DirectHandle<String> name = CopyStringToJSHeap(function_name_, isolate);
+  DirectHandle<String> schedule = CopyStringToJSHeap(schedule_, isolate);
+  DirectHandle<String> code = CopyStringToJSHeap(code_, isolate);
 
   return isolate->factory()->NewOnHeapBasicBlockProfilerData(
-      block_ids, counts, name, schedule, code, hash_, AllocationType::kOld);
+      block_ids, counts, branches, name, schedule, code, hash_,
+      AllocationType::kOld);
 }
 
 void BasicBlockProfiler::ResetCounts(Isolate* isolate) {
@@ -126,54 +148,69 @@ void BasicBlockProfiler::ResetCounts(Isolate* isolate) {
     data->ResetCounts();
   }
   HandleScope scope(isolate);
-  Handle<ArrayList> list(isolate->heap()->basic_block_profiling_data(),
-                         isolate);
-  for (int i = 0; i < list->Length(); ++i) {
-    Handle<ByteArray> counts(
-        OnHeapBasicBlockProfilerData::cast(list->Get(i)).counts(), isolate);
+  DirectHandle<ArrayList> list(isolate->heap()->basic_block_profiling_data(),
+                               isolate);
+  for (int i = 0; i < list->length(); ++i) {
+    DirectHandle<FixedUInt32Array> counts(
+        Cast<OnHeapBasicBlockProfilerData>(list->get(i))->counts(), isolate);
     for (int j = 0; j < counts->length() / kBlockCountSlotSize; ++j) {
-      counts->set_uint32(j, 0);
+      counts->set(j, 0);
     }
   }
 }
 
 bool BasicBlockProfiler::HasData(Isolate* isolate) {
-  return data_list_.size() > 0 ||
-         isolate->heap()->basic_block_profiling_data().Length() > 0;
+  return !data_list_.empty() ||
+         isolate->heap()->basic_block_profiling_data()->length() > 0;
 }
 
-void BasicBlockProfiler::Print(std::ostream& os, Isolate* isolate) {
-  os << "---- Start Profiling Data ----" << std::endl;
+void BasicBlockProfiler::Print(Isolate* isolate, std::ostream& os) {
+  os << "---- Start Profiling Data ----" << '\n';
   for (const auto& data : data_list_) {
     os << *data;
   }
   HandleScope scope(isolate);
-  Handle<ArrayList> list(isolate->heap()->basic_block_profiling_data(),
-                         isolate);
+  DirectHandle<ArrayList> list(isolate->heap()->basic_block_profiling_data(),
+                               isolate);
   std::unordered_set<std::string> builtin_names;
-  for (int i = 0; i < list->Length(); ++i) {
+  for (int i = 0; i < list->length(); ++i) {
     BasicBlockProfilerData data(
-        handle(OnHeapBasicBlockProfilerData::cast(list->Get(i)), isolate),
+        direct_handle(Cast<OnHeapBasicBlockProfilerData>(list->get(i)),
+                      isolate),
         isolate);
-    // Print data for builtins to both stdout and the log file, if logging is
-    // enabled.
     os << data;
-    data.Log(isolate);
     // Ensure that all builtin names are unique; otherwise profile-guided
     // optimization might get confused.
     CHECK(builtin_names.insert(data.function_name_).second);
   }
-  os << "---- End Profiling Data ----" << std::endl;
+  os << "---- End Profiling Data ----" << '\n';
+}
+
+void BasicBlockProfiler::Log(Isolate* isolate, std::ostream& os) {
+  HandleScope scope(isolate);
+  DirectHandle<ArrayList> list(isolate->heap()->basic_block_profiling_data(),
+                               isolate);
+  std::unordered_set<std::string> builtin_names;
+  for (int i = 0; i < list->length(); ++i) {
+    BasicBlockProfilerData data(
+        direct_handle(Cast<OnHeapBasicBlockProfilerData>(list->get(i)),
+                      isolate),
+        isolate);
+    data.Log(isolate, os);
+    // Ensure that all builtin names are unique; otherwise profile-guided
+    // optimization might get confused.
+    CHECK(builtin_names.insert(data.function_name_).second);
+  }
 }
 
 std::vector<bool> BasicBlockProfiler::GetCoverageBitmap(Isolate* isolate) {
   DisallowGarbageCollection no_gc;
-  ArrayList list(isolate->heap()->basic_block_profiling_data());
+  Tagged<ArrayList> list(isolate->heap()->basic_block_profiling_data());
   std::vector<bool> out;
-  int list_length = list.Length();
+  int list_length = list->length();
   for (int i = 0; i < list_length; ++i) {
     BasicBlockProfilerData data(
-        OnHeapBasicBlockProfilerData::cast(list.Get(i)));
+        Cast<OnHeapBasicBlockProfilerData>(list->get(i)));
     for (size_t j = 0; j < data.n_blocks(); ++j) {
       out.push_back(data.counts_[j] > 0);
     }
@@ -181,17 +218,25 @@ std::vector<bool> BasicBlockProfiler::GetCoverageBitmap(Isolate* isolate) {
   return out;
 }
 
-void BasicBlockProfilerData::Log(Isolate* isolate) {
+void BasicBlockProfilerData::Log(Isolate* isolate, std::ostream& os) {
   bool any_nonzero_counter = false;
+  constexpr char kNext[] = "\t";
   for (size_t i = 0; i < n_blocks(); ++i) {
     if (counts_[i] > 0) {
       any_nonzero_counter = true;
-      isolate->logger()->BasicBlockCounterEvent(function_name_.c_str(),
-                                                block_ids_[i], counts_[i]);
+      os << ProfileDataFromFileConstants::kBlockCounterMarker << kNext
+         << function_name_.c_str() << kNext << block_ids_[i] << kNext
+         << counts_[i] << '\n';
     }
   }
   if (any_nonzero_counter) {
-    isolate->logger()->BuiltinHashEvent(function_name_.c_str(), hash_);
+    for (size_t i = 0; i < branches_.size(); ++i) {
+      os << ProfileDataFromFileConstants::kBlockHintMarker << kNext
+         << function_name_.c_str() << kNext << branches_[i].first << kNext
+         << branches_[i].second << '\n';
+    }
+    os << ProfileDataFromFileConstants::kBuiltinHashMarker << kNext
+       << function_name_.c_str() << kNext << hash_ << '\n';
   }
 }
 
@@ -207,10 +252,10 @@ std::ostream& operator<<(std::ostream& os, const BasicBlockProfilerData& d) {
   }
   if (!d.schedule_.empty()) {
     os << "schedule for " << name << " (B0 entered " << d.counts_[0]
-       << " times)" << std::endl;
-    os << d.schedule_.c_str() << std::endl;
+       << " times)" << '\n';
+    os << d.schedule_.c_str() << '\n';
   }
-  os << "block counts for " << name << ":" << std::endl;
+  os << "block counts for " << name << ":" << '\n';
   std::vector<std::pair<size_t, uint32_t>> pairs;
   pairs.reserve(d.n_blocks());
   for (size_t i = 0; i < d.n_blocks(); ++i) {
@@ -224,13 +269,35 @@ std::ostream& operator<<(std::ostream& os, const BasicBlockProfilerData& d) {
       });
   for (auto it : pairs) {
     if (it.second == 0) break;
-    os << "block B" << it.first << " : " << it.second << std::endl;
+    os << "block B" << it.first << " : " << it.second << '\n';
   }
-  os << std::endl;
+  os << '\n';
   if (!d.code_.empty()) {
-    os << d.code_.c_str() << std::endl;
+    os << d.code_.c_str() << '\n';
   }
   return os;
+}
+
+BuiltinsCallGraph::BuiltinsCallGraph() : all_hash_matched_(true) {}
+
+void BuiltinsCallGraph::AddBuiltinCall(Builtin caller, Builtin callee,
+                                       int32_t block_id) {
+  if (builtin_call_map_.count(caller) == 0) {
+    builtin_call_map_.emplace(caller, BuiltinCallees());
+  }
+  BuiltinCallees& callees = builtin_call_map_.at(caller);
+  if (callees.count(block_id) == 0) {
+    callees.emplace(block_id, BlockCallees());
+  }
+  BlockCallees& block_callees = callees.at(block_id);
+  if (block_callees.count(callee) == 0) {
+    block_callees.emplace(callee);
+  }
+}
+
+const BuiltinCallees* BuiltinsCallGraph::GetBuiltinCallees(Builtin builtin) {
+  if (builtin_call_map_.count(builtin) == 0) return nullptr;
+  return &builtin_call_map_.at(builtin);
 }
 
 }  // namespace internal

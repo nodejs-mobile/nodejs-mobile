@@ -6,7 +6,6 @@
 #define V8_COMPILER_JS_INTRINSIC_LOWERING_H_
 
 #include "src/base/compiler-specific.h"
-#include "src/common/globals.h"
 #include "src/compiler/common-operator.h"
 #include "src/compiler/graph-reducer.h"
 
@@ -45,22 +44,21 @@ class V8_EXPORT_PRIVATE JSIntrinsicLowering final
   Reduction ReduceDeoptimizeNow(Node* node);
   Reduction ReduceCreateJSGeneratorObject(Node* node);
   Reduction ReduceGeneratorClose(Node* node);
-  Reduction ReduceAsyncFunctionAwaitCaught(Node* node);
-  Reduction ReduceAsyncFunctionAwaitUncaught(Node* node);
+  Reduction ReduceAsyncFunctionAwait(Node* node);
   Reduction ReduceAsyncFunctionEnter(Node* node);
   Reduction ReduceAsyncFunctionReject(Node* node);
   Reduction ReduceAsyncFunctionResolve(Node* node);
-  Reduction ReduceAsyncGeneratorAwaitCaught(Node* node);
-  Reduction ReduceAsyncGeneratorAwaitUncaught(Node* node);
+  Reduction ReduceAsyncGeneratorAwait(Node* node);
   Reduction ReduceAsyncGeneratorReject(Node* node);
   Reduction ReduceAsyncGeneratorResolve(Node* node);
-  Reduction ReduceAsyncGeneratorYield(Node* node);
+  Reduction ReduceAsyncGeneratorYieldWithAwait(Node* node);
   Reduction ReduceGeneratorGetResumeMode(Node* node);
   Reduction ReduceIsInstanceType(Node* node, InstanceType instance_type);
   Reduction ReduceIsJSReceiver(Node* node);
   Reduction ReduceIsBeingInterpreted(Node* node);
   Reduction ReduceTurbofanStaticAssert(Node* node);
   Reduction ReduceVerifyType(Node* node);
+  Reduction ReduceCheckTurboshaftTypeOf(Node* node);
   Reduction ReduceToLength(Node* node);
   Reduction ReduceToObject(Node* node);
   Reduction ReduceToString(Node* node);
@@ -82,7 +80,7 @@ class V8_EXPORT_PRIVATE JSIntrinsicLowering final
                    int stack_parameter_count,
                    enum FrameStateFlag frame_state_flag = kNeedsFrameState);
 
-  Graph* graph() const;
+  TFGraph* graph() const;
   JSGraph* jsgraph() const { return jsgraph_; }
   JSHeapBroker* broker() const { return broker_; }
   Isolate* isolate() const;

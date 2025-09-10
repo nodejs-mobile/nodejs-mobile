@@ -9,15 +9,15 @@ const assert = require('assert');
 
 // Launch CLI w/o args.
 (async () => {
-  const cli = startCLI([]);
+  const cli = startCLI([], [], {}, { randomPort: false });
   const code = await cli.quit();
-  assert.strictEqual(code, 1);
+  assert.strictEqual(code, 9);
   assert.match(cli.output, /^Usage:/, 'Prints usage info');
 })().then(common.mustCall());
 
 // Launch w/ invalid host:port.
 (async () => {
-  const cli = startCLI([`localhost:${common.PORT}`]);
+  const cli = startCLI([`localhost:${common.PORT}`], [], {}, { randomPort: false });
   const code = await cli.quit();
   assert.match(
     cli.output,

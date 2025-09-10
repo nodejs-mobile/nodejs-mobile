@@ -54,7 +54,7 @@ void RegExpStack::ThreadLocal::ResetToStaticStack(RegExpStack* regexp_stack) {
   memory_size_ = kStaticStackSize;
   stack_pointer_ = memory_top_;
   limit_ = reinterpret_cast<Address>(regexp_stack->static_stack_) +
-           kStackLimitSlack * kSystemPointerSize;
+           kStackLimitSlackSize;
   owns_memory_ = false;
 }
 
@@ -74,7 +74,7 @@ Address RegExpStack::EnsureCapacity(size_t size) {
   if (size > kMaximumStackSize) return kNullAddress;
   if (thread_local_.memory_size_ < size) {
     if (size < kMinimumDynamicStackSize) size = kMinimumDynamicStackSize;
-    byte* new_memory = NewArray<byte>(size);
+    uint8_t* new_memory = NewArray<uint8_t>(size);
     if (thread_local_.memory_size_ > 0) {
       // Copy original memory into top of new memory.
       MemCopy(new_memory + size - thread_local_.memory_size_,
@@ -86,8 +86,8 @@ Address RegExpStack::EnsureCapacity(size_t size) {
     thread_local_.memory_top_ = new_memory + size;
     thread_local_.memory_size_ = size;
     thread_local_.stack_pointer_ = thread_local_.memory_top_ + delta;
-    thread_local_.limit_ = reinterpret_cast<Address>(new_memory) +
-                           kStackLimitSlack * kSystemPointerSize;
+    thread_local_.limit_ =
+        reinterpret_cast<Address>(new_memory) + kStackLimitSlackSize;
     thread_local_.owns_memory_ = true;
   }
   return reinterpret_cast<Address>(thread_local_.memory_top_);

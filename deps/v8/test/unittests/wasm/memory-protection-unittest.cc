@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
 #include "include/v8config.h"
 
 // TODO(clemensb): Extend this to other OSes.
@@ -21,43 +23,15 @@
 #include "test/unittests/test-utils.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 
-namespace v8 {
-namespace internal {
-namespace wasm {
-
-enum MemoryProtectionMode {
-  kNoProtection,
-  kPku,
-  kMprotect,
-  kPkuWithMprotectFallback
-};
-
-const char* MemoryProtectionModeToString(MemoryProtectionMode mode) {
-  switch (mode) {
-    case kNoProtection:
-      return "NoProtection";
-    case kPku:
-      return "Pku";
-    case kMprotect:
-      return "Mprotect";
-    case kPkuWithMprotectFallback:
-      return "PkuWithMprotectFallback";
-  }
-}
+namespace v8::internal::wasm {
 
 class MemoryProtectionTest : public TestWithNativeContext {
  public:
-  void Initialize(MemoryProtectionMode mode) {
-    mode_ = mode;
-    bool enable_pku = mode == kPku || mode == kPkuWithMprotectFallback;
-    FLAG_wasm_memory_protection_keys = enable_pku;
+  void SetUp() override {
+    v8_flags.wasm_lazy_compilation = false;
     // The key is initially write-protected.
-    CHECK_IMPLIES(GetWasmCodeManager()->HasMemoryProtectionKeySupport(),
-                  !GetWasmCodeManager()->MemoryProtectionKeyWritable());
-
-    bool enable_mprotect =
-        mode == kMprotect || mode == kPkuWithMprotectFallback;
-    FLAG_wasm_write_protect_code_memory = enable_mprotect;
+    CHECK_IMPLIES(WasmCodeManager::HasMemoryProtectionKeySupport(),
+                  !WasmCodeManager::MemoryProtectionKeyWritable());
   }
 
   void CompileModule() {
@@ -71,11 +45,8 @@ class MemoryProtectionTest : public TestWithNativeContext {
   WasmCode* code() const { return code_; }
 
   bool code_is_protected() {
-    return V8_HAS_PTHREAD_JIT_WRITE_PROTECT || uses_pku() || uses_mprotect();
-  }
-
-  void MakeCodeWritable() {
-    native_module_->MakeWritable(base::AddressRegionOf(code_->instructions()));
+    return V8_HAS_PTHREAD_JIT_WRITE_PROTECT ||
+           V8_HAS_BECORE_JIT_WRITE_PROTECT || uses_pku();
   }
 
   void WriteToCode() { code_->instructions()[0] = 0; }
@@ -86,101 +57,72 @@ class MemoryProtectionTest : public TestWithNativeContext {
       WriteToCode();
       return;
     }
-    // Tier-up might be running and unprotecting the code region temporarily (if
-    // using mprotect). In that case, repeatedly write to the code region to
-    // make us eventually crash.
     ASSERT_DEATH_IF_SUPPORTED(
-        do {
+        {
           WriteToCode();
           base::OS::Sleep(base::TimeDelta::FromMilliseconds(10));
-        } while (uses_mprotect()),
+        },
         "");
-  }
-
-  bool uses_mprotect() {
-    // M1 always uses MAP_JIT.
-    if (V8_HAS_PTHREAD_JIT_WRITE_PROTECT) return false;
-    return mode_ == kMprotect ||
-           (mode_ == kPkuWithMprotectFallback && !uses_pku());
   }
 
   bool uses_pku() {
     // M1 always uses MAP_JIT.
-    if (V8_HAS_PTHREAD_JIT_WRITE_PROTECT) return false;
-    bool param_has_pku = mode_ == kPku || mode_ == kPkuWithMprotectFallback;
-    return param_has_pku &&
-           GetWasmCodeManager()->HasMemoryProtectionKeySupport();
+    if (V8_HAS_PTHREAD_JIT_WRITE_PROTECT || V8_HAS_BECORE_JIT_WRITE_PROTECT) {
+      return false;
+    }
+    return WasmCodeManager::HasMemoryProtectionKeySupport();
   }
 
  private:
   std::shared_ptr<NativeModule> CompileNativeModule() {
     // Define the bytes for a module with a single empty function.
-    static const byte module_bytes[] = {
+    static const uint8_t module_bytes[] = {
         WASM_MODULE_HEADER, SECTION(Type, ENTRY_COUNT(1), SIG_ENTRY_v_v),
         SECTION(Function, ENTRY_COUNT(1), SIG_INDEX(0)),
         SECTION(Code, ENTRY_COUNT(1), ADD_COUNT(0 /* locals */, kExprEnd))};
 
+    base::OwnedVector<const uint8_t> bytes = base::OwnedCopyOf(module_bytes);
+
+    WasmDetectedFeatures detected_features;
     ModuleResult result =
-        DecodeWasmModule(WasmFeatures::All(), std::begin(module_bytes),
-                         std::end(module_bytes), false, kWasmOrigin,
-                         isolate()->counters(), isolate()->metrics_recorder(),
-                         v8::metrics::Recorder::ContextId::Empty(),
-                         DecodingMethod::kSync, GetWasmEngine()->allocator());
+        DecodeWasmModule(WasmEnabledFeatures::All(), bytes.as_vector(), false,
+                         kWasmOrigin, &detected_features);
     CHECK(result.ok());
 
-    Handle<FixedArray> export_wrappers;
     ErrorThrower thrower(isolate(), "");
     constexpr int kNoCompilationId = 0;
+    constexpr ProfileInformation* kNoProfileInformation = nullptr;
     std::shared_ptr<NativeModule> native_module = CompileToNativeModule(
-        isolate(), WasmFeatures::All(), &thrower, std::move(result).value(),
-        ModuleWireBytes{base::ArrayVector(module_bytes)}, &export_wrappers,
-        kNoCompilationId, v8::metrics::Recorder::ContextId::Empty());
+        isolate(), WasmEnabledFeatures::All(), detected_features,
+        CompileTimeImports{}, &thrower, std::move(result).value(),
+        std::move(bytes), kNoCompilationId,
+        v8::metrics::Recorder::ContextId::Empty(), kNoProfileInformation);
     CHECK(!thrower.error());
     CHECK_NOT_NULL(native_module);
 
     return native_module;
   }
 
-  MemoryProtectionMode mode_;
   std::shared_ptr<NativeModule> native_module_;
   WasmCodeRefScope code_refs_;
   WasmCode* code_;
 };
 
-class ParameterizedMemoryProtectionTest
-    : public MemoryProtectionTest,
-      public ::testing::WithParamInterface<MemoryProtectionMode> {
- public:
-  void SetUp() override { Initialize(GetParam()); }
-};
-
-std::string PrintMemoryProtectionTestParam(
-    ::testing::TestParamInfo<MemoryProtectionMode> info) {
-  return MemoryProtectionModeToString(info.param);
-}
-
-INSTANTIATE_TEST_SUITE_P(MemoryProtection, ParameterizedMemoryProtectionTest,
-                         ::testing::Values(kNoProtection, kPku, kMprotect,
-                                           kPkuWithMprotectFallback),
-                         PrintMemoryProtectionTestParam);
-
-TEST_P(ParameterizedMemoryProtectionTest, CodeNotWritableAfterCompilation) {
+TEST_F(MemoryProtectionTest, CodeNotWritableAfterCompilation) {
   CompileModule();
   AssertCodeEventuallyProtected();
 }
 
-TEST_P(ParameterizedMemoryProtectionTest, CodeWritableWithinScope) {
+TEST_F(MemoryProtectionTest, CodeWritableWithinScope) {
   CompileModule();
-  CodeSpaceWriteScope write_scope(native_module());
-  MakeCodeWritable();
+  CodeSpaceWriteScope write_scope;
   WriteToCode();
 }
 
-TEST_P(ParameterizedMemoryProtectionTest, CodeNotWritableAfterScope) {
+TEST_F(MemoryProtectionTest, CodeNotWritableAfterScope) {
   CompileModule();
   {
-    CodeSpaceWriteScope write_scope(native_module());
-    MakeCodeWritable();
+    CodeSpaceWriteScope write_scope;
     WriteToCode();
   }
   AssertCodeEventuallyProtected();
@@ -189,8 +131,7 @@ TEST_P(ParameterizedMemoryProtectionTest, CodeNotWritableAfterScope) {
 #if V8_OS_POSIX && !V8_OS_FUCHSIA
 class ParameterizedMemoryProtectionTestWithSignalHandling
     : public MemoryProtectionTest,
-      public ::testing::WithParamInterface<
-          std::tuple<MemoryProtectionMode, bool, bool>> {
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   class SignalHandlerScope {
    public:
@@ -245,8 +186,6 @@ class ParameterizedMemoryProtectionTestWithSignalHandling
     // These are accessed from the signal handler.
     static SignalHandlerScope* current_handler_scope_;
   };
-
-  void SetUp() override { Initialize(std::get<0>(GetParam())); }
 };
 
 // static
@@ -255,22 +194,18 @@ ParameterizedMemoryProtectionTestWithSignalHandling::SignalHandlerScope*
         current_handler_scope_ = nullptr;
 
 std::string PrintMemoryProtectionAndSignalHandlingTestParam(
-    ::testing::TestParamInfo<std::tuple<MemoryProtectionMode, bool, bool>>
-        info) {
-  MemoryProtectionMode protection_mode = std::get<0>(info.param);
-  const bool write_in_signal_handler = std::get<1>(info.param);
-  const bool open_write_scope = std::get<2>(info.param);
-  return std::string{MemoryProtectionModeToString(protection_mode)} + "_" +
-         (write_in_signal_handler ? "Write" : "NoWrite") + "_" +
+    ::testing::TestParamInfo<std::tuple<bool, bool>> info) {
+  const bool write_in_signal_handler = std::get<0>(info.param);
+  const bool open_write_scope = std::get<1>(info.param);
+  return std::string(write_in_signal_handler ? "Write" : "NoWrite") + "_" +
          (open_write_scope ? "WithScope" : "NoScope");
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    MemoryProtection, ParameterizedMemoryProtectionTestWithSignalHandling,
-    ::testing::Combine(::testing::Values(kNoProtection, kPku, kMprotect,
-                                         kPkuWithMprotectFallback),
-                       ::testing::Bool(), ::testing::Bool()),
-    PrintMemoryProtectionAndSignalHandlingTestParam);
+INSTANTIATE_TEST_SUITE_P(MemoryProtection,
+                         ParameterizedMemoryProtectionTestWithSignalHandling,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()),
+                         PrintMemoryProtectionAndSignalHandlingTestParam);
 
 TEST_P(ParameterizedMemoryProtectionTestWithSignalHandling, TestSignalHandler) {
   // We must run in the "threadsafe" mode in order to make the spawned process
@@ -278,10 +213,10 @@ TEST_P(ParameterizedMemoryProtectionTestWithSignalHandling, TestSignalHandler) {
   // death test. Otherwise we would not really test the signal handling setup
   // that we use in the wild.
   // (see https://google.github.io/googletest/reference/assertions.html)
-  CHECK_EQ("threadsafe", ::testing::GTEST_FLAG(death_test_style));
+  CHECK_EQ("threadsafe", GTEST_FLAG_GET(death_test_style));
 
-  const bool write_in_signal_handler = std::get<1>(GetParam());
-  const bool open_write_scope = std::get<2>(GetParam());
+  const bool write_in_signal_handler = std::get<0>(GetParam());
+  const bool open_write_scope = std::get<1>(GetParam());
   CompileModule();
   SignalHandlerScope signal_handler_scope;
 
@@ -300,22 +235,20 @@ TEST_P(ParameterizedMemoryProtectionTestWithSignalHandling, TestSignalHandler) {
   // An exception is M1, where an open scope still has an effect in the signal
   // handler.
   bool expect_crash = write_in_signal_handler && code_is_protected() &&
-                      (!V8_HAS_PTHREAD_JIT_WRITE_PROTECT || !open_write_scope);
+                      ((!V8_HAS_PTHREAD_JIT_WRITE_PROTECT &&
+                        !V8_HAS_BECORE_JIT_WRITE_PROTECT) ||
+                       !open_write_scope);
   if (expect_crash) {
     // Avoid {ASSERT_DEATH_IF_SUPPORTED}, because it only accepts a regex as
     // second parameter, and not a matcher as {ASSERT_DEATH}.
 #if GTEST_HAS_DEATH_TEST
     ASSERT_DEATH(
-        // The signal handler should crash, but it might "accidentally"
-        // succeed if tier-up is running in the background and using mprotect
-        // to unprotect the code for the whole process. In that case we
-        // repeatedly send the signal until we crash.
-        do {
-          base::Optional<CodeSpaceWriteScope> write_scope;
-          if (open_write_scope) write_scope.emplace(native_module());
+        {
+          std::optional<CodeSpaceWriteScope> write_scope;
+          if (open_write_scope) write_scope.emplace();
           pthread_kill(pthread_self(), SIGPROF);
           base::OS::Sleep(base::TimeDelta::FromMilliseconds(10));
-        } while (uses_mprotect()),  // Only loop for mprotect.
+        },
         // Check that the subprocess tried to write, but did not succeed.
         ::testing::AnyOf(
             // non-sanitizer builds:
@@ -331,8 +264,8 @@ TEST_P(ParameterizedMemoryProtectionTestWithSignalHandling, TestSignalHandler) {
                                  "UndefinedBehaviorSanitizer:DEADLYSIGNAL")));
 #endif  // GTEST_HAS_DEATH_TEST
   } else {
-    base::Optional<CodeSpaceWriteScope> write_scope;
-    if (open_write_scope) write_scope.emplace(native_module());
+    std::optional<CodeSpaceWriteScope> write_scope;
+    if (open_write_scope) write_scope.emplace();
     // The signal handler does not write or code is not protected, hence this
     // should succeed.
     pthread_kill(pthread_self(), SIGPROF);
@@ -343,6 +276,4 @@ TEST_P(ParameterizedMemoryProtectionTestWithSignalHandling, TestSignalHandler) {
 }
 #endif  // V8_OS_POSIX && !V8_OS_FUCHSIA
 
-}  // namespace wasm
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::wasm

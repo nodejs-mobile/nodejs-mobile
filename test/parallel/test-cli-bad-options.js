@@ -14,6 +14,17 @@ if (process.features.inspector) {
 }
 requiresArgument('--eval');
 
+missingOption('--allow-fs-read=*', '--permission');
+missingOption('--allow-fs-write=*', '--permission');
+
+function missingOption(option, requiredOption) {
+  const r = spawnSync(process.execPath, [option], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 1);
+
+  const message = `${requiredOption} is required`;
+  assert.match(r.stderr, new RegExp(message));
+}
+
 function requiresArgument(option) {
   const r = spawnSync(process.execPath, [option], { encoding: 'utf8' });
 

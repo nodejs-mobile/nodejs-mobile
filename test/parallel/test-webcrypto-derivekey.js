@@ -7,7 +7,8 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { webcrypto: { subtle }, KeyObject } = require('crypto');
+const { subtle } = globalThis.crypto;
+const { KeyObject } = require('crypto');
 
 // This is only a partial test. The WebCrypto Web Platform Tests
 // will provide much greater coverage.
@@ -205,6 +206,8 @@ const { webcrypto: { subtle }, KeyObject } = require('crypto');
     assert.deepStrictEqual(raw1, raw2);
   }
 
-  test('X25519').then(common.mustCall());
-  test('X448').then(common.mustCall());
+  if (!process.features.openssl_is_boringssl) {
+    test('X25519').then(common.mustCall());
+    test('X448').then(common.mustCall());
+  }
 }

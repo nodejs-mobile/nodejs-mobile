@@ -18,8 +18,10 @@ namespace compiler {
 // allocated object and also provides helpers for commonly allocated objects.
 class AllocationBuilder final {
  public:
-  AllocationBuilder(JSGraph* jsgraph, Node* effect, Node* control)
+  AllocationBuilder(JSGraph* jsgraph, JSHeapBroker* broker, Node* effect,
+                    Node* control)
       : jsgraph_(jsgraph),
+        broker_(broker),
         allocation_(nullptr),
         effect_(effect),
         control_(control) {}
@@ -60,8 +62,13 @@ class AllocationBuilder final {
       AllocationType allocation = AllocationType::kYoung);
 
   // Compound store of a constant into a field.
-  void Store(const FieldAccess& access, const ObjectRef& value) {
-    Store(access, jsgraph()->Constant(value));
+  void Store(const FieldAccess& access, ObjectRef value) {
+    if (access.machine_type == MachineType::IndirectPointer()) {
+      Store(access,
+            jsgraph()->TrustedHeapConstant(value.AsHeapObject().object()));
+    } else {
+      Store(access, jsgraph()->ConstantNoHole(value, broker_));
+    }
   }
 
   void FinishAndChange(Node* node) {
@@ -79,12 +86,13 @@ class AllocationBuilder final {
  protected:
   JSGraph* jsgraph() { return jsgraph_; }
   Isolate* isolate() const { return jsgraph_->isolate(); }
-  Graph* graph() { return jsgraph_->graph(); }
+  TFGraph* graph() { return jsgraph_->graph(); }
   CommonOperatorBuilder* common() { return jsgraph_->common(); }
   SimplifiedOperatorBuilder* simplified() { return jsgraph_->simplified(); }
 
  private:
   JSGraph* const jsgraph_;
+  JSHeapBroker* const broker_;
   Node* allocation_;
   Node* effect_;
   Node* control_;

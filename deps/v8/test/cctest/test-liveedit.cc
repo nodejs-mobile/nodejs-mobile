@@ -30,7 +30,6 @@
 #include "include/v8-function.h"
 #include "src/api/api-inl.h"
 #include "src/debug/liveedit.h"
-#include "src/init/v8.h"
 #include "src/objects/objects-inl.h"
 #include "test/cctest/cctest.h"
 
@@ -189,11 +188,11 @@ TEST(LiveEditTranslatePosition) {
   CompareStringsOneWay("aabbaaaa", "aaaabbaa", &changes);
   CHECK_EQ(LiveEdit::TranslatePosition(changes, 0), 0);
   CHECK_EQ(LiveEdit::TranslatePosition(changes, 1), 1);
-  CHECK_EQ(LiveEdit::TranslatePosition(changes, 2), 4);
-  CHECK_EQ(LiveEdit::TranslatePosition(changes, 3), 5);
-  CHECK_EQ(LiveEdit::TranslatePosition(changes, 4), 6);
-  CHECK_EQ(LiveEdit::TranslatePosition(changes, 5), 7);
-  CHECK_EQ(LiveEdit::TranslatePosition(changes, 6), 8);
+  CHECK_EQ(LiveEdit::TranslatePosition(changes, 2), 2);
+  CHECK_EQ(LiveEdit::TranslatePosition(changes, 3), 3);
+  CHECK_EQ(LiveEdit::TranslatePosition(changes, 4), 2);
+  CHECK_EQ(LiveEdit::TranslatePosition(changes, 5), 3);
+  CHECK_EQ(LiveEdit::TranslatePosition(changes, 6), 6);
   CHECK_EQ(LiveEdit::TranslatePosition(changes, 8), 8);
 }
 
@@ -208,13 +207,14 @@ void PatchFunctions(v8::Local<v8::Context> context, const char* source_a,
       v8::Script::Compile(context, v8_str(isolate, source_a)).ToLocalChecked();
   script_a->Run(context).ToLocalChecked();
   i::Handle<i::Script> i_script_a(
-      i::Script::cast(v8::Utils::OpenHandle(*script_a)->shared().script()),
+      i::Cast<i::Script>(
+          v8::Utils::OpenDirectHandle(*script_a)->shared()->script()),
       i_isolate);
 
   if (result) {
     LiveEdit::PatchScript(
         i_isolate, i_script_a,
-        i_isolate->factory()->NewStringFromAsciiChecked(source_b), false,
+        i_isolate->factory()->NewStringFromAsciiChecked(source_b), false, false,
         result);
     if (result->status == v8::debug::LiveEditResult::COMPILE_ERROR) {
       result->message = scope.Escape(result->message);
@@ -223,7 +223,8 @@ void PatchFunctions(v8::Local<v8::Context> context, const char* source_a,
     v8::debug::LiveEditResult r;
     LiveEdit::PatchScript(
         i_isolate, i_script_a,
-        i_isolate->factory()->NewStringFromAsciiChecked(source_b), false, &r);
+        i_isolate->factory()->NewStringFromAsciiChecked(source_b), false, false,
+        &r);
     CHECK_EQ(r.status, v8::debug::LiveEditResult::OK);
   }
 }
@@ -234,10 +235,10 @@ TEST(LiveEditPatchFunctions) {
   v8::HandleScope scope(env->GetIsolate());
   v8::Local<v8::Context> context = env.local();
   // Check that function is removed from compilation cache.
-  i::FLAG_allow_natives_syntax = true;
+  i::v8_flags.allow_natives_syntax = true;
   PatchFunctions(context, "42;", "%AbortJS('')");
   PatchFunctions(context, "42;", "239;");
-  i::FLAG_allow_natives_syntax = false;
+  i::v8_flags.allow_natives_syntax = false;
 
   // Basic test cases.
   PatchFunctions(context, "42;", "2;");
@@ -349,7 +350,7 @@ TEST(LiveEditPatchFunctions) {
                ->Value(),
            6);
 
-  i::FLAG_allow_natives_syntax = true;
+  i::v8_flags.allow_natives_syntax = true;
   PatchFunctions(context,
                  "function foo(a, b) { return a + b; }; "
                  "%PrepareFunctionForOptimization(foo);"
@@ -360,7 +361,7 @@ TEST(LiveEditPatchFunctions) {
                .ToLocalChecked()
                ->Value(),
            35);
-  i::FLAG_allow_natives_syntax = false;
+  i::v8_flags.allow_natives_syntax = false;
 
   // Check inner function.
   PatchFunctions(
@@ -543,13 +544,14 @@ TEST(LiveEditFunctionExpression) {
   v8::Local<v8::Function> f =
       script->Run(context).ToLocalChecked().As<v8::Function>();
   i::Handle<i::Script> i_script(
-      i::Script::cast(v8::Utils::OpenHandle(*script)->shared().script()),
+      i::Cast<i::Script>(
+          v8::Utils::OpenDirectHandle(*script)->shared()->script()),
       i_isolate);
   debug::LiveEditResult result;
   LiveEdit::PatchScript(
       i_isolate, i_script,
       i_isolate->factory()->NewStringFromAsciiChecked(updated_source), false,
-      &result);
+      false, &result);
   CHECK_EQ(result.status, debug::LiveEditResult::OK);
   {
     v8::Local<v8::String> result_str =

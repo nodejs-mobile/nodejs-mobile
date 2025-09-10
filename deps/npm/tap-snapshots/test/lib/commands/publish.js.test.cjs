@@ -6,7 +6,7 @@
  */
 'use strict'
 exports[`test/lib/commands/publish.js TAP _auth config default registry > new package version 1`] = `
-+ test-package@1.0.0
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP bare _auth and registry config > new package version 1`] = `
@@ -15,15 +15,15 @@ exports[`test/lib/commands/publish.js TAP bare _auth and registry config > new p
 
 exports[`test/lib/commands/publish.js TAP dry-run > must match snapshot 1`] = `
 Array [
-  "package: test-package@1.0.0",
+  "package: @npmcli/test-package@1.0.0",
   "Tarball Contents",
-  "87B package.json",
+  "95B package.json",
   "Tarball Details",
-  "name: test-package",
+  "name: @npmcli/test-package",
   "version: 1.0.0",
-  "filename: test-package-1.0.0.tgz",
+  "filename: npmcli-test-package-1.0.0.tgz",
   "package size: {size}",
-  "unpacked size: 87 B",
+  "unpacked size: 95 B",
   "shasum: {sha}",
   "integrity: {integrity}
   "total files: 1",
@@ -76,7 +76,7 @@ exports[`test/lib/commands/publish.js TAP has token auth for scope configured re
 `
 
 exports[`test/lib/commands/publish.js TAP ignore-scripts > new package version 1`] = `
-+ test-package@1.0.0
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP json > must match snapshot 1`] = `
@@ -87,14 +87,14 @@ Array [
 
 exports[`test/lib/commands/publish.js TAP json > new package json 1`] = `
 {
-  "id": "test-package@1.0.0",
-  "name": "test-package",
+  "id": "@npmcli/test-package@1.0.0",
+  "name": "@npmcli/test-package",
   "version": "1.0.0",
   "size": "{size}",
-  "unpackedSize": 87,
+  "unpackedSize": 95,
   "shasum": "{sha}",
   "integrity": "{integrity}",
-  "filename": "test-package-1.0.0.tgz",
+  "filename": "npmcli-test-package-1.0.0.tgz",
   "files": [
     {
       "path": "package.json",
@@ -174,7 +174,6 @@ Object {
     "man/man1/npm-fund.1",
     "man/man1/npm-help-search.1",
     "man/man1/npm-help.1",
-    "man/man1/npm-hook.1",
     "man/man1/npm-init.1",
     "man/man1/npm-install-ci-test.1",
     "man/man1/npm-install-test.1",
@@ -198,7 +197,7 @@ Object {
     "man/man1/npm-repo.1",
     "man/man1/npm-restart.1",
     "man/man1/npm-root.1",
-    "man/man1/npm-run-script.1",
+    "man/man1/npm-run.1",
     "man/man1/npm-sbom.1",
     "man/man1/npm-search.1",
     "man/man1/npm-shrinkwrap.1",
@@ -209,6 +208,7 @@ Object {
     "man/man1/npm-team.1",
     "man/man1/npm-test.1",
     "man/man1/npm-token.1",
+    "man/man1/npm-undeprecate.1",
     "man/man1/npm-uninstall.1",
     "man/man1/npm-unpublish.1",
     "man/man1/npm-unstar.1",
@@ -249,22 +249,17 @@ Object {
 `
 
 exports[`test/lib/commands/publish.js TAP no auth dry-run > must match snapshot 1`] = `
-+ test-package@1.0.0
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP no auth dry-run > warns about auth being needed 1`] = `
 Array [
-  "publish npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
-  String(
-    publish errors corrected:
-    publish Removed invalid "scripts"
-  ),
   "This command requires you to be logged in to https://registry.npmjs.org/ (dry-run)",
 ]
 `
 
 exports[`test/lib/commands/publish.js TAP prioritize CLI flags over publishConfig > new package version 1`] = `
-+ test-package@1.0.0
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP public access > must match snapshot 1`] = `
@@ -290,11 +285,20 @@ exports[`test/lib/commands/publish.js TAP public access > new package version 1`
 `
 
 exports[`test/lib/commands/publish.js TAP re-loads publishConfig.registry if added during script process > new package version 1`] = `
-+ test-package@1.0.0
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP respects publishConfig.registry, runs appropriate scripts > new package version 1`] = `
 
+> @npmcli/test-package@1.0.0 prepublishOnly
+> touch scripts-prepublishonly
+
+> @npmcli/test-package@1.0.0 publish
+> touch scripts-publish
+
+> @npmcli/test-package@1.0.0 postpublish
+> touch scripts-postpublish
++ @npmcli/test-package@1.0.0
 `
 
 exports[`test/lib/commands/publish.js TAP restricted access > must match snapshot 1`] = `
@@ -359,25 +363,13 @@ Array [
   "\\u001b[94mpublish\\u001b[39m npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
   String(
     \\u001b[94mpublish\\u001b[39m errors corrected:
-    \\u001b[94mpublish\\u001b[39m Removed invalid "scripts"
     \\u001b[94mpublish\\u001b[39m "repository" was changed from a string to an object
   ),
   "\\u001b[94mpublish\\u001b[39m npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
   String(
     \\u001b[94mpublish\\u001b[39m errors corrected:
-    \\u001b[94mpublish\\u001b[39m Removed invalid "scripts"
     \\u001b[94mpublish\\u001b[39m "repository" was changed from a string to an object
     \\u001b[94mpublish\\u001b[39m "repository.url" was normalized to "git+https://github.com/npm/workspace-b.git"
-  ),
-  "\\u001b[94mpublish\\u001b[39m npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
-  String(
-    \\u001b[94mpublish\\u001b[39m errors corrected:
-    \\u001b[94mpublish\\u001b[39m Removed invalid "scripts"
-  ),
-  "\\u001b[94mpublish\\u001b[39m npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
-  String(
-    \\u001b[94mpublish\\u001b[39m errors corrected:
-    \\u001b[94mpublish\\u001b[39m Removed invalid "scripts"
   ),
   "\\u001b[94mpublish\\u001b[39m Skipping workspace \\u001b[36mworkspace-p\\u001b[39m, marked as \\u001b[1mprivate\\u001b[22m",
 ]
@@ -394,28 +386,24 @@ Array [
   "publish npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
   String(
     publish errors corrected:
-    publish Removed invalid "scripts"
     publish "repository" was changed from a string to an object
   ),
   "publish npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
   String(
     publish errors corrected:
-    publish Removed invalid "scripts"
     publish "repository" was changed from a string to an object
     publish "repository.url" was normalized to "git+https://github.com/npm/workspace-b.git"
   ),
-  "publish npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
-  String(
-    publish errors corrected:
-    publish Removed invalid "scripts"
-  ),
-  "publish npm auto-corrected some errors in your package.json when publishing.  Please run \\"npm pkg fix\\" to address these errors.",
-  String(
-    publish errors corrected:
-    publish Removed invalid "scripts"
-  ),
   "publish Skipping workspace workspace-p, marked as private",
 ]
+`
+
+exports[`test/lib/commands/publish.js TAP workspaces all workspaces - some marked private > one marked private 1`] = `
++ workspace-a@1.2.3-a
+`
+
+exports[`test/lib/commands/publish.js TAP workspaces differet package spec > publish different package spec 1`] = `
++ pkg@1.2.3
 `
 
 exports[`test/lib/commands/publish.js TAP workspaces json > all workspaces in json 1`] = `

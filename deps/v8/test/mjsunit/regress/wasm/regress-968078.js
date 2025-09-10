@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 (function() {
@@ -24,7 +22,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
     return Array.from(bytes.trunc_buffer());
   }
   var builder = new WasmModuleBuilder();
-  builder.addMemory(12, 12, false);
+  builder.addMemory(12, 12);
   builder.addFunction("foo", kSig_v_iii)
     .addBody([].concat([
       kExprBlock, kWasmVoid,

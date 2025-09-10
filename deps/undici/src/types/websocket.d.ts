@@ -1,10 +1,9 @@
 /// <reference types="node" />
 
 import type { Blob } from 'buffer'
+import type { ReadableStream, WritableStream } from 'stream/web'
 import type { MessagePort } from 'worker_threads'
 import {
-  EventTarget,
-  Event,
   EventInit,
   EventListenerOptions,
   AddEventListenerOptions,
@@ -17,14 +16,14 @@ export type BinaryType = 'blob' | 'arraybuffer'
 
 interface WebSocketEventMap {
   close: CloseEvent
-  error: Event
+  error: ErrorEvent
   message: MessageEvent
   open: Event
 }
 
 interface WebSocket extends EventTarget {
   binaryType: BinaryType
-  
+
   readonly bufferedAmount: number
   readonly extensions: string
 
@@ -124,8 +123,64 @@ export declare const MessageEvent: {
   new<T>(type: string, eventInitDict?: MessageEventInit<T>): MessageEvent<T>
 }
 
+interface ErrorEventInit extends EventInit {
+  message?: string
+  filename?: string
+  lineno?: number
+  colno?: number
+  error?: any
+}
+
+interface ErrorEvent extends Event {
+  readonly message: string
+  readonly filename: string
+  readonly lineno: number
+  readonly colno: number
+  readonly error: Error
+}
+
+export declare const ErrorEvent: {
+  prototype: ErrorEvent
+  new (type: string, eventInitDict?: ErrorEventInit): ErrorEvent
+}
+
 interface WebSocketInit {
   protocols?: string | string[],
   dispatcher?: Dispatcher,
   headers?: HeadersInit
 }
+
+interface WebSocketStreamOptions {
+  protocols?: string | string[]
+  signal?: AbortSignal
+}
+
+interface WebSocketCloseInfo {
+  closeCode: number
+  reason: string
+}
+
+interface WebSocketStream {
+  closed: Promise<WebSocketCloseInfo>
+  opened: Promise<{
+    extensions: string
+    protocol: string
+    readable: ReadableStream
+    writable: WritableStream
+  }>
+  url: string
+}
+
+export declare const WebSocketStream: {
+  prototype: WebSocketStream
+  new (url: string | URL, options?: WebSocketStreamOptions): WebSocketStream
+}
+
+interface WebSocketError extends Event, WebSocketCloseInfo {}
+
+export declare const WebSocketError: {
+  prototype: WebSocketError
+  new (type: string, init?: WebSocketCloseInfo): WebSocketError
+}
+
+export declare const ping: (ws: WebSocket, body?: Buffer) => void

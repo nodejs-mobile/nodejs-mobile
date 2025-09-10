@@ -8,11 +8,11 @@
 #include <limits>
 
 #include "src/codegen/tick-counter.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/js-heap-broker.h"
 #include "src/compiler/node-observer.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/compiler/verifier.h"
 
 namespace v8 {
@@ -39,9 +39,9 @@ Reduction Reducer::Reduce(Node* node,
   return reduction;
 }
 
-GraphReducer::GraphReducer(Zone* zone, Graph* graph, TickCounter* tick_counter,
-                           JSHeapBroker* broker, Node* dead,
-                           ObserveNodeManager* observe_node_manager)
+GraphReducer::GraphReducer(Zone* zone, TFGraph* graph,
+                           TickCounter* tick_counter, JSHeapBroker* broker,
+                           Node* dead, ObserveNodeManager* observe_node_manager)
     : graph_(graph),
       dead_(dead),
       state_(graph, 4),
@@ -109,7 +109,7 @@ Reduction GraphReducer::Reduce(Node* const node) {
         // {replacement} == {node} represents an in-place reduction. Rerun
         // all the other reducers for this node, as now there may be more
         // opportunities for reduction.
-        if (FLAG_trace_turbo_reduction) {
+        if (v8_flags.trace_turbo_reduction) {
           UnparkedScopeIfNeeded unparked(broker_);
           // TODO(neis): Disallow racy handle dereference once we stop
           // supporting --no-local-heaps --no-concurrent-inlining.
@@ -122,7 +122,7 @@ Reduction GraphReducer::Reduce(Node* const node) {
         continue;
       } else {
         // {node} was replaced by another node.
-        if (FLAG_trace_turbo_reduction) {
+        if (v8_flags.trace_turbo_reduction) {
           UnparkedScopeIfNeeded unparked(broker_);
           // TODO(neis): Disallow racy handle dereference once we stop
           // supporting --no-local-heaps --no-concurrent-inlining.

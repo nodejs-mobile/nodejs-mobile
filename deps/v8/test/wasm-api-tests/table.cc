@@ -8,27 +8,28 @@ namespace v8 {
 namespace internal {
 namespace wasm {
 
-using ::wasm::FUNCREF;
+using ::wasm::Extern;
 using ::wasm::Limits;
 using ::wasm::TableType;
+using ::wasm::ValKind::FUNCREF;
 
 namespace {
 
-own<Trap> Negate(const Val args[], Val results[]) {
+own<Trap> Negate(const vec<Val>& args, vec<Val>& results) {
   results[0] = Val(-args[0].i32());
   return nullptr;
 }
 
 void ExpectTrap(const Func* func, int arg1, int arg2) {
-  Val args[2] = {Val::i32(arg1), Val::i32(arg2)};
-  Val results[1];
+  vec<Val> args = vec<Val>::make(Val::i32(arg1), Val::i32(arg2));
+  vec<Val> results = vec<Val>::make_uninitialized(1);
   own<Trap> trap = func->call(args, results);
   EXPECT_NE(nullptr, trap);
 }
 
 void ExpectResult(int expected, const Func* func, int arg1, int arg2) {
-  Val args[2] = {Val::i32(arg1), Val::i32(arg2)};
-  Val results[1];
+  vec<Val> args = vec<Val>::make(Val::i32(arg1), Val::i32(arg2));
+  vec<Val> results = vec<Val>::make_uninitialized(1);
   own<Trap> trap = func->call(args, results);
   EXPECT_EQ(nullptr, trap);
   EXPECT_EQ(expected, results[0].i32());
@@ -39,17 +40,18 @@ void ExpectResult(int expected, const Func* func, int arg1, int arg2) {
 TEST_F(WasmCapiTest, Table) {
   const uint32_t table_index = builder()->AddTable(kWasmFuncRef, 2, 10);
   builder()->AddExport(base::CStrVector("table"), kExternalTable, table_index);
-  const uint32_t sig_i_i_index = builder()->AddSignature(wasm_i_i_sig());
+  const ModuleTypeIndex sig_i_i_index =
+      builder()->AddSignature(wasm_i_i_sig(), true);
   ValueType reps[] = {kWasmI32, kWasmI32, kWasmI32};
   FunctionSig call_sig(1, 2, reps);
-  byte call_code[] = {
+  uint8_t call_code[] = {
       WASM_CALL_INDIRECT(sig_i_i_index, WASM_LOCAL_GET(0), WASM_LOCAL_GET(1))};
   AddExportedFunction(base::CStrVector("call_indirect"), call_code,
                       sizeof(call_code), &call_sig);
-  byte f_code[] = {WASM_LOCAL_GET(0)};
+  uint8_t f_code[] = {WASM_LOCAL_GET(0)};
   AddExportedFunction(base::CStrVector("f"), f_code, sizeof(f_code),
                       wasm_i_i_sig());
-  byte g_code[] = {WASM_I32V_1(42)};
+  uint8_t g_code[] = {WASM_I32V_1(42)};
   AddExportedFunction(base::CStrVector("g"), g_code, sizeof(g_code),
                       wasm_i_i_sig());
   // Set table[1] to {f}, which has function index 1.
@@ -57,7 +59,8 @@ TEST_F(WasmCapiTest, Table) {
       table_index, 1, 1,
       WasmModuleBuilder::WasmElemSegment::kRelativeToImports);
 
-  Instantiate(nullptr);
+  vec<Extern*> imports = vec<Extern*>::make_uninitialized();
+  Instantiate(imports);
 
   Table* table = GetExportedTable(0);
   Func* call_indirect = GetExportedFunction(1);

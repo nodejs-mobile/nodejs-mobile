@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <cerrno>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -395,9 +396,9 @@ class Runner {
       ScratchDigits X(size);
       GenerateRandom(X);
       for (int radix = 2; radix <= 36; radix++) {
-        int chars_required = ToStringResultLength(X, radix, false);
-        int result_len = chars_required;
-        int reference_len = chars_required;
+        uint32_t chars_required = ToStringResultLength(X, radix, false);
+        uint32_t result_len = chars_required;
+        uint32_t reference_len = chars_required;
         std::unique_ptr<char[]> result(new char[result_len]);
         std::unique_ptr<char[]> reference(new char[reference_len]);
         processor()->ToStringImpl(result.get(), &result_len, X, radix, false,
@@ -457,15 +458,15 @@ class Runner {
       ScratchDigits X(size);
       GenerateRandom(X);
       for (int bits = 1; bits <= 5; bits++) {
-        int radix = 1 << bits;
-        int chars_required = ToStringResultLength(X, radix, false);
-        int string_len = chars_required;
+        uint32_t radix = 1 << bits;
+        uint32_t chars_required = ToStringResultLength(X, radix, false);
+        uint32_t string_len = chars_required;
         std::unique_ptr<char[]> chars(new char[string_len]);
         processor()->ToStringImpl(chars.get(), &string_len, X, radix, false,
                                   true);
         // Fill any remaining allocated characters with garbage to test that
         // too.
-        for (int i = string_len; i < chars_required; i++) {
+        for (uint32_t i = string_len; i < chars_required; i++) {
           chars[i] = '?';
         }
         const char* start = chars.get();
@@ -481,6 +482,20 @@ class Runner {
     }
   }
 
+  template <typename I>
+  bool ParseInt(char* s, I* out) {
+    char* end;
+    if (s[0] == '\0') return false;
+    errno = 0;
+    long l = strtol(s, &end, 10);
+    if (errno != 0 || *end != '\0' || l > std::numeric_limits<I>::max() ||
+        l < std::numeric_limits<I>::min()) {
+      return false;
+    }
+    *out = static_cast<I>(l);
+    return true;
+  }
+
   int ParseOptions(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
       if (strcmp(argv[i], "--list") == 0) {
@@ -490,14 +505,16 @@ class Runner {
         return 0;
       } else if (strcmp(argv[i], "--random-seed") == 0 ||
                  strcmp(argv[i], "--random_seed") == 0) {
-        random_seed_ = std::stoi(argv[++i]);
+        if (++i == argc || !ParseInt(argv[i], &random_seed_)) {
+          return PrintHelp(argv);
+        }
       } else if (strncmp(argv[i], "--random-seed=", 14) == 0 ||
                  strncmp(argv[i], "--random_seed=", 14) == 0) {
-        random_seed_ = std::stoi(argv[i] + 14);
+        if (!ParseInt(argv[i] + 14, &random_seed_)) return PrintHelp(argv);
       } else if (strcmp(argv[i], "--runs") == 0) {
-        runs_ = std::stoi(argv[++i]);
+        if (++i == argc || !ParseInt(argv[i], &runs_)) return PrintHelp(argv);
       } else if (strncmp(argv[i], "--runs=", 7) == 0) {
-        runs_ = std::stoi(argv[i] + 7);
+        if (!ParseInt(argv[i] + 7, &runs_)) return PrintHelp(argv);
       }
 #define TEST(kName, name)                \
   else if (strcmp(argv[i], name) == 0) { \

@@ -46,6 +46,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_Mul32:
     case kPPC_Mul32WithHigh32:
     case kPPC_Mul64:
+    case kPPC_MulHighS64:
+    case kPPC_MulHighU64:
     case kPPC_MulHigh32:
     case kPPC_MulHighU32:
     case kPPC_MulPair:
@@ -103,6 +105,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_DoubleToFloat32:
     case kPPC_DoubleExtractLowWord32:
     case kPPC_DoubleExtractHighWord32:
+    case kPPC_DoubleFromWord32Pair:
     case kPPC_DoubleInsertLowWord32:
     case kPPC_DoubleInsertHighWord32:
     case kPPC_DoubleConstruct:
@@ -112,9 +115,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_BitcastDoubleToInt64:
     case kPPC_ByteRev32:
     case kPPC_ByteRev64:
-    case kPPC_F64x2Splat:
-    case kPPC_F64x2ExtractLane:
-    case kPPC_F64x2ReplaceLane:
     case kPPC_F64x2Add:
     case kPPC_F64x2Sub:
     case kPPC_F64x2Mul:
@@ -138,9 +138,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_F64x2ConvertLowI32x4S:
     case kPPC_F64x2ConvertLowI32x4U:
     case kPPC_F64x2PromoteLowF32x4:
-    case kPPC_F32x4Splat:
-    case kPPC_F32x4ExtractLane:
-    case kPPC_F32x4ReplaceLane:
     case kPPC_F32x4Add:
     case kPPC_F32x4Sub:
     case kPPC_F32x4Mul:
@@ -150,8 +147,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_F32x4Le:
     case kPPC_F32x4Abs:
     case kPPC_F32x4Neg:
-    case kPPC_F32x4RecipApprox:
-    case kPPC_F32x4RecipSqrtApprox:
     case kPPC_F32x4Sqrt:
     case kPPC_F32x4SConvertI32x4:
     case kPPC_F32x4UConvertI32x4:
@@ -166,9 +161,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_F32x4Pmin:
     case kPPC_F32x4Pmax:
     case kPPC_F32x4DemoteF64x2Zero:
-    case kPPC_I64x2Splat:
-    case kPPC_I64x2ExtractLane:
-    case kPPC_I64x2ReplaceLane:
     case kPPC_I64x2Add:
     case kPPC_I64x2Sub:
     case kPPC_I64x2Mul:
@@ -190,9 +182,6 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_I64x2ExtMulLowI32x4U:
     case kPPC_I64x2ExtMulHighI32x4U:
     case kPPC_I64x2Abs:
-    case kPPC_I32x4Splat:
-    case kPPC_I32x4ExtractLane:
-    case kPPC_I32x4ReplaceLane:
     case kPPC_I32x4Add:
     case kPPC_I32x4Sub:
     case kPPC_I32x4Mul:
@@ -227,10 +216,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_I32x4ExtMulHighI16x8U:
     case kPPC_I32x4TruncSatF64x2SZero:
     case kPPC_I32x4TruncSatF64x2UZero:
-    case kPPC_I16x8Splat:
-    case kPPC_I16x8ExtractLaneU:
-    case kPPC_I16x8ExtractLaneS:
-    case kPPC_I16x8ReplaceLane:
+    case kPPC_I32x4DotI8x16AddS:
     case kPPC_I16x8Add:
     case kPPC_I16x8Sub:
     case kPPC_I16x8Mul:
@@ -268,10 +254,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_I16x8ExtMulHighI8x16S:
     case kPPC_I16x8ExtMulLowI8x16U:
     case kPPC_I16x8ExtMulHighI8x16U:
-    case kPPC_I8x16Splat:
-    case kPPC_I8x16ExtractLaneU:
-    case kPPC_I8x16ExtractLaneS:
-    case kPPC_I8x16ReplaceLane:
+    case kPPC_I16x8DotI8x16S:
     case kPPC_I8x16Add:
     case kPPC_I8x16Sub:
     case kPPC_I8x16MinS:
@@ -314,6 +297,14 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_S128Not:
     case kPPC_S128Select:
     case kPPC_S128AndNot:
+    case kPPC_FExtractLane:
+    case kPPC_IExtractLane:
+    case kPPC_IExtractLaneU:
+    case kPPC_IExtractLaneS:
+    case kPPC_FReplaceLane:
+    case kPPC_IReplaceLane:
+    case kPPC_FSplat:
+    case kPPC_ISplat:
     case kPPC_LoadReverseSimd128RR:
       return kNoOpcodeFlags;
 
@@ -331,8 +322,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_LoadSimd128:
     case kPPC_Peek:
     case kPPC_LoadDecompressTaggedSigned:
-    case kPPC_LoadDecompressTaggedPointer:
-    case kPPC_LoadDecompressAnyTagged:
+    case kPPC_LoadDecompressTagged:
+    case kPPC_LoadDecodeSandboxedPointer:
     case kPPC_S128Load8Splat:
     case kPPC_S128Load16Splat:
     case kPPC_S128Load32Splat:
@@ -361,6 +352,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kPPC_StoreDouble:
     case kPPC_StoreSimd128:
     case kPPC_StoreCompressTagged:
+    case kPPC_StoreIndirectPointer:
+    case kPPC_StoreEncodeSandboxedPointer:
     case kPPC_Push:
     case kPPC_PushFrame:
     case kPPC_StoreToStackSlot:

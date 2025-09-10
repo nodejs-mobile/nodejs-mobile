@@ -11,6 +11,7 @@ const assert = require('assert');
 const expected_keys = [
   'ares',
   'brotli',
+  'zstd',
   'modules',
   'uv',
   'v8',
@@ -20,10 +21,11 @@ const expected_keys = [
   'llhttp',
   'uvwasi',
   'acorn',
+  'simdjson',
   'simdutf',
   'ada',
   'cjs_module_lexer',
-  'base64',
+  'nbytes',
 ];
 
 if (common.isAndroid || common.isIOS) {
@@ -31,13 +33,20 @@ if (common.isAndroid || common.isIOS) {
 }
 
 const hasUndici = process.config.variables.node_builtin_shareable_builtins.includes('deps/undici/undici.js');
+const hasAmaro = process.config.variables.node_builtin_shareable_builtins.includes('deps/amaro/dist/index.js');
 
+if (process.config.variables.node_use_amaro) {
+  if (hasAmaro) {
+    expected_keys.push('amaro');
+  }
+}
 if (hasUndici) {
   expected_keys.push('undici');
 }
 
 if (common.hasCrypto) {
   expected_keys.push('openssl');
+  expected_keys.push('ncrypto');
 }
 
 if (common.hasQuic) {
@@ -50,6 +59,10 @@ if (common.hasIntl) {
   expected_keys.push('cldr');
   expected_keys.push('tz');
   expected_keys.push('unicode');
+}
+
+if (common.hasSQLite) {
+  expected_keys.push('sqlite');
 }
 
 expected_keys.sort();
@@ -67,7 +80,9 @@ assert.match(process.versions.brotli, commonTemplate);
 assert.match(process.versions.llhttp, commonTemplate);
 assert.match(process.versions.node, commonTemplate);
 assert.match(process.versions.uv, commonTemplate);
+assert.match(process.versions.nbytes, commonTemplate);
 assert.match(process.versions.zlib, /^\d+(?:\.\d+){1,3}(?:-.*)?$/);
+assert.match(process.versions.zstd, commonTemplate);
 
 if (hasUndici) {
   assert.match(process.versions.undici, commonTemplate);
@@ -81,10 +96,12 @@ assert.match(process.versions.modules, /^\d+$/);
 assert.match(process.versions.cjs_module_lexer, commonTemplate);
 
 if (common.hasCrypto) {
+  const { hasOpenSSL3 } = require('../common/crypto');
+  assert.match(process.versions.ncrypto, commonTemplate);
   if (process.config.variables.node_shared_openssl) {
     assert.ok(process.versions.openssl);
   } else {
-    const versionRegex = common.hasOpenSSL3 ?
+    const versionRegex = hasOpenSSL3 ?
       // The following also matches a development version of OpenSSL 3.x which
       // can be in the format '3.0.0-alpha4-dev'. This can be handy when
       // building and linking against the main development branch of OpenSSL.
@@ -107,15 +124,15 @@ if (hasUndici) {
   // nodejs-mobile patch to hard code this version since we don't have access to
   // root-level "deps" folder inside the mobile app
   // const undici = require('../../deps/undici/src/package.json');
-  const expectedUndiciVersion = '5.22.1'; // undici.version;
+  const expectedUndiciVersion = '7.12.0'; // undici.version;
   assert.strictEqual(process.versions.undici, expectedUndiciVersion);
 }
 
 // nodejs-mobile patch to hard code this version since we don't have access to
 // root-level "deps" folder inside the mobile app
-const expectedAcornVersion = '8.11.3'; // acorn.version;
+const expectedAcornVersion = '8.15.0'; // acorn.version;
 assert.strictEqual(process.versions.acorn, expectedAcornVersion);
 // nodejs-mobile patch to hard code this version since we don't have access to
 // root-level "deps" folder inside the mobile app
-const expectedCjsModuleLexerVersion = '1.2.2'; // cjs_module_lexer.version;
+const expectedCjsModuleLexerVersion = '2.1.0'; // cjs_module_lexer.version;
 assert.strictEqual(process.versions.cjs_module_lexer, expectedCjsModuleLexerVersion);

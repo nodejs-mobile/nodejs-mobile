@@ -49,11 +49,11 @@ fs.open(__filename, 'r', 0, common.mustSucceed());
 fs.open(__filename, 'r', null, common.mustSucceed());
 
 async function promise() {
-  await fs.promises.open(__filename);
-  await fs.promises.open(__filename, 'r');
+  await (await fs.promises.open(__filename)).close();
+  await (await fs.promises.open(__filename, 'r')).close();
 }
 
-promise().then(common.mustCall()).catch(common.mustNotCall());
+promise().then(common.mustCall());
 
 assert.throws(
   () => fs.open(__filename, 'r', 'boom', common.mustNotCall()),
@@ -94,7 +94,7 @@ for (const extra of [[], ['r'], ['r', 0], ['r', 0, 'bad callback']]) {
       code: 'ERR_INVALID_ARG_TYPE',
       name: 'TypeError'
     }
-  );
+  ).then(common.mustCall());
 });
 
 // Check invalid modes.
@@ -116,5 +116,5 @@ for (const extra of [[], ['r'], ['r', 0], ['r', 0, 'bad callback']]) {
     {
       code: 'ERR_INVALID_ARG_TYPE'
     }
-  );
+  ).then(common.mustCall());
 });

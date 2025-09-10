@@ -36,10 +36,6 @@
 
 ##############################################################################
 ['variant == stress', {
-  # TODO(turbofan): Functions with eval or debugger now get optimized
-  # with Turbofan, which has issues with the debugger issues.
-  'debug/debug-evaluate-locals': [FAIL],
-
   # Very slow in stress mode.
   'regress/regress-2318': [SKIP],
 
@@ -68,10 +64,8 @@
   'debug/es8/async-debug-caught-exception-cases3': [SKIP],
   'debug/es8/async-function-debug-scopes': [SKIP],
 
-  # https://crbug.com/v8/8141
-  'debug/debug-liveedit-1': [SKIP],
-  'debug/es6/debug-liveedit-new-target-3': [SKIP],
-  'debug/side-effect/debug-evaluate-no-side-effect-control': [SKIP],
+  # https://crbug.com/v8/14420
+  'debug/side-effect/debug-evaluate-no-side-effect-builtins': [SKIP],
 }],  # 'gc_stress == True'
 
 ##############################################################################
@@ -81,7 +75,7 @@
 }],  # 'gc_fuzzer'
 
 ##############################################################################
-['predictable == True', {
+['verify_predictable', {
   # https://crbug.com/v8/8147
   'debug/debug-liveedit-*': [SKIP],
   'debug/debug-set-variable-value': [SKIP],
@@ -90,7 +84,10 @@
   'debug/regress/regress-opt-after-debug-deopt': [SKIP],
   'debug/regress/regress-prepare-break-while-recompile': [SKIP],
   'regress/regress-7421': [SKIP],
-}],  # 'predictable == True'
+
+  # https://crbug.com/374722652
+  'regress/regress-374013413': [SKIP],
+}],  # 'verify_predictable'
 
 ##############################################################################
 ['variant == no_wasm_traps', {
@@ -121,11 +118,11 @@
   'debug/wasm/debug-enabled-tier-down-wasm-unsupported-liftoff': [SKIP],
 }],
 ##############################################################################
-['arch == s390 or arch == s390x', {
+['arch == s390x', {
 
   # Stack manipulations in LiveEdit is not implemented for this arch.
   'debug/debug-liveedit-check-stack': [SKIP],
-}],  # 'arch == s390 or arch == s390x'
+}],  # 'arch == s390x'
 
 ##############################################################################
 # TODO(v8:7777): Change this once wasm is supported in jitless mode.
@@ -137,25 +134,14 @@
 
 ##############################################################################
 # Tests requiring Sparkplug.
-['arch not in (x64, arm64, ia32, arm, mips64el, mipsel, loong64)', {
+['arch not in (x64, arm64, ia32, arm, mips64el, loong64)', {
   'regress/regress-crbug-1199681': [SKIP],
+  'debug/regress/regress-crbug-1357554': [SKIP]
 }],
 
 ################################################################################
 ['variant == stress_snapshot', {
   '*': [SKIP],  # only relevant for mjsunit tests.
 }],
-
-################################################################################
-['third_party_heap', {
-  # Requires --concurrent_recompilation
-  'debug/regress/regress-opt-after-debug-deopt': [SKIP],
-  'debug/regress/regress-prepare-break-while-recompile': [SKIP],
-  'regress/regress-7421': [SKIP],
-  # Requires a second isolate
-  'debug/debug-step': [SKIP],
-  'debug/deserialize-script-id': [SKIP],
-  'regress/regress-crbug-507070': [SKIP],
-}], # third_party_heap
 
 ]

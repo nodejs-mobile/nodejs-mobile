@@ -4,6 +4,10 @@
 
 #include "src/objects/type-hints.h"
 
+#include <ostream>
+
+#include "src/base/logging.h"
+
 namespace v8 {
 namespace internal {
 
@@ -15,14 +19,20 @@ std::ostream& operator<<(std::ostream& os, BinaryOperationHint hint) {
       return os << "SignedSmall";
     case BinaryOperationHint::kSignedSmallInputs:
       return os << "SignedSmallInputs";
+    case BinaryOperationHint::kAdditiveSafeInteger:
+      return os << "AdditiveSafeInteger";
     case BinaryOperationHint::kNumber:
       return os << "Number";
     case BinaryOperationHint::kNumberOrOddball:
       return os << "NumberOrOddball";
     case BinaryOperationHint::kString:
       return os << "String";
+    case BinaryOperationHint::kStringOrStringWrapper:
+      return os << "StringOrStringWrapper";
     case BinaryOperationHint::kBigInt:
       return os << "BigInt";
+    case BinaryOperationHint::kBigInt64:
+      return os << "BigInt64";
     case BinaryOperationHint::kAny:
       return os << "Any";
   }
@@ -49,6 +59,8 @@ std::ostream& operator<<(std::ostream& os, CompareOperationHint hint) {
       return os << "Symbol";
     case CompareOperationHint::kBigInt:
       return os << "BigInt";
+    case CompareOperationHint::kBigInt64:
+      return os << "BigInt64";
     case CompareOperationHint::kReceiver:
       return os << "Receiver";
     case CompareOperationHint::kReceiverOrNullOrUndefined:

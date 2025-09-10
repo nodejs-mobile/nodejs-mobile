@@ -50,33 +50,31 @@ enum PropertyFilter {
   ONLY_CONFIGURABLE = 4,
   SKIP_STRINGS = 8,
   SKIP_SYMBOLS = 16,
-  ONLY_ALL_CAN_READ = 32,
-  PRIVATE_NAMES_ONLY = 64,
+  PRIVATE_NAMES_ONLY = 32,
   ENUMERABLE_STRINGS = ONLY_ENUMERABLE | SKIP_SYMBOLS,
 };
 // Enable fast comparisons of PropertyAttributes against PropertyFilters.
-STATIC_ASSERT(ALL_PROPERTIES == static_cast<PropertyFilter>(NONE));
-STATIC_ASSERT(ONLY_WRITABLE == static_cast<PropertyFilter>(READ_ONLY));
-STATIC_ASSERT(ONLY_ENUMERABLE == static_cast<PropertyFilter>(DONT_ENUM));
-STATIC_ASSERT(ONLY_CONFIGURABLE == static_cast<PropertyFilter>(DONT_DELETE));
-STATIC_ASSERT(((SKIP_STRINGS | SKIP_SYMBOLS | ONLY_ALL_CAN_READ) &
-               ALL_ATTRIBUTES_MASK) == 0);
-STATIC_ASSERT(ALL_PROPERTIES ==
+static_assert(ALL_PROPERTIES == static_cast<PropertyFilter>(NONE));
+static_assert(ONLY_WRITABLE == static_cast<PropertyFilter>(READ_ONLY));
+static_assert(ONLY_ENUMERABLE == static_cast<PropertyFilter>(DONT_ENUM));
+static_assert(ONLY_CONFIGURABLE == static_cast<PropertyFilter>(DONT_DELETE));
+static_assert(((SKIP_STRINGS | SKIP_SYMBOLS) & ALL_ATTRIBUTES_MASK) == 0);
+static_assert(ALL_PROPERTIES ==
               static_cast<PropertyFilter>(v8::PropertyFilter::ALL_PROPERTIES));
-STATIC_ASSERT(ONLY_WRITABLE ==
+static_assert(ONLY_WRITABLE ==
               static_cast<PropertyFilter>(v8::PropertyFilter::ONLY_WRITABLE));
-STATIC_ASSERT(ONLY_ENUMERABLE ==
+static_assert(ONLY_ENUMERABLE ==
               static_cast<PropertyFilter>(v8::PropertyFilter::ONLY_ENUMERABLE));
-STATIC_ASSERT(ONLY_CONFIGURABLE == static_cast<PropertyFilter>(
+static_assert(ONLY_CONFIGURABLE == static_cast<PropertyFilter>(
                                        v8::PropertyFilter::ONLY_CONFIGURABLE));
-STATIC_ASSERT(SKIP_STRINGS ==
+static_assert(SKIP_STRINGS ==
               static_cast<PropertyFilter>(v8::PropertyFilter::SKIP_STRINGS));
-STATIC_ASSERT(SKIP_SYMBOLS ==
+static_assert(SKIP_SYMBOLS ==
               static_cast<PropertyFilter>(v8::PropertyFilter::SKIP_SYMBOLS));
 
 // Assert that kPropertyAttributesBitsCount value matches the definition of
 // ALL_ATTRIBUTES_MASK.
-STATIC_ASSERT((ALL_ATTRIBUTES_MASK == (READ_ONLY | DONT_ENUM | DONT_DELETE)) ==
+static_assert((ALL_ATTRIBUTES_MASK == (READ_ONLY | DONT_ENUM | DONT_DELETE)) ==
               (kPropertyAttributesBitsCount == 3));
 
 class Smi;
@@ -228,11 +226,15 @@ class Representation {
     UNREACHABLE();
   }
 
+  bool operator==(const Representation& other) const {
+    return kind_ == other.kind_;
+  }
+
  private:
   explicit constexpr Representation(Kind k) : kind_(k) {}
 
   // Make sure kind fits in int8.
-  STATIC_ASSERT(kNumRepresentations <= (1 << kBitsPerByte));
+  static_assert(kNumRepresentations <= (1 << kBitsPerByte));
 
   int8_t kind_;
 };
@@ -306,11 +308,11 @@ class PropertyDetails {
     return PropertyDetails(PropertyKind::kData, NONE, cell_type);
   }
 
-  bool operator==(PropertyDetails const& other) {
+  bool operator==(PropertyDetails const& other) const {
     return value_ == other.value_;
   }
 
-  bool operator!=(PropertyDetails const& other) {
+  bool operator!=(PropertyDetails const& other) const {
     return value_ != other.value_;
   }
 
@@ -345,8 +347,8 @@ class PropertyDetails {
   }
 
   // Conversion for storing details as Object.
-  explicit inline PropertyDetails(Smi smi);
-  inline Smi AsSmi() const;
+  explicit inline PropertyDetails(Tagged<Smi> smi);
+  inline Tagged<Smi> AsSmi() const;
 
   static constexpr uint8_t EncodeRepresentation(Representation representation) {
     return representation.kind();
@@ -393,8 +395,6 @@ class PropertyDetails {
     return PropertyCellTypeField::decode(value_);
   }
 
-  bool operator==(const PropertyDetails& b) const { return value_ == b.value_; }
-
   // Bit fields in value_ (type, shift, size). Must be public so the
   // constants can be embedded in generated code.
   using KindField = base::BitField<PropertyKind, 0, 1>;
@@ -420,18 +420,18 @@ class PropertyDetails {
       DescriptorPointer::Next<uint32_t, kDescriptorIndexBitCount>;
 
   // All bits for both fast and slow objects must fit in a smi.
-  STATIC_ASSERT(DictionaryStorageField::kLastUsedBit < 31);
-  STATIC_ASSERT(FieldIndexField::kLastUsedBit < 31);
+  static_assert(DictionaryStorageField::kLastUsedBit < 31);
+  static_assert(FieldIndexField::kLastUsedBit < 31);
 
   // DictionaryStorageField must be the last field, so that overflowing it
   // doesn't overwrite other fields.
-  STATIC_ASSERT(DictionaryStorageField::kLastUsedBit == 30);
+  static_assert(DictionaryStorageField::kLastUsedBit == 30);
 
   // All bits for non-global dictionary mode objects except enumeration index
   // must fit in a byte.
-  STATIC_ASSERT(KindField::kLastUsedBit < 8);
-  STATIC_ASSERT(ConstnessField::kLastUsedBit < 8);
-  STATIC_ASSERT(AttributesField::kLastUsedBit < 8);
+  static_assert(KindField::kLastUsedBit < 8);
+  static_assert(ConstnessField::kLastUsedBit < 8);
+  static_assert(AttributesField::kLastUsedBit < 8);
 
   static const int kInitialIndex = 1;
 
@@ -450,7 +450,7 @@ class PropertyDetails {
     kPrintRepresentation = 1 << 2,
     kPrintPointer = 1 << 3,
 
-    kForProperties = kPrintFieldIndex,
+    kForProperties = kPrintFieldIndex | kPrintAttributes,
     kForTransitions = kPrintAttributes,
     kPrintFull = -1,
   };
@@ -465,10 +465,10 @@ class PropertyDetails {
     // into a byte together.
 
     DCHECK_EQ(PropertyLocation::kField, location());
-    STATIC_ASSERT(static_cast<int>(PropertyLocation::kField) == 0);
+    static_assert(static_cast<int>(PropertyLocation::kField) == 0);
 
     DCHECK_EQ(PropertyCellType::kNoCell, cell_type());
-    STATIC_ASSERT(static_cast<int>(PropertyCellType::kNoCell) == 0);
+    static_assert(static_cast<int>(PropertyCellType::kNoCell) == 0);
 
     // Only to be used when the enum index isn't actually maintained
     // by the PropertyDetails:

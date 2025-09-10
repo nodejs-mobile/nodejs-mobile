@@ -27,7 +27,11 @@
 
   'conditions': [
     [ 'clang==1', {
-      'cflags': [ '-Werror=undefined-inline', '-Werror=extra-semi']
+      'cflags': [
+        '-Werror=undefined-inline',
+        '-Werror=extra-semi',
+        '-Werror=ctad-maybe-unsupported',
+      ],
     }],
     [ '"<(_type)"=="executable"', {
       'msvs_settings': {
@@ -63,18 +67,18 @@
         'FD_SETSIZE=1024',
         # we need to use node's preferred "win32" rather than gyp's preferred "win"
         'NODE_PLATFORM="win32"',
-        # Stop <windows.h> from defining macros that conflict with
-        # std::min() and std::max().  We don't use <windows.h> (much)
-        # but we still inherit it from uv.h.
-        'NOMINMAX',
         '_UNICODE=1',
       ],
-      'msvs_precompiled_header': 'tools/msvs/pch/node_pch.h',
-      'msvs_precompiled_source': 'tools/msvs/pch/node_pch.cc',
-      'sources': [
-        '<(_msvs_precompiled_header)',
-        '<(_msvs_precompiled_source)',
-      ],
+      'conditions': [
+          ['clang != 1 or use_ccache_win != 1', {
+            'msvs_precompiled_header': 'tools/msvs/pch/node_pch.h',
+            'msvs_precompiled_source': 'tools/msvs/pch/node_pch.cc',
+            'sources': [
+              '<(_msvs_precompiled_header)',
+              '<(_msvs_precompiled_source)',
+            ],
+          }]
+      ]
     }, { # POSIX
       'defines': [ '__POSIX__' ],
     }],
@@ -95,9 +99,6 @@
       'defines': [
         'NODE_USE_V8_PLATFORM=0',
       ],
-    }],
-    [ 'v8_enable_shared_ro_heap==1', {
-      'defines': ['NODE_V8_SHARED_RO_HEAP',],
     }],
     [ 'node_tag!=""', {
       'defines': [ 'NODE_TAG="<(node_tag)"' ],
@@ -141,6 +142,7 @@
     } ],
     [ 'node_shared_zlib=="false"', {
       'dependencies': [ 'deps/zlib/zlib.gyp:zlib' ],
+      'defines': [ 'NODE_BUNDLED_ZLIB' ],
       'conditions': [
         [ 'force_load=="true"', {
           'xcode_settings': {
@@ -151,7 +153,7 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'AdditionalOptions': [
-                '/WHOLEARCHIVE:zlib<(STATIC_LIB_SUFFIX)',
+                '/WHOLEARCHIVE:<(PRODUCT_DIR)/lib/zlib<(STATIC_LIB_SUFFIX)',
               ],
             },
           },
@@ -190,7 +192,7 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'AdditionalOptions': [
-                '/WHOLEARCHIVE:libuv<(STATIC_LIB_SUFFIX)',
+                '/WHOLEARCHIVE:<(PRODUCT_DIR)/lib/libuv<(STATIC_LIB_SUFFIX)',
               ],
             },
           },
@@ -207,18 +209,43 @@
       ],
     }],
 
+    [ 'node_shared_uvwasi=="false"', {
+      'dependencies': [ 'deps/uvwasi/uvwasi.gyp:uvwasi' ],
+    }],
+
     [ 'node_shared_nghttp2=="false"', {
       'dependencies': [ 'deps/nghttp2/nghttp2.gyp:nghttp2' ],
+    }],
+
+    [ 'node_shared_ada=="false"', {
+        'dependencies': [ 'deps/ada/ada.gyp:ada' ],
+    }],
+
+    [ 'node_shared_simdjson=="false"', {
+        'dependencies': [ 'deps/simdjson/simdjson.gyp:simdjson' ],
+    }],
+
+    [ 'node_shared_simdutf=="false"', {
+        'dependencies': [ 'tools/v8_gypfiles/v8.gyp:simdutf' ],
     }],
 
     [ 'node_shared_brotli=="false"', {
       'dependencies': [ 'deps/brotli/brotli.gyp:brotli' ],
     }],
 
+    [ 'node_use_sqlite=="true" and node_shared_sqlite=="false"', {
+      'dependencies': [ 'deps/sqlite/sqlite.gyp:sqlite' ],
+    }],
+
+    [ 'node_shared_zstd=="false"', {
+      'dependencies': [ 'deps/zstd/zstd.gyp:zstd' ],
+    }],
+
     [ 'OS=="mac"', {
-      # linking Corefoundation is needed since certain OSX debugging tools
-      # like Instruments require it for some features
-      'libraries': [ '-framework CoreFoundation' ],
+      # linking Corefoundation is needed since certain macOS debugging tools
+      # like Instruments require it for some features. Security is needed for
+      # --use-system-ca.
+      'libraries': [ '-framework CoreFoundation -framework Security' ],
       'defines!': [
         'NODE_PLATFORM="mac"',
       ],
@@ -226,6 +253,11 @@
         # we need to use node's preferred "darwin" rather than gyp's preferred "mac"
         'NODE_PLATFORM="darwin"',
       ],
+    }],
+    # nodejs-mobile patch: link CoreFoundation and Security frameworks when compiling for iOS
+    [ 'OS=="ios"', {
+      # linking Corefoundation and Security is needed for crypto functionality
+      'libraries': [ '-framework CoreFoundation -framework Security' ],
     }],
     [ 'OS=="freebsd"', {
       'libraries': [
@@ -280,7 +312,7 @@
         'NODE_PLATFORM="sunos"',
       ],
     }],
-    [ '(OS=="freebsd" or OS=="linux") and node_shared=="false"'
+    [ '(OS=="freebsd" or OS=="linux" or OS=="openharmony") and node_shared=="false"'
         ' and force_load=="true"', {
       'ldflags': [
         '-Wl,-z,noexecstack',
@@ -305,7 +337,7 @@
         ],
       },
     }],
-    [ 'coverage=="true" and node_shared=="false" and OS in "mac ios freebsd linux"', {
+    [ 'coverage=="true" and node_shared=="false" and OS in "mac ios freebsd linux openharmony"', {
       'cflags!': [ '-O3' ],
       'ldflags': [ '--coverage',
                    '-g',
@@ -337,12 +369,12 @@
     [ 'OS=="sunos"', {
       'ldflags': [ '-Wl,-M,/usr/lib/ld/map.noexstk' ],
     }],
-    [ 'OS=="linux"', {
+    [ 'OS=="linux" or OS=="openharmony"', {
       'libraries!': [
         '-lrt'
       ],
     }],
-    [ 'OS in "freebsd linux"', {
+    [ 'OS in "freebsd linux openharmony"', {
       'ldflags': [ '-Wl,-z,relro',
                    '-Wl,-z,now' ]
     }],
@@ -373,12 +405,12 @@
               'msvs_settings': {
                 'VCLinkerTool': {
                   'AdditionalOptions': [
-                    '/WHOLEARCHIVE:<(openssl_product)',
+                    '/WHOLEARCHIVE:<(PRODUCT_DIR)/lib/<(openssl_product)',
                   ],
                 },
               },
               'conditions': [
-                ['OS in "linux freebsd" and node_shared=="false"', {
+                ['OS in "linux freebsd openharmony" and node_shared=="false"', {
                   'ldflags': [
                     '-Wl,--whole-archive,'
                       '<(obj_dir)/deps/openssl/<(openssl_product)',
@@ -407,7 +439,12 @@
     }, {
       'defines': [ 'HAVE_OPENSSL=0' ]
     }],
-   [ 'OS=="android" or OS=="ios"', {
+    [ 'node_use_amaro=="true"', {
+      'defines': [ 'HAVE_AMARO=1' ],
+    }, {
+      'defines': [ 'HAVE_AMARO=0' ]
+    }],
+    [ 'OS=="android" or OS=="ios"', {
       'defines': [
         'NODE_MOBILE',
       ],

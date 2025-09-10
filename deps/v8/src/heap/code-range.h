@@ -11,6 +11,7 @@
 #include "src/base/platform/mutex.h"
 #include "src/common/globals.h"
 #include "src/utils/allocation.h"
+#include "v8-internal.h"
 
 namespace v8 {
 namespace internal {
@@ -44,33 +45,38 @@ class CodeRangeAddressHint {
 // A code range is a virtual memory cage that may contain executable code. It
 // has the following layout.
 //
-// +------------+-----+----------------  ~~~  -+
-// |     RW     | ... |    ...                 |
-// +------------+-----+----------------- ~~~  -+
-// ^            ^     ^
-// start        base  allocatable base
+// +---------+---------+-----------------  ~~~  -+
+// |   RW    |   ...   |     ...                 |
+// +---------+---------+------------------ ~~~  -+
+// ^                   ^
+// base                allocatable base
 //
-// <------------>     <------------------------>
-//   reserved            allocatable region
-// <------------------------------------------->
-//               code region
+// <------------------><------------------------->
+//   non-allocatable       allocatable region
+//   region
+// <-------->
+//  reserved
+// <--------------------------------------------->
+//                 CodeRange
 //
 // The start of the reservation may include reserved page with read-write access
-// as required by some platforms (Win64). The cage's page allocator does not
-// control the optional reserved page in the beginning of the code region.
+// as required by some platforms (Win64) followed by an unmapped region which
+// make allocatable base MemoryChunk::kAlignment-aligned. The cage's page
+// allocator explicitly marks the optional reserved page as occupied, so it's
+// excluded from further allocations.
 //
 // The following conditions hold:
-// 1) |reservation()->region()| >= |optional RW pages| +
-//    |reservation()->page_allocator()|
-// 2) |reservation()| is AllocatePageSize()-aligned
-// 3) |reservation()->page_allocator()| (i.e. allocatable base) is
-//    MemoryChunk::kAlignment-aligned
-// 4) |base()| is CommitPageSize()-aligned
+// 1) |reservation()->region()| == [base(), base() + size()[,
+// 2) |base| is OS page size aligned,
+// 3) |allocatable base| is MemoryChunk::kAlignment-aligned,
+// 4) non-allocatable region might be empty (if |base| == |allocatable base|),
+// 5) if optional RW pages are necessary and they don't fit into non-allocatable
+//    region, then the first page is excluded from allocatable area.
 class CodeRange final : public VirtualMemoryCage {
  public:
   V8_EXPORT_PRIVATE ~CodeRange() override;
 
-  // Returns the size of the initial area of a code-range, which is marked
+  // Returns the size of the initial area of a code range, which is marked
   // writable and reserved to contain unwind information.
   static size_t GetWritableReservedAreaSize();
 
@@ -97,29 +103,19 @@ class CodeRange final : public VirtualMemoryCage {
     return embedded_blob_code_copy_.load(std::memory_order_acquire);
   }
 
-#ifdef V8_OS_WIN64
-  // 64-bit Windows needs to track how many Isolates are using the CodeRange for
-  // registering and unregistering of unwind info. Note that even though
-  // CodeRanges are used with std::shared_ptr, std::shared_ptr::use_count should
-  // not be used for synchronization as it's usually implemented with a relaxed
-  // read.
-  uint32_t AtomicIncrementUnwindInfoUseCount() {
-    return unwindinfo_use_count_.fetch_add(1, std::memory_order_acq_rel);
-  }
+  // Initialize the address space reservation for the code range. The immutable
+  // flag specifies if the reservation will live until the end of the process
+  // and can be sealed.
+  bool InitReservation(v8::PageAllocator* page_allocator, size_t requested,
+                       bool immutable);
 
-  uint32_t AtomicDecrementUnwindInfoUseCount() {
-    return unwindinfo_use_count_.fetch_sub(1, std::memory_order_acq_rel);
-  }
-#endif  // V8_OS_WIN64
-
-  bool InitReservation(v8::PageAllocator* page_allocator, size_t requested);
-
-  void Free();
+  V8_EXPORT_PRIVATE void Free();
 
   // Remap and copy the embedded builtins into this CodeRange. This method is
   // idempotent and only performs the copy once. This property is so that this
-  // method can be used uniformly regardless of having a per-Isolate or a shared
-  // pointer cage. Returns the address of the copy.
+  // method can be used uniformly regardless of whether there is a single global
+  // pointer address space or multiple pointer cages. Returns the address of
+  // the copy.
   //
   // The builtins code region will be freed with the code range at tear down.
   //
@@ -129,14 +125,10 @@ class CodeRange final : public VirtualMemoryCage {
                                  const uint8_t* embedded_blob_code,
                                  size_t embedded_blob_code_size);
 
-  static std::shared_ptr<CodeRange> EnsureProcessWideCodeRange(
-      v8::PageAllocator* page_allocator, size_t requested_size);
-
-  // If InitializeProcessWideCodeRangeOnce has been called, returns the
-  // initialized CodeRange. Otherwise returns an empty std::shared_ptr.
-  V8_EXPORT_PRIVATE static std::shared_ptr<CodeRange> GetProcessWideCodeRange();
-
  private:
+  static base::AddressRegion GetPreferredRegion(size_t radius_in_megabytes,
+                                                size_t allocate_page_size);
+
   // Used when short builtin calls are enabled, where embedded builtins are
   // copied into the CodeRange so calls can be nearer.
   std::atomic<uint8_t*> embedded_blob_code_copy_{nullptr};
@@ -145,8 +137,8 @@ class CodeRange final : public VirtualMemoryCage {
   // race during Isolate::Init.
   base::Mutex remap_embedded_builtins_mutex_;
 
-#ifdef V8_OS_WIN64
-  std::atomic<uint32_t> unwindinfo_use_count_{0};
+#if !defined(V8_OS_WIN) && !defined(V8_OS_IOS) && defined(DEBUG)
+  bool immutable_ = false;
 #endif
 };
 

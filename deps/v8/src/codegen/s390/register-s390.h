@@ -15,9 +15,19 @@ namespace internal {
   V(r0)  V(r1)  V(r2)  V(r3)  V(r4)  V(r5)  V(r6)  V(r7)  \
   V(r8)  V(r9)  V(r10) V(fp) V(ip) V(r13) V(r14) V(sp)
 
-#define ALLOCATABLE_GENERAL_REGISTERS(V)                  \
+#define ALWAYS_ALLOCATABLE_GENERAL_REGISTERS(V)                  \
   V(r2)  V(r3)  V(r4)  V(r5)  V(r6)  V(r7)                \
-  V(r8)  V(r9)  V(r13)
+  V(r8)  V(r13)
+
+#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+#define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
+#else
+#define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V) V(r9)
+#endif
+
+#define ALLOCATABLE_GENERAL_REGISTERS(V)  \
+  ALWAYS_ALLOCATABLE_GENERAL_REGISTERS(V) \
+  MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
 
 #define DOUBLE_REGISTERS(V)                               \
   V(d0)  V(d1)  V(d2)  V(d3)  V(d4)  V(d5)  V(d6)  V(d7)  \
@@ -38,7 +48,47 @@ namespace internal {
 // The following constants describe the stack frame linkage area as
 // defined by the ABI.
 
-#if V8_TARGET_ARCH_S390X
+#if V8_OS_ZOS
+// z/OS XPLINK 64-bit frame shape (without the 2k stack bias):
+// [0] Backchain
+// [1] Environment
+// [2] Entry Point
+// [3] Return Address (XPLINK)
+// [4] GPR8
+// [5] GPR9
+// ...
+// [10] GPR14 / RA Slot
+// [11] GPR15 / SP Slot
+// [12] Reserved
+// [13] Reserved
+// [14] Debug Area
+// [15] Reserved
+// [16] Register Arg1
+// [17] Register Arg2
+// [18] Register Arg3
+// [19] Register Arg4
+// [20] Register Arg5
+
+// Since z/OS port of V8 follows the register assignment from Linux in the
+// JavaScript context, JS code will set up r2-r6 as parameter registers,
+// with 6th+ parameters passed on the stack, when calling C functions.
+// XPLINK allocates stack slots for all parameters regardless of whether
+// they are passed in registers. To ensure stack slots are available to
+// store register parameters back to the stack for XPLINK calls, we include
+// slots for the 5 "register" arguments (r2-r6 as noted above) as part of
+// the required stack frame slots. Additional params being passed on the
+// stack will continue to grow from slot 22 and beyond.
+//
+// The 2k stack bias for XPLINK will be adjusted from SP into r4 (system
+// stack pointer) by the CallCFunctionHelper and CEntryStub right before
+// the actual native call.
+const int kNumRequiredStackFrameSlots = 21;
+const int kStackFrameSPSlot = 11;
+const int kStackFrameRASlot = 10;
+const int kStackFrameExtraParamSlot = 21;
+const int kXPLINKStackFrameExtraParamSlot = 19;
+const int kStackPointerBias = 2048;
+#else
 // [0] Back Chain
 // [1] Reserved for compiler use
 // [2] GPR 2
@@ -53,32 +103,11 @@ const int kNumRequiredStackFrameSlots = 20;
 const int kStackFrameRASlot = 14;
 const int kStackFrameSPSlot = 15;
 const int kStackFrameExtraParamSlot = 20;
-#else
-// [0] Back Chain
-// [1] Reserved for compiler use
-// [2] GPR 2
-// [3] GPR 3
-// ...
-// [15] GPR 15
-// [16..17] FPR 0
-// [18..19] FPR 2
-// [20..21] FPR 4
-// [22..23] FPR 6
-const int kNumRequiredStackFrameSlots = 24;
-const int kStackFrameRASlot = 14;
-const int kStackFrameSPSlot = 15;
-const int kStackFrameExtraParamSlot = 24;
 #endif
 
 // zLinux ABI requires caller frames to include sufficient space for
 // callee preserved register save area.
-#if V8_TARGET_ARCH_S390X
 const int kCalleeRegisterSaveAreaSize = 160;
-#elif V8_TARGET_ARCH_S390
-const int kCalleeRegisterSaveAreaSize = 96;
-#else
-const int kCalleeRegisterSaveAreaSize = 0;
-#endif
 
 enum RegisterCode {
 #define REGISTER_CODE(R) kRegCode_##R,
@@ -106,6 +135,13 @@ ASSERT_TRIVIALLY_COPYABLE(Register);
 static_assert(sizeof(Register) <= sizeof(int),
               "Register can efficiently be passed by value");
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 #define DEFINE_REGISTER(R) \
   constexpr Register R = Register::from_code(kRegCode_##R);
 GENERAL_REGISTERS(DEFINE_REGISTER)
@@ -114,7 +150,16 @@ constexpr Register no_reg = Register::no_reg();
 
 // Register aliases
 constexpr Register kRootRegister = r10;  // Roots array pointer.
+#ifdef V8_COMPRESS_POINTERS_IN_SHARED_CAGE
+constexpr Register kPtrComprCageBaseRegister = r9;  // callee save
+#else
+constexpr Register kPtrComprCageBaseRegister = kRootRegister;
+#endif
 constexpr Register cp = r13;             // JavaScript context pointer.
+
+// s390x calling convention
+constexpr Register kCArgRegs[] = {r2, r3, r4, r5, r6};
+static const int kRegisterPassedArguments = arraysize(kCArgRegs);
 
 // Returns the number of padding slots needed for stack pointer alignment.
 constexpr int ArgumentPaddingSlots(int argument_count) {
@@ -196,6 +241,7 @@ DEFINE_REGISTER_NAMES(Register, GENERAL_REGISTERS)
 DEFINE_REGISTER_NAMES(DoubleRegister, DOUBLE_REGISTERS)
 
 // Give alias names to registers for calling conventions.
+constexpr Register kStackPointerRegister = sp;
 constexpr Register kReturnRegister0 = r2;
 constexpr Register kReturnRegister1 = r3;
 constexpr Register kReturnRegister2 = r4;
@@ -212,12 +258,14 @@ constexpr Register kJavaScriptCallCodeStartRegister = r4;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = r5;
 constexpr Register kJavaScriptCallExtraArg1Register = r4;
+// DispatchHandle is only needed for the sandbox which is not available on
+// s390x.
+constexpr Register kJavaScriptCallDispatchHandleRegister = no_reg;
 
-constexpr Register kOffHeapTrampolineRegister = ip;
 constexpr Register kRuntimeCallFunctionRegister = r3;
 constexpr Register kRuntimeCallArgCountRegister = r2;
 constexpr Register kRuntimeCallArgvRegister = r4;
-constexpr Register kWasmInstanceRegister = r6;
+constexpr Register kWasmImplicitArgRegister = r6;
 constexpr Register kWasmCompileLazyFuncIndexRegister = r7;
 
 constexpr DoubleRegister kFPReturnRegister0 = d0;

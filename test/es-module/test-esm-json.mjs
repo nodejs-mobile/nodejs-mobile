@@ -2,7 +2,7 @@ import { spawnPromisified } from '../common/index.mjs';
 import * as fixtures from '../common/fixtures.mjs';
 import assert from 'node:assert';
 import { execPath } from 'node:process';
-import { describe, it, test } from 'node:test';
+import { before, describe, it, test } from 'node:test';
 
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import * as tmpdir from '../common/tmpdir.js';
@@ -10,16 +10,23 @@ import * as tmpdir from '../common/tmpdir.js';
 import secret from '../fixtures/experimental.json' with { type: 'json' };
 
 describe('ESM: importing JSON', () => {
+  before(() => tmpdir.refresh());
+
   it('should load JSON', () => {
     assert.strictEqual(secret.ofLife, 42);
   });
 
-  it('should print an experimental warning', async () => {
+  it('should load JSON with import calls', async () => {
+    const module = await import('../fixtures/experimental.json', { with: { type: 'json' } });
+    assert.strictEqual(module.default.ofLife, 42);
+  });
+
+  it('should not print an experimental warning', async () => {
     const { code, signal, stderr } = await spawnPromisified(execPath, [
       fixtures.path('/es-modules/json-modules.mjs'),
     ]);
 
-    assert.match(stderr, /ExperimentalWarning: Importing JSON modules/);
+    assert.strictEqual(stderr, '');
     assert.strictEqual(code, 0);
     assert.strictEqual(signal, null);
   });

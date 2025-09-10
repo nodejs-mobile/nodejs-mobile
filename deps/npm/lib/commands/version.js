@@ -22,7 +22,6 @@ class Version extends BaseCommand {
   static workspaces = true
   static ignoreImplicitWorkspace = false
 
-  /* eslint-disable-next-line max-len */
   static usage = ['[<newversion> | major | minor | patch | premajor | preminor | prepatch | prerelease | from-git]']
 
   static async completion (opts) {
@@ -126,7 +125,7 @@ class Version extends BaseCommand {
     }
 
     if (this.npm.config.get('json')) {
-      output.standard(JSON.stringify(results, null, 2))
+      output.buffer(results)
     } else {
       output.standard(results)
     }

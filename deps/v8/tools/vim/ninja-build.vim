@@ -9,12 +9,10 @@
 " Adds a "Build this target" function, using ninja. This is not bound
 " to any key by default, but can be used via the :CrBuild command.
 " It builds 'd8' by default, but :CrBuild target1 target2 etc works as well,
-" i.e. :CrBuild all or :CrBuild d8 cctest unittests.
+" i.e. :CrBuild all or :CrBuild d8 cctest v8_unittests.
 "
 " Requires that gyp has already generated build.ninja files, and that ninja is
 " in your path (which it is automatically if depot_tools is in your path).
-" Bumps the number of parallel jobs in ninja automatically if goma is
-" detected.
 "
 " Add the following to your .vimrc file:
 "     so /path/to/src/tools/vim/ninja-build.vim

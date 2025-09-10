@@ -31,8 +31,12 @@
     "label": "//test:v8_d8_default",
     "type": "script",
   },
+  "d8_pgo": {
+    "label": "//test:d8_pgo",
+    "type": "script",
+  },
   "generate-bytecode-expectations": {
-    "label": "//test/cctest:generate-bytecode-expectations",
+    "label": "//test/unittests:generate-bytecode-expectations",
     "type": "script",
   },
   "mjsunit": {
@@ -67,12 +71,16 @@
     "label": "//test:v8_run_num_fuzzer",
     "type": "script",
   },
+  "snapshot_set": {
+    "label": "//:snapshot_set",
+    "type": "script",
+  },
   "test262": {
     "label": "//test/test262:v8_test262",
     "type": "script",
   },
   "unittests": {
-    "label": "//test/unittests:unittests",
+    "label": "//test/unittests:v8_unittests",
     "type": "script",
   },
   "fuchsia-unittests": {

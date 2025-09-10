@@ -10,6 +10,14 @@ Forked from https://github.com/guybedford/es-module-lexer.
 
 _Comprehensively handles the JS language grammar while remaining small and fast. - ~90ms per MB of JS cold and ~15ms per MB of JS warm, [see benchmarks](#benchmarks) for more info._
 
+### Project Status
+
+This project is used in Node.js core for detecting the named exports available when importing a CJS module into ESM, and is maintained for this purpose.
+
+PRs will be accepted and upstreamed for parser bugs, performance improvements or new syntax support only.
+
+_Detection patterns for this project are **frozen**_. This is because adding any new export detection patterns would result in fragmented backwards-compatibility. Specifically, it would be very difficult to figure out why an ES module named export for CommonJS might work in newer Node.js versions but not older versions. This problem would only be discovered downstream of module authors, with the fix for module authors being to then have to understand which patterns in this project provide full backwards-compatibily. Rather, by fully freezing the detected patterns, if it works in any Node.js version it will work in any other. Build tools can also reliably treat the supported syntax for this project as a part of their output target for ensuring syntax support.
+
 ### Usage
 
 ```
@@ -51,7 +59,8 @@ When using the ESM version, Wasm is supported instead:
 
 ```js
 import { parse, init } from 'cjs-module-lexer';
-// init needs to be called and waited upon
+// init() needs to be called and waited upon, or use initSync() to compile
+// Wasm blockingly and synchronously.
 await init();
 const { exports, reexports } = parse(source);
 ```
@@ -433,18 +442,39 @@ test/samples/*.js (3635 KiB)
 
 ### Wasm Build Steps
 
-To build download the WASI SDK from https://github.com/WebAssembly/wasi-sdk/releases.
+The build uses docker and make, they must be installed first.
 
-The Makefile assumes the existence of "wasi-sdk-11.0" and "wabt" (optional) as sibling folders to this project.
+To build the lexer wasm run `npm run build-wasm`.
 
-The build through the Makefile is then run via `make lib/lexer.wasm`, which can also be triggered via `npm run build-wasm` to create `dist/lexer.js`.
+Optimization passes are run with [Binaryen](https://github.com/WebAssembly/binaryen)
+prior to publish to reduce the Web Assembly footprint.
 
-On Windows it may be preferable to use the Linux subsystem.
+After building the lexer wasm, build the final distribution components
+(lexer.js and lexer.mjs) by running `npm run build`.
 
-After the Web Assembly build, the CJS build can be triggered via `npm run build`.
+If you need to build lib/lexer.wat (optional) you must first install
+[wabt](https://github.com/WebAssembly/wabt) as a sibling folder to this
+project. The wat file is then build by running `make lib/lexer.wat`
 
-Optimization passes are run with [Binaryen](https://github.com/WebAssembly/binaryen) prior to publish to reduce the Web Assembly footprint.
+### Creating a Release
+These are the steps to create and publish a release. You will need docker
+installed as well as having installed [wabt](https://github.com/WebAssembly/wabt)
+as outlined above:
 
+- [ ] Figure out if the release should be semver patch, minor or major based on the changes since
+  the last release and determine the new version.
+- [ ] Update the package.json version, and run a full build and test
+  - npm install
+  - npm run build
+  - npm run test
+- [ ] Commit and tag the changes, pushing up to main and the tag
+  - For example
+    - `git tag -a 1.4.2 -m "1.4.2"`
+    - `git push origin tag 1.4.2`
+- [ ] Create the GitHub release
+- [ ] Run npm publish from an account with access (asking somebody with access
+      the nodejs-foundation account is an option if you don't have access.
+      
 ### License
 
 MIT

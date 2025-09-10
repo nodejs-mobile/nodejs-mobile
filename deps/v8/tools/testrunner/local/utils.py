@@ -25,13 +25,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from os.path import exists
 from os.path import isdir
 from os.path import join
 import os
 import platform
 import re
-import urllib
 
 
 ### Exit codes and their meaning.
@@ -90,6 +88,8 @@ def GuessOS():
   elif system in ['AIX', 'OS400']:
     # OS400 runs an AIX emulator called PASE
     return 'aix'
+  elif system == "OS/390":
+    return 'zos'
   else:
     return None
 
@@ -97,6 +97,12 @@ def GuessOS():
 # Check if Vector Enhancement Facility 1 is available on the
 # host S390 machine. This facility is required for supporting Simd on V8.
 def IsS390SimdSupported():
+  if GuessOS() == 'zos':
+    from ctypes import CDLL
+    libname = os.environ.get('ZOSLIB_LIBPATH') + '/libzoslib.so'
+    clib = CDLL(libname)
+    return clib.__is_vef1_available()
+
   import subprocess
   cpuinfo = subprocess.check_output("cat /proc/cpuinfo", shell=True)
   cpuinfo_list = cpuinfo.strip().decode("utf-8").splitlines()
@@ -160,9 +166,8 @@ def GuessPowerProcessorVersion():
 
 def UseSimulator(arch):
   machine = platform.machine()
-  return (machine and
-      (arch == "mipsel" or arch == "arm" or arch == "arm64") and
-      not arch.startswith(machine))
+  return (machine and (arch == "arm" or arch == "arm64") and
+          not arch.startswith(machine))
 
 
 # This will default to building the 32 bit VM even on machines that are

@@ -10,8 +10,8 @@ def patch_android():
         os.system('patch -f ./deps/v8/src/trap-handler/trap-handler.h < ./android-patches/trap-handler.h.patch')
     print("\033[92mInfo: \033[0m" + "Tried to patch.")
 
-if platform.system() == "Windows":
-    print("android-configure is not supported on Windows yet.")
+if platform.system() != "Linux" and platform.system() != "Darwin":
+    print("android-configure is currently only supported on Linux and Darwin.")
     sys.exit(1)
 
 if len(sys.argv) == 2 and sys.argv[1] == "patch":
@@ -55,7 +55,7 @@ else:
 print("\033[92mInfo: \033[0m" + "Configuring for " + DEST_CPU + "...")
 
 if platform.system() == "Darwin":
-    host_os = "darwin"
+    host_os = "mac"
     toolchain_path = android_ndk_path + "/toolchains/llvm/prebuilt/darwin-x86_64"
 
 elif platform.system() == "Linux":
@@ -66,17 +66,16 @@ os.environ['PATH'] += os.pathsep + toolchain_path + "/bin"
 os.environ['CC'] = toolchain_path + "/bin/" + TOOLCHAIN_PREFIX + android_sdk_version + "-" +  "clang"
 os.environ['CXX'] = toolchain_path + "/bin/" + TOOLCHAIN_PREFIX + android_sdk_version + "-" + "clang++"
 # nodejs-mobile patch: add host CC and CXX
-os.environ['CC_host'] = os.popen('command -v gcc').read().strip()
-os.environ['CXX_host'] = os.popen('command -v g++').read().strip()
+os.environ['CC_host'] = os.popen('command -v clang').read().strip()
+os.environ['CXX_host'] = os.popen('command -v clang++').read().strip()
 
 GYP_DEFINES = "target_arch=" + arch
 GYP_DEFINES += " v8_target_arch=" + arch
 GYP_DEFINES += " android_target_arch=" + arch
 GYP_DEFINES += " host_os=" + host_os + " OS=android"
-GYP_DEFINES += " ANDROID_NDK_ROOT=" + android_ndk_path
-GYP_DEFINES += " ANDROID_NDK_SYSROOT=" + toolchain_path + "/sysroot"
+GYP_DEFINES += " android_ndk_path=" + android_ndk_path
+GYP_DEFINES += " android_ndk_sysroot=" + toolchain_path + "/sysroot"
 os.environ['GYP_DEFINES'] = GYP_DEFINES
 
 if os.path.exists("./configure"):
-    # nodejs-mobile patch: added --with-intl=none and --shared
     os.system("./configure --dest-cpu=" + DEST_CPU + " --dest-os=android --openssl-no-asm --with-intl=none --cross-compiling --shared")

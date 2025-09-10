@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --stress-compaction
+// Flags: --stress-compaction
 
 d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 
@@ -11,7 +11,7 @@ let maximumPages = 6;
 
 function generateBuilder() {
   let builder = new WasmModuleBuilder();
-  builder.addMemory(initialPages, maximumPages, true);
+  builder.addMemory(initialPages, maximumPages);
   builder.addFunction('store', kSig_i_ii)
       .addBody([
         kExprLocalGet, 0, kExprLocalGet, 1, kExprI32StoreMem, 0, 0,

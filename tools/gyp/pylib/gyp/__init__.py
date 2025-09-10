@@ -4,15 +4,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import annotations
 
-import copy
-import gyp.input
 import argparse
+import copy
 import os.path
 import re
 import shlex
 import sys
 import traceback
+
+import gyp.input
 from gyp.common import GypError
 
 # Default debug modes for GYP
@@ -23,6 +25,18 @@ DEBUG_GENERAL = "general"
 DEBUG_VARIABLES = "variables"
 DEBUG_INCLUDES = "includes"
 
+def EscapeForCString(string: bytes | str) -> str:
+    if isinstance(string, str):
+        string = string.encode(encoding='utf8')
+
+    backslash_or_double_quote = {ord('\\'), ord('"')}
+    result = ''
+    for char in string:
+        if char in backslash_or_double_quote or not 32 <= char < 127:
+            result += '\\%03o' % char
+        else:
+            result += chr(char)
+    return result
 
 def DebugOutput(mode, message, *args):
     if "all" in gyp.debug or mode in gyp.debug:
@@ -105,15 +119,18 @@ def Load(
 
     output_dir = params["options"].generator_output or params["options"].toplevel_dir
     if default_variables["GENERATOR"] == "ninja":
-        default_variables.setdefault(
-            "PRODUCT_DIR_ABS",
-            os.path.join(output_dir, "out", default_variables["build_type"]),
+        product_dir_abs = os.path.join(
+            output_dir, "out", default_variables.get("build_type", "default")
         )
     else:
-        default_variables.setdefault(
-            "PRODUCT_DIR_ABS",
-            os.path.join(output_dir, default_variables["CONFIGURATION_NAME"]),
+        product_dir_abs = os.path.join(
+            output_dir, default_variables["CONFIGURATION_NAME"]
         )
+
+    default_variables.setdefault("PRODUCT_DIR_ABS", product_dir_abs)
+    default_variables.setdefault(
+        "PRODUCT_DIR_ABS_CSTR", EscapeForCString(product_dir_abs)
+    )
 
     # Give the generator the opportunity to set additional variables based on
     # the params it will receive in the output phase.
@@ -189,8 +206,7 @@ def NameValueListToDict(name_value_list):
 
 
 def ShlexEnv(env_name):
-    flags = os.environ.get(env_name, [])
-    if flags:
+    if flags := os.environ.get(env_name) or []:
         flags = shlex.split(flags)
     return flags
 
@@ -250,7 +266,7 @@ def RegenerateFlags(options):
     for name, metadata in options._regeneration_metadata.items():
         opt = metadata["opt"]
         value = getattr(options, name)
-        value_predicate = metadata["type"] == "path" and FixPath or Noop
+        value_predicate = (metadata["type"] == "path" and FixPath) or Noop
         action = metadata["action"]
         env_name = metadata["env_name"]
         if action == "append":
@@ -345,7 +361,7 @@ def gyp_main(args):
         action="store",
         env_name="GYP_CONFIG_DIR",
         default=None,
-        help="The location for configuration files like " "include.gypi.",
+        help="The location for configuration files like include.gypi.",
     )
     parser.add_argument(
         "-d",
@@ -463,8 +479,19 @@ def gyp_main(args):
         metavar="TARGET",
         help="include only TARGET and its deep dependencies",
     )
+    parser.add_argument(
+        "-V",
+        "--version",
+        dest="version",
+        action="store_true",
+        help="Show the version and exit.",
+    )
 
     options, build_files_arg = parser.parse_args(args)
+    if options.version:
+        import pkg_resources  # noqa: PLC0415
+        print(f"v{pkg_resources.get_distribution('gyp-next').version}")
+        return 0
     build_files = build_files_arg
 
     # Set up the configuration directory (defaults to ~/.gyp)
@@ -498,19 +525,18 @@ def gyp_main(args):
         # If no format was given on the command line, then check the env variable.
         generate_formats = []
         if options.use_environment:
-            generate_formats = os.environ.get("GYP_GENERATORS", [])
+            generate_formats = os.environ.get("GYP_GENERATORS") or []
         if generate_formats:
             generate_formats = re.split(r"[\s,]", generate_formats)
         if generate_formats:
             options.formats = generate_formats
+        # Nothing in the variable, default based on platform.
+        elif sys.platform == "darwin":
+            options.formats = ["xcode"]
+        elif sys.platform in ("win32", "cygwin"):
+            options.formats = ["msvs"]
         else:
-            # Nothing in the variable, default based on platform.
-            if sys.platform == "darwin":
-                options.formats = ["xcode"]
-            elif sys.platform in ("win32", "cygwin"):
-                options.formats = ["msvs"]
-            else:
-                options.formats = ["make"]
+            options.formats = ["make"]
 
     if not options.generator_output and options.use_environment:
         g_o = os.environ.get("GYP_GENERATOR_OUTPUT")
@@ -610,7 +636,7 @@ def gyp_main(args):
     if options.generator_flags:
         gen_flags += options.generator_flags
     generator_flags = NameValueListToDict(gen_flags)
-    if DEBUG_GENERAL in gyp.debug.keys():
+    if DEBUG_GENERAL in gyp.debug:
         DebugOutput(DEBUG_GENERAL, "generator_flags: %s", generator_flags)
 
     # Generate all requested formats (use a set in case we got one format request
@@ -669,7 +695,7 @@ def main(args):
         return 1
 
 
-# NOTE: setuptools generated console_scripts calls function with no arguments
+# NOTE: console_scripts calls this function with no arguments
 def script_main():
     return main(sys.argv[1:])
 

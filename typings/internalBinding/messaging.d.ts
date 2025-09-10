@@ -17,16 +17,15 @@ declare namespace InternalMessagingBinding {
 }
 
 
-declare function InternalBinding(binding: 'messaging'): {
+export interface MessagingBinding {
   DOMException: typeof import('internal/per_context/domexception').DOMException;
   MessageChannel: typeof InternalMessagingBinding.MessageChannel;
   MessagePort: typeof InternalMessagingBinding.MessagePort;
   JSTransferable: typeof InternalMessagingBinding.JSTransferable;
   stopMessagePort(port: typeof InternalMessagingBinding.MessagePort): void;
-  checkMessagePort(port: unknown): boolean;
   drainMessagePort(port: typeof InternalMessagingBinding.MessagePort): void;
   receiveMessageOnPort(port: typeof InternalMessagingBinding.MessagePort): any;
   moveMessagePortToContext(port: typeof InternalMessagingBinding.MessagePort, context: any): typeof InternalMessagingBinding.MessagePort;
   setDeserializerCreateObjectFunction(func: (deserializeInfo: string) => any): void;
   broadcastChannel(name: string): typeof InternalMessagingBinding.MessagePort;
-};
+}

@@ -114,6 +114,13 @@ int ToNumber(Register reg);
 
 Register ToRegister(int num);
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 // Returns the number of padding slots needed for stack pointer alignment.
 constexpr int ArgumentPaddingSlots(int argument_count) {
   // No argument padding required.
@@ -212,6 +219,7 @@ constexpr Register cp = s7;
 constexpr Register kScratchReg = s3;
 constexpr Register kScratchReg2 = s4;
 constexpr DoubleRegister kScratchDoubleReg = f30;
+constexpr DoubleRegister kScratchDoubleReg2 = f31;
 // FPU zero reg is often used to hold 0.0, but it's not hardwired to 0.0.
 constexpr DoubleRegister kDoubleRegZero = f28;
 // Used on mips64r6 for compare operations.
@@ -277,7 +285,10 @@ DEFINE_REGISTER_NAMES(Register, GENERAL_REGISTERS)
 DEFINE_REGISTER_NAMES(FPURegister, DOUBLE_REGISTERS)
 DEFINE_REGISTER_NAMES(MSARegister, SIMD128_REGISTERS)
 
-// Give alias names to registers for calling conventions.
+constexpr Register kCArgRegs[] = {a0, a1, a2, a3, a4, a5, a6, a7};
+constexpr int kRegisterPassedArguments = arraysize(kCArgRegs);
+constexpr int kFPRegisterPassedArguments = 8;
+
 constexpr Register kReturnRegister0 = v0;
 constexpr Register kReturnRegister1 = v1;
 constexpr Register kReturnRegister2 = a0;
@@ -288,18 +299,17 @@ constexpr Register kInterpreterAccumulatorRegister = v0;
 constexpr Register kInterpreterBytecodeOffsetRegister = t0;
 constexpr Register kInterpreterBytecodeArrayRegister = t1;
 constexpr Register kInterpreterDispatchTableRegister = t2;
-
 constexpr Register kJavaScriptCallArgCountRegister = a0;
 constexpr Register kJavaScriptCallCodeStartRegister = a2;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = a3;
 constexpr Register kJavaScriptCallExtraArg1Register = a2;
+constexpr Register kJavaScriptCallDispatchHandleRegister = a4;
 
-constexpr Register kOffHeapTrampolineRegister = at;
 constexpr Register kRuntimeCallFunctionRegister = a1;
 constexpr Register kRuntimeCallArgCountRegister = a0;
 constexpr Register kRuntimeCallArgvRegister = a2;
-constexpr Register kWasmInstanceRegister = a0;
+constexpr Register kWasmImplicitArgRegister = a0;
 constexpr Register kWasmCompileLazyFuncIndexRegister = t0;
 
 constexpr DoubleRegister kFPReturnRegister0 = f0;

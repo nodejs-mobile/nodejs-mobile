@@ -43,52 +43,52 @@ class JSCallReducerTest : public TypedGraphTest {
   JSOperatorBuilder* javascript() { return &javascript_; }
 
   Node* GlobalFunction(const char* name) {
-    Handle<JSFunction> f = Handle<JSFunction>::cast(
+    Handle<JSFunction> f = Cast<JSFunction>(
         Object::GetProperty(
             isolate(), isolate()->global_object(),
             isolate()->factory()->NewStringFromAsciiChecked(name))
             .ToHandleChecked());
-    return HeapConstant(f);
+    return HeapConstantNoHole(CanonicalHandle(f));
   }
 
   Node* MathFunction(const std::string& name) {
-    Handle<Object> m =
-        JSObject::GetProperty(
-            isolate(), isolate()->global_object(),
-            isolate()->factory()->NewStringFromAsciiChecked("Math"))
-            .ToHandleChecked();
-    Handle<JSFunction> f = Handle<JSFunction>::cast(
+    DirectHandle<JSAny> m =
+        Cast<JSAny>(JSObject::GetProperty(
+                        isolate(), isolate()->global_object(),
+                        isolate()->factory()->NewStringFromAsciiChecked("Math"))
+                        .ToHandleChecked());
+    Handle<JSFunction> f = Cast<JSFunction>(
         Object::GetProperty(
             isolate(), m,
             isolate()->factory()->NewStringFromAsciiChecked(name.c_str()))
             .ToHandleChecked());
-    return HeapConstant(f);
+    return HeapConstantNoHole(CanonicalHandle(f));
   }
 
   Node* StringFunction(const char* name) {
-    Handle<Object> m =
+    DirectHandle<JSAny> m = Cast<JSAny>(
         JSObject::GetProperty(
             isolate(), isolate()->global_object(),
             isolate()->factory()->NewStringFromAsciiChecked("String"))
-            .ToHandleChecked();
-    Handle<JSFunction> f = Handle<JSFunction>::cast(
+            .ToHandleChecked());
+    Handle<JSFunction> f = Cast<JSFunction>(
         Object::GetProperty(
             isolate(), m, isolate()->factory()->NewStringFromAsciiChecked(name))
             .ToHandleChecked());
-    return HeapConstant(f);
+    return HeapConstantNoHole(CanonicalHandle(f));
   }
 
   Node* NumberFunction(const char* name) {
-    Handle<Object> m =
+    DirectHandle<JSAny> m = Cast<JSAny>(
         JSObject::GetProperty(
             isolate(), isolate()->global_object(),
             isolate()->factory()->NewStringFromAsciiChecked("Number"))
-            .ToHandleChecked();
-    Handle<JSFunction> f = Handle<JSFunction>::cast(
+            .ToHandleChecked());
+    Handle<JSFunction> f = Cast<JSFunction>(
         Object::GetProperty(
             isolate(), m, isolate()->factory()->NewStringFromAsciiChecked(name))
             .ToHandleChecked());
-    return HeapConstant(f);
+    return HeapConstantNoHole(CanonicalHandle(f));
   }
 
   std::string op_name_for(const char* fnc) {
@@ -101,18 +101,8 @@ class JSCallReducerTest : public TypedGraphTest {
   const Operator* Call(int arity) {
     FeedbackVectorSpec spec(zone());
     spec.AddCallICSlot();
-    Handle<FeedbackMetadata> metadata = FeedbackMetadata::New(isolate(), &spec);
-    Handle<SharedFunctionInfo> shared =
-        isolate()->factory()->NewSharedFunctionInfoForBuiltin(
-            isolate()->factory()->empty_string(), Builtin::kIllegal);
-    // Set the raw feedback metadata to circumvent checks that we are not
-    // overwriting existing metadata.
-    shared->set_raw_outer_scope_info_or_feedback_metadata(*metadata);
-    Handle<ClosureFeedbackCellArray> closure_feedback_cell_array =
-        ClosureFeedbackCellArray::New(isolate(), shared);
-    IsCompiledScope is_compiled_scope(shared->is_compiled_scope(isolate()));
-    Handle<FeedbackVector> vector = FeedbackVector::New(
-        isolate(), shared, closure_feedback_cell_array, &is_compiled_scope);
+    Handle<FeedbackVector> vector =
+        FeedbackVector::NewForTesting(isolate(), &spec);
     FeedbackSource feedback(vector, FeedbackSlot(0));
     return javascript()->Call(JSCallNode::ArityForArgc(arity), CallFrequency(),
                               feedback, ConvertReceiverMode::kAny,
@@ -135,7 +125,7 @@ class JSCallReducerTest : public TypedGraphTest {
 
 TEST_F(JSCallReducerTest, PromiseConstructorNoArgs) {
   Node* promise =
-      HeapConstant(handle(native_context()->promise_function(), isolate()));
+      HeapConstantNoHole(CanonicalHandle(native_context()->promise_function()));
   Node* effect = graph()->start();
   Node* control = graph()->start();
   Node* context = UndefinedConstant();
@@ -153,9 +143,9 @@ TEST_F(JSCallReducerTest, PromiseConstructorNoArgs) {
 
 TEST_F(JSCallReducerTest, PromiseConstructorSubclass) {
   Node* promise =
-      HeapConstant(handle(native_context()->promise_function(), isolate()));
+      HeapConstantNoHole(CanonicalHandle(native_context()->promise_function()));
   Node* new_target =
-      HeapConstant(handle(native_context()->array_function(), isolate()));
+      HeapConstantNoHole(CanonicalHandle(native_context()->array_function()));
   Node* effect = graph()->start();
   Node* control = graph()->start();
   Node* context = UndefinedConstant();
@@ -174,7 +164,7 @@ TEST_F(JSCallReducerTest, PromiseConstructorSubclass) {
 
 TEST_F(JSCallReducerTest, PromiseConstructorBasic) {
   Node* promise =
-      HeapConstant(handle(native_context()->promise_function(), isolate()));
+      HeapConstantNoHole(CanonicalHandle(native_context()->promise_function()));
   Node* effect = graph()->start();
   Node* control = graph()->start();
   Node* context = UndefinedConstant();
@@ -194,7 +184,7 @@ TEST_F(JSCallReducerTest, PromiseConstructorBasic) {
 // except that we invalidate the protector cell.
 TEST_F(JSCallReducerTest, PromiseConstructorWithHook) {
   Node* promise =
-      HeapConstant(handle(native_context()->promise_function(), isolate()));
+      HeapConstantNoHole(CanonicalHandle(native_context()->promise_function()));
   Node* effect = graph()->start();
   Node* control = graph()->start();
   Node* context = UndefinedConstant();

@@ -9,7 +9,8 @@ const {
   MessagePort,
   parentPort,
 } = require('worker_threads');
-const { eventLoopUtilization, now } = require('perf_hooks').performance;
+const { performance } = require('perf_hooks');
+const { eventLoopUtilization } = require('perf_hooks').performance;
 
 // Use argv to detect whether we're running as a Worker called by this test vs.
 // this test also being called as a Worker.
@@ -35,8 +36,8 @@ function workerOnMetricsMsg(msg) {
 
   if (msg.cmd === 'spin') {
     const elu = eventLoopUtilization();
-    const t = now();
-    while (now() - t < msg.dur);
+    const t = performance.now();
+    while (performance.now() - t < msg.dur);
     return this.postMessage(eventLoopUtilization(elu));
   }
 }
@@ -61,7 +62,7 @@ let workerELU;
   metricsCh.port2.once('message', mustCall(checkWorkerIdle));
   metricsCh.port2.postMessage({ cmd: 'elu' });
   // Make sure it's still safe to call eventLoopUtilization() after the worker
-  // hass been closed.
+  // has been closed.
   worker.on('exit', mustCall(() => {
     assert.deepStrictEqual(worker.performance.eventLoopUtilization(),
                            { idle: 0, active: 0, utilization: 0 });

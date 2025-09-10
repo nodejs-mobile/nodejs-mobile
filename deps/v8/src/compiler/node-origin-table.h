@@ -8,8 +8,6 @@
 #include <limits>
 
 #include "src/base/compiler-specific.h"
-#include "src/codegen/source-position.h"
-#include "src/common/globals.h"
 #include "src/compiler/node-aux-data.h"
 
 namespace v8 {
@@ -18,7 +16,7 @@ namespace compiler {
 
 class NodeOrigin {
  public:
-  enum OriginKind { kWasmBytecode, kGraphNode };
+  enum OriginKind { kWasmBytecode, kGraphNode, kJSBytecode };
   NodeOrigin(const char* phase_name, const char* reducer_name,
              NodeId created_from)
       : phase_name_(phase_name),
@@ -114,7 +112,8 @@ class V8_EXPORT_PRIVATE NodeOriginTable final
     const char* prev_phase_name_;
   };
 
-  explicit NodeOriginTable(Graph* graph);
+  explicit NodeOriginTable(TFGraph* graph);
+  explicit NodeOriginTable(Zone* zone);
   NodeOriginTable(const NodeOriginTable&) = delete;
   NodeOriginTable& operator=(const NodeOriginTable&) = delete;
 
@@ -122,18 +121,28 @@ class V8_EXPORT_PRIVATE NodeOriginTable final
   void RemoveDecorator();
 
   NodeOrigin GetNodeOrigin(Node* node) const;
+  NodeOrigin GetNodeOrigin(NodeId id) const;
   void SetNodeOrigin(Node* node, const NodeOrigin& no);
+  void SetNodeOrigin(NodeId id, NodeId origin);
+  void SetNodeOrigin(NodeId id, NodeOrigin::OriginKind kind, NodeId origin);
 
   void SetCurrentPosition(const NodeOrigin& no) { current_origin_ = no; }
+
+  void SetCurrentBytecodePosition(int offset) {
+    current_bytecode_position_ = offset;
+  }
+
+  int GetCurrentBytecodePosition() { return current_bytecode_position_; }
 
   void PrintJson(std::ostream& os) const;
 
  private:
   class Decorator;
 
-  Graph* const graph_;
+  TFGraph* const graph_;
   Decorator* decorator_;
   NodeOrigin current_origin_;
+  int current_bytecode_position_;
 
   const char* current_phase_name_;
   static NodeOrigin UnknownNodeOrigin(Zone* zone) {

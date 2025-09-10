@@ -2,21 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_WASM_MODULE_COMPILER_H_
+#define V8_WASM_MODULE_COMPILER_H_
+
 #if !V8_ENABLE_WEBASSEMBLY
 #error This header should only be included if WebAssembly is enabled.
 #endif  // !V8_ENABLE_WEBASSEMBLY
 
-#ifndef V8_WASM_MODULE_COMPILER_H_
-#define V8_WASM_MODULE_COMPILER_H_
-
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "include/v8-metrics.h"
-#include "src/base/optional.h"
+#include "src/base/platform/time.h"
 #include "src/common/globals.h"
-#include "src/logging/metrics.h"
 #include "src/tasks/cancelable-task.h"
 #include "src/wasm/compilation-environment.h"
 #include "src/wasm/wasm-features.h"
@@ -37,6 +37,7 @@ class JSPromise;
 class Counters;
 class WasmModuleObject;
 class WasmInstanceObject;
+class WasmTrustedInstanceData;
 
 namespace wasm {
 
@@ -45,73 +46,64 @@ class CompilationResultResolver;
 class ErrorThrower;
 class ModuleCompiler;
 class NativeModule;
+class ProfileInformation;
 class StreamingDecoder;
 class WasmCode;
 struct WasmModule;
 
 V8_EXPORT_PRIVATE
 std::shared_ptr<NativeModule> CompileToNativeModule(
-    Isolate* isolate, const WasmFeatures& enabled, ErrorThrower* thrower,
-    std::shared_ptr<const WasmModule> module, const ModuleWireBytes& wire_bytes,
-    Handle<FixedArray>* export_wrappers_out, int compilation_id,
-    v8::metrics::Recorder::ContextId context_id);
+    Isolate* isolate, WasmEnabledFeatures enabled_features,
+    WasmDetectedFeatures detected_features, CompileTimeImports compile_imports,
+    ErrorThrower* thrower, std::shared_ptr<const WasmModule> module,
+    base::OwnedVector<const uint8_t> wire_bytes, int compilation_id,
+    v8::metrics::Recorder::ContextId context_id, ProfileInformation* pgo_info);
 
-void RecompileNativeModule(NativeModule* native_module,
-                           TieringState new_tiering_state);
-
-V8_EXPORT_PRIVATE
-void CompileJsToWasmWrappers(Isolate* isolate, const WasmModule* module,
-                             Handle<FixedArray>* export_wrappers_out);
+V8_EXPORT_PRIVATE WasmError ValidateAndSetBuiltinImports(
+    const WasmModule* module, base::Vector<const uint8_t> wire_bytes,
+    const CompileTimeImports& imports, WasmDetectedFeatures* detected);
 
 // Compiles the wrapper for this (kind, sig) pair and sets the corresponding
 // cache entry. Assumes the key already exists in the cache but has not been
 // compiled yet.
 V8_EXPORT_PRIVATE
-WasmCode* CompileImportWrapper(
-    NativeModule* native_module, Counters* counters,
-    compiler::WasmImportCallKind kind, const FunctionSig* sig,
-    int expected_arity, Suspend suspend,
-    WasmImportWrapperCache::ModificationScope* cache_scope);
+WasmCode* CompileImportWrapperForTest(Isolate* isolate,
+                                      NativeModule* native_module,
+                                      ImportCallKind kind,
+                                      const CanonicalSig* sig,
+                                      CanonicalTypeIndex type_index,
+                                      int expected_arity, Suspend suspend);
 
 // Triggered by the WasmCompileLazy builtin. The return value indicates whether
 // compilation was successful. Lazy compilation can fail only if validation is
 // also lazy.
-bool CompileLazy(Isolate*, Handle<WasmInstanceObject>, int func_index);
+bool CompileLazy(Isolate*, Tagged<WasmTrustedInstanceData>, int func_index);
 
-V8_EXPORT_PRIVATE void TriggerTierUp(Isolate*, NativeModule*, int func_index,
-                                     Handle<WasmInstanceObject> instance);
+// Throws the compilation error after failed lazy compilation.
+void ThrowLazyCompilationError(Isolate* isolate,
+                               const NativeModule* native_module,
+                               int func_index);
 
-template <typename Key, typename Hash>
-class WrapperQueue {
- public:
-  // Removes an arbitrary key from the queue and returns it.
-  // If the queue is empty, returns nullopt.
-  // Thread-safe.
-  base::Optional<Key> pop() {
-    base::Optional<Key> key = base::nullopt;
-    base::MutexGuard lock(&mutex_);
-    auto it = queue_.begin();
-    if (it != queue_.end()) {
-      key = *it;
-      queue_.erase(it);
-    }
-    return key;
-  }
+// Trigger tier-up of a particular function to TurboFan. If tier-up was already
+// triggered, we instead increase the priority with exponential back-off.
+V8_EXPORT_PRIVATE void TriggerTierUp(Isolate*, Tagged<WasmTrustedInstanceData>,
+                                     int func_index);
+// Synchronous version of the above.
+V8_EXPORT_PRIVATE void TierUpNowForTesting(Isolate*,
+                                           Tagged<WasmTrustedInstanceData>,
+                                           int func_index);
+// Same, but all functions.
+V8_EXPORT_PRIVATE void TierUpAllForTesting(Isolate*,
+                                           Tagged<WasmTrustedInstanceData>);
 
-  // Add the given key to the queue and returns true iff the insert was
-  // successful.
-  // Not thread-safe.
-  bool insert(const Key& key) { return queue_.insert(key).second; }
+V8_EXPORT_PRIVATE void InitializeCompilationForTesting(
+    NativeModule* native_module);
 
-  size_t size() {
-    base::MutexGuard lock(&mutex_);
-    return queue_.size();
-  }
-
- private:
-  base::Mutex mutex_;
-  std::unordered_set<Key, Hash> queue_;
-};
+// Publish a set of detected features in a given isolate. If this is the initial
+// compilation, also the "kWasmModuleCompilation" use counter is incremented to
+// serve as a baseline for the other detected features.
+void PublishDetectedFeatures(WasmDetectedFeatures, Isolate*,
+                             bool is_initial_compilation);
 
 // Encapsulates all the state and steps of an asynchronous compilation.
 // An asynchronous compile job consists of a number of tasks that are executed
@@ -122,9 +114,11 @@ class WrapperQueue {
 // TODO(wasm): factor out common parts of this with the synchronous pipeline.
 class AsyncCompileJob {
  public:
-  AsyncCompileJob(Isolate* isolate, const WasmFeatures& enabled_features,
-                  std::unique_ptr<byte[]> bytes_copy, size_t length,
-                  Handle<Context> context, Handle<Context> incumbent_context,
+  AsyncCompileJob(Isolate* isolate, WasmEnabledFeatures enabled_features,
+                  CompileTimeImports compile_imports,
+                  base::OwnedVector<const uint8_t> bytes,
+                  DirectHandle<Context> context,
+                  DirectHandle<NativeContext> incumbent_context,
                   const char* api_method_name,
                   std::shared_ptr<CompilationResultResolver> resolver,
                   int compilation_id);
@@ -139,7 +133,7 @@ class AsyncCompileJob {
 
   Isolate* isolate() const { return isolate_; }
 
-  Handle<NativeContext> context() const { return native_context_; }
+  DirectHandle<NativeContext> context() const { return native_context_; }
   v8::metrics::Recorder::ContextId context_id() const { return context_id_; }
 
  private:
@@ -148,11 +142,25 @@ class AsyncCompileJob {
   class CompilationStateCallback;
 
   // States of the AsyncCompileJob.
-  class DecodeModule;            // Step 1  (async)
-  class DecodeFail;              // Step 1b (sync)
-  class PrepareAndStartCompile;  // Step 2  (sync)
-  class CompileFailed;           // Step 3a (sync)
-  class CompileFinished;         // Step 3b (sync)
+  // Step 1 (async). Decodes the wasm module.
+  // --> Fail on decoding failure,
+  // --> PrepareAndStartCompile on success.
+  class DecodeModule;
+
+  // Step 2 (sync). Prepares runtime objects and starts background compilation.
+  // --> finish directly on native module cache hit,
+  // --> finish directly on validation error,
+  // --> trigger eager compilation, if any; FinishCompile is triggered when
+  // done.
+  class PrepareAndStartCompile;
+
+  // Step 3 (sync). Compilation finished. Finalize the module and resolve the
+  // promise.
+  class FinishCompilation;
+
+  // Step 4 (sync). Decoding, validation or compilation failed. Reject the
+  // promise.
+  class Fail;
 
   friend class AsyncStreamingProcessor;
 
@@ -173,12 +181,11 @@ class AsyncCompileJob {
 
   void FinishCompile(bool is_after_cache_hit);
 
-  void DecodeFailed(const WasmError&);
-  void AsyncCompileFailed();
+  void Failed();
 
-  void AsyncCompileSucceeded(Handle<WasmModuleObject> result);
+  void AsyncCompileSucceeded(DirectHandle<WasmModuleObject> result);
 
-  void FinishModule();
+  void FinishSuccessfully();
 
   void StartForegroundTask();
   void ExecuteForegroundTaskImmediately();
@@ -214,23 +221,23 @@ class AsyncCompileJob {
 
   Isolate* const isolate_;
   const char* const api_method_name_;
-  const WasmFeatures enabled_features_;
-  const DynamicTiering dynamic_tiering_;
-  const bool wasm_lazy_compilation_;
+  const WasmEnabledFeatures enabled_features_;
+  WasmDetectedFeatures detected_features_;
+  CompileTimeImports compile_imports_;
   base::TimeTicks start_time_;
   // Copy of the module wire bytes, moved into the {native_module_} on its
   // creation.
-  std::unique_ptr<byte[]> bytes_copy_;
+  base::OwnedVector<const uint8_t> bytes_copy_;
   // Reference to the wire bytes (held in {bytes_copy_} or as part of
   // {native_module_}).
   ModuleWireBytes wire_bytes_;
-  Handle<NativeContext> native_context_;
-  Handle<Context> incumbent_context_;
+  IndirectHandle<NativeContext> native_context_;
+  IndirectHandle<NativeContext> incumbent_context_;
   v8::metrics::Recorder::ContextId context_id_;
   v8::metrics::WasmModuleDecoded metrics_event_;
   const std::shared_ptr<CompilationResultResolver> resolver_;
 
-  Handle<WasmModuleObject> module_object_;
+  IndirectHandle<WasmModuleObject> module_object_;
   std::shared_ptr<NativeModule> native_module_;
 
   std::unique_ptr<CompileStep> step_;

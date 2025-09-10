@@ -235,7 +235,13 @@ InspectorTest.runAsyncTestSuite([
       expression: '/\w+/y'
     })).result);
     InspectorTest.logMessage((await evaluate({
+      expression: '/\w+/v'
+    })).result);
+    InspectorTest.logMessage((await evaluate({
       expression: '/\w+/dgimsuy'
+    })).result);
+    InspectorTest.logMessage((await evaluate({
+      expression: '/\w+/dgimsvy'
     })).result);
     InspectorTest.logMessage((await evaluate({
       expression: `new RegExp('\\w+', 'g')`,
@@ -245,6 +251,11 @@ InspectorTest.runAsyncTestSuite([
     })).result);
     InspectorTest.logMessage((await evaluate({
       expression: `var re = /./dgimsuy;
+        re.toString = () => 'foo';
+        re`
+    })).result);
+    InspectorTest.logMessage((await evaluate({
+      expression: `var re = /./dgimsvy;
         re.toString = () => 'foo';
         re`
     })).result);
@@ -490,6 +501,14 @@ InspectorTest.runAsyncTestSuite([
       expression: '({e: new Proxy({a: 1}, {b: 2})})',
       generatePreview: true
     })).result);
+    InspectorTest.logMessage((await evaluate({
+      expression: 'new Proxy([1, 2], {})',
+      generatePreview: true
+    })).result);
+    InspectorTest.logMessage((await evaluate({
+      expression: 'revocable = Proxy.revocable({}, {}); revocable.revoke(); revocable.proxy',
+      generatePreview: true
+    })).result);
   },
   async function testPromise() {
     InspectorTest.logMessage((await evaluate({
@@ -560,18 +579,12 @@ InspectorTest.runAsyncTestSuite([
       expression: '[1,2,3]'
     })).result);
   },
-  async function testArrayLike() {
+  async function testArgumentsObject() {
     InspectorTest.logMessage((await evaluate({
-      expression: '({length: 5, splice: () => []})'
+      expression: '(function() { return arguments; })(1, 2, 3)'
     })).result);
     InspectorTest.logMessage((await evaluate({
-      expression: `new (class Foo{constructor() {
-        this.length = 5;
-        this.splice = () => [];
-      }})`
-    })).result);
-    InspectorTest.logMessage((await evaluate({
-      expression: '({length: -5, splice: () => []})'
+      expression: '(function() { "use strict"; return arguments; })(-1, 0, 1, 2, 3)'
     })).result);
   },
   async function testOtherObjects() {
@@ -597,16 +610,16 @@ InspectorTest.runAsyncTestSuite([
       expression: 'new (class Bar {})'
     })).result);
     InspectorTest.logMessage((await evaluate({
-      expression: 'inspector.createObjectWithAccessor(\'title\', true)',
+      expression: 'inspector.createObjectWithNativeDataProperty(\'title\', true)',
       generatePreview: true
     })));
     InspectorTest.logMessage((await evaluate({
-      expression: 'inspector.createObjectWithAccessor(\'title\', false)',
+      expression: 'inspector.createObjectWithNativeDataProperty(\'title\', false)',
       generatePreview: true
     })));
     // TODO(kozyatinskiy): fix this one.
     InspectorTest.logMessage((await evaluate({
-      expression: 'inspector.createObjectWithAccessor(\'title\', true)',
+      expression: 'inspector.createObjectWithNativeDataProperty(\'title\', true)',
       returnByValue: true
     })));
     InspectorTest.logMessage((await evaluate({

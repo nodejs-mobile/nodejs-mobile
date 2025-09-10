@@ -97,5 +97,20 @@ export function load(url, context, next) {
     };
   }
 
+  if (url.endsWith('esmHook/commonJsNullSource.mjs')) {
+    return {
+      format: 'commonjs',
+      shortCircuit: true,
+      source: 1n,
+    };
+  }
+
+  if (url.endsWith('esmHook/maximumCallStack.mjs')) {
+    function recurse() {
+      recurse();
+    }
+    recurse();
+  }
+
   return next(url);
 }

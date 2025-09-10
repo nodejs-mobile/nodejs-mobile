@@ -15,24 +15,10 @@
 namespace v8 {
 namespace internal {
 
+class Oddball;
 class StructBodyDescriptor;
 
 #include "torque-generated/src/objects/template-objects-tq.inc"
-
-// CachedTemplateObject is a tuple used to cache a TemplateObject that has been
-// created. All the CachedTemplateObject's for a given SharedFunctionInfo form a
-// linked list via the next fields.
-class CachedTemplateObject final
-    : public TorqueGeneratedCachedTemplateObject<CachedTemplateObject, Struct> {
- public:
-  static Handle<CachedTemplateObject> New(Isolate* isolate, int slot_id,
-                                          Handle<JSArray> template_object,
-                                          Handle<HeapObject> next);
-
-  using BodyDescriptor = StructBodyDescriptor;
-
-  TQ_OBJECT_CONSTRUCTORS(CachedTemplateObject)
-};
 
 // TemplateObjectDescription is a tuple of raw strings and cooked strings for
 // tagged template literals. Used to communicate with the runtime for template
@@ -41,10 +27,10 @@ class TemplateObjectDescription final
     : public TorqueGeneratedTemplateObjectDescription<TemplateObjectDescription,
                                                       Struct> {
  public:
-  static Handle<JSArray> GetTemplateObject(
-      Isolate* isolate, Handle<NativeContext> native_context,
-      Handle<TemplateObjectDescription> description,
-      Handle<SharedFunctionInfo> shared_info, int slot_id);
+  static DirectHandle<JSArray> GetTemplateObject(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateObjectDescription> description,
+      DirectHandle<SharedFunctionInfo> shared_info, int slot_id);
 
   using BodyDescriptor = StructBodyDescriptor;
 

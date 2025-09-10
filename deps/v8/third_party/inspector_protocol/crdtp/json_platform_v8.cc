@@ -1,4 +1,4 @@
-// Copyright 2019 The V8 Authors. All rights reserved.
+// Copyright 2019 The V8 Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,17 +16,15 @@ namespace platform {
 // Parses |str| into |result|. Returns false iff there are
 // leftover characters or parsing errors.
 bool StrToD(const char* str, double* result) {
-  *result =
-      v8::internal::StringToDouble(str, v8::internal::NO_CONVERSION_FLAGS);
+  *result = v8::internal::StringToDouble(str, v8::internal::NO_CONVERSION_FLAG);
   return std::isfinite(*result);
 }
 
 // Prints |value| in a format suitable for JSON.
 std::string DToStr(double value) {
   v8::base::ScopedVector<char> buffer(
-      v8::internal::kDoubleToCStringMinBufferSize);
-  const char* str = v8::internal::DoubleToCString(value, buffer);
-  return (str == nullptr) ? "" : std::string(str);
+      v8::internal::kDoubleToStringMinBufferSize);
+  return std::string(v8::internal::DoubleToStringView(value, buffer));
 }
 }  // namespace platform
 }  // namespace json

@@ -4,15 +4,12 @@
 
 # Fork from commands.py and output.py in v8 test driver.
 
-import os
 import signal
 import subprocess
 import sys
+
+from pathlib import Path
 from threading import Event, Timer
-
-import v8_fuzz_config
-
-PYTHON3 = sys.version_info >= (3, 0)
 
 # List of default flags passed to each d8 run.
 DEFAULT_FLAGS = [
@@ -23,22 +20,30 @@ DEFAULT_FLAGS = [
     '--invoke-weak-callbacks',
     '--omit-quit',
     '--harmony',
+    '--js-staging',
     '--wasm-staging',
     '--no-wasm-async-compilation',
+    # Limit wasm memory to just below 2GiB, to avoid differences between 32-bit
+    # and 64-bit builds.
+    '--wasm-max-mem-pages=32767',
     '--suppress-asm-messages',
 ]
 
-BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+BASE_PATH = Path(__file__).parent.resolve()
 
 # List of files passed to each d8 run before the testcase.
-DEFAULT_MOCK = os.path.join(BASE_PATH, 'v8_mock.js')
+DEFAULT_MOCK = BASE_PATH / 'v8_mock.js'
+SMOKE_TESTS = BASE_PATH / 'v8_smoke_tests.js'
 
 # Suppressions on JavaScript level for known issues.
-JS_SUPPRESSIONS = os.path.join(BASE_PATH, 'v8_suppressions.js')
+JS_SUPPRESSIONS = BASE_PATH / 'v8_suppressions.js'
 
 # Config-specific mock files.
-ARCH_MOCKS = os.path.join(BASE_PATH, 'v8_mock_archs.js')
-WEBASSEMBLY_MOCKS = os.path.join(BASE_PATH, 'v8_mock_webassembly.js')
+ARCH_MOCKS = BASE_PATH / 'v8_mock_archs.js'
+WEBASSEMBLY_MOCKS = BASE_PATH / 'v8_mock_webassembly.js'
+
+# Non-standard exit code only used to simulate crashes in tests.
+CRASH_CODE_FOR_TESTING = 73
 
 
 def _startup_files(options):
@@ -51,7 +56,8 @@ def _startup_files(options):
   # Mock out WebAssembly when comparing with jitless mode.
   if '--jitless' in options.first.flags + options.second.flags:
     files.append(WEBASSEMBLY_MOCKS)
-  return files
+  # Keep the smoke tests last, right before the actual test case.
+  return files + [SMOKE_TESTS]
 
 
 class BaseException(Exception):
@@ -83,18 +89,18 @@ class Command(object):
 
     self.files = _startup_files(options)
 
-  def run(self, testcase, timeout, verbose=False):
+  def run(self, testcase, timeout):
     """Run the executable with a specific testcase."""
-    args = [self.executable] + self.flags + self.files + [testcase]
-    if verbose:
-      print('# Command line for %s comparison:' % self.label)
-      print(' '.join(args))
-    if self.executable.endswith('.py'):
+    raw_args = [self.executable] + self.flags + self.files + [testcase]
+    args = list(map(str, raw_args))
+    print(f'# Command line for {self.label} comparison:')
+    print(' '.join(args))
+    if self.executable.suffix == '.py':
       # Wrap with python in tests.
       args = [sys.executable] + args
     return Execute(
         args,
-        cwd=os.path.dirname(os.path.abspath(testcase)),
+        cwd=testcase.parent,
         timeout=timeout,
     )
 
@@ -102,32 +108,41 @@ class Command(object):
   def flags(self):
     return self.common_flags + self.config_flags
 
+  def remove_config_flag(self, remove_flag):
+    """Removes all occurences of `remove_flag` from the config flags."""
+    self.config_flags = [
+        flag for flag in self.config_flags if flag != remove_flag
+    ]
+
 
 class Output(object):
-  def __init__(self, exit_code, stdout, pid):
+  def __init__(self, exit_code, stdout_bytes, pid):
     self.exit_code = exit_code
-    self.stdout = stdout
+    self.stdout_bytes = stdout_bytes
     self.pid = pid
 
+  @property
+  def stdout(self):
+    try:
+      return self.stdout_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+      return self.stdout_bytes.decode('latin-1')
+
   def HasCrashed(self):
-    return self.exit_code < 0
+    return self.exit_code < 0 or self.exit_code == CRASH_CODE_FOR_TESTING
 
 
 def Execute(args, cwd, timeout=None):
   popen_args = [c for c in args if c != ""]
-  kwargs = {}
-  if PYTHON3:
-    kwargs['encoding'] = 'utf-8'
   try:
     process = subprocess.Popen(
       args=popen_args,
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE,
       cwd=cwd,
-      **kwargs
     )
   except Exception as e:
-    sys.stderr.write("Error executing: %s\n" % popen_args)
+    sys.stderr.write(f'Error executing: {popen_args}\n')
     raise e
 
   timeout_event = Event()
@@ -137,11 +152,11 @@ def Execute(args, cwd, timeout=None):
     try:
       process.kill()
     except OSError:
-      sys.stderr.write('Error: Process %s already ended.\n' % process.pid)
+      sys.stderr.write(f'Error: Process {process.pid} already ended.\n')
 
   timer = Timer(timeout, kill_process)
   timer.start()
-  stdout, _ = process.communicate()
+  stdout_bytes, _ = process.communicate()
   timer.cancel()
 
   if timeout_event.is_set():
@@ -149,6 +164,6 @@ def Execute(args, cwd, timeout=None):
 
   return Output(
       process.returncode,
-      stdout,
+      stdout_bytes,
       process.pid,
   )

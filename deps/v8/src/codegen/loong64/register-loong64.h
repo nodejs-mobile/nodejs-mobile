@@ -19,10 +19,20 @@ namespace internal {
   V(x_reg)      V(fp)  \
   V(s0)  V(s1)  V(s2)  V(s3)  V(s4)  V(s5)  V(s6)  V(s7)  V(s8) \
 
-#define ALLOCATABLE_GENERAL_REGISTERS(V) \
+#define ALWAYS_ALLOCATABLE_GENERAL_REGISTERS(V) \
   V(a0)  V(a1)  V(a2)  V(a3)  V(a4)  V(a5)  V(a6)  V(a7) \
   V(t0)  V(t1)  V(t2)  V(t3)  V(t4)  V(t5)               \
-  V(s0)  V(s1)  V(s2)  V(s3)  V(s4)  V(s5)  V(s7)  V(s8)
+  V(s0)  V(s1)  V(s2)  V(s3)  V(s4)  V(s5)  V(s7)
+
+#ifdef V8_COMPRESS_POINTERS
+#define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
+#else
+#define MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V) V(s8)
+#endif
+
+#define ALLOCATABLE_GENERAL_REGISTERS(V)  \
+  ALWAYS_ALLOCATABLE_GENERAL_REGISTERS(V) \
+  MAYBE_ALLOCATABLE_GENERAL_REGISTERS(V)
 
 #define DOUBLE_REGISTERS(V)                               \
   V(f0)  V(f1)  V(f2)  V(f3)  V(f4)  V(f5)  V(f6)  V(f7)  \
@@ -38,9 +48,10 @@ namespace internal {
   V(w24) V(w25) V(w26) V(w27) V(w28) V(w29) V(w30) V(w31)
 
 #define ALLOCATABLE_DOUBLE_REGISTERS(V)                   \
-  V(f0)  V(f1)  V(f2)  V(f3)  V(f4)  V(f5) V(f6) V(f7) \
-  V(f8) V(f9) V(f10) V(f11) V(f12) V(f13) V(f14) V(f15) V(f16) \
-  V(f17) V(f18) V(f19) V(f20) V(f21) V(f22) V(f23)
+  V(f0)  V(f1)  V(f2)  V(f3)  V(f4)  V(f5)  V(f6)  V(f7)  \
+  V(f8)  V(f9)  V(f10) V(f11) V(f12) V(f13) V(f14) V(f15) \
+  V(f16) V(f17) V(f18) V(f19) V(f20) V(f21) V(f22) V(f23) \
+  V(f24) V(f25) V(f26) V(f27) V(f28)
 // clang-format on
 
 // Note that the bit values must match those used in actual instruction
@@ -102,6 +113,13 @@ int ToNumber(Register reg);
 
 Register ToRegister(int num);
 
+// Assign |source| value to |no_reg| and return the |source|'s previous value.
+inline Register ReassignRegister(Register& source) {
+  Register result = source;
+  source = Register::no_reg();
+  return result;
+}
+
 // Returns the number of padding slots needed for stack pointer alignment.
 constexpr int ArgumentPaddingSlots(int argument_count) {
   // No argument padding required.
@@ -151,7 +169,6 @@ constexpr Register cp = s7;
 constexpr Register kScratchReg = s3;
 constexpr Register kScratchReg2 = s4;
 constexpr DoubleRegister kScratchDoubleReg = f30;
-constexpr DoubleRegister kScratchDoubleReg1 = f30;
 constexpr DoubleRegister kScratchDoubleReg2 = f31;
 // FPU zero reg is often used to hold 0.0, but it's not hardwired to 0.0.
 constexpr DoubleRegister kDoubleRegZero = f29;
@@ -186,7 +203,11 @@ constexpr FPUControlRegister FCSR3 = {kFCSRRegister + 3};
 DEFINE_REGISTER_NAMES(Register, GENERAL_REGISTERS)
 DEFINE_REGISTER_NAMES(FPURegister, DOUBLE_REGISTERS)
 
-// Give alias names to registers for calling conventions.
+// LoongArch64 calling convention.
+constexpr Register kCArgRegs[] = {a0, a1, a2, a3, a4, a5, a6, a7};
+constexpr int kRegisterPassedArguments = arraysize(kCArgRegs);
+constexpr int kFPRegisterPassedArguments = 8;
+
 constexpr Register kReturnRegister0 = a0;
 constexpr Register kReturnRegister1 = a1;
 constexpr Register kReturnRegister2 = a2;
@@ -203,13 +224,20 @@ constexpr Register kJavaScriptCallCodeStartRegister = a2;
 constexpr Register kJavaScriptCallTargetRegister = kJSFunctionRegister;
 constexpr Register kJavaScriptCallNewTargetRegister = a3;
 constexpr Register kJavaScriptCallExtraArg1Register = a2;
+constexpr Register kJavaScriptCallDispatchHandleRegister = a4;
 
-constexpr Register kOffHeapTrampolineRegister = t7;
 constexpr Register kRuntimeCallFunctionRegister = a1;
 constexpr Register kRuntimeCallArgCountRegister = a0;
 constexpr Register kRuntimeCallArgvRegister = a2;
-constexpr Register kWasmInstanceRegister = a0;
+constexpr Register kWasmImplicitArgRegister = a7;
 constexpr Register kWasmCompileLazyFuncIndexRegister = t0;
+constexpr Register kWasmTrapHandlerFaultAddressRegister = t6;
+
+#ifdef V8_COMPRESS_POINTERS
+constexpr Register kPtrComprCageBaseRegister = s8;
+#else
+constexpr Register kPtrComprCageBaseRegister = no_reg;
+#endif
 
 constexpr DoubleRegister kFPReturnRegister0 = f0;
 

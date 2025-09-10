@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {DOM, V8CustomElement} from './helper.mjs';
+import {Debouncer, DOM, V8CustomElement} from './helper.mjs';
 
 DOM.defineCustomElement(
     'view/tool-tip', (templateText) => class Tooltip extends V8CustomElement {
       _targetNode;
       _content;
       _isHidden = true;
+      _debouncedSetData =
+          new Debouncer((...args) => this._setData(...args), 500)
 
       constructor() {
         super(templateText);
@@ -33,6 +35,7 @@ DOM.defineCustomElement(
 
       _update() {
         if (!this._targetNode || this._isHidden) return;
+        if (!this._targetNode.parentNode) return;
         const rect = this._targetNode.getBoundingClientRect();
         rect.x += rect.width / 2;
         let atRight = this._useRight(rect.x);
@@ -42,15 +45,28 @@ DOM.defineCustomElement(
         this.requestUpdate(true);
       }
 
-      set positionOrTargetNode(positionOrTargetNode) {
-        if (positionOrTargetNode.nodeType === undefined) {
-          this.position = positionOrTargetNode;
+      set data({content, positionOrTargetNode, immediate}) {
+        if (immediate) {
+          this._debouncedSetData.callNow(content, positionOrTargetNode)
         } else {
-          this.targetNode = positionOrTargetNode;
+          this._debouncedSetData.call(content, positionOrTargetNode)
         }
       }
 
-      set targetNode(targetNode) {
+      _setData(content, positionOrTargetNode) {
+        if (positionOrTargetNode.nodeType === undefined) {
+          this._targetNode = undefined;
+          const position = positionOrTargetNode;
+          this._setPosition(
+              position, this._useRight(position.x),
+              this._useBottom(position.y));
+        } else {
+          this._setTargetNode(positionOrTargetNode);
+        }
+        this._setContent(content);
+      }
+
+      _setTargetNode(targetNode) {
         this._intersectionObserver.disconnect();
         this._targetNode = targetNode;
         if (targetNode === undefined) return;
@@ -58,12 +74,6 @@ DOM.defineCustomElement(
           this._intersectionObserver.observe(targetNode);
         }
         this.requestUpdate(true);
-      }
-
-      set position(position) {
-        this._targetNode = undefined;
-        this._setPosition(
-            position, this._useRight(position.x), this._useBottom(position.y));
       }
 
       _setPosition(viewportPosition, atRight, atBottom) {
@@ -84,7 +94,7 @@ DOM.defineCustomElement(
         return viewportX < document.documentElement.clientWidth / 2;
       }
 
-      set content(content) {
+      _setContent(content) {
         if (!content) return this.hide();
         this.show();
         if (this._content === content) return;

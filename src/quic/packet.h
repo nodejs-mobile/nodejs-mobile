@@ -15,10 +15,10 @@
 #include "bindingdata.h"
 #include "cid.h"
 #include "data.h"
+#include "defs.h"
 #include "tokens.h"
 
-namespace node {
-namespace quic {
+namespace node::quic {
 
 struct PathDescriptor {
   uint32_t version;
@@ -26,6 +26,7 @@ struct PathDescriptor {
   const CID& scid;
   const SocketAddress& local_address;
   const SocketAddress& remote_address;
+  std::string ToString() const;
 };
 
 // A Packet encapsulates serialized outbound QUIC data.
@@ -49,8 +50,6 @@ class Packet final : public ReqWrap<uv_udp_send_t> {
   struct Data;
 
  public:
-  using Queue = std::deque<BaseObjectPtr<Packet>>;
-
   static v8::Local<v8::FunctionTemplate> GetConstructorTemplate(
       Environment* env);
 
@@ -77,13 +76,9 @@ class Packet final : public ReqWrap<uv_udp_send_t> {
          const SocketAddress& destination,
          std::shared_ptr<Data> data);
 
-  Packet(const Packet&) = delete;
-  Packet(Packet&&) = delete;
-  Packet& operator=(const Packet&) = delete;
-  Packet& operator=(Packet&&) = delete;
+  DISALLOW_COPY_AND_MOVE(Packet)
 
   const SocketAddress& destination() const;
-  bool is_sending() const;
   size_t length() const;
   operator uv_buf_t() const;
   operator ngtcp2_vec() const;
@@ -109,11 +104,6 @@ class Packet final : public ReqWrap<uv_udp_send_t> {
 
   std::string ToString() const;
 
-  // Transmits the packet. The handle is the bound uv_udp_t
-  // port that we're sending on, the ref is a pointer to the
-  // HandleWrap that owns the handle.
-  int Send(uv_udp_t* handle, BaseObjectPtr<BaseObject> ref);
-
   static BaseObjectPtr<Packet> CreateRetryPacket(
       Environment* env,
       Listener* listener,
@@ -130,7 +120,6 @@ class Packet final : public ReqWrap<uv_udp_send_t> {
   static BaseObjectPtr<Packet> CreateImmediateConnectionClosePacket(
       Environment* env,
       Listener* listener,
-      const SocketAddress& destination,
       const PathDescriptor& path_descriptor,
       const QuicError& reason);
 
@@ -146,23 +135,21 @@ class Packet final : public ReqWrap<uv_udp_send_t> {
       Listener* listener,
       const PathDescriptor& path_descriptor);
 
+  // Called when the packet is done being sent.
+  void Done(int status);
+
  private:
   static BaseObjectPtr<Packet> FromFreeList(Environment* env,
                                             std::shared_ptr<Data> data,
                                             Listener* listener,
                                             const SocketAddress& destination);
 
-  // Called when the packet is done being sent.
-  void Done(int status);
-
   Listener* listener_;
   SocketAddress destination_;
   std::shared_ptr<Data> data_;
-  BaseObjectPtr<BaseObject> handle_;
 };
 
-}  // namespace quic
-}  // namespace node
+}  // namespace node::quic
 
 #endif  // HAVE_OPENSSL && NODE_OPENSSL_HAS_QUIC
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

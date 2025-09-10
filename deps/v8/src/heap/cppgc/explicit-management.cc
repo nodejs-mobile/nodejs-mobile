@@ -11,6 +11,7 @@
 #include "src/heap/cppgc/heap-object-header.h"
 #include "src/heap/cppgc/heap-page.h"
 #include "src/heap/cppgc/memory.h"
+#include "src/heap/cppgc/object-view.h"
 
 namespace cppgc {
 namespace internal {
@@ -36,21 +37,38 @@ void ExplicitManagementImpl::FreeUnreferencedObject(HeapHandle& heap_handle,
   auto& header = HeapObjectHeader::FromObject(object);
   header.Finalize();
 
-  size_t object_size = 0;
-  USE(object_size);
-
   // `object` is guaranteed to be of type GarbageCollected, so getting the
   // BasePage is okay for regular and large objects.
   BasePage* base_page = BasePage::FromPayload(object);
+
+#if defined(CPPGC_YOUNG_GENERATION)
+  const size_t object_size = ObjectView<>(header).Size();
+
+  if (auto& heap_base = HeapBase::From(heap_handle);
+      heap_base.generational_gc_supported()) {
+    heap_base.remembered_set().InvalidateRememberedSlotsInRange(
+        object, reinterpret_cast<uint8_t*>(object) + object_size);
+    // If this object was registered as remembered, remove it. Do that before
+    // the page gets destroyed.
+    heap_base.remembered_set().InvalidateRememberedSourceObject(header);
+    if (header.IsMarked()) {
+      base_page->DecrementMarkedBytes(
+          header.IsLargeObject<AccessMode::kNonAtomic>()
+              ? reinterpret_cast<const LargePage*>(
+                    BasePage::FromPayload(&header))
+                    ->PayloadSize()
+              : header.AllocatedSize<AccessMode::kNonAtomic>());
+    }
+  }
+#endif  // defined(CPPGC_YOUNG_GENERATION)
+
   if (base_page->is_large()) {  // Large object.
-    object_size = LargePage::From(base_page)->ObjectSize();
     base_page->space().RemovePage(base_page);
     base_page->heap().stats_collector()->NotifyExplicitFree(
         LargePage::From(base_page)->PayloadSize());
     LargePage::Destroy(LargePage::From(base_page));
   } else {  // Regular object.
     const size_t header_size = header.AllocatedSize();
-    object_size = header.ObjectSize();
     auto* normal_page = NormalPage::From(base_page);
     auto& normal_space = *static_cast<NormalPageSpace*>(&base_page->space());
     auto& lab = normal_space.linear_allocation_buffer();
@@ -66,13 +84,6 @@ void ExplicitManagementImpl::FreeUnreferencedObject(HeapHandle& heap_handle,
       // list entry.
     }
   }
-#if defined(CPPGC_YOUNG_GENERATION)
-  auto& heap_base = HeapBase::From(heap_handle);
-  heap_base.remembered_set().InvalidateRememberedSlotsInRange(
-      object, reinterpret_cast<uint8_t*>(object) + object_size);
-  // If this object was registered as remembered, remove it.
-  heap_base.remembered_set().InvalidateRememberedSourceObject(header);
-#endif  // defined(CPPGC_YOUNG_GENERATION)
 }
 
 namespace {
@@ -91,6 +102,15 @@ bool Grow(HeapObjectHeader& header, BasePage& base_page, size_t new_size,
     Address delta_start = lab.Allocate(size_delta);
     SetMemoryAccessible(delta_start, size_delta);
     header.SetAllocatedSize(new_size);
+#if defined(CPPGC_YOUNG_GENERATION)
+    if (auto& heap_base = *normal_space.raw_heap()->heap();
+        heap_base.generational_gc_supported()) {
+      if (header.IsMarked()) {
+        base_page.IncrementMarkedBytes(
+            header.AllocatedSize<AccessMode::kNonAtomic>());
+      }
+    }
+#endif  // defined(CPPGC_YOUNG_GENERATION)
     return true;
   }
   return false;
@@ -122,8 +142,15 @@ bool Shrink(HeapObjectHeader& header, BasePage& base_page, size_t new_size,
     header.SetAllocatedSize(new_size);
   }
 #if defined(CPPGC_YOUNG_GENERATION)
-  base_page.heap().remembered_set().InvalidateRememberedSlotsInRange(
-      free_start, free_start + size_delta);
+  auto& heap = base_page.heap();
+  if (heap.generational_gc_supported()) {
+    heap.remembered_set().InvalidateRememberedSlotsInRange(
+        free_start, free_start + size_delta);
+    if (header.IsMarked()) {
+      base_page.DecrementMarkedBytes(
+          header.AllocatedSize<AccessMode::kNonAtomic>());
+    }
+  }
 #endif  // defined(CPPGC_YOUNG_GENERATION)
   // Return success in any case, as we want to avoid that embedders start
   // copying memory because of small deltas.

@@ -31,21 +31,29 @@
 #endif
 #include "callback_queue.h"
 #include "cleanup_queue-inl.h"
+#include "compile_cache.h"
 #include "debug_utils.h"
 #include "env_properties.h"
 #include "handle_wrap.h"
 #include "node.h"
 #include "node_binding.h"
 #include "node_builtins.h"
+#include "node_exit_code.h"
 #include "node_main_instance.h"
 #include "node_options.h"
 #include "node_perf_common.h"
 #include "node_realm.h"
 #include "node_snapshotable.h"
+#include "permission/permission.h"
 #include "req_wrap.h"
 #include "util.h"
 #include "uv.h"
+#include "v8-external-memory-accounter.h"
 #include "v8.h"
+
+#if HAVE_OPENSSL
+#include <openssl/evp.h>
+#endif
 
 #include <array>
 #include <atomic>
@@ -62,6 +70,9 @@
 
 namespace node {
 
+namespace shadow_realm {
+class ShadowRealm;
+}
 namespace contextify {
 class ContextifyScript;
 class CompiledFnEntry;
@@ -98,19 +109,6 @@ class ModuleWrap;
 class Environment;
 class Realm;
 
-// Disables zero-filling for ArrayBuffer allocations in this scope. This is
-// similar to how we implement Buffer.allocUnsafe() in JS land.
-class NoArrayBufferZeroFillScope {
- public:
-  inline explicit NoArrayBufferZeroFillScope(IsolateData* isolate_data);
-  inline ~NoArrayBufferZeroFillScope();
-
- private:
-  NodeArrayBufferAllocator* node_allocator_;
-
-  friend class Environment;
-};
-
 struct IsolateDataSerializeInfo {
   std::vector<SnapshotIndex> primitive_values;
   std::vector<PropInfo> template_values;
@@ -119,22 +117,52 @@ struct IsolateDataSerializeInfo {
                                   const IsolateDataSerializeInfo& i);
 };
 
+struct PerIsolateWrapperData {
+  uint16_t cppgc_id;
+  uint16_t non_cppgc_id;
+};
+
 class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
- public:
+ private:
   IsolateData(v8::Isolate* isolate,
               uv_loop_t* event_loop,
-              MultiIsolatePlatform* platform = nullptr,
-              ArrayBufferAllocator* node_allocator = nullptr,
-              const IsolateDataSerializeInfo* isolate_data_info = nullptr);
+              MultiIsolatePlatform* platform,
+              ArrayBufferAllocator* node_allocator,
+              const SnapshotData* snapshot_data,
+              std::shared_ptr<PerIsolateOptions> options);
+
+ public:
+  static IsolateData* CreateIsolateData(
+      v8::Isolate* isolate,
+      uv_loop_t* event_loop,
+      MultiIsolatePlatform* platform = nullptr,
+      ArrayBufferAllocator* node_allocator = nullptr,
+      const EmbedderSnapshotData* embedder_snapshot_data = nullptr,
+      std::shared_ptr<PerIsolateOptions> options = nullptr);
+  ~IsolateData();
+
   SET_MEMORY_INFO_NAME(IsolateData)
   SET_SELF_SIZE(IsolateData)
   void MemoryInfo(MemoryTracker* tracker) const override;
   IsolateDataSerializeInfo Serialize(v8::SnapshotCreator* creator);
 
+  bool is_building_snapshot() const { return snapshot_config_.has_value(); }
+  const SnapshotConfig* snapshot_config() const {
+    return snapshot_config_.has_value() ? &(snapshot_config_.value()) : nullptr;
+  }
+  void set_snapshot_config(const SnapshotConfig* config) {
+    if (config != nullptr) {
+      snapshot_config_ = *config;  // Copy the config.
+    }
+  }
+
+  uint16_t* embedder_id_for_cppgc() const;
+  uint16_t* embedder_id_for_non_cppgc() const;
+
   inline uv_loop_t* event_loop() const;
   inline MultiIsolatePlatform* platform() const;
+  inline const SnapshotData* snapshot_data() const;
   inline std::shared_ptr<PerIsolateOptions> options();
-  inline void set_options(std::shared_ptr<PerIsolateOptions> options);
 
   inline NodeArrayBufferAllocator* node_allocator() const;
 
@@ -144,17 +172,20 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VY(PropertyName, StringValue) V(v8::Symbol, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
+#define VR(PropertyName, TypeName) V(v8::Private, per_realm_##PropertyName)
 #define V(TypeName, PropertyName)                                             \
   inline v8::Local<TypeName> PropertyName() const;
   PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
   PER_ISOLATE_STRING_PROPERTIES(VS)
+  PER_REALM_STRONG_PERSISTENT_VALUES(VR)
 #undef V
+#undef VR
 #undef VY
 #undef VS
 #undef VP
 
-#define VM(PropertyName) V(PropertyName##_binding, v8::FunctionTemplate)
+#define VM(PropertyName) V(PropertyName##_binding_template, v8::ObjectTemplate)
 #define V(PropertyName, TypeName)                                              \
   inline v8::Local<TypeName> PropertyName() const;                             \
   inline void set_##PropertyName(v8::Local<TypeName> value);
@@ -181,7 +212,8 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VY(PropertyName, StringValue) V(v8::Symbol, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
-#define VM(PropertyName) V(v8::FunctionTemplate, PropertyName##_binding)
+#define VR(PropertyName, TypeName) V(v8::Private, per_realm_##PropertyName)
+#define VM(PropertyName) V(v8::ObjectTemplate, PropertyName##_binding_template)
 #define VT(PropertyName, TypeName) V(TypeName, PropertyName)
 #define V(TypeName, PropertyName)                                             \
   v8::Eternal<TypeName> PropertyName ## _;
@@ -189,9 +221,11 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
   PER_ISOLATE_STRING_PROPERTIES(VS)
   PER_ISOLATE_TEMPLATE_PROPERTIES(VT)
+  PER_REALM_STRONG_PERSISTENT_VALUES(VR)
   NODE_BINDINGS_WITH_PER_ISOLATE_INIT(VM)
 #undef V
 #undef VM
+#undef VR
 #undef VT
 #undef VS
 #undef VY
@@ -204,8 +238,17 @@ class NODE_EXTERN_PRIVATE IsolateData : public MemoryRetainer {
   uv_loop_t* const event_loop_;
   NodeArrayBufferAllocator* const node_allocator_;
   MultiIsolatePlatform* platform_;
+
+  const SnapshotData* snapshot_data_;
+  std::optional<SnapshotConfig> snapshot_config_;
+
   std::shared_ptr<PerIsolateOptions> options_;
   worker::Worker* worker_context_ = nullptr;
+  PerIsolateWrapperData* wrapper_data_;
+
+  static Mutex isolate_data_mutex_;
+  static std::unordered_map<uint16_t, std::unique_ptr<PerIsolateWrapperData>>
+      wrapper_data_map_;
 };
 
 struct ContextInfo {
@@ -267,7 +310,9 @@ class AsyncHooks : public MemoryRetainer {
                          v8::Local<v8::Function> before,
                          v8::Local<v8::Function> after,
                          v8::Local<v8::Function> resolve);
-
+  // Used for testing since V8 doesn't provide API for retrieving configured
+  // JS promise hooks.
+  v8::Local<v8::Array> GetPromiseHooks(v8::Isolate* isolate) const;
   inline v8::Local<v8::String> provider_string(int idx);
 
   inline void no_force_checks();
@@ -339,7 +384,16 @@ class AsyncHooks : public MemoryRetainer {
   void grow_async_ids_stack();
 
   v8::Global<v8::Array> js_execution_async_resources_;
-  std::vector<v8::Local<v8::Object>> native_execution_async_resources_;
+
+  // TODO(@jasnell): Note that this is technically illegal use of
+  // v8::Locals which should be kept on the stack. Here, the entries
+  // in this object grows and shrinks with the C stack, and entries
+  // will be in the right handle scopes, but v8::Locals are supposed
+  // to remain on the stack and not the heap. For general purposes
+  // this *should* be ok but may need to be looked at further should
+  // v8 become stricter in the future about v8::Locals being held in
+  // the stack.
+  v8::LocalVector<v8::Object> native_execution_async_resources_;
 
   // Non-empty during deserialization
   const SerializeInfo* info_ = nullptr;
@@ -466,7 +520,7 @@ struct EnvSerializeInfo {
   ImmediateInfo::SerializeInfo immediate_info;
   AliasedBufferIndex timeout_info;
   performance::PerformanceState::SerializeInfo performance_state;
-  AliasedBufferIndex exiting;
+  AliasedBufferIndex exit_info;
   AliasedBufferIndex stream_base_state;
   AliasedBufferIndex should_abort_on_uncaught_toggle;
 
@@ -483,8 +537,7 @@ struct SnapshotMetadata {
   std::string node_version;
   std::string node_arch;
   std::string node_platform;
-  // Result of v8::ScriptCompiler::CachedDataVersionTag().
-  uint32_t v8_cache_version_tag;
+  SnapshotFlags flags;
 };
 
 struct SnapshotData {
@@ -514,13 +567,35 @@ struct SnapshotData {
   // v8::ScriptCompiler::CachedData is not copyable.
   std::vector<builtins::CodeCacheInfo> code_cache;
 
-  void ToBlob(FILE* out) const;
+  void ToFile(FILE* out) const;
+  std::vector<char> ToBlob() const;
   // If returns false, the metadata doesn't match the current Node.js binary,
   // and the caller should not consume the snapshot data.
   bool Check() const;
-  static bool FromBlob(SnapshotData* out, FILE* in);
+  static bool FromFile(SnapshotData* out, FILE* in);
+  static bool FromBlob(SnapshotData* out, const std::vector<char>& in);
+  static bool FromBlob(SnapshotData* out, std::string_view in);
+  static const SnapshotData* FromEmbedderWrapper(
+      const EmbedderSnapshotData* data);
+  EmbedderSnapshotData::Pointer AsEmbedderWrapper() const;
 
   ~SnapshotData();
+};
+
+void DefaultProcessExitHandlerInternal(Environment* env, ExitCode exit_code);
+v8::Maybe<ExitCode> SpinEventLoopInternal(Environment* env);
+v8::Maybe<ExitCode> EmitProcessExitInternal(Environment* env);
+
+class Cleanable {
+ public:
+  virtual ~Cleanable() = default;
+
+ protected:
+  ListNode<Cleanable> cleanable_queue_;
+
+ private:
+  virtual void Clean() = 0;
+  friend class Environment;
 };
 
 /**
@@ -528,7 +603,7 @@ struct SnapshotData {
  * environment. Each environment has a principal realm. An environment can
  * create multiple subsidiary synthetic realms.
  */
-class Environment : public MemoryRetainer {
+class Environment final : public MemoryRetainer {
  public:
   Environment(const Environment&) = delete;
   Environment& operator=(const Environment&) = delete;
@@ -536,6 +611,9 @@ class Environment : public MemoryRetainer {
   Environment& operator=(Environment&&) = delete;
 
   SET_MEMORY_INFO_NAME(Environment)
+
+  static std::string GetExecPath(const std::vector<std::string>& argv);
+  static std::string GetCwd(const std::string& exec_path);
 
   inline size_t SelfSize() const override;
   bool IsRootNode() const override { return true; }
@@ -553,13 +631,12 @@ class Environment : public MemoryRetainer {
   // Should be called before InitializeInspector()
   void InitializeDiagnostics();
 
-  std::string GetCwd();
-
 #if HAVE_INSPECTOR
   // If the environment is created for a worker, pass parent_handle and
   // the ownership if transferred into the Environment.
-  int InitializeInspector(
+  void InitializeInspector(
       std::unique_ptr<inspector::ParentInspectorHandle> parent_handle);
+  void WaitForInspectorFrontendByOptions();
 #endif
 
   inline size_t async_callback_scope_depth() const;
@@ -586,14 +663,6 @@ class Environment : public MemoryRetainer {
               ThreadId thread_id);
   void InitializeMainContext(v8::Local<v8::Context> context,
                              const EnvSerializeInfo* env_info);
-  // Create an Environment and initialize the provided principal context for it.
-  Environment(IsolateData* isolate_data,
-              v8::Local<v8::Context> context,
-              const std::vector<std::string>& args,
-              const std::vector<std::string>& exec_args,
-              const EnvSerializeInfo* env_info,
-              EnvironmentFlags::Flags flags,
-              ThreadId thread_id);
   ~Environment() override;
 
   void InitializeLibuv();
@@ -601,24 +670,10 @@ class Environment : public MemoryRetainer {
   inline const std::vector<std::string>& argv();
   const std::string& exec_path() const;
 
-  typedef void (*HandleCleanupCb)(Environment* env,
-                                  uv_handle_t* handle,
-                                  void* arg);
-  struct HandleCleanup {
-    uv_handle_t* handle_;
-    HandleCleanupCb cb_;
-    void* arg_;
-  };
-
-  void RegisterHandleCleanups();
   void CleanupHandles();
-  void Exit(int code);
+  void Exit(ExitCode code);
   void ExitEnv(StopFlags::Flags flags);
-
-  // Register clean-up cb to be called on environment destruction.
-  inline void RegisterHandleCleanup(uv_handle_t* handle,
-                                    HandleCleanupCb cb,
-                                    void* arg);
+  void ClosePerEnvHandles();
 
   template <typename T, typename OnCloseCallback>
   inline void CloseHandle(T* handle, OnCloseCallback callback);
@@ -630,12 +685,15 @@ class Environment : public MemoryRetainer {
   void AssignToContext(v8::Local<v8::Context> context,
                        Realm* realm,
                        const ContextInfo& info);
-  void TrackContext(v8::Local<v8::Context> context);
-  void UntrackContext(v8::Local<v8::Context> context);
+  void UnassignFromContext(v8::Local<v8::Context> context);
+  void TrackShadowRealm(shadow_realm::ShadowRealm* realm);
+  void UntrackShadowRealm(shadow_realm::ShadowRealm* realm);
 
   void StartProfilerIdleNotifier();
 
   inline v8::Isolate* isolate() const;
+  inline cppgc::AllocationHandle& cppgc_allocation_handle() const;
+  inline v8::ExternalMemoryAccounter* external_memory_accounter() const;
   inline uv_loop_t* event_loop() const;
   void TryLoadAddon(const char* filename,
                     int flags,
@@ -656,6 +714,7 @@ class Environment : public MemoryRetainer {
   inline AliasedInt32Array& timeout_info();
   inline TickInfo* tick_info();
   inline uint64_t timer_base() const;
+  inline permission::Permission* permission();
   inline std::shared_ptr<KVStore> env_vars();
   inline void set_env_vars(std::shared_ptr<KVStore> env_vars);
 
@@ -670,10 +729,15 @@ class Environment : public MemoryRetainer {
   inline void set_force_context_aware(bool value);
   inline bool force_context_aware() const;
 
-  // This is a pseudo-boolean that keeps track of whether the process is
-  // exiting.
+  // This contains fields that are a pseudo-boolean that keeps track of whether
+  // the process is exiting, an integer representing the process exit code, and
+  // a pseudo-boolean to indicate whether the exit code is undefined.
+  inline AliasedInt32Array& exit_info();
   inline void set_exiting(bool value);
-  inline AliasedUint32Array& exiting();
+  bool exiting() const;
+  inline ExitCode exit_code(const ExitCode default_code) const;
+
+  inline void set_exit_code(const ExitCode code);
 
   // This stores whether the --abort-on-uncaught-exception flag was passed
   // to Node.
@@ -703,12 +767,12 @@ class Environment : public MemoryRetainer {
 
   inline performance::PerformanceState* performance_state();
 
-  void CollectUVExceptionInfo(v8::Local<v8::Value> context,
-                              int errorno,
-                              const char* syscall = nullptr,
-                              const char* message = nullptr,
-                              const char* path = nullptr,
-                              const char* dest = nullptr);
+  v8::Maybe<void> CollectUVExceptionInfo(v8::Local<v8::Value> context,
+                                         int errorno,
+                                         const char* syscall = nullptr,
+                                         const char* message = nullptr,
+                                         const char* path = nullptr,
+                                         const char* dest = nullptr);
 
   // If this flag is set, calls into JS (if they would be observable
   // from userland) must be avoided.  This flag does not indicate whether
@@ -734,11 +798,13 @@ class Environment : public MemoryRetainer {
   inline bool no_native_addons() const;
   inline bool should_not_register_esm_loader() const;
   inline bool should_create_inspector() const;
+  inline bool should_wait_for_inspector_frontend() const;
   inline bool owns_process_state() const;
   inline bool owns_inspector() const;
   inline bool tracks_unmanaged_fds() const;
   inline bool hide_console_windows() const;
   inline bool no_global_search_paths() const;
+  inline bool should_start_debug_signal_handler() const;
   inline bool no_browser_globals() const;
   inline uint64_t thread_id() const;
   inline worker::Worker* worker_context() const;
@@ -765,6 +831,9 @@ class Environment : public MemoryRetainer {
   inline void ThrowError(const char* errmsg);
   inline void ThrowTypeError(const char* errmsg);
   inline void ThrowRangeError(const char* errmsg);
+  inline void ThrowStdErrException(std::error_code error_code,
+                                   const char* syscall,
+                                   const char* path = nullptr);
   inline void ThrowErrnoException(int errorno,
                                   const char* syscall = nullptr,
                                   const char* message = nullptr,
@@ -778,6 +847,7 @@ class Environment : public MemoryRetainer {
   void AtExit(void (*cb)(void* arg), void* arg);
   void RunAtExitCallbacks();
 
+  v8::Maybe<bool> CheckUnsettledTopLevelAwait() const;
   void RunWeakRefCleanup();
 
   v8::MaybeLocal<v8::Value> RunSnapshotSerializeCallback() const;
@@ -819,6 +889,9 @@ class Environment : public MemoryRetainer {
   inline inspector::Agent* inspector_agent() const {
     return inspector_agent_.get();
   }
+  inline void StopInspector() {
+    inspector_agent_.reset();
+  }
 
   inline bool is_in_inspector_console_call() const;
   inline void set_is_in_inspector_console_call(bool value);
@@ -826,9 +899,22 @@ class Environment : public MemoryRetainer {
 
   typedef ListHead<HandleWrap, &HandleWrap::handle_wrap_queue_> HandleWrapQueue;
   typedef ListHead<ReqWrapBase, &ReqWrapBase::req_wrap_queue_> ReqWrapQueue;
+  typedef ListHead<Cleanable, &Cleanable::cleanable_queue_> CleanableQueue;
 
   inline HandleWrapQueue* handle_wrap_queue() { return &handle_wrap_queue_; }
+  inline CleanableQueue* cleanable_queue() {
+    return &cleanable_queue_;
+  }
   inline ReqWrapQueue* req_wrap_queue() { return &req_wrap_queue_; }
+
+  // https://w3c.github.io/hr-time/#dfn-time-origin
+  inline uint64_t time_origin() {
+    return time_origin_;
+  }
+  // https://w3c.github.io/hr-time/#dfn-get-time-origin-timestamp
+  inline double time_origin_timestamp() {
+    return time_origin_timestamp_;
+  }
 
   inline bool EmitProcessEnvWarning() {
     bool current_value = emit_env_nonstring_warning_;
@@ -868,6 +954,8 @@ class Environment : public MemoryRetainer {
   static inline Environment* ForAsyncHooks(AsyncHooks* hooks);
 
   v8::Local<v8::Value> GetNow();
+  uint64_t GetNowUint64();
+
   void ScheduleTimer(int64_t duration);
   void ToggleTimerRef(bool ref);
 
@@ -875,6 +963,9 @@ class Environment : public MemoryRetainer {
   inline void RemoveCleanupHook(CleanupQueue::Callback cb, void* arg);
   void RunCleanup();
 
+  static void TracePromises(v8::PromiseHookType type,
+                            v8::Local<v8::Promise> promise,
+                            v8::Local<v8::Value> parent);
   static size_t NearHeapLimitCallback(void* data,
                                       size_t current_heap_limit,
                                       size_t initial_heap_limit);
@@ -885,7 +976,7 @@ class Environment : public MemoryRetainer {
   inline std::shared_ptr<EnvironmentOptions> options();
   inline std::shared_ptr<ExclusiveAccess<HostPort>> inspector_host_port();
 
-  inline int32_t stack_trace_limit() const { return 10; }
+  inline int64_t stack_trace_limit() const;
 
 #if HAVE_INSPECTOR
   void set_coverage_connection(
@@ -923,8 +1014,19 @@ class Environment : public MemoryRetainer {
 
 #endif  // HAVE_INSPECTOR
 
+  inline const EmbedderPreloadCallback& embedder_preload() const;
+  inline void set_embedder_preload(EmbedderPreloadCallback fn);
+
   inline void set_process_exit_handler(
-      std::function<void(Environment*, int)>&& handler);
+      std::function<void(Environment*, ExitCode)>&& handler);
+
+  inline CompileCacheHandler* compile_cache_handler();
+  inline bool use_compile_cache() const;
+  void InitializeCompileCache();
+  // Enable built-in compile cache if it has not yet been enabled.
+  // The cache will be persisted to disk on exit.
+  CompileCacheEnableResult EnableCompileCache(const std::string& cache_dir);
+  void FlushCompileCache();
 
   void RunAndClearNativeImmediates(bool only_refed = false);
   void RunAndClearInterrupts();
@@ -941,17 +1043,46 @@ class Environment : public MemoryRetainer {
   inline void set_heap_snapshot_near_heap_limit(uint32_t limit);
   inline bool is_in_heapsnapshot_heap_limit_callback() const;
 
+  inline bool report_exclude_env() const;
+
   inline void AddHeapSnapshotNearHeapLimitCallback();
 
   inline void RemoveHeapSnapshotNearHeapLimitCallback(size_t heap_limit);
 
+  // Field identifiers for exit_info_
+  enum ExitInfoField {
+    kExiting = 0,
+    kExitCode,
+    kHasExitCode,
+    kExitInfoFieldCount
+  };
+
+#if HAVE_OPENSSL
+#if OPENSSL_VERSION_MAJOR >= 3
+  // We declare another alias here to avoid having to include crypto_util.h
+  using EVPMDPointer = DeleteFnPtr<EVP_MD, EVP_MD_free>;
+  std::vector<EVPMDPointer> evp_md_cache;
+#endif  // OPENSSL_VERSION_MAJOR >= 3
+  std::unordered_map<std::string, size_t> alias_to_md_id_map;
+  std::vector<std::string> supported_hash_algorithms;
+#endif  // HAVE_OPENSSL
+
+  v8::Global<v8::Module> temporary_required_module_facade_original;
+
  private:
-  inline void ThrowError(v8::Local<v8::Value> (*fun)(v8::Local<v8::String>),
+  inline void ThrowError(v8::Local<v8::Value> (*fun)(v8::Local<v8::String>,
+                                                     v8::Local<v8::Value>),
                          const char* errmsg);
+  void TrackContext(v8::Local<v8::Context> context);
+  void UntrackContext(v8::Local<v8::Context> context);
+  void PurgeTrackedEmptyContexts();
 
   std::list<binding::DLib> loaded_addons_;
   v8::Isolate* const isolate_;
+  v8::ExternalMemoryAccounter* const external_memory_accounter_;
   IsolateData* const isolate_data_;
+
+  bool env_handle_initialized_ = false;
   uv_timer_t timer_handle_;
   uv_check_t immediate_check_handle_;
   uv_idle_t immediate_idle_handle_;
@@ -968,6 +1099,7 @@ class Environment : public MemoryRetainer {
   ImmediateInfo immediate_info_;
   AliasedInt32Array timeout_info_;
   TickInfo tick_info_;
+  permission::Permission permission_;
   const uint64_t timer_base_;
   std::shared_ptr<KVStore> env_vars_;
   bool printed_error_ = false;
@@ -979,6 +1111,7 @@ class Environment : public MemoryRetainer {
 
   size_t async_callback_scope_depth_ = 0;
   std::vector<double> destroy_async_id_list_;
+  std::unordered_set<shadow_realm::ShadowRealm*> shadow_realms_;
 
 #if HAVE_INSPECTOR
   std::unique_ptr<profiler::V8CoverageConnection> coverage_connection_;
@@ -993,6 +1126,7 @@ class Environment : public MemoryRetainer {
   uint64_t heap_prof_interval_;
 #endif  // HAVE_INSPECTOR
 
+  std::unique_ptr<CompileCacheHandler> compile_cache_handler_;
   std::shared_ptr<EnvironmentOptions> options_;
   // options_ contains debug options parsed from CLI arguments,
   // while inspector_host_port_ stores the actual inspector host
@@ -1014,8 +1148,9 @@ class Environment : public MemoryRetainer {
   uint32_t module_id_counter_ = 0;
   uint32_t script_id_counter_ = 0;
   uint32_t function_id_counter_ = 0;
+  uint32_t trace_promise_id_counter_ = 0;
 
-  AliasedUint32Array exiting_;
+  AliasedInt32Array exit_info_;
 
   AliasedUint32Array should_abort_on_uncaught_toggle_;
   int should_not_abort_scope_counter_ = 0;
@@ -1024,7 +1159,17 @@ class Environment : public MemoryRetainer {
 
   AliasedInt32Array stream_base_state_;
 
-  uint64_t environment_start_time_;
+  // As PerformanceNodeTiming is exposed in worker_threads, the per_process
+  // time origin is exposed in the worker threads. This is an intentional
+  // diverge from the HTML spec of web workers.
+  // Process start time from the monotonic clock. This should not be used as an
+  // absolute time, but only as a time relative to another monotonic clock time.
+  const uint64_t time_origin_;
+  // Process start timestamp from the wall clock. This is an absolute time
+  // exposed as `performance.timeOrigin`.
+  const double time_origin_timestamp_;
+  // This is the time when the environment is created.
+  const uint64_t environment_start_;
   std::unique_ptr<performance::PerformanceState> performance_state_;
 
   bool has_serialized_options_ = false;
@@ -1047,9 +1192,9 @@ class Environment : public MemoryRetainer {
   // memory are predictable. For more information please refer to
   // `doc/contributing/node-postmortem-support.md`
   friend int GenDebugSymbols();
+  CleanableQueue cleanable_queue_;
   HandleWrapQueue handle_wrap_queue_;
   ReqWrapQueue req_wrap_queue_;
-  std::list<HandleCleanup> handle_cleanup_queue_;
   int handle_cleanup_waiting_ = 0;
   int request_waiting_ = 0;
 
@@ -1088,12 +1233,13 @@ class Environment : public MemoryRetainer {
 
   std::unordered_set<int> unmanaged_fds_;
 
-  std::function<void(Environment*, int)> process_exit_handler_ {
-      DefaultProcessExitHandler };
+  std::function<void(Environment*, ExitCode)> process_exit_handler_{
+      DefaultProcessExitHandlerInternal};
 
-  std::unique_ptr<Realm> principal_realm_ = nullptr;
+  std::unique_ptr<PrincipalRealm> principal_realm_ = nullptr;
 
   builtins::BuiltinLoader builtin_loader_;
+  EmbedderPreloadCallback embedder_preload_;
 
   // Used by allocate_managed_buffer() and release_managed_buffer() to keep
   // track of the BackingStore for a given pointer.

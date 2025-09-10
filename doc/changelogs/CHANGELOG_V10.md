@@ -58,6 +58,12 @@
 </table>
 
 * Other Versions
+  * [24.x](CHANGELOG_V24.md)
+  * [23.x](CHANGELOG_V23.md)
+  * [22.x](CHANGELOG_V22.md)
+  * [21.x](CHANGELOG_V21.md)
+  * [20.x](CHANGELOG_V20.md)
+  * [19.x](CHANGELOG_V19.md)
   * [18.x](CHANGELOG_V18.md)
   * [17.x](CHANGELOG_V17.md)
   * [16.x](CHANGELOG_V16.md)

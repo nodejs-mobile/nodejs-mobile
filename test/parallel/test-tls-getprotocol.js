@@ -3,6 +3,8 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+const { hasOpenSSL } = require('../common/crypto');
+
 // This test ensures that `getProtocol` returns the right protocol
 // from a TLS connection
 
@@ -14,11 +16,11 @@ const clientConfigs = [
   {
     secureProtocol: 'TLSv1_method',
     version: 'TLSv1',
-    ciphers: (common.hasOpenSSL31 ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT')
+    ciphers: (hasOpenSSL(3, 1) ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT')
   }, {
     secureProtocol: 'TLSv1_1_method',
     version: 'TLSv1.1',
-    ciphers: (common.hasOpenSSL31 ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT')
+    ciphers: (hasOpenSSL(3, 1) ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT')
   }, {
     secureProtocol: 'TLSv1_2_method',
     version: 'TLSv1.2'
@@ -27,15 +29,18 @@ const clientConfigs = [
 
 const serverConfig = {
   secureProtocol: 'TLS_method',
-  ciphers: 'RSA@SECLEVEL=0',
   key: fixtures.readKey('agent2-key.pem'),
   cert: fixtures.readKey('agent2-cert.pem')
 };
 
+if (!process.features.openssl_is_boringssl) {
+  serverConfig.ciphers = 'RSA@SECLEVEL=0';
+}
+
 const server = tls.createServer(serverConfig, common.mustCall(clientConfigs.length))
 .listen(0, common.localhostIPv4, function() {
   let connected = 0;
-  clientConfigs.forEach(function(v) {
+  for (const v of clientConfigs) {
     tls.connect({
       host: common.localhostIPv4,
       port: server.address().port,
@@ -51,5 +56,5 @@ const server = tls.createServer(serverConfig, common.mustCall(clientConfigs.leng
       if (++connected === clientConfigs.length)
         server.close();
     }));
-  });
+  }
 });

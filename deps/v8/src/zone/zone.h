@@ -6,10 +6,13 @@
 #define V8_ZONE_ZONE_H_
 
 #include <limits>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "src/base/logging.h"
+#include "src/base/vector.h"
 #include "src/common/globals.h"
-#include "src/utils/utils.h"
 #include "src/zone/accounting-allocator.h"
 #include "src/zone/type-stats.h"
 #include "src/zone/zone-segment.h"
@@ -34,6 +37,8 @@ namespace internal {
 //
 // Note: The implementation is inherently not thread safe. Do not use
 // from multi-threaded code.
+
+class ZoneSnapshot;
 
 class V8_EXPORT_PRIVATE Zone final {
  public:
@@ -64,13 +69,16 @@ class V8_EXPORT_PRIVATE Zone final {
     }
     allocation_size_for_tracing_ += size;
 #endif
-    Address result = position_;
     if (V8_UNLIKELY(size > limit_ - position_)) {
-      result = NewExpand(size);
-    } else {
-      position_ += size;
+      Expand(size);
     }
-    return reinterpret_cast<void*>(result);
+
+    DCHECK_LE(position_, limit_);
+    DCHECK_LE(size, limit_ - position_);
+    DCHECK_EQ(0, position_ % kAlignmentInBytes);
+    void* result = reinterpret_cast<void*>(position_);
+    position_ += size;
+    return result;
 #endif  // V8_USE_ADDRESS_SANITIZER
   }
 
@@ -104,6 +112,7 @@ class V8_EXPORT_PRIVATE Zone final {
   // associated with the T type.
   template <typename T, typename... Args>
   T* New(Args&&... args) {
+    static_assert(alignof(T) <= kAlignmentInBytes);
     void* memory = Allocate<T>(sizeof(T));
     return new (memory) T(std::forward<Args>(args)...);
   }
@@ -115,10 +124,42 @@ class V8_EXPORT_PRIVATE Zone final {
   // buffer allocations with meaningful names to make buffer allocation sites
   // distinguishable between each other.
   template <typename T, typename TypeTag = T[]>
-  T* NewArray(size_t length) {
+  T* AllocateArray(size_t length) {
+    static_assert(alignof(T) <= kAlignmentInBytes);
     DCHECK_IMPLIES(is_compressed_pointer<T>::value, supports_compression());
     DCHECK_LT(length, std::numeric_limits<size_t>::max() / sizeof(T));
     return static_cast<T*>(Allocate<TypeTag>(length * sizeof(T)));
+  }
+
+  // Allocates a Vector with 'length' uninitialized entries.
+  template <typename T, typename TypeTag = T[]>
+  base::Vector<T> AllocateVector(size_t length) {
+    T* new_array = AllocateArray<T, TypeTag>(length);
+    return {new_array, length};
+  }
+
+  // Allocates a Vector with 'length' elements and value-constructs them.
+  template <typename T, typename TypeTag = T[]>
+  base::Vector<T> NewVector(size_t length) {
+    T* new_array = AllocateArray<T, TypeTag>(length);
+    std::uninitialized_value_construct_n(new_array, length);
+    return {new_array, length};
+  }
+
+  // Allocates a Vector with 'length' elements and initializes them with
+  // 'value'.
+  template <typename T, typename TypeTag = T[]>
+  base::Vector<T> NewVector(size_t length, T value) {
+    T* new_array = AllocateArray<T, TypeTag>(length);
+    std::uninitialized_fill_n(new_array, length, value);
+    return {new_array, length};
+  }
+
+  template <typename T, typename TypeTag = std::remove_const_t<T>[]>
+  base::Vector<std::remove_const_t<T>> CloneVector(base::Vector<T> v) {
+    auto* new_array = AllocateArray<std::remove_const_t<T>, TypeTag>(v.size());
+    std::uninitialized_copy(v.begin(), v.end(), new_array);
+    return {new_array, v.size()};
   }
 
   // Return array of 'length' elements back to Zone. These bytes can be reused
@@ -178,6 +219,12 @@ class V8_EXPORT_PRIVATE Zone final {
   const TypeStats& type_stats() const { return type_stats_; }
 #endif
 
+#ifdef DEBUG
+  bool Contains(const void* ptr) const;
+#endif
+
+  V8_WARN_UNUSED_RESULT ZoneSnapshot Snapshot() const;
+
  private:
   void* AsanNew(size_t size);
 
@@ -189,6 +236,7 @@ class V8_EXPORT_PRIVATE Zone final {
   void ReleaseSegment(Segment* segment);
 
   // All pointers returned from New() are 8-byte aligned.
+  // ASan requires 8-byte alignment. MIPS also requires 8-byte alignment.
   static const size_t kAlignmentInBytes = 8;
 
   // Never allocate segments smaller than this size in bytes.
@@ -205,11 +253,9 @@ class V8_EXPORT_PRIVATE Zone final {
   // the zone.
   std::atomic<size_t> segment_bytes_allocated_ = {0};
 
-  // Expand the Zone to hold at least 'size' more bytes and allocate
-  // the bytes. Returns the address of the newly allocated chunk of
-  // memory in the Zone. Should only be called if there isn't enough
-  // room in the Zone already.
-  Address NewExpand(size_t size);
+  // Expand the Zone to hold at least 'size' more bytes.
+  // Should only be called if there is not enough room in the Zone already.
+  V8_NOINLINE V8_PRESERVE_MOST void Expand(size_t size);
 
   // The free region in the current (front) segment is represented as
   // the half-open interval [position, limit). The 'position' variable
@@ -229,23 +275,26 @@ class V8_EXPORT_PRIVATE Zone final {
   std::atomic<size_t> allocation_size_for_tracing_ = {0};
 
   // The number of bytes freed in this zone so far.
-  stdd::atomic<size_t> freed_size_for_tracing_ = {0};
+  std::atomic<size_t> freed_size_for_tracing_ = {0};
 #endif
 
-  friend class ZoneScope;
+  friend class ZoneSnapshot;
 };
 
-// Similar to the HandleScope, the ZoneScope defines a region of validity for
-// zone memory. All memory allocated in the given Zone during the scope's
-// lifetime is freed when the scope is destructed, i.e. the Zone is reset to
-// the state it was in when the scope was created.
-class ZoneScope final {
+// A `ZoneSnapshot` stores the allocation state of a zone. The zone can later be
+// reset to that state, effectively deleting all memory which was allocated in
+// the zone after taking the snapshot.
+// See `ZoneScope` for an example usage of `ZoneSnapshot`.
+class ZoneSnapshot final {
  public:
-  explicit ZoneScope(Zone* zone);
-  ~ZoneScope();
+  // Reset the `Zone` from which this snapshot was taken to the state stored in
+  // this snapshot.
+  void Restore(Zone* zone) const;
 
  private:
-  Zone* const zone_;
+  explicit ZoneSnapshot(const Zone* zone);
+  friend class Zone;
+
 #ifdef V8_ENABLE_PRECISE_ZONE_STATS
   const size_t allocation_size_for_tracing_;
   const size_t freed_size_for_tracing_;
@@ -255,6 +304,21 @@ class ZoneScope final {
   const Address position_;
   const Address limit_;
   Segment* const segment_head_;
+};
+
+// Similar to the HandleScope, the ZoneScope defines a region of validity for
+// zone memory. All memory allocated in the given Zone during the scope's
+// lifetime is freed when the scope is destructed, i.e. the Zone is reset to
+// the state it was in when the scope was created.
+class ZoneScope final {
+ public:
+  explicit ZoneScope(Zone* zone) : zone_(zone), snapshot_(zone->Snapshot()) {}
+
+  ~ZoneScope() { snapshot_.Restore(zone_); }
+
+ private:
+  Zone* const zone_;
+  const ZoneSnapshot snapshot_;
 };
 
 // ZoneObject is an abstraction that helps define classes of objects
@@ -294,8 +358,8 @@ class ZoneAllocationPolicy {
   explicit ZoneAllocationPolicy(Zone* zone) : zone_(zone) {}
 
   template <typename T, typename TypeTag = T[]>
-  V8_INLINE T* NewArray(size_t length) {
-    return zone()->NewArray<T, TypeTag>(length);
+  V8_INLINE T* AllocateArray(size_t length) {
+    return zone()->AllocateArray<T, TypeTag>(length);
   }
   template <typename T, typename TypeTag = T[]>
   V8_INLINE void DeleteArray(T* p, size_t length) {

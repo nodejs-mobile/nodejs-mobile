@@ -25,6 +25,8 @@ class Hash final : public BaseObject {
   bool HashUpdate(const char* data, size_t len);
 
   static void GetHashes(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void GetCachedAliases(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void OneShotDigest(const v8::FunctionCallbackInfo<v8::Value>& args);
 
  protected:
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -34,7 +36,7 @@ class Hash final : public BaseObject {
   Hash(Environment* env, v8::Local<v8::Object> wrap);
 
  private:
-  EVPMDPointer mdctx_ {};
+  ncrypto::EVPMDCtxPointer mdctx_{};
   unsigned int md_len_ = 0;
   ByteSource digest_;
 };
@@ -62,27 +64,23 @@ struct HashTraits final {
   static constexpr AsyncWrap::ProviderType Provider =
       AsyncWrap::PROVIDER_HASHREQUEST;
 
-  static v8::Maybe<bool> AdditionalConfig(
+  static v8::Maybe<void> AdditionalConfig(
       CryptoJobMode mode,
       const v8::FunctionCallbackInfo<v8::Value>& args,
       unsigned int offset,
       HashConfig* params);
 
-  static bool DeriveBits(
-      Environment* env,
-      const HashConfig& params,
-      ByteSource* out);
+  static bool DeriveBits(Environment* env,
+                         const HashConfig& params,
+                         ByteSource* out,
+                         CryptoJobMode mode);
 
-  static v8::Maybe<bool> EncodeOutput(
-      Environment* env,
-      const HashConfig& params,
-      ByteSource* out,
-      v8::Local<v8::Value>* result);
+  static v8::MaybeLocal<v8::Value> EncodeOutput(Environment* env,
+                                                const HashConfig& params,
+                                                ByteSource* out);
 };
 
 using HashJob = DeriveBitsJob<HashTraits>;
-
-void InternalVerifyIntegrity(const v8::FunctionCallbackInfo<v8::Value>& args);
 
 }  // namespace crypto
 }  // namespace node

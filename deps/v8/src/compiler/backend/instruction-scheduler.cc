@@ -4,9 +4,11 @@
 
 #include "src/compiler/backend/instruction-scheduler.h"
 
+#include <optional>
+
 #include "src/base/iterator.h"
-#include "src/base/optional.h"
 #include "src/base/utils/random-number-generator.h"
+#include "src/compiler/backend/instruction-codes.h"
 
 namespace v8 {
 namespace internal {
@@ -82,9 +84,9 @@ InstructionScheduler::InstructionScheduler(Zone* zone,
       last_live_in_reg_marker_(nullptr),
       last_deopt_or_trap_(nullptr),
       operands_map_(zone) {
-  if (FLAG_turbo_stress_instruction_scheduling) {
+  if (v8_flags.turbo_stress_instruction_scheduling) {
     random_number_generator_ =
-        base::Optional<base::RandomNumberGenerator>(FLAG_random_seed);
+        std::optional<base::RandomNumberGenerator>(v8_flags.random_seed);
   }
 }
 
@@ -99,7 +101,7 @@ void InstructionScheduler::StartBlock(RpoNumber rpo) {
 }
 
 void InstructionScheduler::EndBlock(RpoNumber rpo) {
-  if (FLAG_turbo_stress_instruction_scheduling) {
+  if (v8_flags.turbo_stress_instruction_scheduling) {
     Schedule<StressSchedulerQueue>();
   } else {
     Schedule<CriticalPathFirstQueue>();
@@ -119,7 +121,7 @@ void InstructionScheduler::AddTerminator(Instruction* instr) {
 
 void InstructionScheduler::AddInstruction(Instruction* instr) {
   if (IsBarrier(instr)) {
-    if (FLAG_turbo_stress_instruction_scheduling) {
+    if (v8_flags.turbo_stress_instruction_scheduling) {
       Schedule<StressSchedulerQueue>();
     } else {
       Schedule<CriticalPathFirstQueue>();
@@ -301,12 +303,21 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
       // effects.
       return kIsLoadOperation;
 
+#if V8_ENABLE_WEBASSEMBLY
+    case kArchStackPointer:
+    case kArchSetStackPointer:
+      // Instructions that load or set the stack pointer must not be reordered
+      // with instructions with side effects or with each other.
+      return kHasSideEffect;
+#endif  // V8_ENABLE_WEBASSEMBLY
+
     case kArchPrepareCallCFunction:
     case kArchPrepareTailCall:
     case kArchTailCallCodeObject:
     case kArchTailCallAddress:
 #if V8_ENABLE_WEBASSEMBLY
     case kArchTailCallWasm:
+    case kArchTailCallWasmIndirect:
 #endif  // V8_ENABLE_WEBASSEMBLY
     case kArchAbortCSADcheck:
       return kHasSideEffect;
@@ -319,10 +330,12 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
       return kIsBarrier;
 
     case kArchCallCFunction:
+    case kArchCallCFunctionWithFrameState:
     case kArchCallCodeObject:
     case kArchCallJSFunction:
 #if V8_ENABLE_WEBASSEMBLY
     case kArchCallWasmFunction:
+    case kArchCallWasmFunctionIndirect:
 #endif  // V8_ENABLE_WEBASSEMBLY
     case kArchCallBuiltinPointer:
       // Calls can cause GC and GC may relocate objects. If a pure instruction
@@ -333,6 +346,7 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
 
     case kArchStoreWithWriteBarrier:
     case kArchAtomicStoreWithWriteBarrier:
+    case kArchStoreIndirectWithWriteBarrier:
       return kHasSideEffect;
 
     case kAtomicLoadInt8:

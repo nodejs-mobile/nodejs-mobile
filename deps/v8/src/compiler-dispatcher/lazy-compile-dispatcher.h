@@ -9,22 +9,23 @@
 #include <memory>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "src/base/atomic-utils.h"
 #include "src/base/macros.h"
-#include "src/base/optional.h"
 #include "src/base/platform/condition-variable.h"
 #include "src/base/platform/mutex.h"
 #include "src/base/platform/semaphore.h"
 #include "src/common/globals.h"
-#include "src/handles/maybe-handles.h"
 #include "src/utils/identity-map.h"
-#include "src/utils/locked-queue.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"  // nogncheck
 
 namespace v8 {
 
+class JobDelegate;
+class JobHandle;
 class Platform;
+class TaskRunner;
 enum class MemoryPressureLevel;
 
 namespace internal {
@@ -36,7 +37,6 @@ class CancelableTaskManager;
 class UnoptimizedCompileJob;
 class UnoptimizedCompileState;
 class FunctionLiteral;
-class Isolate;
 class ParseInfo;
 class ProducedPreparseData;
 class SharedFunctionInfo;
@@ -45,8 +45,6 @@ class Utf16CharacterStream;
 class WorkerThreadRuntimeCallStats;
 class Zone;
 
-template <typename T>
-class Handle;
 
 // The LazyCompileDispatcher uses a combination of idle tasks and background
 // tasks to parse and compile lazily parsed functions.
@@ -88,14 +86,14 @@ class V8_EXPORT_PRIVATE LazyCompileDispatcher {
                std::unique_ptr<Utf16CharacterStream> character_stream);
 
   // Returns true if there is a pending job registered for the given function.
-  bool IsEnqueued(Handle<SharedFunctionInfo> function) const;
+  bool IsEnqueued(DirectHandle<SharedFunctionInfo> function) const;
 
   // Blocks until the given function is compiled (and does so as fast as
   // possible). Returns true if the compile job was successful.
-  bool FinishNow(Handle<SharedFunctionInfo> function);
+  bool FinishNow(DirectHandle<SharedFunctionInfo> function);
 
   // Aborts compilation job for the given function.
-  void AbortJob(Handle<SharedFunctionInfo> function);
+  void AbortJob(DirectHandle<SharedFunctionInfo> function);
 
   // Aborts all jobs, blocking until all jobs are aborted.
   void AbortAll();
@@ -154,7 +152,7 @@ class V8_EXPORT_PRIVATE LazyCompileDispatcher {
   using SharedToJobMap = IdentityMap<Job*, FreeStoreAllocationPolicy>;
 
   void WaitForJobIfRunningOnBackground(Job* job, const base::MutexGuard&);
-  Job* GetJobFor(Handle<SharedFunctionInfo> shared,
+  Job* GetJobFor(DirectHandle<SharedFunctionInfo> shared,
                  const base::MutexGuard&) const;
   Job* PopSingleFinalizeJob();
   void ScheduleIdleTaskFromAnyThread(const base::MutexGuard&);
@@ -185,13 +183,14 @@ class V8_EXPORT_PRIVATE LazyCompileDispatcher {
   Isolate* isolate_;
   WorkerThreadRuntimeCallStats* worker_thread_runtime_call_stats_;
   TimedHistogram* background_compile_timer_;
-  std::shared_ptr<v8::TaskRunner> taskrunner_;
+  std::shared_ptr<TaskRunner> taskrunner_;
   Platform* platform_;
   size_t max_stack_size_;
 
   std::unique_ptr<JobHandle> job_handle_;
 
-  // Copy of FLAG_trace_compiler_dispatcher to allow for access from any thread.
+  // Copy of v8_flags.trace_compiler_dispatcher to allow for access from any
+  // thread.
   bool trace_compiler_dispatcher_;
 
   std::unique_ptr<CancelableTaskManager> idle_task_manager_;

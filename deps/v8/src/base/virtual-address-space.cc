@@ -4,10 +4,11 @@
 
 #include "src/base/virtual-address-space.h"
 
+#include <optional>
+
 #include "include/v8-platform.h"
 #include "src/base/bits.h"
 #include "src/base/platform/platform.h"
-#include "src/base/platform/wrappers.h"
 
 namespace v8 {
 namespace base {
@@ -151,7 +152,7 @@ std::unique_ptr<v8::VirtualAddressSpace> VirtualAddressSpace::AllocateSubspace(
   DCHECK(IsAligned(hint, alignment));
   DCHECK(IsAligned(size, allocation_granularity()));
 
-  base::Optional<AddressSpaceReservation> reservation =
+  std::optional<AddressSpaceReservation> reservation =
       OS::CreateAddressSpaceReservation(
           reinterpret_cast<void*>(hint), size, alignment,
           static_cast<OS::MemoryPermission>(max_page_permissions));
@@ -159,6 +160,15 @@ std::unique_ptr<v8::VirtualAddressSpace> VirtualAddressSpace::AllocateSubspace(
     return std::unique_ptr<v8::VirtualAddressSpace>();
   return std::unique_ptr<v8::VirtualAddressSpace>(
       new VirtualAddressSubspace(*reservation, this, max_page_permissions));
+}
+
+bool VirtualAddressSpace::RecommitPages(Address address, size_t size,
+                                        PagePermissions permissions) {
+  DCHECK(IsAligned(address, page_size()));
+  DCHECK(IsAligned(size, page_size()));
+
+  return OS::RecommitPages(reinterpret_cast<void*>(address), size,
+                           static_cast<OS::MemoryPermission>(permissions));
 }
 
 bool VirtualAddressSpace::DiscardSystemPages(Address address, size_t size) {
@@ -206,6 +216,10 @@ VirtualAddressSubspace::VirtualAddressSubspace(
 }
 
 VirtualAddressSubspace::~VirtualAddressSubspace() {
+  // TODO(chromium:1218005) here or in the RegionAllocator destructor we should
+  // assert that all allocations have been freed. Otherwise we may end up
+  // leaking memory on Windows because VirtualFree(subspace_base, 0) will then
+  // only free the first allocation in the subspace, not the entire subspace.
   parent_space_->FreeSubspace(this);
 }
 
@@ -253,7 +267,11 @@ void VirtualAddressSubspace::FreePages(Address address, size_t size) {
   // The order here is important: on Windows, the allocation first has to be
   // freed to a placeholder before the placeholder can be merged (during the
   // merge_callback) with any surrounding placeholder mappings.
-  CHECK(reservation_.Free(reinterpret_cast<void*>(address), size));
+  if (!reservation_.Free(reinterpret_cast<void*>(address), size)) {
+    // This can happen due to an out-of-memory condition, such as running out
+    // of available VMAs for the process.
+    FatalOOM(OOMType::kProcess, "VirtualAddressSubspace::FreePages");
+  }
   CHECK_EQ(size, region_allocator_.FreeRegion(address));
 }
 
@@ -338,7 +356,7 @@ VirtualAddressSubspace::AllocateSubspace(Address hint, size_t size,
     return std::unique_ptr<v8::VirtualAddressSpace>();
   }
 
-  base::Optional<AddressSpaceReservation> reservation =
+  std::optional<AddressSpaceReservation> reservation =
       reservation_.CreateSubReservation(
           reinterpret_cast<void*>(address), size,
           static_cast<OS::MemoryPermission>(max_page_permissions));
@@ -348,6 +366,17 @@ VirtualAddressSubspace::AllocateSubspace(Address hint, size_t size,
   }
   return std::unique_ptr<v8::VirtualAddressSpace>(
       new VirtualAddressSubspace(*reservation, this, max_page_permissions));
+}
+
+bool VirtualAddressSubspace::RecommitPages(Address address, size_t size,
+                                           PagePermissions permissions) {
+  DCHECK(IsAligned(address, page_size()));
+  DCHECK(IsAligned(size, page_size()));
+  DCHECK(IsSubset(permissions, max_page_permissions()));
+
+  return reservation_.RecommitPages(
+      reinterpret_cast<void*>(address), size,
+      static_cast<OS::MemoryPermission>(permissions));
 }
 
 bool VirtualAddressSubspace::DiscardSystemPages(Address address, size_t size) {
