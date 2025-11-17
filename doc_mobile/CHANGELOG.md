@@ -6,6 +6,7 @@
 </tr>
 <tr>
 <td>
+<a href="#18.20.4">18.20.4+16kb-fix</a><br/>
 <a href="#18.20.4">18.20.4</a><br/>
 <a href="#18.17.3">18.17.3</a><br/>
 <a href="#18.17.2">18.17.2</a><br/>
@@ -33,8 +34,17 @@
 </tr>
 </table>
 
+<a id="18.20.4+16kb-fix"></a>
+## 2024-10-07, Version 18.20.4+16kb-fix (Current)
+
+### Notable Changes
+
+* Update android builds to use 16kb page size ([#154](https://github.com/nodejs-mobile/nodejs-mobile/pull/154))
+* Node engine version remains 18.20.4
+
+
 <a id="18.20.4"></a>
-## 2024-10-07, Version 18.20.4 (Current)
+## 2024-10-07, Version 18.20.4
 
 ### Notable Changes
 
