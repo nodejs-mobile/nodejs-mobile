@@ -7,11 +7,13 @@
 
 #include <stddef.h>
 
+#include <functional>
 #include <string>
 
 #include "cppgc/common.h"
 #include "v8-data.h"          // NOLINT(build/include_directory)
 #include "v8-local-handle.h"  // NOLINT(build/include_directory)
+#include "v8-promise.h"       // NOLINT(build/include_directory)
 #include "v8config.h"         // NOLINT(build/include_directory)
 
 #if defined(V8_OS_WIN)
@@ -105,7 +107,7 @@ struct JitCodeEvent {
     size_t line_number_table_size;
   };
 
-  wasm_source_info_t* wasm_source_info;
+  wasm_source_info_t* wasm_source_info = nullptr;
 
   union {
     // Only valid for CODE_ADDED.
@@ -145,14 +147,18 @@ using JitCodeEventHandler = void (*)(const JitCodeEvent* event);
  * the callback functions, you therefore cannot manipulate objects (set or
  * delete properties for example) since it is possible such operations will
  * result in the allocation of objects.
+ * TODO(v8:12612): Deprecate kGCTypeMinorMarkSweep after updating blink.
  */
 enum GCType {
   kGCTypeScavenge = 1 << 0,
-  kGCTypeMinorMarkCompact = 1 << 1,
+  kGCTypeMinorMarkSweep = 1 << 1,
+  kGCTypeMinorMarkCompact V8_DEPRECATE_SOON(
+      "Use kGCTypeMinorMarkSweep instead of kGCTypeMinorMarkCompact.") =
+      kGCTypeMinorMarkSweep,
   kGCTypeMarkSweepCompact = 1 << 2,
   kGCTypeIncrementalMarking = 1 << 3,
   kGCTypeProcessWeakCallbacks = 1 << 4,
-  kGCTypeAll = kGCTypeScavenge | kGCTypeMinorMarkCompact |
+  kGCTypeAll = kGCTypeScavenge | kGCTypeMinorMarkSweep |
                kGCTypeMarkSweepCompact | kGCTypeIncrementalMarking |
                kGCTypeProcessWeakCallbacks
 };
@@ -216,7 +222,13 @@ using AddHistogramSampleCallback = void (*)(void* histogram, int sample);
 
 using FatalErrorCallback = void (*)(const char* location, const char* message);
 
-using OOMErrorCallback = void (*)(const char* location, bool is_heap_oom);
+struct OOMDetails {
+  bool is_heap_oom = false;
+  const char* detail = nullptr;
+};
+
+using OOMErrorCallback = void (*)(const char* location,
+                                  const OOMDetails& details);
 
 using MessageCallback = void (*)(Local<Message> message, Local<Value> data);
 
@@ -230,9 +242,13 @@ using LogEventCallback = void (*)(const char* name,
 enum class CrashKeyId {
   kIsolateAddress,
   kReadonlySpaceFirstPageAddress,
-  kMapSpaceFirstPageAddress,
+  kMapSpaceFirstPageAddress V8_ENUM_DEPRECATE_SOON("Map space got removed"),
+  kOldSpaceFirstPageAddress,
+  kCodeRangeBaseAddress,
   kCodeSpaceFirstPageAddress,
   kDumpType,
+  kSnapshotChecksumCalculated,
+  kSnapshotChecksumExpected,
 };
 
 using AddCrashKeyCallback = void (*)(CrashKeyId id, const std::string& value);
@@ -300,22 +316,30 @@ using ApiImplementationCallback = void (*)(const FunctionCallbackInfo<Value>&);
 // --- Callback for WebAssembly.compileStreaming ---
 using WasmStreamingCallback = void (*)(const FunctionCallbackInfo<Value>&);
 
+enum class WasmAsyncSuccess { kSuccess, kFail };
+
+// --- Callback called when async WebAssembly operations finish ---
+using WasmAsyncResolvePromiseCallback = void (*)(
+    Isolate* isolate, Local<Context> context, Local<Promise::Resolver> resolver,
+    Local<Value> result, WasmAsyncSuccess success);
+
 // --- Callback for loading source map file for Wasm profiling support
 using WasmLoadSourceMapCallback = Local<String> (*)(Isolate* isolate,
                                                     const char* name);
 
-// --- Callback for checking if WebAssembly Simd is enabled ---
-using WasmSimdEnabledCallback = bool (*)(Local<Context> context);
-
-// --- Callback for checking if WebAssembly exceptions are enabled ---
-using WasmExceptionsEnabledCallback = bool (*)(Local<Context> context);
-
-// --- Callback for checking if WebAssembly dynamic tiering is enabled ---
-using WasmDynamicTieringEnabledCallback = bool (*)(Local<Context> context);
+// --- Callback for checking if WebAssembly imported strings are enabled ---
+using WasmImportedStringsEnabledCallback = bool (*)(Local<Context> context);
 
 // --- Callback for checking if the SharedArrayBuffer constructor is enabled ---
 using SharedArrayBufferConstructorEnabledCallback =
     bool (*)(Local<Context> context);
+
+// --- Callback for checking if the compile hints magic comments are enabled ---
+using JavaScriptCompileHintsMagicEnabledCallback =
+    bool (*)(Local<Context> context);
+
+// --- Callback for checking if WebAssembly JSPI is enabled ---
+using WasmJSPIEnabledCallback = bool (*)(Local<Context> context);
 
 /**
  * HostImportModuleDynamicallyCallback is called when we
@@ -327,11 +351,11 @@ using SharedArrayBufferConstructorEnabledCallback =
  *
  * The specifier is the name of the module that should be imported.
  *
- * The import_assertions are import assertions for this request in the form:
+ * The import_attributes are import attributes for this request in the form:
  * [key1, value1, key2, value2, ...] where the keys and values are of type
  * v8::String. Note, unlike the FixedArray passed to ResolveModuleCallback and
  * returned from ModuleRequest::GetImportAssertions(), this array does not
- * contain the source Locations of the assertions.
+ * contain the source Locations of the attributes.
  *
  * The embedder must compile, instantiate, evaluate the Module, and
  * obtain its namespace object.
@@ -343,15 +367,17 @@ using SharedArrayBufferConstructorEnabledCallback =
  * fails (e.g. due to stack overflow), the embedder must propagate
  * that exception by returning an empty MaybeLocal.
  */
-using HostImportModuleDynamicallyWithImportAssertionsCallback =
-    MaybeLocal<Promise> (*)(Local<Context> context,
-                            Local<ScriptOrModule> referrer,
-                            Local<String> specifier,
-                            Local<FixedArray> import_assertions);
 using HostImportModuleDynamicallyCallback = MaybeLocal<Promise> (*)(
     Local<Context> context, Local<Data> host_defined_options,
     Local<Value> resource_name, Local<String> specifier,
-    Local<FixedArray> import_assertions);
+    Local<FixedArray> import_attributes);
+
+/**
+ * Callback for requesting a compile hint for a function from the embedder. The
+ * first parameter is the position of the function in source code and the second
+ * parameter is embedder data to be passed back.
+ */
+using CompileHintCallback = bool (*)(int, void*);
 
 /**
  * HostInitializeImportMetaObjectCallback is called the first time import.meta
@@ -391,6 +417,45 @@ using HostCreateShadowRealmContextCallback =
 using PrepareStackTraceCallback = MaybeLocal<Value> (*)(Local<Context> context,
                                                         Local<Value> error,
                                                         Local<Array> sites);
+
+#if defined(V8_OS_WIN)
+/**
+ * Callback to selectively enable ETW tracing based on the document URL.
+ * Implemented by the embedder, it should never call back into V8.
+ *
+ * Windows allows passing additional data to the ETW EnableCallback:
+ * https://learn.microsoft.com/en-us/windows/win32/api/evntprov/nc-evntprov-penablecallback
+ *
+ * This data can be configured in a WPR (Windows Performance Recorder)
+ * profile, adding a CustomFilter to an EventProvider like the following:
+ *
+ * <EventProvider Id=".." Name="57277741-3638-4A4B-BDBA-0AC6E45DA56C" Level="5">
+ *   <CustomFilter Type="0x80000000" Value="AQABAAAAAAA..." />
+ * </EventProvider>
+ *
+ * Where:
+ * - Name="57277741-3638-4A4B-BDBA-0AC6E45DA56C" is the GUID of the V8
+ *     ETW provider, (see src/libplatform/etw/etw-provider-win.h),
+ * - Type="0x80000000" is EVENT_FILTER_TYPE_SCHEMATIZED,
+ * - Value="AQABAAAAAA..." is a base64-encoded byte array that is
+ *     base64-decoded by Windows and passed to the ETW enable callback in
+ *     the 'PEVENT_FILTER_DESCRIPTOR FilterData' argument; see:
+ * https://learn.microsoft.com/en-us/windows/win32/api/evntprov/ns-evntprov-event_filter_descriptor.
+ *
+ * This array contains a struct EVENT_FILTER_HEADER followed by a
+ * variable length payload, and as payload we pass a string in JSON format,
+ * with a list of regular expressions that should match the document URL
+ * in order to enable ETW tracing:
+ *   {
+ *     "version": "1.0",
+ *     "filtered_urls": [
+ *         "https:\/\/.*\.chromium\.org\/.*", "https://v8.dev/";, "..."
+ *     ]
+ *  }
+ */
+using FilterETWSessionByURLCallback =
+    bool (*)(Local<Context> context, const std::string& etw_filter_payload);
+#endif  // V8_OS_WIN
 
 }  // namespace v8
 

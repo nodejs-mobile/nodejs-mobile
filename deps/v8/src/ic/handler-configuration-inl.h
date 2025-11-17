@@ -20,16 +20,12 @@
 namespace v8 {
 namespace internal {
 
-inline Handle<Object> MakeCodeHandler(Isolate* isolate, Builtin builtin) {
-  return isolate->builtins()->code_handle(builtin);
-}
-
 OBJECT_CONSTRUCTORS_IMPL(LoadHandler, DataHandler)
 
 CAST_ACCESSOR(LoadHandler)
 
 // Decodes kind from Smi-handler.
-LoadHandler::Kind LoadHandler::GetHandlerKind(Smi smi_handler) {
+LoadHandler::Kind LoadHandler::GetHandlerKind(Tagged<Smi> smi_handler) {
   return KindBits::decode(smi_handler.value());
 }
 
@@ -74,9 +70,8 @@ Handle<Smi> LoadHandler::LoadConstantFromPrototype(Isolate* isolate) {
   return handle(Smi::FromInt(config), isolate);
 }
 
-Handle<Smi> LoadHandler::LoadAccessor(Isolate* isolate, int descriptor) {
-  int config =
-      KindBits::encode(Kind::kAccessor) | DescriptorBits::encode(descriptor);
+Handle<Smi> LoadHandler::LoadAccessorFromPrototype(Isolate* isolate) {
+  int config = KindBits::encode(Kind::kAccessorFromPrototype);
   return handle(Smi::FromInt(config), isolate);
 }
 
@@ -113,23 +108,22 @@ Handle<Smi> LoadHandler::LoadNonExistent(Isolate* isolate) {
 
 Handle<Smi> LoadHandler::LoadElement(Isolate* isolate,
                                      ElementsKind elements_kind,
-                                     bool convert_hole_to_undefined,
                                      bool is_js_array,
                                      KeyedAccessLoadMode load_mode) {
-  int config =
-      KindBits::encode(Kind::kElement) |
-      AllowOutOfBoundsBits::encode(load_mode == LOAD_IGNORE_OUT_OF_BOUNDS) |
-      ElementsKindBits::encode(elements_kind) |
-      ConvertHoleBits::encode(convert_hole_to_undefined) |
-      IsJsArrayBits::encode(is_js_array);
+  DCHECK_IMPLIES(LoadModeHandlesHoles(load_mode),
+                 IsHoleyElementsKind(elements_kind));
+  int config = KindBits::encode(Kind::kElement) |
+               AllowOutOfBoundsBits::encode(LoadModeHandlesOOB(load_mode)) |
+               ElementsKindBits::encode(elements_kind) |
+               AllowHandlingHole::encode(LoadModeHandlesHoles(load_mode)) |
+               IsJsArrayBits::encode(is_js_array);
   return handle(Smi::FromInt(config), isolate);
 }
 
 Handle<Smi> LoadHandler::LoadIndexedString(Isolate* isolate,
                                            KeyedAccessLoadMode load_mode) {
-  int config =
-      KindBits::encode(Kind::kIndexedString) |
-      AllowOutOfBoundsBits::encode(load_mode == LOAD_IGNORE_OUT_OF_BOUNDS);
+  int config = KindBits::encode(Kind::kIndexedString) |
+               AllowOutOfBoundsBits::encode(LoadModeHandlesOOB(load_mode));
   return handle(Smi::FromInt(config), isolate);
 }
 
@@ -159,47 +153,58 @@ Handle<Smi> StoreHandler::StoreInterceptor(Isolate* isolate) {
   return handle(Smi::FromInt(config), isolate);
 }
 
-Builtin StoreHandler::StoreSloppyArgumentsBuiltin(KeyedAccessStoreMode mode) {
+Handle<Code> StoreHandler::StoreSloppyArgumentsBuiltin(
+    Isolate* isolate, KeyedAccessStoreMode mode) {
   switch (mode) {
-    case STANDARD_STORE:
-      return Builtin::kKeyedStoreIC_SloppyArguments_Standard;
-    case STORE_AND_GROW_HANDLE_COW:
-      return Builtin::kKeyedStoreIC_SloppyArguments_GrowNoTransitionHandleCOW;
-    case STORE_IGNORE_OUT_OF_BOUNDS:
-      return Builtin::kKeyedStoreIC_SloppyArguments_NoTransitionIgnoreOOB;
-    case STORE_HANDLE_COW:
-      return Builtin::kKeyedStoreIC_SloppyArguments_NoTransitionHandleCOW;
+    case KeyedAccessStoreMode::kInBounds:
+      return BUILTIN_CODE(isolate, KeyedStoreIC_SloppyArguments_InBounds);
+    case KeyedAccessStoreMode::kGrowAndHandleCOW:
+      return BUILTIN_CODE(
+          isolate, KeyedStoreIC_SloppyArguments_NoTransitionGrowAndHandleCOW);
+    case KeyedAccessStoreMode::kIgnoreTypedArrayOOB:
+      return BUILTIN_CODE(
+          isolate,
+          KeyedStoreIC_SloppyArguments_NoTransitionIgnoreTypedArrayOOB);
+    case KeyedAccessStoreMode::kHandleCOW:
+      return BUILTIN_CODE(isolate,
+                          KeyedStoreIC_SloppyArguments_NoTransitionHandleCOW);
     default:
       UNREACHABLE();
   }
 }
 
-Builtin StoreHandler::StoreFastElementBuiltin(KeyedAccessStoreMode mode) {
+Handle<Code> StoreHandler::StoreFastElementBuiltin(Isolate* isolate,
+                                                   KeyedAccessStoreMode mode) {
   switch (mode) {
-    case STANDARD_STORE:
-      return Builtin::kStoreFastElementIC_Standard;
-    case STORE_AND_GROW_HANDLE_COW:
-      return Builtin::kStoreFastElementIC_GrowNoTransitionHandleCOW;
-    case STORE_IGNORE_OUT_OF_BOUNDS:
-      return Builtin::kStoreFastElementIC_NoTransitionIgnoreOOB;
-    case STORE_HANDLE_COW:
-      return Builtin::kStoreFastElementIC_NoTransitionHandleCOW;
+    case KeyedAccessStoreMode::kInBounds:
+      return BUILTIN_CODE(isolate, StoreFastElementIC_InBounds);
+    case KeyedAccessStoreMode::kGrowAndHandleCOW:
+      return BUILTIN_CODE(isolate,
+                          StoreFastElementIC_NoTransitionGrowAndHandleCOW);
+    case KeyedAccessStoreMode::kIgnoreTypedArrayOOB:
+      return BUILTIN_CODE(isolate,
+                          StoreFastElementIC_NoTransitionIgnoreTypedArrayOOB);
+    case KeyedAccessStoreMode::kHandleCOW:
+      return BUILTIN_CODE(isolate, StoreFastElementIC_NoTransitionHandleCOW);
     default:
       UNREACHABLE();
   }
 }
 
-Builtin StoreHandler::ElementsTransitionAndStoreBuiltin(
-    KeyedAccessStoreMode mode) {
+Handle<Code> StoreHandler::ElementsTransitionAndStoreBuiltin(
+    Isolate* isolate, KeyedAccessStoreMode mode) {
   switch (mode) {
-    case STANDARD_STORE:
-      return Builtin::kElementsTransitionAndStore_Standard;
-    case STORE_AND_GROW_HANDLE_COW:
-      return Builtin::kElementsTransitionAndStore_GrowNoTransitionHandleCOW;
-    case STORE_IGNORE_OUT_OF_BOUNDS:
-      return Builtin::kElementsTransitionAndStore_NoTransitionIgnoreOOB;
-    case STORE_HANDLE_COW:
-      return Builtin::kElementsTransitionAndStore_NoTransitionHandleCOW;
+    case KeyedAccessStoreMode::kInBounds:
+      return BUILTIN_CODE(isolate, ElementsTransitionAndStore_InBounds);
+    case KeyedAccessStoreMode::kGrowAndHandleCOW:
+      return BUILTIN_CODE(
+          isolate, ElementsTransitionAndStore_NoTransitionGrowAndHandleCOW);
+    case KeyedAccessStoreMode::kIgnoreTypedArrayOOB:
+      return BUILTIN_CODE(
+          isolate, ElementsTransitionAndStore_NoTransitionIgnoreTypedArrayOOB);
+    case KeyedAccessStoreMode::kHandleCOW:
+      return BUILTIN_CODE(isolate,
+                          ElementsTransitionAndStore_NoTransitionHandleCOW);
     default:
       UNREACHABLE();
   }
@@ -216,7 +221,7 @@ Handle<Smi> StoreHandler::StoreProxy(Isolate* isolate) {
   return handle(StoreProxy(), isolate);
 }
 
-Smi StoreHandler::StoreProxy() {
+Tagged<Smi> StoreHandler::StoreProxy() {
   int config = KindBits::encode(Kind::kProxy);
   return Smi::FromInt(config);
 }
@@ -295,8 +300,8 @@ inline const char* WasmValueType2String(WasmValueType type) {
 
     case WasmValueType::kRef:
       return "Ref";
-    case WasmValueType::kOptRef:
-      return "OptRef";
+    case WasmValueType::kRefNull:
+      return "RefNull";
 
     case WasmValueType::kNumTypes:
       return "???";

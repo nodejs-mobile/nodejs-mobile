@@ -6,7 +6,6 @@
 
 #include "src/interpreter/bytecode-decoder.h"
 #include "src/interpreter/interpreter-intrinsics.h"
-#include "src/objects/code-inl.h"
 #include "src/objects/feedback-vector.h"
 #include "src/objects/objects-inl.h"
 
@@ -30,8 +29,25 @@ BytecodeArrayIterator::BytecodeArrayIterator(
   UpdateOperandScale();
 }
 
+BytecodeArrayIterator::BytecodeArrayIterator(
+    Handle<BytecodeArray> bytecode_array, int initial_offset,
+    DisallowGarbageCollection& no_gc)
+    : bytecode_array_(bytecode_array),
+      start_(reinterpret_cast<uint8_t*>(
+          bytecode_array_->GetFirstBytecodeAddress())),
+      end_(start_ + bytecode_array_->length()),
+      cursor_(start_ + initial_offset),
+      operand_scale_(OperandScale::kSingle),
+      prefix_size_(0),
+      local_heap_(nullptr) {
+  // Don't add a GC callback, since we're in a no_gc scope.
+  UpdateOperandScale();
+}
+
 BytecodeArrayIterator::~BytecodeArrayIterator() {
-  local_heap_->RemoveGCEpilogueCallback(UpdatePointersCallback, this);
+  if (local_heap_) {
+    local_heap_->RemoveGCEpilogueCallback(UpdatePointersCallback, this);
+  }
 }
 
 void BytecodeArrayIterator::SetOffset(int offset) {
@@ -39,6 +55,16 @@ void BytecodeArrayIterator::SetOffset(int offset) {
   cursor_ = reinterpret_cast<uint8_t*>(
       bytecode_array()->GetFirstBytecodeAddress() + offset);
   UpdateOperandScale();
+}
+
+// static
+bool BytecodeArrayIterator::IsValidOffset(Handle<BytecodeArray> bytecode_array,
+                                          int offset) {
+  for (BytecodeArrayIterator it(bytecode_array); !it.done(); it.Advance()) {
+    if (it.current_offset() == offset) return true;
+    if (it.current_offset() > offset) break;
+  }
+  return false;
 }
 
 void BytecodeArrayIterator::ApplyDebugBreak() {
@@ -83,10 +109,16 @@ int32_t BytecodeArrayIterator::GetSignedOperand(
                                               current_operand_scale());
 }
 
-uint32_t BytecodeArrayIterator::GetFlagOperand(int operand_index) const {
+uint32_t BytecodeArrayIterator::GetFlag8Operand(int operand_index) const {
   DCHECK_EQ(Bytecodes::GetOperandType(current_bytecode(), operand_index),
             OperandType::kFlag8);
   return GetUnsignedOperand(operand_index, OperandType::kFlag8);
+}
+
+uint32_t BytecodeArrayIterator::GetFlag16Operand(int operand_index) const {
+  DCHECK_EQ(Bytecodes::GetOperandType(current_bytecode(), operand_index),
+            OperandType::kFlag16);
+  return GetUnsignedOperand(operand_index, OperandType::kFlag16);
 }
 
 uint32_t BytecodeArrayIterator::GetUnsignedImmediateOperand(
@@ -201,15 +233,15 @@ Runtime::FunctionId BytecodeArrayIterator::GetIntrinsicIdOperand(
 template <typename IsolateT>
 Handle<Object> BytecodeArrayIterator::GetConstantAtIndex(
     int index, IsolateT* isolate) const {
-  return handle(bytecode_array()->constant_pool().get(index), isolate);
+  return handle(bytecode_array()->constant_pool()->get(index), isolate);
 }
 
 bool BytecodeArrayIterator::IsConstantAtIndexSmi(int index) const {
-  return bytecode_array()->constant_pool().get(index).IsSmi();
+  return IsSmi(bytecode_array()->constant_pool()->get(index));
 }
 
-Smi BytecodeArrayIterator::GetConstantAtIndexAsSmi(int index) const {
-  return Smi::cast(bytecode_array()->constant_pool().get(index));
+Tagged<Smi> BytecodeArrayIterator::GetConstantAtIndexAsSmi(int index) const {
+  return Smi::cast(bytecode_array()->constant_pool()->get(index));
 }
 
 template <typename IsolateT>
@@ -233,7 +265,7 @@ int BytecodeArrayIterator::GetRelativeJumpTargetOffset() const {
     }
     return relative_offset;
   } else if (interpreter::Bytecodes::IsJumpConstant(bytecode)) {
-    Smi smi = GetConstantAtIndexAsSmi(GetIndexOperand(0));
+    Tagged<Smi> smi = GetConstantAtIndexAsSmi(GetIndexOperand(0));
     return smi.value();
   } else {
     UNREACHABLE();

@@ -11,11 +11,18 @@ import os
 import sys
 import re
 
+from pathlib import Path
+
 BASE_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 ANDROID_DIR = os.path.join(BASE_DIR, 'build', 'android')
 DEVICE_DIR = '/data/local/tmp/v8/'
 
+FILTER_LINES_EXPRESSIONS = [
+  r'WARNING: linker: .+ unsupported flags DT_FLAGS_1=0x8000001',
+  r'WARNING: linker: .+ unused DT entry:.*type 0x70000001 arg 0x0.*',
+]
+FILTER_LINES_EXPRESSIONS = [re.compile(exp) for exp in FILTER_LINES_EXPRESSIONS]
 
 class TimeoutException(Exception):
   def __init__(self, timeout, output=None):
@@ -29,7 +36,15 @@ class CommandFailedException(Exception):
     self.output = output
 
 
-class _Driver(object):
+class Driver(object):
+  __instance = None
+
+  @staticmethod
+  def instance(device):
+    if not Driver.__instance:
+      Driver.__instance = Driver(device)
+    return Driver.__instance
+
   """Helper class to execute shell commands on an Android device."""
   def __init__(self, device=None):
     assert os.path.exists(ANDROID_DIR)
@@ -101,6 +116,13 @@ class _Driver(object):
     self.device.adb.Shell('cp %s %s' % (file_on_device_tmp, file_on_device))
     self.pushed.add(file_on_host)
 
+  def push_files_rec(self, host_dir, target_rel='.'):
+    """As above, but push the whole directory tree under host_dir."""
+    root = Path(host_dir)
+    for entry in root.rglob('*'):
+      if entry.is_file():
+        self.push_file(host_dir, entry.relative_to(root), target_rel)
+
   def push_executable(self, shell_dir, target_dir, binary):
     """Push files required to run a V8 executable.
 
@@ -133,6 +155,12 @@ class _Driver(object):
         skip_if_missing=True,
     )
 
+  def filter_line(self, line):
+    for exp in FILTER_LINES_EXPRESSIONS:
+      if exp.match(line):
+        return False
+    return True
+
   def run(self, target_dir, binary, args, rel_path, timeout, env=None,
           logcat_file=False):
     """Execute a command on the device's shell.
@@ -159,7 +187,8 @@ class _Driver(object):
             timeout=timeout,
             retries=0,
         )
-        return '\n'.join(output)
+        # Return output without linker warnings (https://crbug.com/1454414).
+        return '\n'.join(filter(self.filter_line, output))
       except device_errors.AdbCommandFailedError as e:
         raise CommandFailedException(e.status, e.output)
       except device_errors.CommandTimeoutError as e:
@@ -188,12 +217,3 @@ class _Driver(object):
     """Set device into default performance mode."""
     perf = perf_control.PerfControl(self.device)
     perf.SetDefaultPerfMode()
-
-
-_ANDROID_DRIVER = None
-def android_driver(device=None):
-  """Singleton access method to the driver class."""
-  global _ANDROID_DRIVER
-  if not _ANDROID_DRIVER:
-    _ANDROID_DRIVER = _Driver(device)
-  return _ANDROID_DRIVER

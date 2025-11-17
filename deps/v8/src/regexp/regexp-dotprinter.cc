@@ -135,8 +135,8 @@ void DotPrinterImpl::VisitText(TextNode* that) {
         }
         break;
       }
-      case TextElement::CHAR_CLASS: {
-        RegExpCharacterClass* node = elm.char_class();
+      case TextElement::CLASS_RANGES: {
+        RegExpClassRanges* node = elm.class_ranges();
         os_ << "[";
         if (node->is_negated()) os_ << "^";
         for (int j = 0; j < node->ranges(zone)->length(); j++) {
@@ -231,6 +231,10 @@ void DotPrinterImpl::VisitAction(ActionNode* that) {
       os_ << "label=\"clear $" << that->data_.u_clear_captures.range_from
           << " to $" << that->data_.u_clear_captures.range_to
           << "\", shape=septagon";
+      break;
+    }
+    case ActionNode::MODIFY_FLAGS: {
+      os_ << "label=\"flags $" << that->flags() << "\", shape=septagon";
       break;
     }
   }

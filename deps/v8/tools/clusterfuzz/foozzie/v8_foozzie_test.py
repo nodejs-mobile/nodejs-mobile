@@ -5,9 +5,11 @@
 
 import os
 import random
+import re
 import subprocess
 import sys
 import unittest
+import unittest.mock
 
 import v8_commands
 import v8_foozzie
@@ -101,18 +103,22 @@ class UnitTest(unittest.TestCase):
     crash_test_example_path = 'CrashTests/path/to/file.js'
     self.assertEqual(
         v8_foozzie.ORIGINAL_SOURCE_DEFAULT,
-        v8_foozzie.cluster_failures(''))
+        v8_foozzie.cluster_failures('', compact=False))
     self.assertEqual(
         v8_foozzie.ORIGINAL_SOURCE_CRASHTESTS,
-        v8_foozzie.cluster_failures(crash_test_example_path))
+        v8_foozzie.cluster_failures(crash_test_example_path, compact=False))
     self.assertEqual(
         '_o_O_',
         v8_foozzie.cluster_failures(
             crash_test_example_path,
+            compact=False,
             known_failures={crash_test_example_path: '_o_O_'}))
     self.assertEqual(
         '980',
-        v8_foozzie.cluster_failures('v8/test/mjsunit/apply.js'))
+        v8_foozzie.cluster_failures('v8/test/mjsunit/apply.js', compact=False))
+    self.assertEqual(
+        '98',
+        v8_foozzie.cluster_failures('v8/test/mjsunit/apply.js', compact=True))
 
   def testDiff(self):
     def diff_fun(one, two, skip=False):
@@ -197,14 +203,15 @@ other weird stuff
   def testOutputCapping(self):
     def output(stdout, is_crash):
       exit_code = -1 if is_crash else 0
-      return v8_commands.Output(exit_code=exit_code, stdout=stdout, pid=0)
+      return v8_commands.Output(
+          exit_code=exit_code, stdout_bytes=stdout.encode('utf-8'), pid=0)
 
     def check(stdout1, stdout2, is_crash1, is_crash2, capped_lines1,
               capped_lines2):
       output1 = output(stdout1, is_crash1)
       output2 = output(stdout2, is_crash2)
       self.assertEqual(
-          (capped_lines1, capped_lines2),
+          (capped_lines1.encode('utf-8'), capped_lines2.encode('utf-8')),
           v8_suppressions.get_output_capped(output1, output2))
 
     # No capping, already equal.
@@ -233,6 +240,24 @@ other weird stuff
     check('12', '345', True, True, '12', '34')
     check('123', '45', True, True, '12', '45')
 
+  @unittest.mock.patch('v8_foozzie.DISALLOWED_FLAGS', ['A'])
+  @unittest.mock.patch('v8_foozzie.CONTRADICTORY_FLAGS',
+                       [('B', 'C'), ('B', 'D')])
+  def testFilterFlags(self):
+    def check(input_flags, expected):
+      self.assertEqual(expected, v8_foozzie.filter_flags(input_flags))
+
+    check([], [])
+    check(['A'], [])
+    check(['D', 'A'], ['D'])
+    check(['A', 'D'], ['D'])
+    check(['C', 'D'], ['C', 'D'])
+    check(['E', 'C', 'D', 'F'], ['E', 'C', 'D', 'F'])
+    check(['B', 'D'], ['D'])
+    check(['D', 'B'], ['B'])
+    check(['C', 'B', 'D'], ['C', 'D'])
+    check(['E', 'C', 'A', 'F', 'B', 'G', 'D'], ['E', 'C', 'F', 'G', 'D'])
+
 
 def cut_verbose_output(stdout, n_comp):
   # This removes the first lines containing d8 commands of `n_comp` comparison
@@ -257,6 +282,12 @@ def run_foozzie(second_d8_dir, *extra_flags, **kwargs):
     os.path.join(TEST_DATA, 'fuzz-123.js'),
   ] + list(extra_flags), **kwargs)
 
+
+def expected_output(file_name):
+  with open(os.path.join(TEST_DATA, file_name)) as f:
+    return f.read()
+
+
 class SystemTest(unittest.TestCase):
   """This tests the whole correctness-fuzzing harness with fake build
   artifacts.
@@ -279,26 +310,34 @@ class SystemTest(unittest.TestCase):
     self.assertNotIn('v8_mock_archs.js', stdout)
     self.assertNotIn('v8_mock_webassembly.js', stdout)
 
-  def testDifferentOutputFail(self):
-    with open(os.path.join(TEST_DATA, 'failure_output.txt')) as f:
-      expected_output = f.read()
+  def _testDifferentOutputFail(self, expected, *args):
     with self.assertRaises(subprocess.CalledProcessError) as ctx:
       run_foozzie('build2', '--skip-smoke-tests',
                   '--first-config-extra-flags=--flag1',
                   '--first-config-extra-flags=--flag2=0',
-                  '--second-config-extra-flags=--flag3')
+                  '--second-config-extra-flags=--flag3', *args)
     e = ctx.exception
     self.assertEqual(v8_foozzie.RETURN_FAIL, e.returncode)
-    self.assertEqual(expected_output, cut_verbose_output(e.output, 2))
+    self.assertEqual(expected, cut_verbose_output(e.output, 2))
+
+  def testDifferentOutputFail(self):
+    self._testDifferentOutputFail(expected_output('failure_output.txt'))
+
+  def testFailCompact(self):
+    # Compact output drops the config line and uses a shorter hash.
+    compact_output = expected_output('failure_output.txt')
+    compact_output = re.sub(
+        r'# V8 correctness configs: .*\n', '', compact_output)
+    compact_output = re.sub(
+        r'sources: f60', 'sources: f6', compact_output)
+    self._testDifferentOutputFail(compact_output, '--compact')
 
   def testSmokeTest(self):
-    with open(os.path.join(TEST_DATA, 'smoke_test_output.txt')) as f:
-      expected_output = f.read()
     with self.assertRaises(subprocess.CalledProcessError) as ctx:
       run_foozzie('build2')
     e = ctx.exception
     self.assertEqual(v8_foozzie.RETURN_FAIL, e.returncode)
-    self.assertEqual(expected_output, e.output)
+    self.assertEqual(expected_output('smoke_test_output.txt'), e.output)
 
   def testDifferentArch(self):
     """Test that the architecture-specific mocks are passed to both runs when

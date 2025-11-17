@@ -27,7 +27,22 @@ if (v8_enable_google_benchmark) {
 
     deps = [
       "//:v8_libbase",
-      "//third_party/google_benchmark:benchmark_main",
+      "//third_party/google_benchmark_chrome:benchmark_main",
+      "//third_party/google_benchmark_chrome:google_benchmark",
+    ]
+  }
+
+  v8_executable("dtoa_benchmark") {
+    testonly = true
+
+    configs = []
+
+    sources = [ "dtoa.cc" ]
+
+    deps = [
+      "//:v8_libbase",
+      "//third_party/google_benchmark_chrome:benchmark_main",
+      "//third_party/google_benchmark_chrome:google_benchmark",
     ]
   }
 }

@@ -49,6 +49,7 @@ class V8Console;
 class V8ConsoleMessageStorage;
 class V8Debugger;
 class V8DebuggerAgentImpl;
+class V8DebuggerBarrier;
 class V8InspectorSessionImpl;
 class V8ProfilerAgentImpl;
 class V8RuntimeAgentImpl;
@@ -64,6 +65,9 @@ class V8InspectorImpl : public V8Inspector {
   v8::Isolate* isolate() const { return m_isolate; }
   V8InspectorClient* client() { return m_client; }
   V8Debugger* debugger() { return m_debugger.get(); }
+  PromiseHandlerTracker& promiseHandlerTracker() {
+    return m_promiseHandlerTracker;
+  }
   int contextGroupId(v8::Local<v8::Context>) const;
   int contextGroupId(int contextId) const;
   uint64_t isolateId() const { return m_isolateId; }
@@ -80,7 +84,9 @@ class V8InspectorImpl : public V8Inspector {
   // V8Inspector implementation.
   std::unique_ptr<V8InspectorSession> connect(int contextGroupId,
                                               V8Inspector::Channel*,
-                                              StringView state) override;
+                                              StringView state,
+                                              ClientTrustLevel,
+                                              SessionPauseState) override;
   void contextCreated(const V8ContextInfo&) override;
   void contextDestroyed(v8::Local<v8::Context>) override;
   v8::MaybeLocal<v8::Context> contextById(int contextId) override;
@@ -125,7 +131,7 @@ class V8InspectorImpl : public V8Inspector {
   V8InspectorSessionImpl* sessionById(int contextGroupId, int sessionId);
   InspectedContext* getContext(int groupId, int contextId) const;
   InspectedContext* getContext(int contextId) const;
-  V8Console* console();
+  V8_EXPORT_PRIVATE V8Console* console();
   void forEachContext(int contextGroupId,
                       const std::function<void(InspectedContext*)>& callback);
   void forEachSession(
@@ -151,7 +157,6 @@ class V8InspectorImpl : public V8Inspector {
     const InjectedScript::Scope& m_scope;
     v8::Isolate* m_isolate;
     std::shared_ptr<CancelToken> m_cancelToken;
-    v8::Isolate::SafeForTerminationScope m_safeForTerminationScope;
   };
 
  private:
@@ -177,6 +182,8 @@ class V8InspectorImpl : public V8Inspector {
 
   // contextGroupId -> sessionId -> session
   std::unordered_map<int, std::map<int, V8InspectorSessionImpl*>> m_sessions;
+  // contextGroupId -> debugger barrier
+  std::unordered_map<int, std::weak_ptr<V8DebuggerBarrier>> m_debuggerBarriers;
 
   using ConsoleStorageMap =
       std::unordered_map<int, std::unique_ptr<V8ConsoleMessageStorage>>;
@@ -186,6 +193,7 @@ class V8InspectorImpl : public V8Inspector {
   std::map<std::pair<int64_t, int64_t>, int> m_uniqueIdToContextId;
 
   std::unique_ptr<V8Console> m_console;
+  PromiseHandlerTracker m_promiseHandlerTracker;
 };
 
 }  // namespace v8_inspector

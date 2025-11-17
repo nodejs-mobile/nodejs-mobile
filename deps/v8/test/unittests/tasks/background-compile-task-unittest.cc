@@ -50,11 +50,12 @@ class BackgroundCompileTaskTest : public TestWithNativeContext {
 
   BackgroundCompileTask* NewBackgroundCompileTask(
       Isolate* isolate, Handle<SharedFunctionInfo> shared,
-      size_t stack_size = FLAG_stack_size) {
+      size_t stack_size = v8_flags.stack_size) {
     return new BackgroundCompileTask(
         isolate, shared, test::SourceCharacterStreamForShared(isolate, shared),
         isolate->counters()->worker_thread_runtime_call_stats(),
-        isolate->counters()->compile_function_on_background(), FLAG_stack_size);
+        isolate->counters()->compile_function_on_background(),
+        v8_flags.stack_size);
   }
 
  private:
@@ -82,9 +83,9 @@ TEST_F(BackgroundCompileTaskTest, SyntaxError) {
   task->RunOnMainThread(isolate());
   ASSERT_FALSE(Compiler::FinalizeBackgroundCompileTask(
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
-  ASSERT_TRUE(isolate()->has_pending_exception());
+  ASSERT_TRUE(isolate()->has_exception());
 
-  isolate()->clear_pending_exception();
+  isolate()->clear_exception();
 }
 
 TEST_F(BackgroundCompileTaskTest, CompileAndRun) {
@@ -110,7 +111,7 @@ TEST_F(BackgroundCompileTaskTest, CompileAndRun) {
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
   ASSERT_TRUE(shared->is_compiled());
 
-  Smi value = Smi::cast(*RunJS("f(100);"));
+  Tagged<Smi> value = Smi::cast(*RunJS("f(100);"));
   ASSERT_TRUE(value == Smi::FromInt(160));
 }
 
@@ -134,9 +135,9 @@ TEST_F(BackgroundCompileTaskTest, CompileFailure) {
   task->RunOnMainThread(isolate());
   ASSERT_FALSE(Compiler::FinalizeBackgroundCompileTask(
       task.get(), isolate(), Compiler::KEEP_EXCEPTION));
-  ASSERT_TRUE(isolate()->has_pending_exception());
+  ASSERT_TRUE(isolate()->has_exception());
 
-  isolate()->clear_pending_exception();
+  isolate()->clear_exception();
 }
 
 class CompileTask : public Task {
@@ -208,7 +209,7 @@ TEST_F(BackgroundCompileTaskTest, EagerInnerFunctions) {
 
   Handle<JSFunction> e = RunJS<JSFunction>("f();");
 
-  ASSERT_TRUE(e->shared().is_compiled());
+  ASSERT_TRUE(e->shared()->is_compiled());
 }
 
 TEST_F(BackgroundCompileTaskTest, LazyInnerFunctions) {
@@ -238,7 +239,7 @@ TEST_F(BackgroundCompileTaskTest, LazyInnerFunctions) {
 
   Handle<JSFunction> e = RunJS<JSFunction>("f();");
 
-  ASSERT_FALSE(e->shared().is_compiled());
+  ASSERT_FALSE(e->shared()->is_compiled());
 }
 
 }  // namespace internal

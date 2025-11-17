@@ -4,8 +4,9 @@
 // but with an on('error') handler that does nothing.
 
 const common = require('../common');
-const onGC = require('../common/ongc');
+const { onGC } = require('../common/gc');
 
+// nodejs-mobile patch
 let cpus;
 if (common.isAndroid) {
   // Unable to get os.availableParallelism() on Android.

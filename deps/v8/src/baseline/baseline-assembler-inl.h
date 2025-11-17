@@ -7,10 +7,6 @@
 
 #include "src/baseline/baseline-assembler.h"
 
-// TODO(v8:11421): Remove #if once baseline compiler is ported to other
-// architectures.
-#if ENABLE_SPARKPLUG
-
 #include <type_traits>
 #include <unordered_map>
 
@@ -32,12 +28,10 @@
 #include "src/baseline/ppc/baseline-assembler-ppc-inl.h"
 #elif V8_TARGET_ARCH_S390X
 #include "src/baseline/s390/baseline-assembler-s390-inl.h"
-#elif V8_TARGET_ARCH_RISCV64
-#include "src/baseline/riscv64/baseline-assembler-riscv64-inl.h"
+#elif V8_TARGET_ARCH_RISCV32 || V8_TARGET_ARCH_RISCV64
+#include "src/baseline/riscv/baseline-assembler-riscv-inl.h"
 #elif V8_TARGET_ARCH_MIPS64
 #include "src/baseline/mips64/baseline-assembler-mips64-inl.h"
-#elif V8_TARGET_ARCH_MIPS
-#include "src/baseline/mips/baseline-assembler-mips-inl.h"
 #elif V8_TARGET_ARCH_LOONG64
 #include "src/baseline/loong64/baseline-assembler-loong64-inl.h"
 #else
@@ -50,20 +44,30 @@ namespace baseline {
 
 #define __ masm_->
 
-void BaselineAssembler::GetCode(Isolate* isolate, CodeDesc* desc) {
+void BaselineAssembler::GetCode(LocalIsolate* isolate, CodeDesc* desc) {
   __ GetCode(isolate, desc);
 }
 int BaselineAssembler::pc_offset() const { return __ pc_offset(); }
 void BaselineAssembler::CodeEntry() const { __ CodeEntry(); }
 void BaselineAssembler::ExceptionHandler() const { __ ExceptionHandler(); }
 void BaselineAssembler::RecordComment(const char* string) {
-  if (!FLAG_code_comments) return;
+  if (!v8_flags.code_comments) return;
   __ RecordComment(string);
 }
 void BaselineAssembler::Trap() { __ Trap(); }
 void BaselineAssembler::DebugBreak() { __ DebugBreak(); }
 void BaselineAssembler::CallRuntime(Runtime::FunctionId function, int nargs) {
   __ CallRuntime(function, nargs);
+}
+
+void BaselineAssembler::CallBuiltin(Builtin builtin) {
+  // BaselineAssemblerOptions defines how builtin calls are generated.
+  __ CallBuiltin(builtin);
+}
+
+void BaselineAssembler::TailCallBuiltin(Builtin builtin) {
+  // BaselineAssemblerOptions defines how builtin tail calls are generated.
+  __ TailCallBuiltin(builtin);
 }
 
 MemOperand BaselineAssembler::ContextOperand() {
@@ -95,7 +99,7 @@ void BaselineAssembler::Move(Register output, Register source) {
 void BaselineAssembler::Move(Register output, MemOperand operand) {
   __ Move(output, operand);
 }
-void BaselineAssembler::Move(Register output, Smi value) {
+void BaselineAssembler::Move(Register output, Tagged<Smi> value) {
   __ Move(output, value);
 }
 
@@ -106,13 +110,12 @@ void BaselineAssembler::SmiUntag(Register output, Register value) {
 
 void BaselineAssembler::LoadFixedArrayElement(Register output, Register array,
                                               int32_t index) {
-  LoadTaggedAnyField(output, array,
-                     FixedArray::kHeaderSize + index * kTaggedSize);
+  LoadTaggedField(output, array, FixedArray::kHeaderSize + index * kTaggedSize);
 }
 
 void BaselineAssembler::LoadPrototype(Register prototype, Register object) {
   __ LoadMap(prototype, object);
-  LoadTaggedPointerField(prototype, prototype, Map::kPrototypeOffset);
+  LoadTaggedField(prototype, prototype, Map::kPrototypeOffset);
 }
 void BaselineAssembler::LoadContext(Register output) {
   LoadRegister(output, interpreter::Register::current_context());
@@ -132,13 +135,16 @@ void BaselineAssembler::StoreRegister(interpreter::Register output,
   Move(output, value);
 }
 
-SaveAccumulatorScope::SaveAccumulatorScope(BaselineAssembler* assembler)
-    : assembler_(assembler) {
-  assembler_->Push(kInterpreterAccumulatorRegister);
+void BaselineAssembler::LoadFeedbackCell(Register output) {
+  Move(output, FeedbackCellOperand());
+  ScratchRegisterScope scratch_scope(this);
+  Register scratch = scratch_scope.AcquireScratch();
+  __ AssertFeedbackCell(output, scratch);
 }
 
-SaveAccumulatorScope::~SaveAccumulatorScope() {
-  assembler_->Pop(kInterpreterAccumulatorRegister);
+template <typename Field>
+void BaselineAssembler::DecodeField(Register reg) {
+  __ DecodeField<Field>(reg);
 }
 
 EnsureAccumulatorPreservedScope::EnsureAccumulatorPreservedScope(
@@ -164,7 +170,5 @@ EnsureAccumulatorPreservedScope::~EnsureAccumulatorPreservedScope() {
 }  // namespace baseline
 }  // namespace internal
 }  // namespace v8
-
-#endif  // ENABLE_SPARKPLUG
 
 #endif  // V8_BASELINE_BASELINE_ASSEMBLER_INL_H_

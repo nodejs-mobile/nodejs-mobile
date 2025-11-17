@@ -18,7 +18,7 @@ namespace internal {
 
 class CppHeap;
 
-class UnifiedHeapTest : public TestWithHeapInternals {
+class UnifiedHeapTest : public TestWithHeapInternalsAndContext {
  public:
   UnifiedHeapTest();
   explicit UnifiedHeapTest(
@@ -28,6 +28,13 @@ class UnifiedHeapTest : public TestWithHeapInternals {
   void CollectGarbageWithEmbedderStack(cppgc::Heap::SweepingType sweeping_type =
                                            cppgc::Heap::SweepingType::kAtomic);
   void CollectGarbageWithoutEmbedderStack(
+      cppgc::Heap::SweepingType sweeping_type =
+          cppgc::Heap::SweepingType::kAtomic);
+
+  void CollectYoungGarbageWithEmbedderStack(
+      cppgc::Heap::SweepingType sweeping_type =
+          cppgc::Heap::SweepingType::kAtomic);
+  void CollectYoungGarbageWithoutEmbedderStack(
       cppgc::Heap::SweepingType sweeping_type =
           cppgc::Heap::SweepingType::kAtomic);
 
@@ -67,6 +74,12 @@ class WrapperHelper {
   // emit any possibly needed write barrier.
   static void SetWrappableConnection(v8::Local<v8::Object> api_object, void*,
                                      void*);
+
+  template <typename T>
+  static T* UnwrapAs(v8::Local<v8::Object> api_object) {
+    return reinterpret_cast<T*>(api_object->GetAlignedPointerFromInternalField(
+        kWrappableInstanceEmbedderIndex));
+  }
 };
 
 }  // namespace internal

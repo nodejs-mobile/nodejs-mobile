@@ -41,8 +41,8 @@ let kTableSize = 50;
     let f17 = addConstFunc(builder, 17);
     builder.addExport("f15", f15);
     builder.addExport("f17", f17);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(15), [f15]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(1), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(15), [f15]);
+    builder.addActiveElementSegment(0, wasmI32Const(1), [call.index]);
 
     var mod1 = builder.toModule();
   }
@@ -62,10 +62,10 @@ let kTableSize = 50;
         ])
         .exportAs("call");
     let f26 = addConstFunc(builder, 26);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(17), [f17]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(21), [f21]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(26), [f26]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(5), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(17), [f17]);
+    builder.addActiveElementSegment(0, wasmI32Const(21), [f21]);
+    builder.addActiveElementSegment(0, wasmI32Const(26), [f26]);
+    builder.addActiveElementSegment(0, wasmI32Const(5), [call.index]);
 
     var mod2 = builder.toModule();
   }
@@ -89,7 +89,7 @@ let kTableSize = 50;
 })();
 
 function addConstFuncUsingGlobal(builder, val) {
-  let g = builder.addGlobal(kWasmI32, false, WasmInitExpr.I32Const(val));
+  let g = builder.addGlobal(kWasmI32, false, false, wasmI32Const(val));
   return builder.addFunction("global" + val, kSig_i_v)
     .addBody([kExprGlobalGet, g.index]).index;
 }
@@ -112,8 +112,8 @@ function addConstFuncUsingGlobal(builder, val) {
     let f18 = addConstFuncUsingGlobal(builder, 18);
     builder.addExport("f14", f14);
     builder.addExport("f18", f18);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(14), [f14]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(1), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(14), [f14]);
+    builder.addActiveElementSegment(0, wasmI32Const(1), [call.index]);
 
     var mod1 = builder.toModule();
   }
@@ -133,10 +133,10 @@ function addConstFuncUsingGlobal(builder, val) {
         ])
         .exportAs("call");
     let f28 = addConstFuncUsingGlobal(builder, 28);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(18), [f18]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(22), [f22]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(28), [f28]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(5), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(18), [f18]);
+    builder.addActiveElementSegment(0, wasmI32Const(22), [f22]);
+    builder.addActiveElementSegment(0, wasmI32Const(28), [f28]);
+    builder.addActiveElementSegment(0, wasmI32Const(5), [call.index]);
 
     var mod2 = builder.toModule();
   }
@@ -164,7 +164,7 @@ function addConstFuncUsingMemory(builder, val) {
   var addr = builder.address;
   builder.address += 8;
   var bytes = [val & 0xff, (val>>8) & 0xff, (val>>16) & 0xff, (val>>24) & 0xff];
-  builder.addDataSegment(addr, bytes);
+  builder.addActiveDataSegment(0, [kExprI32Const, addr], bytes);
   return builder.addFunction("mem" + val, kSig_i_v)
     .addBody([
       ...wasmI32Const(addr),
@@ -180,7 +180,7 @@ function addConstFuncUsingMemory(builder, val) {
     builder.address = 8;
     let signums = addSigs(builder, 1);
 
-    builder.addMemory(1, 1, false);
+    builder.addMemory(1, 1);
     builder.addImportedTable("m", "table", kTableSize, kTableSize);
     let f13 = addConstFuncUsingMemory(builder, 13);
     let call = builder.addFunction("call", kSig_i_i)
@@ -192,8 +192,8 @@ function addConstFuncUsingMemory(builder, val) {
     let f19 = addConstFuncUsingMemory(builder, 19);
     builder.addExport("f13", f13);
     builder.addExport("f19", f19);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(13), [f13]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(1), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(13), [f13]);
+    builder.addActiveElementSegment(0, wasmI32Const(1), [call.index]);
 
     var mod1 = builder.toModule();
   }
@@ -203,7 +203,7 @@ function addConstFuncUsingMemory(builder, val) {
     builder.address = 8;
     let signums = addSigs(builder, 4);  // ensure different sigids
 
-    builder.addMemory(1, 1, false);
+    builder.addMemory(1, 1);
     builder.addImportedTable("m", "table", kTableSize, kTableSize);
     let f13 = builder.addImport("m", "f13", kSig_i_v);
     let f19 = builder.addImport("m", "f19", kSig_i_v);
@@ -215,10 +215,10 @@ function addConstFuncUsingMemory(builder, val) {
         ])
         .exportAs("call");
     let f29 = addConstFuncUsingMemory(builder, 29);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(19), [f19]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(23), [f23]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(29), [f29]);
-    builder.addActiveElementSegment(0, WasmInitExpr.I32Const(5), [call.index]);
+    builder.addActiveElementSegment(0, wasmI32Const(19), [f19]);
+    builder.addActiveElementSegment(0, wasmI32Const(23), [f23]);
+    builder.addActiveElementSegment(0, wasmI32Const(29), [f29]);
+    builder.addActiveElementSegment(0, wasmI32Const(5), [call.index]);
 
     var mod2 = builder.toModule();
   }

@@ -3,14 +3,13 @@
 // found in the LICENSE file.
 
 #include <stdlib.h>
+
 #include <sstream>
 #include <utility>
 
 #include "src/api/api-inl.h"
-#include "src/init/v8.h"
 #include "src/objects/heap-number-inl.h"
 #include "src/objects/objects-inl.h"
-
 #include "test/cctest/cctest.h"
 
 namespace v8 {
@@ -47,9 +46,8 @@ Handle<T> GetLexical(const char* name) {
 
   VariableLookupResult lookup_result;
   if (script_contexts->Lookup(str_name, &lookup_result)) {
-    Handle<Context> script_context = ScriptContextTable::GetContext(
-        isolate, script_contexts, lookup_result.context_index);
-
+    Tagged<Context> script_context =
+        script_contexts->get(lookup_result.context_index);
     Handle<Object> result(script_context->get(lookup_result.slot_index),
                           isolate);
     return Handle<T>::cast(result);
@@ -73,31 +71,32 @@ static inline Handle<T> CompileRunI(const char* script) {
   return OpenHandle<T>(CompileRun(script));
 }
 
-static Object GetFieldValue(JSObject obj, int property_index) {
-  FieldIndex index = FieldIndex::ForPropertyIndex(obj.map(), property_index);
-  return obj.RawFastPropertyAt(index);
+static Tagged<Object> GetFieldValue(Tagged<JSObject> obj, int property_index) {
+  FieldIndex index = FieldIndex::ForPropertyIndex(obj->map(), property_index);
+  return obj->RawFastPropertyAt(index);
 }
 
-static double GetDoubleFieldValue(JSObject obj, FieldIndex field_index) {
-  Object value = obj.RawFastPropertyAt(field_index);
-  if (value.IsHeapNumber()) {
-    return HeapNumber::cast(value).value();
+static double GetDoubleFieldValue(Tagged<JSObject> obj,
+                                  FieldIndex field_index) {
+  Tagged<Object> value = obj->RawFastPropertyAt(field_index);
+  if (IsHeapNumber(value)) {
+    return HeapNumber::cast(value)->value();
   } else {
-    return value.Number();
+    return Object::Number(value);
   }
 }
 
-static double GetDoubleFieldValue(JSObject obj, int property_index) {
-  FieldIndex index = FieldIndex::ForPropertyIndex(obj.map(), property_index);
+static double GetDoubleFieldValue(Tagged<JSObject> obj, int property_index) {
+  FieldIndex index = FieldIndex::ForPropertyIndex(obj->map(), property_index);
   return GetDoubleFieldValue(obj, index);
 }
 
-bool IsObjectShrinkable(JSObject obj) {
+bool IsObjectShrinkable(Tagged<JSObject> obj) {
   Handle<Map> filler_map =
       CcTest::i_isolate()->factory()->one_pointer_filler_map();
 
-  int inobject_properties = obj.map().GetInObjectProperties();
-  int unused = obj.map().UnusedPropertyFields();
+  int inobject_properties = obj->map()->GetInObjectProperties();
+  int unused = obj->map()->UnusedPropertyFields();
   if (unused == 0) return false;
 
   Address packed_filler = MapWord::FromMap(*filler_map).ptr();
@@ -111,7 +110,7 @@ bool IsObjectShrinkable(JSObject obj) {
 
 TEST(JSObjectBasic) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
   const char* source =
@@ -140,7 +139,7 @@ TEST(JSObjectBasic) {
   CHECK(initial_map->IsInobjectSlackTrackingInProgress());
 
   // There must be at least some slack.
-  CHECK_LT(5, obj->map().GetInObjectProperties());
+  CHECK_LT(5, obj->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*obj, 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*obj, 1));
   CHECK_EQ(*obj, GetFieldValue(*obj, 2));
@@ -157,19 +156,19 @@ TEST(JSObjectBasic) {
   CHECK(!IsObjectShrinkable(*obj));
 
   // No slack left.
-  CHECK_EQ(3, obj->map().GetInObjectProperties());
+  CHECK_EQ(3, obj->map()->GetInObjectProperties());
 }
 
 
 TEST(JSObjectBasicNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestJSObjectBasic();
 }
 
 
 TEST(JSObjectComplex) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
   const char* source =
@@ -201,7 +200,7 @@ TEST(JSObjectComplex) {
   CHECK(initial_map->IsInobjectSlackTrackingInProgress());
 
   // There must be at least some slack.
-  CHECK_LT(5, obj3->map().GetInObjectProperties());
+  CHECK_LT(5, obj3->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*obj3, 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*obj3, 1));
   CHECK_EQ(*obj3, GetFieldValue(*obj3, 2));
@@ -221,14 +220,14 @@ TEST(JSObjectComplex) {
   CHECK(IsObjectShrinkable(*obj3));
   CHECK(!IsObjectShrinkable(*obj5));
 
-  CHECK_EQ(5, obj1->map().GetInObjectProperties());
-  CHECK_EQ(4, obj1->map().UnusedPropertyFields());
+  CHECK_EQ(5, obj1->map()->GetInObjectProperties());
+  CHECK_EQ(4, obj1->map()->UnusedPropertyFields());
 
-  CHECK_EQ(5, obj3->map().GetInObjectProperties());
-  CHECK_EQ(2, obj3->map().UnusedPropertyFields());
+  CHECK_EQ(5, obj3->map()->GetInObjectProperties());
+  CHECK_EQ(2, obj3->map()->UnusedPropertyFields());
 
-  CHECK_EQ(5, obj5->map().GetInObjectProperties());
-  CHECK_EQ(0, obj5->map().UnusedPropertyFields());
+  CHECK_EQ(5, obj5->map()->GetInObjectProperties());
+  CHECK_EQ(0, obj5->map()->UnusedPropertyFields());
 
   // Since slack tracking is complete, the new objects should not be shrinkable.
   obj1 = CompileRunI<JSObject>("new A(1);");
@@ -242,14 +241,14 @@ TEST(JSObjectComplex) {
 
 
 TEST(JSObjectComplexNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestJSObjectComplex();
 }
 
 
 TEST(JSGeneratorObjectBasic) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
   const char* source =
@@ -286,7 +285,7 @@ TEST(JSGeneratorObjectBasic) {
   CHECK(initial_map->IsInobjectSlackTrackingInProgress());
 
   // There must be at least some slack.
-  CHECK_LT(5, obj->map().GetInObjectProperties());
+  CHECK_LT(5, obj->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*obj, 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*obj, 1));
   CHECK_EQ(*obj, GetFieldValue(*obj, 2));
@@ -303,19 +302,19 @@ TEST(JSGeneratorObjectBasic) {
   CHECK(!IsObjectShrinkable(*obj));
 
   // No slack left.
-  CHECK_EQ(3, obj->map().GetInObjectProperties());
+  CHECK_EQ(3, obj->map()->GetInObjectProperties());
 }
 
 
 TEST(JSGeneratorObjectBasicNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestJSGeneratorObjectBasic();
 }
 
 
 TEST(SubclassBasicNoBaseClassInstances) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -370,7 +369,7 @@ TEST(SubclassBasicNoBaseClassInstances) {
   CHECK(b_initial_map->IsInobjectSlackTrackingInProgress());
 
   // There must be at least some slack.
-  CHECK_LT(10, obj->map().GetInObjectProperties());
+  CHECK_LT(10, obj->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*obj, 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*obj, 1));
   CHECK_EQ(*obj, GetFieldValue(*obj, 2));
@@ -395,19 +394,19 @@ TEST(SubclassBasicNoBaseClassInstances) {
   CHECK(a_initial_map->IsInobjectSlackTrackingInProgress());
 
   // No slack left.
-  CHECK_EQ(6, obj->map().GetInObjectProperties());
+  CHECK_EQ(6, obj->map()->GetInObjectProperties());
 }
 
 
 TEST(SubclassBasicNoBaseClassInstancesNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassBasicNoBaseClassInstances();
 }
 
 
 TEST(SubclassBasic) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -475,10 +474,10 @@ TEST(SubclassBasic) {
   CHECK(!IsObjectShrinkable(*a_obj));
 
   // No slack left.
-  CHECK_EQ(3, a_obj->map().GetInObjectProperties());
+  CHECK_EQ(3, a_obj->map()->GetInObjectProperties());
 
   // There must be at least some slack.
-  CHECK_LT(10, b_obj->map().GetInObjectProperties());
+  CHECK_LT(10, b_obj->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*b_obj, 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*b_obj, 1));
   CHECK_EQ(*b_obj, GetFieldValue(*b_obj, 2));
@@ -498,12 +497,12 @@ TEST(SubclassBasic) {
   CHECK(!IsObjectShrinkable(*b_obj));
 
   // No slack left.
-  CHECK_EQ(6, b_obj->map().GetInObjectProperties());
+  CHECK_EQ(6, b_obj->map()->GetInObjectProperties());
 }
 
 
 TEST(SubclassBasicNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassBasic();
 }
 
@@ -575,10 +574,10 @@ static void TestClassHierarchy(const std::vector<int>& hierarchy_desc, int n) {
     Handle<Map> initial_map(func->initial_map(), func->GetIsolate());
 
     // If the object is slow-mode already, bail out.
-    if (obj->map().is_dictionary_map()) continue;
+    if (obj->map()->is_dictionary_map()) continue;
 
     // There must be at least some slack.
-    CHECK_LT(fields_count, obj->map().GetInObjectProperties());
+    CHECK_LT(fields_count, obj->map()->GetInObjectProperties());
 
     // One instance was created.
     CHECK_EQ(Map::kSlackTrackingCounterStart - 1,
@@ -602,14 +601,14 @@ static void TestClassHierarchy(const std::vector<int>& hierarchy_desc, int n) {
     CHECK(!IsObjectShrinkable(*obj));
 
     // No slack left.
-    CHECK_EQ(fields_count, obj->map().GetInObjectProperties());
+    CHECK_EQ(fields_count, obj->map()->GetInObjectProperties());
   }
 }
 
 
 static void TestSubclassChain(const std::vector<int>& hierarchy_desc) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -655,7 +654,7 @@ TEST(LongSubclassChain3) {
 
 TEST(InobjectPropetiesCountOverflowInSubclass) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -685,8 +684,8 @@ TEST(InobjectPropetiesCountOverflowInSubclass) {
     Handle<Map> initial_map(func->initial_map(), func->GetIsolate());
 
     // There must be no slack left.
-    CHECK_EQ(JSObject::kMaxInstanceSize, obj->map().instance_size());
-    CHECK_EQ(kMaxInobjectProperties, obj->map().GetInObjectProperties());
+    CHECK_EQ(JSObject::kMaxInstanceSize, obj->map()->instance_size());
+    CHECK_EQ(kMaxInobjectProperties, obj->map()->GetInObjectProperties());
 
     // One instance was created.
     CHECK_EQ(Map::kSlackTrackingCounterStart - 1,
@@ -703,7 +702,7 @@ TEST(InobjectPropetiesCountOverflowInSubclass) {
     CHECK(!IsObjectShrinkable(*obj));
 
     // No slack left.
-    CHECK_EQ(kMaxInobjectProperties, obj->map().GetInObjectProperties());
+    CHECK_EQ(kMaxInobjectProperties, obj->map()->GetInObjectProperties());
   }
 
   // The other classes in the hierarchy are not affected.
@@ -713,7 +712,7 @@ TEST(InobjectPropetiesCountOverflowInSubclass) {
 static void CheckExpectedProperties(int expected, std::ostringstream& os) {
   Handle<HeapObject> obj = Handle<HeapObject>::cast(
       v8::Utils::OpenHandle(*CompileRun(os.str().c_str())));
-  CHECK_EQ(expected, obj->map().GetInObjectProperties());
+  CHECK_EQ(expected, obj->map()->GetInObjectProperties());
 }
 
 TEST(ObjectLiteralPropertyBackingStoreSize) {
@@ -838,10 +837,10 @@ TEST(ObjectLiteralPropertyBackingStoreSize) {
 }
 
 TEST(SlowModeSubclass) {
-  if (FLAG_stress_concurrent_allocation) return;
+  if (v8_flags.stress_concurrent_allocation) return;
 
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -871,8 +870,8 @@ TEST(SlowModeSubclass) {
     Handle<Map> initial_map(func->initial_map(), func->GetIsolate());
 
     // Object should go dictionary mode.
-    CHECK_EQ(JSObject::kHeaderSize, obj->map().instance_size());
-    CHECK(obj->map().is_dictionary_map());
+    CHECK_EQ(JSObject::kHeaderSize, obj->map()->instance_size());
+    CHECK(obj->map()->is_dictionary_map());
 
     // One instance was created.
     CHECK_EQ(Map::kSlackTrackingCounterStart - 1,
@@ -889,8 +888,8 @@ TEST(SlowModeSubclass) {
     CHECK(!IsObjectShrinkable(*obj));
 
     // Object should stay in dictionary mode.
-    CHECK_EQ(JSObject::kHeaderSize, obj->map().instance_size());
-    CHECK(obj->map().is_dictionary_map());
+    CHECK_EQ(JSObject::kHeaderSize, obj->map()->instance_size());
+    CHECK(obj->map()->is_dictionary_map());
   }
 
   // The other classes in the hierarchy are not affected.
@@ -953,7 +952,7 @@ static void TestSubclassBuiltin(const char* subclass_name,
   CHECK(initial_map->IsInobjectSlackTrackingInProgress());
 
   // There must be at least some slack.
-  CHECK_LT(builtin_properties_count + 5, obj->map().GetInObjectProperties());
+  CHECK_LT(builtin_properties_count + 5, obj->map()->GetInObjectProperties());
   CHECK_EQ(Smi::FromInt(42), GetFieldValue(*obj, builtin_properties_count + 0));
   CHECK_EQ(4.2, GetDoubleFieldValue(*obj, builtin_properties_count + 1));
   CHECK_EQ(*obj, GetFieldValue(*obj, builtin_properties_count + 2));
@@ -970,15 +969,15 @@ static void TestSubclassBuiltin(const char* subclass_name,
   CHECK(!IsObjectShrinkable(*obj));
 
   // No slack left.
-  CHECK_EQ(builtin_properties_count + 3, obj->map().GetInObjectProperties());
+  CHECK_EQ(builtin_properties_count + 3, obj->map()->GetInObjectProperties());
 
-  CHECK_EQ(instance_type, obj->map().instance_type());
+  CHECK_EQ(instance_type, obj->map()->instance_type());
 }
 
 
 TEST(SubclassObjectBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -989,14 +988,14 @@ TEST(SubclassObjectBuiltin) {
 
 
 TEST(SubclassObjectBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassObjectBuiltin();
 }
 
 
 TEST(SubclassFunctionBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1006,14 +1005,14 @@ TEST(SubclassFunctionBuiltin) {
 
 
 TEST(SubclassFunctionBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassFunctionBuiltin();
 }
 
 
 TEST(SubclassBooleanBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1023,14 +1022,14 @@ TEST(SubclassBooleanBuiltin) {
 
 
 TEST(SubclassBooleanBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassBooleanBuiltin();
 }
 
 
 TEST(SubclassErrorBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1047,14 +1046,14 @@ TEST(SubclassErrorBuiltin) {
 
 
 TEST(SubclassErrorBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassErrorBuiltin();
 }
 
 
 TEST(SubclassNumberBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1064,14 +1063,14 @@ TEST(SubclassNumberBuiltin) {
 
 
 TEST(SubclassNumberBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassNumberBuiltin();
 }
 
 
 TEST(SubclassDateBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1080,14 +1079,14 @@ TEST(SubclassDateBuiltin) {
 
 
 TEST(SubclassDateBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassDateBuiltin();
 }
 
 
 TEST(SubclassStringBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1098,14 +1097,14 @@ TEST(SubclassStringBuiltin) {
 
 
 TEST(SubclassStringBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassStringBuiltin();
 }
 
 
 TEST(SubclassRegExpBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1116,14 +1115,14 @@ TEST(SubclassRegExpBuiltin) {
 
 
 TEST(SubclassRegExpBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassRegExpBuiltin();
 }
 
 
 TEST(SubclassArrayBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1132,14 +1131,15 @@ TEST(SubclassArrayBuiltin) {
 
 
 TEST(SubclassArrayBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassArrayBuiltin();
 }
 
 
 TEST(SubclassTypedArrayBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
+  v8_flags.js_float16array = true;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1153,14 +1153,14 @@ TEST(SubclassTypedArrayBuiltin) {
 
 
 TEST(SubclassTypedArrayBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassTypedArrayBuiltin();
 }
 
 
 TEST(SubclassCollectionBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1172,14 +1172,14 @@ TEST(SubclassCollectionBuiltin) {
 
 
 TEST(SubclassCollectionBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassCollectionBuiltin();
 }
 
 
 TEST(SubclassArrayBufferBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1190,14 +1190,14 @@ TEST(SubclassArrayBufferBuiltin) {
 
 
 TEST(SubclassArrayBufferBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassArrayBufferBuiltin();
 }
 
 
 TEST(SubclassPromiseBuiltin) {
   // Avoid eventual completion of in-object slack tracking.
-  FLAG_always_opt = false;
+  v8_flags.always_turbofan = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1207,7 +1207,7 @@ TEST(SubclassPromiseBuiltin) {
 
 
 TEST(SubclassPromiseBuiltinNoInlineNew) {
-  FLAG_inline_new = false;
+  v8_flags.inline_new = false;
   TestSubclassPromiseBuiltin();
 }
 
@@ -1284,8 +1284,8 @@ TEST(SubclassTranspiledClassHierarchy) {
   CHECK(!IsObjectShrinkable(*obj));
 
   // No slack left.
-  CHECK_EQ(21, obj->map().GetInObjectProperties());
-  CHECK_EQ(JS_OBJECT_TYPE, obj->map().instance_type());
+  CHECK_EQ(21, obj->map()->GetInObjectProperties());
+  CHECK_EQ(JS_OBJECT_TYPE, obj->map()->instance_type());
 }
 
 TEST(Regress8853_ClassConstructor) {
@@ -1295,9 +1295,9 @@ TEST(Regress8853_ClassConstructor) {
   // For classes without any this.prop assignments in their
   // constructors we start out with 10 inobject properties.
   Handle<JSObject> obj = CompileRunI<JSObject>("new (class {});\n");
-  CHECK(obj->map().IsInobjectSlackTrackingInProgress());
+  CHECK(obj->map()->IsInobjectSlackTrackingInProgress());
   CHECK(IsObjectShrinkable(*obj));
-  CHECK_EQ(10, obj->map().GetInObjectProperties());
+  CHECK_EQ(10, obj->map()->GetInObjectProperties());
 
   // For classes with N explicit this.prop assignments in their
   // constructors we start out with N+8 inobject properties.
@@ -1309,9 +1309,9 @@ TEST(Regress8853_ClassConstructor) {
       "    this.z = 3;\n"
       "  }\n"
       "});\n");
-  CHECK(obj->map().IsInobjectSlackTrackingInProgress());
+  CHECK(obj->map()->IsInobjectSlackTrackingInProgress());
   CHECK(IsObjectShrinkable(*obj));
-  CHECK_EQ(3 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(3 + 8, obj->map()->GetInObjectProperties());
 }
 
 TEST(Regress8853_ClassHierarchy) {
@@ -1325,9 +1325,9 @@ TEST(Regress8853_ClassHierarchy) {
   for (int i = 1; i < 10; ++i) {
     std::string script = "new " + base + ";\n";
     Handle<JSObject> obj = CompileRunI<JSObject>(script.c_str());
-    CHECK(obj->map().IsInobjectSlackTrackingInProgress());
+    CHECK(obj->map()->IsInobjectSlackTrackingInProgress());
     CHECK(IsObjectShrinkable(*obj));
-    CHECK_EQ(8 + 2 * i, obj->map().GetInObjectProperties());
+    CHECK_EQ(8 + 2 * i, obj->map()->GetInObjectProperties());
     base = "(class extends " + base + " {})";
   }
 }
@@ -1339,9 +1339,9 @@ TEST(Regress8853_FunctionConstructor) {
   // For constructor functions without any this.prop assignments in
   // them we start out with 10 inobject properties.
   Handle<JSObject> obj = CompileRunI<JSObject>("new (function() {});\n");
-  CHECK(obj->map().IsInobjectSlackTrackingInProgress());
+  CHECK(obj->map()->IsInobjectSlackTrackingInProgress());
   CHECK(IsObjectShrinkable(*obj));
-  CHECK_EQ(10, obj->map().GetInObjectProperties());
+  CHECK_EQ(10, obj->map()->GetInObjectProperties());
 
   // For constructor functions with N explicit this.prop assignments
   // in them we start out with N+8 inobject properties.
@@ -1354,9 +1354,9 @@ TEST(Regress8853_FunctionConstructor) {
       "  this.c = 3;\n"
       "  this.f = 3;\n"
       "});\n");
-  CHECK(obj->map().IsInobjectSlackTrackingInProgress());
+  CHECK(obj->map()->IsInobjectSlackTrackingInProgress());
   CHECK(IsObjectShrinkable(*obj));
-  CHECK_EQ(6 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(6 + 8, obj->map()->GetInObjectProperties());
 }
 
 TEST(InstanceFieldsArePropertiesDefaultConstructorLazy) {
@@ -1377,7 +1377,7 @@ TEST(InstanceFieldsArePropertiesDefaultConstructorLazy) {
       "  x09 = null;\n"
       "  x10 = null;\n"
       "});\n");
-  CHECK_EQ(11 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(11 + 8, obj->map()->GetInObjectProperties());
 }
 
 TEST(InstanceFieldsArePropertiesFieldsAndConstructorLazy) {
@@ -1410,11 +1410,11 @@ TEST(InstanceFieldsArePropertiesFieldsAndConstructorLazy) {
       "    this.x20 = null;\n"
       "  }\n"
       "});\n");
-  CHECK_EQ(21 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(21 + 8, obj->map()->GetInObjectProperties());
 }
 
 TEST(InstanceFieldsArePropertiesDefaultConstructorEager) {
-  i::FLAG_lazy = false;
+  i::v8_flags.lazy = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1432,11 +1432,11 @@ TEST(InstanceFieldsArePropertiesDefaultConstructorEager) {
       "  x09 = null;\n"
       "  x10 = null;\n"
       "});\n");
-  CHECK_EQ(11 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(11 + 8, obj->map()->GetInObjectProperties());
 }
 
 TEST(InstanceFieldsArePropertiesFieldsAndConstructorEager) {
-  i::FLAG_lazy = false;
+  i::v8_flags.lazy = false;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
 
@@ -1466,7 +1466,7 @@ TEST(InstanceFieldsArePropertiesFieldsAndConstructorEager) {
       "    this.x20 = null;\n"
       "  }\n"
       "});\n");
-  CHECK_EQ(21 + 8, obj->map().GetInObjectProperties());
+  CHECK_EQ(21 + 8, obj->map()->GetInObjectProperties());
 }
 
 }  // namespace test_inobject_slack_tracking

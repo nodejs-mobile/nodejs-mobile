@@ -27,6 +27,7 @@ enum CpuFeature {
   LZCNT,
   POPCNT,
   INTEL_ATOM,
+  INTEL_JCC_ERRATUM_MITIGATION,
   CETSS,
 
 #elif V8_TARGET_ARCH_ARM
@@ -43,8 +44,12 @@ enum CpuFeature {
 
 #elif V8_TARGET_ARCH_ARM64
   JSCVT,
+  DOTPROD,
+  // Large System Extension, include atomic operations on memory: CAS, LDADD,
+  // STADD, SWP, etc.
+  LSE,
 
-#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
+#elif V8_TARGET_ARCH_MIPS64
   FPU,
   FP64FPU,
   MIPSr1,
@@ -72,10 +77,13 @@ enum CpuFeature {
   VECTOR_ENHANCE_FACILITY_2,
   MISC_INSTR_EXT2,
 
-#elif V8_TARGET_ARCH_RISCV64
+#elif V8_TARGET_ARCH_RISCV64 || V8_TARGET_ARCH_RISCV32
   FPU,
   FP64FPU,
   RISCV_SIMD,
+  ZBA,
+  ZBB,
+  ZBS,
 #endif
 
   NUMBER_OF_CPU_FEATURES
@@ -96,7 +104,7 @@ class V8_EXPORT_PRIVATE CpuFeatures : public AllStatic {
   CpuFeatures& operator=(const CpuFeatures&) = delete;
 
   static void Probe(bool cross_compile) {
-    STATIC_ASSERT(NUMBER_OF_CPU_FEATURES <= kBitsPerInt);
+    static_assert(NUMBER_OF_CPU_FEATURES <= kBitsPerInt);
     if (initialized_) return;
     initialized_ = true;
     ProbeImpl(cross_compile);

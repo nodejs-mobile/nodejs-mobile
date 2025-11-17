@@ -75,6 +75,24 @@
 #define TRAP_SEQUENCE1_() asm volatile("brk #0")
 #define TRAP_SEQUENCE2_() asm volatile("hlt #0")
 
+#elif V8_HOST_ARCH_PPC64
+
+// GDB software breakpoint instruction.
+// Same as `bkpt` under the assembler.
+#if V8_OS_AIX
+#define TRAP_SEQUENCE1_() asm volatile(".vbyte 4,0x7D821008");
+#else
+#define TRAP_SEQUENCE1_() asm volatile(".4byte 0x7D821008");
+#endif
+#define TRAP_SEQUENCE2_() asm volatile("")
+
+#elif V8_HOST_ARCH_S390
+
+// GDB software breakpoint instruction.
+// Same as `bkpt` under the assembler.
+#define TRAP_SEQUENCE1_() asm volatile(".2byte 0x0001");
+#define TRAP_SEQUENCE2_() asm volatile("")
+
 #else
 
 // Crash report accuracy will not be guaranteed on other architectures, but at
@@ -140,9 +158,9 @@
     [] { TRAP_SEQUENCE_(); }();  \
   } while (false)
 
-#endif  // !V8_CC_GCC
+#endif  // !V8_CC_GNU
 
-#if defined(__clang__) || V8_CC_GCC
+#if defined(__clang__) || V8_CC_GNU
 
 // __builtin_unreachable() hints to the compiler that this is noreturn and can
 // be packed in the function epilogue.

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-eh --experimental-wasm-type-reflection
+// Flags: --experimental-wasm-type-reflection
 
 load("test/mjsunit/wasm/wasm-module-builder.js");
 
@@ -46,4 +46,9 @@ let testcases = [
   testcases.forEach(function(expected, i) {
     assertEquals(instance.exports["ex" + i].type(), expected.types);
   })
+})();
+
+(function TestJSTag() {
+  print(arguments.callee.name);
+  assertEquals(WebAssembly.JSTag.type(), {parameters:['externref']});
 })();

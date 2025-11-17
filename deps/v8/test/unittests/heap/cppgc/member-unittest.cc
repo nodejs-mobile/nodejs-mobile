@@ -9,6 +9,8 @@
 
 #include "include/cppgc/allocation.h"
 #include "include/cppgc/garbage-collected.h"
+#include "include/cppgc/internal/member-storage.h"
+#include "include/cppgc/internal/pointer-policies.h"
 #include "include/cppgc/persistent.h"
 #include "include/cppgc/sentinel-pointer.h"
 #include "include/cppgc/type-traits.h"
@@ -21,9 +23,15 @@ namespace internal {
 namespace {
 
 struct GCed : GarbageCollected<GCed> {
+  double d;
   virtual void Trace(cppgc::Visitor*) const {}
 };
-struct DerivedGCed : GCed {
+
+struct DerivedMixin : GarbageCollectedMixin {
+  void Trace(cppgc::Visitor* v) const override {}
+};
+
+struct DerivedGCed : GCed, DerivedMixin {
   void Trace(cppgc::Visitor* v) const override { GCed::Trace(v); }
 };
 
@@ -32,6 +40,10 @@ static_assert(!IsWeakV<Member<GCed>>, "Member is always strong.");
 static_assert(IsWeakV<WeakMember<GCed>>, "WeakMember is always weak.");
 
 static_assert(IsMemberTypeV<Member<GCed>>, "Member must be Member.");
+static_assert(IsMemberTypeV<const Member<GCed>>,
+              "const Member must be Member.");
+static_assert(IsMemberTypeV<const Member<GCed>&>,
+              "const Member ref must be Member.");
 static_assert(!IsMemberTypeV<WeakMember<GCed>>,
               "WeakMember must not be Member.");
 static_assert(!IsMemberTypeV<UntracedMember<GCed>>,
@@ -51,6 +63,25 @@ static_assert(!IsUntracedMemberTypeV<WeakMember<GCed>>,
 static_assert(IsUntracedMemberTypeV<UntracedMember<GCed>>,
               "UntracedMember must be UntracedMember.");
 static_assert(!IsUntracedMemberTypeV<int>, "int must not be UntracedMember.");
+static_assert(IsMemberOrWeakMemberTypeV<Member<GCed>>,
+              "Member must be Member.");
+static_assert(IsMemberOrWeakMemberTypeV<WeakMember<GCed>>,
+              "WeakMember must be WeakMember.");
+static_assert(!IsMemberOrWeakMemberTypeV<UntracedMember<GCed>>,
+              "UntracedMember is neither Member nor WeakMember.");
+static_assert(!IsMemberOrWeakMemberTypeV<int>,
+              "int is neither Member nor WeakMember.");
+static_assert(IsAnyMemberTypeV<Member<GCed>>, "Member must be a member type.");
+static_assert(IsAnyMemberTypeV<WeakMember<GCed>>,
+              "WeakMember must be a member type.");
+static_assert(IsAnyMemberTypeV<UntracedMember<GCed>>,
+              "UntracedMember must be a member type.");
+static_assert(!IsAnyMemberTypeV<int>, "int must not be a member type.");
+static_assert(
+    IsAnyMemberTypeV<
+        internal::BasicMember<GCed, class SomeTag, NoWriteBarrierPolicy,
+                              DefaultMemberCheckingPolicy, RawPointer>>,
+    "Any custom member must be a member type.");
 
 struct CustomWriteBarrierPolicy {
   static size_t InitializingWriteBarriersTriggered;
@@ -58,7 +89,12 @@ struct CustomWriteBarrierPolicy {
   static void InitializingBarrier(const void* slot, const void* value) {
     ++InitializingWriteBarriersTriggered;
   }
+  template <WriteBarrierSlotType>
   static void AssigningBarrier(const void* slot, const void* value) {
+    ++AssigningWriteBarriersTriggered;
+  }
+  template <WriteBarrierSlotType>
+  static void AssigningBarrier(const void* slot, DefaultMemberStorage) {
     ++AssigningWriteBarriersTriggered;
   }
 };
@@ -335,10 +371,19 @@ void EqualityTest(cppgc::Heap* heap) {
     MemberType1<GCed> member1 = gced;
     MemberType2<GCed> member2 = gced;
     EXPECT_TRUE(member1 == member2);
+    EXPECT_TRUE(member1 == gced);
+    EXPECT_TRUE(member2 == gced);
     EXPECT_FALSE(member1 != member2);
+    EXPECT_FALSE(member1 != gced);
+    EXPECT_FALSE(member2 != gced);
+
     member2 = member1;
     EXPECT_TRUE(member1 == member2);
+    EXPECT_TRUE(member1 == gced);
+    EXPECT_TRUE(member2 == gced);
     EXPECT_FALSE(member1 != member2);
+    EXPECT_FALSE(member1 != gced);
+    EXPECT_FALSE(member2 != gced);
   }
   {
     MemberType1<GCed> member1 =
@@ -346,7 +391,9 @@ void EqualityTest(cppgc::Heap* heap) {
     MemberType2<GCed> member2 =
         MakeGarbageCollected<GCed>(heap->GetAllocationHandle());
     EXPECT_TRUE(member1 != member2);
+    EXPECT_TRUE(member1 != member2.Get());
     EXPECT_FALSE(member1 == member2);
+    EXPECT_FALSE(member1 == member2.Get());
   }
 }
 
@@ -361,6 +408,56 @@ TEST_F(MemberTest, EqualityTest) {
   EqualityTest<UntracedMember, Member>(heap);
   EqualityTest<UntracedMember, WeakMember>(heap);
   EqualityTest<UntracedMember, UntracedMember>(heap);
+}
+
+TEST_F(MemberTest, HeterogeneousEqualityTest) {
+  cppgc::Heap* heap = GetHeap();
+  {
+    auto* gced = MakeGarbageCollected<DerivedGCed>(heap->GetAllocationHandle());
+    auto* derived = static_cast<DerivedMixin*>(gced);
+    ASSERT_NE(reinterpret_cast<void*>(gced), reinterpret_cast<void*>(derived));
+  }
+  {
+    auto* gced = MakeGarbageCollected<DerivedGCed>(heap->GetAllocationHandle());
+    Member<DerivedGCed> member = gced;
+#define EXPECT_MIXIN_EQUAL(Mixin) \
+  EXPECT_TRUE(member == mixin);   \
+  EXPECT_TRUE(member == gced);    \
+  EXPECT_TRUE(mixin == gced);     \
+  EXPECT_FALSE(member != mixin);  \
+  EXPECT_FALSE(member != gced);   \
+  EXPECT_FALSE(mixin != gced);
+    {
+      // Construct from raw.
+      Member<DerivedMixin> mixin = gced;
+      EXPECT_MIXIN_EQUAL(mixin);
+    }
+    {
+      // Copy construct from member.
+      Member<DerivedMixin> mixin = member;
+      EXPECT_MIXIN_EQUAL(mixin);
+    }
+    {
+      // Move construct from member.
+      Member<DerivedMixin> mixin = std::move(member);
+      member = gced;
+      EXPECT_MIXIN_EQUAL(mixin);
+    }
+    {
+      // Copy assign from member.
+      Member<DerivedMixin> mixin;
+      mixin = member;
+      EXPECT_MIXIN_EQUAL(mixin);
+    }
+    {
+      // Move assign from member.
+      Member<DerivedMixin> mixin;
+      mixin = std::move(member);
+      member = gced;
+      EXPECT_MIXIN_EQUAL(mixin);
+    }
+#undef EXPECT_MIXIN_EQUAL
+  }
 }
 
 TEST_F(MemberTest, WriteBarrierTriggered) {
@@ -524,6 +621,9 @@ class LinkedNode final : public GarbageCollected<LinkedNode> {
 
 }  // namespace
 
+// The following tests create multiple heaps per thread, which is not supported
+// with pointer compression enabled.
+#if !defined(CPPGC_POINTER_COMPRESSION)
 TEST_F(MemberHeapDeathTest, CheckForOffHeapMemberCrashesOnReassignment) {
   std::vector<Member<LinkedNode>> off_heap_member;
   // Verification state is constructed on first assignment.
@@ -561,6 +661,29 @@ TEST_F(MemberHeapDeathTest, CheckForOnHeapMemberCrashesOnInitialAssignment) {
         "");
   }
 }
+#endif  // defined(CPPGC_POINTER_COMPRESSION)
+
+#if defined(CPPGC_POINTER_COMPRESSION)
+TEST_F(MemberTest, CompressDecompress) {
+  CompressedPointer cp;
+  EXPECT_EQ(nullptr, cp.Load());
+
+  Member<GCed> member;
+  cp.Store(member.Get());
+  EXPECT_EQ(nullptr, cp.Load());
+
+  cp.Store(kSentinelPointer);
+  EXPECT_EQ(kSentinelPointer, cp.Load());
+
+  member = kSentinelPointer;
+  cp.Store(member.Get());
+  EXPECT_EQ(kSentinelPointer, cp.Load());
+
+  member = MakeGarbageCollected<GCed>(GetAllocationHandle());
+  cp.Store(member.Get());
+  EXPECT_EQ(member.Get(), cp.Load());
+}
+#endif  // defined(CPPGC_POINTER_COMPRESSION)
 
 #endif  // V8_ENABLE_CHECKS
 

@@ -18,7 +18,7 @@ namespace internal {
 class JSObject;
 class EmbedderDataSlot;
 
-class CppMarkingState {
+class CppMarkingState final {
  public:
   using EmbedderDataSnapshot =
       std::pair<EmbedderDataSlot::EmbedderDataSlotSnapshot,
@@ -43,7 +43,8 @@ class CppMarkingState {
 
   void Publish() { marking_state_.Publish(); }
 
-  inline bool ExtractEmbedderDataSnapshot(Map, JSObject, EmbedderDataSnapshot&);
+  inline bool ExtractEmbedderDataSnapshot(Tagged<Map>, Tagged<JSObject>,
+                                          EmbedderDataSnapshot&);
 
   inline void MarkAndPush(const EmbedderDataSnapshot&);
   inline void MarkAndPush(const EmbedderDataSlot type_slot,

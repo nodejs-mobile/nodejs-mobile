@@ -6,8 +6,7 @@
 #include "src/builtins/builtins-async-gen.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-factory.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/execution/frames-inl.h"
 
 namespace v8 {
@@ -65,7 +64,7 @@ class AsyncFromSyncBuiltinsAssembler : public AsyncBuiltinsAssembler {
   // Returns a Pair of Nodes, whose first element is the value of the "value"
   // property, and whose second element is the value of the "done" property,
   // converted to a Boolean if needed.
-  std::pair<TNode<Object>, TNode<Oddball>> LoadIteratorResult(
+  std::pair<TNode<Object>, TNode<Boolean>> LoadIteratorResult(
       const TNode<Context> context, const TNode<NativeContext> native_context,
       const TNode<Object> iter_result, Label* if_exception,
       TVariable<Object>* var_exception);
@@ -154,7 +153,7 @@ void AsyncFromSyncBuiltinsAssembler::Generate_AsyncFromSyncIteratorMethod(
   }
 
   TNode<Object> value;
-  TNode<Oddball> done;
+  TNode<Boolean> done;
   std::tie(value, done) =
       LoadIteratorResult(context, native_context, iter_result.value(),
                          &reject_promise, &var_exception);
@@ -193,7 +192,7 @@ void AsyncFromSyncBuiltinsAssembler::Generate_AsyncFromSyncIteratorMethod(
   }
 }
 
-std::pair<TNode<Object>, TNode<Oddball>>
+std::pair<TNode<Object>, TNode<Boolean>>
 AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
     const TNode<Context> context, const TNode<NativeContext> native_context,
     const TNode<Object> iter_result, Label* if_exception,
@@ -203,7 +202,7 @@ AsyncFromSyncBuiltinsAssembler::LoadIteratorResult(
   GotoIf(TaggedIsSmi(iter_result), &if_notanobject);
 
   const TNode<Map> iter_result_map = LoadMap(CAST(iter_result));
-  GotoIfNot(IsJSReceiverMap(iter_result_map), &if_notanobject);
+  GotoIfNot(JSAnyIsNotPrimitiveMap(iter_result_map), &if_notanobject);
 
   const TNode<Object> fast_iter_result_map =
       LoadContextElement(native_context, Context::ITERATOR_RESULT_MAP_INDEX);

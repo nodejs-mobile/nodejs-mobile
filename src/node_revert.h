@@ -11,13 +11,12 @@
  * a given LTS or Stable may be added to this list, and only with TSC
  * consensus.
  *
- * For *master* this list should always be empty!
+ * For *main* this list should always be empty!
  **/
 namespace node {
 
 #define SECURITY_REVERSIONS(XX)                                                \
-  XX(CVE_2023_46809, "CVE-2023-46809", "Marvin attack on PKCS#1 padding")      \
-  XX(CVE_2024_27980, "CVE-2024-27980", "Unsafe Windows batch file execution")
+  //  XX(CVE_2016_PEND, "CVE-2016-PEND", "Vulnerability Title")
 
 enum reversion {
 #define V(code, ...) SECURITY_REVERT_##code,

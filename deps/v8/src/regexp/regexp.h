@@ -70,6 +70,9 @@ class RegExp final : public AllStatic {
   // Whether the irregexp engine generates interpreter bytecode.
   static bool CanGenerateBytecode();
 
+  // Verify that the given flags combination is valid.
+  V8_EXPORT_PRIVATE static bool VerifyFlags(RegExpFlags flags);
+
   // Verify the given pattern, i.e. check that parsing succeeds. If
   // verification fails, `regexp_error_out` is set.
   template <class CharT>
@@ -87,8 +90,8 @@ class RegExp final : public AllStatic {
       RegExpFlags flags, uint32_t backtrack_limit);
 
   // Ensures that a regexp is fully compiled and ready to be executed on a
-  // subject string.  Returns true on success. Return false on failure, and
-  // then an exception will be pending.
+  // subject string.  Returns true on success. Throw and return false on
+  // failure.
   V8_WARN_UNUSED_RESULT static bool EnsureFullyCompiled(Isolate* isolate,
                                                         Handle<JSRegExp> re,
                                                         Handle<String> subject);
@@ -155,6 +158,7 @@ class RegExp final : public AllStatic {
   V8_WARN_UNUSED_RESULT
   static MaybeHandle<Object> ThrowRegExpException(Isolate* isolate,
                                                   Handle<JSRegExp> re,
+                                                  RegExpFlags flags,
                                                   Handle<String> pattern,
                                                   RegExpError error);
   static void ThrowRegExpException(Isolate* isolate, Handle<JSRegExp> re,
@@ -210,14 +214,16 @@ class RegExpResultsCache final : public AllStatic {
 
   // Attempt to retrieve a cached result.  On failure, 0 is returned as a Smi.
   // On success, the returned result is guaranteed to be a COW-array.
-  static Object Lookup(Heap* heap, String key_string, Object key_pattern,
-                       FixedArray* last_match_out, ResultsCacheType type);
+  static Tagged<Object> Lookup(Heap* heap, Tagged<String> key_string,
+                               Tagged<Object> key_pattern,
+                               Tagged<FixedArray>* last_match_out,
+                               ResultsCacheType type);
   // Attempt to add value_array to the cache specified by type.  On success,
   // value_array is turned into a COW-array.
   static void Enter(Isolate* isolate, Handle<String> key_string,
                     Handle<Object> key_pattern, Handle<FixedArray> value_array,
                     Handle<FixedArray> last_match_cache, ResultsCacheType type);
-  static void Clear(FixedArray cache);
+  static void Clear(Tagged<FixedArray> cache);
 
   static constexpr int kRegExpResultsCacheSize = 0x100;
 

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-threads
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 const kSequenceLength = 8192;
@@ -15,15 +13,19 @@ const kSequenceStartAddress = 32;
 function makeWorkerCodeForOpcode(compareExchangeOpcode, size, functionName,
     builder) {
     let loadMemOpcode = kTrapUnreachable;
+    let alignLog2;
     switch (size) {
         case 32:
             loadMemOpcode = kExprI32LoadMem;
+            alignLog2 = 2;
             break;
         case 16:
             loadMemOpcode = kExprI32LoadMem16U;
+            alignLog2 = 1;
             break;
         case 8:
             loadMemOpcode = kExprI32LoadMem8U;
+            alignLog2 = 0;
             break;
         default:
             throw "!";
@@ -103,7 +105,7 @@ function makeWorkerCodeForOpcode(compareExchangeOpcode, size, functionName,
                     // Load updated value.
                     kExprLocalGet, kLocalNextValue,
                     // Try update.
-                    kAtomicPrefix, compareExchangeOpcode, 0, 0,
+                    kAtomicPrefix, compareExchangeOpcode, alignLog2, 0,
                     // Load expected value.
                     kExprLocalGet, kLocalExpectedValue,
                     // Spin if not what expected.

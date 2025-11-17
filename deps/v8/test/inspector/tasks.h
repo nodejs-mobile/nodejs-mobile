@@ -20,29 +20,11 @@
 namespace v8 {
 namespace internal {
 
-template <typename T>
-void RunSyncTask(TaskRunner* task_runner, T callback) {
-  class SyncTask : public TaskRunner::Task {
-   public:
-    SyncTask(v8::base::Semaphore* ready_semaphore, T callback)
-        : ready_semaphore_(ready_semaphore), callback_(callback) {}
-    ~SyncTask() override = default;
-    bool is_priority_task() final { return true; }
-
-   private:
-    void Run(InspectorIsolateData* data) override {
-      callback_(data);
-      if (ready_semaphore_) ready_semaphore_->Signal();
-    }
-
-    v8::base::Semaphore* ready_semaphore_;
-    T callback_;
-  };
-
-  v8::base::Semaphore ready_semaphore(0);
-  task_runner->Append(std::make_unique<SyncTask>(&ready_semaphore, callback));
-  ready_semaphore.Wait();
-}
+void RunSyncTask(TaskRunner* task_runner,
+                 std::function<void(InspectorIsolateData*)> callback);
+void RunSimpleAsyncTask(TaskRunner* task_runner,
+                        std::function<void(InspectorIsolateData* data)> task,
+                        v8::Local<v8::Function> callback);
 
 class SendMessageToBackendTask : public TaskRunner::Task {
  public:
@@ -129,10 +111,10 @@ class SetTimeoutTask : public TaskRunner::Task {
 
  private:
   void Run(InspectorIsolateData* data) override {
-    v8::MicrotasksScope microtasks_scope(data->isolate(),
-                                         v8::MicrotasksScope::kRunMicrotasks);
     v8::HandleScope handle_scope(data->isolate());
     v8::Local<v8::Context> context = data->GetDefaultContext(context_group_id_);
+    v8::MicrotasksScope microtasks_scope(context,
+                                         v8::MicrotasksScope::kRunMicrotasks);
     v8::Context::Scope context_scope(context);
 
     v8::Local<v8::Function> function = function_.Get(data->isolate());
@@ -154,30 +136,30 @@ class SetTimeoutExtension : public InspectorIsolateData::SetupGlobalTask {
   }
 
  private:
-  static void SetTimeout(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    if (args.Length() != 2 || !args[1]->IsNumber() ||
-        (!args[0]->IsFunction() && !args[0]->IsString()) ||
-        args[1].As<v8::Number>()->Value() != 0.0) {
+  static void SetTimeout(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    if (info.Length() != 2 || !info[1]->IsNumber() ||
+        (!info[0]->IsFunction() && !info[0]->IsString()) ||
+        info[1].As<v8::Number>()->Value() != 0.0) {
       return;
     }
-    v8::Isolate* isolate = args.GetIsolate();
+    v8::Isolate* isolate = info.GetIsolate();
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
     InspectorIsolateData* data = InspectorIsolateData::FromContext(context);
     int context_group_id = data->GetContextGroupId(context);
     const char* task_name = "setTimeout";
     v8_inspector::StringView task_name_view(
         reinterpret_cast<const uint8_t*>(task_name), strlen(task_name));
-    if (args[0]->IsFunction()) {
+    if (info[0]->IsFunction()) {
       RunAsyncTask(data->task_runner(), task_name_view,
                    std::make_unique<SetTimeoutTask>(
                        context_group_id, isolate,
-                       v8::Local<v8::Function>::Cast(args[0])));
+                       v8::Local<v8::Function>::Cast(info[0])));
     } else {
       RunAsyncTask(
           data->task_runner(), task_name_view,
           std::make_unique<ExecuteStringTask>(
               isolate, context_group_id,
-              ToVector(isolate, args[0].As<v8::String>()),
+              ToVector(isolate, info[0].As<v8::String>()),
               v8::String::Empty(isolate), v8::Integer::New(isolate, 0),
               v8::Integer::New(isolate, 0), v8::Boolean::New(isolate, false)));
     }

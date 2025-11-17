@@ -15,7 +15,7 @@ import watcher from 'internal/watch_mode/files_watcher';
 if (common.isIBMi)
   common.skip('IBMi does not support `fs.watch()`');
 
-const supportsRecursiveWatching = common.isOSX || common.isWindows;
+const supportsRecursiveWatching = common.isMacOS || common.isWindows;
 
 const { FilesWatcher } = watcher;
 tmpdir.refresh();
@@ -44,7 +44,7 @@ describe('watch mode file watcher', () => {
   }
 
   it('should watch changed files', async () => {
-    const file = path.join(tmpdir.path, 'file1');
+    const file = tmpdir.resolve('file1');
     writeFileSync(file, 'written');
     watcher.filterFile(file);
     await writeAndWaitForChanges(watcher, file);
@@ -52,7 +52,7 @@ describe('watch mode file watcher', () => {
   });
 
   it('should debounce changes', async () => {
-    const file = path.join(tmpdir.path, 'file2');
+    const file = tmpdir.resolve('file2');
     writeFileSync(file, 'written');
     watcher.filterFile(file);
     await writeAndWaitForChanges(watcher, file);
@@ -70,17 +70,40 @@ describe('watch mode file watcher', () => {
     assert.ok(changesCount < 5);
   });
 
+  it('should debounce changes on multiple files', async () => {
+    const files = [];
+    for (let i = 0; i < 10; i++) {
+      const file = tmpdir.resolve(`file-debounced-${i}`);
+      writeFileSync(file, 'written');
+      watcher.filterFile(file);
+      files.push(file);
+    }
+
+    files.forEach((file) => writeFileSync(file, '1'));
+    files.forEach((file) => writeFileSync(file, '2'));
+    files.forEach((file) => writeFileSync(file, '3'));
+    files.forEach((file) => writeFileSync(file, '4'));
+
+    await setTimeout(200); // debounce * 2
+    files.forEach((file) => writeFileSync(file, '5'));
+    const changed = once(watcher, 'changed');
+    files.forEach((file) => writeFileSync(file, 'after'));
+    await changed;
+    // Unfortunately testing that changesCount === 2 is flaky
+    assert.ok(changesCount < 5);
+  });
+
   it('should ignore files in watched directory if they are not filtered',
      { skip: !supportsRecursiveWatching }, async () => {
        watcher.on('changed', common.mustNotCall());
        watcher.watchPath(tmpdir.path);
-       writeFileSync(path.join(tmpdir.path, 'file3'), '1');
+       writeFileSync(tmpdir.resolve('file3'), '1');
        // Wait for this long to make sure changes are not triggered
        await setTimeout(1000);
      });
 
   it('should allow clearing filters', async () => {
-    const file = path.join(tmpdir.path, 'file4');
+    const file = tmpdir.resolve('file4');
     writeFileSync(file, 'written');
     watcher.filterFile(file);
     await writeAndWaitForChanges(watcher, file);
@@ -100,7 +123,7 @@ describe('watch mode file watcher', () => {
        watcher = new FilesWatcher({ debounce: 100, mode: 'all' });
        watcher.on('changed', () => changesCount++);
 
-       const file = path.join(tmpdir.path, 'file5');
+       const file = tmpdir.resolve('file5');
        watcher.watchPath(tmpdir.path);
 
        const changed = once(watcher, 'changed');
@@ -124,14 +147,14 @@ describe('watch mode file watcher', () => {
        assert.deepStrictEqual(watcher.watchedPaths, []);
        watcher.watchPath(tmpdir.path);
        assert.deepStrictEqual(watcher.watchedPaths, [tmpdir.path]);
-       watcher.watchPath(path.join(tmpdir.path, 'subdirectory'));
+       watcher.watchPath(tmpdir.resolve('subdirectory'));
        assert.deepStrictEqual(watcher.watchedPaths, [tmpdir.path]);
      });
 
   it('should remove existing watcher if adding a parent directory watcher',
      { skip: !supportsRecursiveWatching }, () => {
        assert.deepStrictEqual(watcher.watchedPaths, []);
-       const subdirectory = path.join(tmpdir.path, 'subdirectory');
+       const subdirectory = tmpdir.resolve('subdirectory');
        mkdirSync(subdirectory);
        watcher.watchPath(subdirectory);
        assert.deepStrictEqual(watcher.watchedPaths, [subdirectory]);
@@ -155,7 +178,7 @@ describe('watch mode file watcher', () => {
     const child = spawn(process.execPath, [file], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'], encoding: 'utf8' });
     watcher.watchChildProcessModules(child);
     await once(child, 'exit');
-    let expected = [file, path.join(tmpdir.path, 'file')];
+    let expected = [file, tmpdir.resolve('file')];
     if (supportsRecursiveWatching) {
       expected = expected.map((file) => path.dirname(file));
     }

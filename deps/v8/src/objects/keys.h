@@ -13,8 +13,9 @@
 namespace v8 {
 namespace internal {
 
-class JSProxy;
+class AccessCheckInfo;
 class FastKeyAccumulator;
+class JSProxy;
 
 enum AddKeyConversion { DO_NOT_CONVERT, CONVERT_TO_ARRAY_INDEX };
 
@@ -56,7 +57,8 @@ class KeyAccumulator final {
   KeyAccumulator& operator=(const KeyAccumulator&) = delete;
 
   static MaybeHandle<FixedArray> GetKeys(
-      Handle<JSReceiver> object, KeyCollectionMode mode, PropertyFilter filter,
+      Isolate* isolate, Handle<JSReceiver> object, KeyCollectionMode mode,
+      PropertyFilter filter,
       GetKeysConversion keys_conversion = GetKeysConversion::kKeepNumbers,
       bool is_for_in = false, bool skip_indices = false);
 
@@ -73,7 +75,7 @@ class KeyAccumulator final {
                                                    Handle<JSObject> object);
 
   V8_WARN_UNUSED_RESULT ExceptionStatus
-  AddKey(Object key, AddKeyConversion convert = DO_NOT_CONVERT);
+  AddKey(Tagged<Object> key, AddKeyConversion convert = DO_NOT_CONVERT);
   V8_WARN_UNUSED_RESULT ExceptionStatus
   AddKey(Handle<Object> key, AddKeyConversion convert = DO_NOT_CONVERT);
 
@@ -88,7 +90,7 @@ class KeyAccumulator final {
   void set_skip_indices(bool value) { skip_indices_ = value; }
   // Shadowing keys are used to filter keys. This happens when non-enumerable
   // keys appear again on the prototype chain.
-  void AddShadowingKey(Object key, AllowGarbageCollection* allow_gc);
+  void AddShadowingKey(Tagged<Object> key, AllowGarbageCollection* allow_gc);
   void AddShadowingKey(Handle<Object> key);
 
  private:
@@ -173,7 +175,7 @@ class KeyAccumulator final {
 };
 
 // The FastKeyAccumulator handles the cases where there are no elements on the
-// prototype chain and forwords the complex/slow cases to the normal
+// prototype chain and forwards the complex/slow cases to the normal
 // KeyAccumulator. This significantly speeds up the cases where the OWN_ONLY
 // case where we do not have to walk the prototype chain.
 class FastKeyAccumulator {
@@ -199,6 +201,19 @@ class FastKeyAccumulator {
   MaybeHandle<FixedArray> GetKeys(
       GetKeysConversion convert = GetKeysConversion::kKeepNumbers);
 
+  // Initialize the the enum cache for a map with all of the following:
+  //   - uninitialized enum length
+  //   - fast properties (i.e. !is_dictionary_map())
+  //   - has >0 enumerable own properties
+  //
+  // The number of enumerable properties is passed in as an optimization, for
+  // when the caller has already computed it.
+  //
+  // Returns the keys.
+  static Handle<FixedArray> InitializeFastPropertyEnumCache(
+      Isolate* isolate, Handle<Map> map, int enum_length,
+      AllocationType allocation = AllocationType::kOld);
+
  private:
   void Prepare();
   MaybeHandle<FixedArray> GetKeysFast(GetKeysConversion convert);
@@ -206,9 +221,9 @@ class FastKeyAccumulator {
   MaybeHandle<FixedArray> GetKeysWithPrototypeInfoCache(
       GetKeysConversion convert);
 
-  MaybeHandle<FixedArray> GetOwnKeysWithUninitializedEnumCache();
+  MaybeHandle<FixedArray> GetOwnKeysWithUninitializedEnumLength();
 
-  bool MayHaveElements(JSReceiver receiver);
+  bool MayHaveElements(Tagged<JSReceiver> receiver);
   bool TryPrototypeInfoCache(Handle<JSReceiver> receiver);
 
   Isolate* isolate_;

@@ -123,14 +123,14 @@ MaybeHandle<JSPluralRules> JSPluralRules::New(Isolate* isolate, Handle<Map> map,
   std::unique_ptr<icu::PluralRules> icu_plural_rules;
   bool success =
       CreateICUPluralRules(isolate, r.icu_locale, type, &icu_plural_rules);
-  if (!success || icu_plural_rules.get() == nullptr) {
+  if (!success || icu_plural_rules == nullptr) {
     // Remove extensions and try again.
     icu::Locale no_extension_locale(icu_locale.getBaseName());
     success = CreateICUPluralRules(isolate, no_extension_locale, type,
                                    &icu_plural_rules);
     icu_locale = no_extension_locale;
 
-    if (!success || icu_plural_rules.get() == nullptr) {
+    if (!success || icu_plural_rules == nullptr) {
       THROW_NEW_ERROR(isolate, NewRangeError(MessageTemplate::kIcuError),
                       JSPluralRules);
     }
@@ -138,18 +138,14 @@ MaybeHandle<JSPluralRules> JSPluralRules::New(Isolate* isolate, Handle<Map> map,
 
   // 9. Perform ? SetNumberFormatDigitOptions(pluralRules, options, 0, 3).
   Maybe<Intl::NumberFormatDigitOptions> maybe_digit_options =
-      Intl::SetNumberFormatDigitOptions(isolate, options, 0, 3, false);
+      Intl::SetNumberFormatDigitOptions(isolate, options, 0, 3, false, service);
   MAYBE_RETURN(maybe_digit_options, MaybeHandle<JSPluralRules>());
   Intl::NumberFormatDigitOptions digit_options = maybe_digit_options.FromJust();
-  settings = JSNumberFormat::SetDigitOptionsToFormatter(
-      settings, digit_options, 1, JSNumberFormat::ShowTrailingZeros::kShow);
+  settings =
+      JSNumberFormat::SetDigitOptionsToFormatter(settings, digit_options);
 
   icu::number::LocalizedNumberFormatter icu_number_formatter =
       settings.locale(icu_locale);
-  icu::number::LocalizedNumberRangeFormatter icu_number_range_formatter =
-      icu::number::UnlocalizedNumberRangeFormatter()
-          .numberFormatterBoth(settings)
-          .locale(icu_locale);
 
   Handle<Managed<icu::PluralRules>> managed_plural_rules =
       Managed<icu::PluralRules>::FromUniquePtr(isolate, 0,
@@ -160,12 +156,6 @@ MaybeHandle<JSPluralRules> JSPluralRules::New(Isolate* isolate, Handle<Map> map,
           Managed<icu::number::LocalizedNumberFormatter>::FromRawPtr(
               isolate, 0,
               new icu::number::LocalizedNumberFormatter(icu_number_formatter));
-  Handle<Managed<icu::number::LocalizedNumberRangeFormatter>>
-      managed_number_range_formatter =
-          Managed<icu::number::LocalizedNumberRangeFormatter>::FromRawPtr(
-              isolate, 0,
-              new icu::number::LocalizedNumberRangeFormatter(
-                  icu_number_range_formatter));
 
   // Now all properties are ready, so we can allocate the result object.
   Handle<JSPluralRules> plural_rules = Handle<JSPluralRules>::cast(
@@ -181,7 +171,6 @@ MaybeHandle<JSPluralRules> JSPluralRules::New(Isolate* isolate, Handle<Map> map,
 
   plural_rules->set_icu_plural_rules(*managed_plural_rules);
   plural_rules->set_icu_number_formatter(*managed_number_formatter);
-  plural_rules->set_icu_number_range_formatter(*managed_number_range_formatter);
 
   // 13. Return pluralRules.
   return plural_rules;
@@ -189,11 +178,11 @@ MaybeHandle<JSPluralRules> JSPluralRules::New(Isolate* isolate, Handle<Map> map,
 
 MaybeHandle<String> JSPluralRules::ResolvePlural(
     Isolate* isolate, Handle<JSPluralRules> plural_rules, double number) {
-  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules().raw();
+  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules()->raw();
   DCHECK_NOT_NULL(icu_plural_rules);
 
   icu::number::LocalizedNumberFormatter* fmt =
-      plural_rules->icu_number_formatter().raw();
+      plural_rules->icu_number_formatter()->raw();
   DCHECK_NOT_NULL(fmt);
 
   UErrorCode status = U_ZERO_ERROR;
@@ -210,15 +199,20 @@ MaybeHandle<String> JSPluralRules::ResolvePlural(
 
 MaybeHandle<String> JSPluralRules::ResolvePluralRange(
     Isolate* isolate, Handle<JSPluralRules> plural_rules, double x, double y) {
-  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules().raw();
+  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules()->raw();
   DCHECK_NOT_NULL(icu_plural_rules);
 
-  icu::number::LocalizedNumberRangeFormatter* fmt =
-      plural_rules->icu_number_range_formatter().raw();
-  DCHECK_NOT_NULL(fmt);
+  Maybe<icu::number::LocalizedNumberRangeFormatter> maybe_range_formatter =
+      JSNumberFormat::GetRangeFormatter(
+          isolate, plural_rules->locale(),
+          *plural_rules->icu_number_formatter()->raw());
+  MAYBE_RETURN(maybe_range_formatter, MaybeHandle<String>());
+
+  icu::number::LocalizedNumberRangeFormatter nrfmt =
+      maybe_range_formatter.FromJust();
 
   UErrorCode status = U_ZERO_ERROR;
-  icu::number::FormattedNumberRange formatted = fmt->formatFormattableRange(
+  icu::number::FormattedNumberRange formatted = nrfmt.formatFormattableRange(
       icu::Formattable(x), icu::Formattable(y), status);
 
   DCHECK(U_SUCCESS(status));
@@ -263,7 +257,7 @@ Handle<JSObject> JSPluralRules::ResolvedOptions(
 
   UErrorCode status = U_ZERO_ERROR;
   icu::number::LocalizedNumberFormatter* icu_number_formatter =
-      plural_rules->icu_number_formatter().raw();
+      plural_rules->icu_number_formatter()->raw();
   icu::UnicodeString skeleton = icu_number_formatter->toSkeleton(status);
   DCHECK(U_SUCCESS(status));
 
@@ -288,7 +282,7 @@ Handle<JSObject> JSPluralRules::ResolvedOptions(
 
   // 6. Let pluralCategories be a List of Strings representing the
   // possible results of PluralRuleSelect for the selected locale pr.
-  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules().raw();
+  icu::PluralRules* icu_plural_rules = plural_rules->icu_plural_rules()->raw();
   DCHECK_NOT_NULL(icu_plural_rules);
 
   std::unique_ptr<icu::StringEnumeration> categories(
@@ -297,15 +291,15 @@ Handle<JSObject> JSPluralRules::ResolvedOptions(
   int32_t count = categories->count(status);
   DCHECK(U_SUCCESS(status));
 
-  Handle<FixedArray> plural_categories =
-      isolate->factory()->NewFixedArray(count);
+  Factory* factory = isolate->factory();
+  Handle<FixedArray> plural_categories = factory->NewFixedArray(count);
   for (int32_t i = 0; i < count; i++) {
     const icu::UnicodeString* category = categories->snext(status);
     DCHECK(U_SUCCESS(status));
     if (category == nullptr) break;
 
     std::string keyword;
-    Handle<String> value = isolate->factory()->NewStringFromAsciiChecked(
+    Handle<String> value = factory->NewStringFromAsciiChecked(
         category->toUTF8String(keyword).data());
     plural_categories->set(i, *value);
   }
@@ -313,9 +307,30 @@ Handle<JSObject> JSPluralRules::ResolvedOptions(
   // 7. Perform ! CreateDataProperty(options, "pluralCategories",
   // CreateArrayFromList(pluralCategories)).
   Handle<JSArray> plural_categories_value =
-      isolate->factory()->NewJSArrayWithElements(plural_categories);
+      factory->NewJSArrayWithElements(plural_categories);
   CreateDataPropertyForOptions(isolate, options, plural_categories_value,
                                "pluralCategories");
+
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingIncrement_string(),
+            JSNumberFormat::RoundingIncrement(isolate, skeleton),
+            Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingMode_string(),
+            JSNumberFormat::RoundingModeString(isolate, skeleton),
+            Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->roundingPriority_string(),
+            JSNumberFormat::RoundingPriorityString(isolate, skeleton),
+            Just(kDontThrow))
+            .FromJust());
+  CHECK(JSReceiver::CreateDataProperty(
+            isolate, options, factory->trailingZeroDisplay_string(),
+            JSNumberFormat::TrailingZeroDisplayString(isolate, skeleton),
+            Just(kDontThrow))
+            .FromJust());
 
   return options;
 }

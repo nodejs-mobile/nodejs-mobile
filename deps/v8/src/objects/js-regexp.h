@@ -56,21 +56,22 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
                                           Handle<String> source,
                                           Handle<String> flags_string);
 
-  DECL_ACCESSORS(last_index, Object)
+  DECL_ACCESSORS(last_index, Tagged<Object>)
 
   // Instance fields accessors.
-  inline String source() const;
+  inline Tagged<String> source() const;
   inline Flags flags() const;
 
   // Data array field accessors.
 
   inline Type type_tag() const;
-  inline String atom_pattern() const;
-  // This could be a Smi kUninitializedValue or Code.
-  V8_EXPORT_PRIVATE Object code(bool is_latin1) const;
+  inline Tagged<String> atom_pattern() const;
+  // This could be a Smi kUninitializedValue or InstructionStream.
+  V8_EXPORT_PRIVATE Tagged<Object> code(IsolateForSandbox isolate,
+                                        bool is_latin1) const;
   V8_EXPORT_PRIVATE void set_code(bool is_unicode, Handle<Code> code);
   // This could be a Smi kUninitializedValue or ByteArray.
-  V8_EXPORT_PRIVATE Object bytecode(bool is_latin1) const;
+  V8_EXPORT_PRIVATE Tagged<Object> bytecode(bool is_latin1) const;
   // Sets the bytecode as well as initializing trampoline slots to the
   // RegExpInterpreterTrampoline.
   void set_bytecode_and_trampoline(Isolate* isolate,
@@ -78,7 +79,7 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   inline int max_register_count() const;
   // Number of captures (without the match itself).
   inline int capture_count() const;
-  inline Object capture_name_map();
+  inline Tagged<Object> capture_name_map();
   inline void set_capture_name_map(Handle<FixedArray> capture_name_map);
   uint32_t backtrack_limit() const;
 
@@ -96,21 +97,25 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
     base::Optional<RegExpFlag> f = TryRegExpFlagFromChar(c);
     if (!f.has_value()) return f;
     if (f.value() == RegExpFlag::kLinear &&
-        !FLAG_enable_experimental_regexp_engine) {
+        !v8_flags.enable_experimental_regexp_engine) {
+      return {};
+    }
+    if (f.value() == RegExpFlag::kUnicodeSets &&
+        !v8_flags.harmony_regexp_unicode_sets) {
       return {};
     }
     return f;
   }
 
-  STATIC_ASSERT(static_cast<int>(kNone) == v8::RegExp::kNone);
+  static_assert(static_cast<int>(kNone) == v8::RegExp::kNone);
 #define V(_, Camel, ...)                                             \
-  STATIC_ASSERT(static_cast<int>(k##Camel) == v8::RegExp::k##Camel); \
-  STATIC_ASSERT(static_cast<int>(k##Camel) ==                        \
+  static_assert(static_cast<int>(k##Camel) == v8::RegExp::k##Camel); \
+  static_assert(static_cast<int>(k##Camel) ==                        \
                 static_cast<int>(RegExpFlag::k##Camel));
   REGEXP_FLAG_LIST(V)
 #undef V
-  STATIC_ASSERT(kFlagCount == v8::RegExp::kFlagCount);
-  STATIC_ASSERT(kFlagCount == kRegExpFlagCount);
+  static_assert(kFlagCount == v8::RegExp::kFlagCount);
+  static_assert(kFlagCount == kRegExpFlagCount);
 
   static base::Optional<Flags> FlagsFromString(Isolate* isolate,
                                                Handle<String> flags);
@@ -118,7 +123,7 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   V8_EXPORT_PRIVATE static Handle<String> StringFromFlags(Isolate* isolate,
                                                           Flags flags);
 
-  inline String EscapedPattern();
+  inline Tagged<String> EscapedPattern();
 
   bool CanTierUp();
   bool MarkedForTierUp();
@@ -137,6 +142,11 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   // Each capture (including the match itself) needs two registers.
   static constexpr int RegistersForCaptureCount(int count) {
     return (count + 1) * 2;
+  }
+  static constexpr int CaptureCountForRegisters(int register_count) {
+    DCHECK_EQ(register_count % 2, 0);
+    DCHECK_GE(register_count, 2);
+    return (register_count - 2) / 2;
   }
 
   static constexpr int code_index(bool is_latin1) {
@@ -172,7 +182,8 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   static constexpr int kAtomPatternIndex = kFirstTypeSpecificIndex;
   static constexpr int kAtomDataSize = kAtomPatternIndex + 1;
 
-  // A Code object or a Smi marker value equal to kUninitializedValue.
+  // A InstructionStream object or a Smi marker value equal to
+  // kUninitializedValue.
   static constexpr int kIrregexpLatin1CodeIndex = kFirstTypeSpecificIndex;
   static constexpr int kIrregexpUC16CodeIndex = kIrregexpLatin1CodeIndex + 1;
   // A ByteArray object or a Smi marker value equal to kUninitializedValue.
@@ -244,8 +255,11 @@ class JSRegExp : public TorqueGeneratedJSRegExp<JSRegExp, JSObject> {
   static constexpr int kMaxCaptures = 1 << 16;
 
  private:
-  inline Object DataAt(int index) const;
-  inline void SetDataAt(int index, Object value);
+  using FlagsBuffer = base::EmbeddedVector<char, kFlagCount + 1>;
+  inline static const char* FlagsToString(Flags flags, FlagsBuffer* out_buffer);
+
+  inline Tagged<Object> DataAt(int index) const;
+  inline void SetDataAt(int index, Tagged<Object> value);
 
   TQ_OBJECT_CONSTRUCTORS(JSRegExp)
 };

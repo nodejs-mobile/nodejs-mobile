@@ -6,7 +6,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { subtle } = require('crypto').webcrypto;
+const { subtle } = globalThis.crypto;
 
 function getDeriveKeyInfo(name, length, hash, ...usages) {
   return [{ name, length, hash }, usages];
@@ -268,6 +268,11 @@ async function testDeriveBitsBadLengths(
       }),
     assert.rejects(
       subtle.deriveBits(algorithm, baseKeys[size], null), {
+        message: 'length cannot be null',
+        name: 'OperationError',
+      }),
+    assert.rejects(
+      subtle.deriveBits(algorithm, baseKeys[size]), {
         message: 'length cannot be null',
         name: 'OperationError',
       }),

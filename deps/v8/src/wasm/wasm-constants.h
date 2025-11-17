@@ -26,41 +26,42 @@ constexpr uint32_t kWasmVersion = 0x01;
 enum ValueTypeCode : uint8_t {
   // Current value types
   kVoidCode = 0x40,
-  kI32Code = 0x7f,
-  kI64Code = 0x7e,
-  kF32Code = 0x7d,
-  kF64Code = 0x7c,
-  // Simd proposal
-  kS128Code = 0x7b,
-  // GC proposal packed types
-  kI8Code = 0x7a,
-  kI16Code = 0x79,
-  // Current reference types
-  kFuncRefCode = 0x70,
-  kAnyRefCode = 0x6f,  // aka externref
-  // typed-funcref and GC proposal types
-  // TODO(7748): For backwards compatibility only, remove when able.
-  kAnyRefCodeAlias = 0x6e,
-  kEqRefCode = 0x6d,
-  kOptRefCode = 0x6c,
-  kRefCode = 0x6b,
-  kI31RefCode = 0x6a,
-  // TODO(7748): Only here for backwards compatibility, remove when able.
-  kRttWithDepthCode = 0x69,
-  kRttCode = 0x68,
-  kDataRefCode = 0x67,
-  kArrayRefCode = 0x66
+  kI32Code = 0x7f,              // -0x01
+  kI64Code = 0x7e,              // -0x02
+  kF32Code = 0x7d,              // -0x03
+  kF64Code = 0x7c,              // -0x04
+  kS128Code = 0x7b,             // -0x05
+  kI8Code = 0x78,               // -0x08, packed type
+  kI16Code = 0x77,              // -0x09, packed type
+  kNoExnCode = 0x74,            // -0x0c
+  kNoFuncCode = 0x73,           // -0x0d
+  kNoExternCode = 0x72,         // -0x0e
+  kNoneCode = 0x71,             // -0x0f
+  kFuncRefCode = 0x70,          // -0x10
+  kExternRefCode = 0x6f,        // -0x11
+  kAnyRefCode = 0x6e,           // -0x12
+  kEqRefCode = 0x6d,            // -0x13
+  kI31RefCode = 0x6c,           // -0x14
+  kStructRefCode = 0x6b,        // -0x15
+  kArrayRefCode = 0x6a,         // -0x16
+  kRefCode = 0x64,              // -0x1c
+  kRefNullCode = 0x63,          // -0x1d
+                                // Non-finalized proposals below.
+  kExnRefCode = 0x69,           // -0x17
+  kStringRefCode = 0x67,        // -0x19
+  kStringViewWtf8Code = 0x66,   // -0x1a
+  kStringViewWtf16Code = 0x62,  // -0x1e
+  kStringViewIterCode = 0x61,   // -0x1f
 };
 
 // Binary encoding of type definitions.
+constexpr uint8_t kSharedFlagCode = 0x65;
 constexpr uint8_t kWasmFunctionTypeCode = 0x60;
 constexpr uint8_t kWasmStructTypeCode = 0x5f;
 constexpr uint8_t kWasmArrayTypeCode = 0x5e;
-constexpr uint8_t kWasmFunctionNominalCode = 0x5d;
-constexpr uint8_t kWasmStructNominalCode = 0x5c;
-constexpr uint8_t kWasmArrayNominalCode = 0x5b;
 constexpr uint8_t kWasmSubtypeCode = 0x50;
-constexpr uint8_t kWasmRecursiveTypeGroupCode = 0x4f;
+constexpr uint8_t kWasmSubtypeFinalCode = 0x4f;
+constexpr uint8_t kWasmRecursiveTypeGroupCode = 0x4e;
 
 // Binary encoding of import/export kinds.
 enum ImportExportKindCode : uint8_t {
@@ -72,12 +73,14 @@ enum ImportExportKindCode : uint8_t {
 };
 
 enum LimitsFlags : uint8_t {
-  kNoMaximum = 0x00,           // Also valid for table limits.
-  kWithMaximum = 0x01,         // Also valid for table limits.
-  kSharedNoMaximum = 0x02,     // Only valid for memory limits.
-  kSharedWithMaximum = 0x03,   // Only valid for memory limits.
-  kMemory64NoMaximum = 0x04,   // Only valid for memory limits.
-  kMemory64WithMaximum = 0x05  // Only valid for memory limits.
+  kNoMaximum = 0x00,                 // Also valid for table limits.
+  kWithMaximum = 0x01,               // Also valid for table limits.
+  kSharedNoMaximum = 0x02,           // Only valid for memory limits.
+  kSharedWithMaximum = 0x03,         // Only valid for memory limits.
+  kMemory64NoMaximum = 0x04,         // Only valid for memory limits.
+  kMemory64WithMaximum = 0x05,       // Only valid for memory limits.
+  kMemory64SharedNoMaximum = 0x06,   // Only valid for memory limits.
+  kMemory64SharedWithMaximum = 0x07  // Only valid for memory limits.
 };
 
 // Flags for data and element segments.
@@ -103,6 +106,7 @@ enum SectionCode : int8_t {
   kDataSectionCode = 11,       // Data segments
   kDataCountSectionCode = 12,  // Number of data segments
   kTagSectionCode = 13,        // Tag section
+  kStringRefSectionCode = 14,  // Stringref literal section
 
   // The following sections are custom sections, and are identified using a
   // string rather than an integer. Their enumeration values are not guaranteed
@@ -111,12 +115,13 @@ enum SectionCode : int8_t {
   kSourceMappingURLSectionCode,   // Source Map URL section
   kDebugInfoSectionCode,          // DWARF section .debug_info
   kExternalDebugInfoSectionCode,  // Section encoding the external symbol path
+  kInstTraceSectionCode,          // Instruction trace section
   kCompilationHintsSectionCode,   // Compilation hints section
   kBranchHintsSectionCode,        // Branch hints section
 
   // Helper values
   kFirstSectionInModule = kTypeSectionCode,
-  kLastKnownModuleSection = kBranchHintsSectionCode,
+  kLastKnownModuleSection = kStringRefSectionCode,
   kFirstUnorderedSection = kDataCountSectionCode,
 };
 
@@ -138,7 +143,17 @@ enum NameSectionKindCode : uint8_t {
   kElementSegmentCode = 8,
   kDataSegmentCode = 9,
   // https://github.com/WebAssembly/gc/issues/193
-  kFieldCode = 10
+  kFieldCode = 10,
+  // https://github.com/WebAssembly/exception-handling/pull/213
+  kTagCode = 11,
+};
+
+enum CatchKind : uint8_t {
+  kCatch = 0x0,
+  kCatchRef = 0x1,
+  kCatchAll = 0x2,
+  kCatchAllRef = 0x3,
+  kLastCatchKind = kCatchAllRef,
 };
 
 constexpr size_t kWasmPageSize = 0x10000;
@@ -172,12 +187,21 @@ constexpr uint32_t kGenericWrapperBudget = 1000;
 // gives up some module size for faster access to the supertypes.
 constexpr uint32_t kMinimumSupertypeArraySize = 3;
 
+// Maximum number of call targets tracked per call.
+constexpr int kMaxPolymorphism = 4;
+
+// A struct field beyond this limit needs an explicit null check (trapping null
+// access not guaranteed to behave properly).
+constexpr int kMaxStructFieldIndexForImplicitNullCheck = 4000;
+
 #if V8_TARGET_ARCH_X64
-constexpr int32_t kOSRTargetOffset = 5 * kSystemPointerSize;
+constexpr int32_t kOSRTargetOffset = 4 * kSystemPointerSize;
 #endif
 
-constexpr Tagged_t kArrayInitFromDataArrayTooLargeErrorCode = 0;
-constexpr Tagged_t kArrayInitFromDataSegmentOutOfBoundsErrorCode = 1;
+enum FPRelativeScope {
+  kEnterFPRelativeOnlyScope,
+  kLeaveFPRelativeOnlyScope,
+};
 
 }  // namespace wasm
 }  // namespace internal

@@ -10,9 +10,9 @@
 
 #include "src/base/platform/condition-variable.h"
 #include "src/base/platform/mutex.h"
-#include "src/base/platform/platform.h"
 #include "src/common/globals.h"
 #include "src/flags/flags.h"
+#include "src/heap/parked-scope.h"
 #include "src/utils/allocation.h"
 
 namespace v8 {
@@ -25,15 +25,7 @@ class SharedFunctionInfo;
 
 class V8_EXPORT_PRIVATE OptimizingCompileDispatcher {
  public:
-  explicit OptimizingCompileDispatcher(Isolate* isolate)
-      : isolate_(isolate),
-        input_queue_capacity_(FLAG_concurrent_recompilation_queue_length),
-        input_queue_length_(0),
-        input_queue_shift_(0),
-        ref_count_(0),
-        recompilation_delay_(FLAG_concurrent_recompilation_delay) {
-    input_queue_ = NewArray<TurbofanCompilationJob*>(input_queue_capacity_);
-  }
+  explicit OptimizingCompileDispatcher(Isolate* isolate);
 
   ~OptimizingCompileDispatcher();
 
@@ -49,7 +41,12 @@ class V8_EXPORT_PRIVATE OptimizingCompileDispatcher {
     return input_queue_length_ < input_queue_capacity_;
   }
 
-  static bool Enabled() { return FLAG_concurrent_recompilation; }
+  inline int InputQueueLength() {
+    base::MutexGuard access_input_queue(&input_queue_mutex_);
+    return input_queue_length_;
+  }
+
+  static bool Enabled() { return v8_flags.concurrent_recompilation; }
 
   // This method must be called on the main thread.
   bool HasJobs();
@@ -67,6 +64,9 @@ class V8_EXPORT_PRIVATE OptimizingCompileDispatcher {
   class CompileTask;
 
   enum ModeFlag { COMPILE, FLUSH };
+  static constexpr TaskPriority kTaskPriority = TaskPriority::kUserVisible;
+  static constexpr TaskPriority kEfficiencyTaskPriority =
+      TaskPriority::kBestEffort;
 
   void FlushQueues(BlockingBehavior blocking_behavior,
                    bool restore_function_code);
@@ -97,11 +97,9 @@ class V8_EXPORT_PRIVATE OptimizingCompileDispatcher {
   // different threads.
   base::Mutex output_queue_mutex_;
 
-  std::atomic<int> ref_count_;
-  base::Mutex ref_count_mutex_;
-  base::ConditionVariable ref_count_zero_;
+  std::unique_ptr<JobHandle> job_handle_;
 
-  // Copy of FLAG_concurrent_recompilation_delay that will be used from the
+  // Copy of v8_flags.concurrent_recompilation_delay that will be used from the
   // background thread.
   //
   // Since flags might get modified while the background thread is running, it

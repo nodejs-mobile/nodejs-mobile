@@ -34,12 +34,14 @@ class SharedEngineIsolate {
     v8::Isolate::CreateParams create_params;
     create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
     v8::Isolate::Initialize(isolate_, create_params);
+    v8_isolate()->Enter();
     v8::HandleScope handle_scope(v8_isolate());
     v8::Context::New(v8_isolate())->Enter();
     testing::SetupIsolateForWasmModule(isolate());
     zone_.reset(new Zone(isolate()->allocator(), ZONE_NAME));
   }
   ~SharedEngineIsolate() {
+    v8_isolate()->Exit();
     zone_.reset();
     isolate_->Dispose();
   }
@@ -67,12 +69,11 @@ class SharedEngineIsolate {
   }
 
   SharedModule ExportInstance(Handle<WasmInstanceObject> instance) {
-    return instance->module_object().shared_native_module();
+    return instance->module_object()->shared_native_module();
   }
 
   int32_t Run(Handle<WasmInstanceObject> instance) {
-    return testing::CallWasmFunctionForTesting(isolate(), instance, "main", 0,
-                                               nullptr);
+    return testing::CallWasmFunctionForTesting(isolate(), instance, "main", {});
   }
 
  private:
@@ -105,7 +106,7 @@ ZoneBuffer* BuildReturnConstantModule(Zone* zone, int constant) {
   WasmModuleBuilder* builder = zone->New<WasmModuleBuilder>(zone);
   WasmFunctionBuilder* f = builder->AddFunction(sigs.i_v());
   f->builder()->AddExport(base::CStrVector("main"), f);
-  byte code[] = {WASM_I32V_2(constant)};
+  uint8_t code[] = {WASM_I32V_2(constant)};
   f->EmitCode(code, sizeof(code));
   f->Emit(kExprEnd);
   builder->WriteTo(buffer);
@@ -160,10 +161,10 @@ Handle<WasmInstanceObject> CompileAndInstantiateAsync(
   auto enabled_features = WasmFeatures::FromIsolate(isolate->isolate());
   constexpr const char* kAPIMethodName = "Test.CompileAndInstantiateAsync";
   GetWasmEngine()->AsyncCompile(
-      isolate->isolate(), enabled_features,
+      isolate->isolate(), enabled_features, CompileTimeImports{},
       std::make_unique<MockCompilationResolver>(isolate, &maybe_instance),
       ModuleWireBytes(buffer->begin(), buffer->end()), true, kAPIMethodName);
-  while (!maybe_instance->IsWasmInstanceObject()) PumpMessageLoop(isolate);
+  while (!IsWasmInstanceObject(*maybe_instance)) PumpMessageLoop(isolate);
   Handle<WasmInstanceObject> instance =
       Handle<WasmInstanceObject>::cast(maybe_instance);
   return instance;
@@ -299,7 +300,7 @@ TEST(SharedEngineRunThreadedTierUp) {
     Handle<WasmInstanceObject> instance = isolate->ImportInstance(module);
     WasmFeatures detected = WasmFeatures::None();
     WasmCompilationUnit::CompileWasmFunction(
-        isolate->isolate(), module.get(), &detected,
+        isolate->isolate()->counters(), module.get(), &detected,
         &module->module()->functions[0], ExecutionTier::kTurbofan);
     CHECK_EQ(23, isolate->Run(instance));
   });

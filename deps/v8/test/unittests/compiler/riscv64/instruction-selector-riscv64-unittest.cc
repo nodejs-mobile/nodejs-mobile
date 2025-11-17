@@ -183,28 +183,28 @@ const IntCmp kCmpInstructions[] = {
      1U},
     {{&RawMachineAssembler::Word32Equal, "Word32Equal", kRiscvCmp,
       MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Word32NotEqual, "Word32NotEqual", kRiscvCmp,
       MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Int32LessThan, "Int32LessThan", kRiscvCmp,
       MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Int32LessThanOrEqual, "Int32LessThanOrEqual",
       kRiscvCmp, MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Int32GreaterThan, "Int32GreaterThan", kRiscvCmp,
       MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Int32GreaterThanOrEqual, "Int32GreaterThanOrEqual",
       kRiscvCmp, MachineType::Int32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Uint32LessThan, "Uint32LessThan", kRiscvCmp,
       MachineType::Uint32()},
-     1U},
+     COMPRESS_POINTERS_BOOL ? 3U : 1U},
     {{&RawMachineAssembler::Uint32LessThanOrEqual, "Uint32LessThanOrEqual",
       kRiscvCmp, MachineType::Uint32()},
-     1U}};
+     COMPRESS_POINTERS_BOOL ? 3U : 1U}};
 
 // ----------------------------------------------------------------------------
 // Conversion instructions.
@@ -312,8 +312,8 @@ TEST_P(InstructionSelectorCmpTest, Parameter) {
   StreamBuilder m(this, type, type, type);
   m.Return((m.*cmp.mi.constructor)(m.Parameter(0), m.Parameter(1)));
   Stream s = m.Build();
-
-  if (FLAG_debug_code &&
+  std::cout << type.representation() << std::endl;
+  if (v8_flags.debug_code &&
       type.representation() == MachineRepresentation::kWord32) {
 #ifndef V8_COMPRESS_POINTERS
     ASSERT_EQ(6U, s.size());
@@ -358,7 +358,7 @@ TEST_P(InstructionSelectorCmpTest, Parameter) {
 #endif
   } else {
     ASSERT_EQ(cmp.expected_size, s.size());
-    EXPECT_EQ(cmp.mi.arch_opcode, s[0]->arch_opcode());
+    EXPECT_EQ(cmp.mi.arch_opcode, s[cmp.expected_size - 1]->arch_opcode());
     EXPECT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
@@ -1000,7 +1000,7 @@ TEST_F(InstructionSelectorTest, ChangeUint32ToUint64AfterLoad) {
     EXPECT_EQ(kMode_None, s[0]->addressing_mode());
     EXPECT_EQ(2U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
-    EXPECT_EQ(kRiscvLw, s[1]->arch_opcode());
+    EXPECT_EQ(kRiscvLwu, s[1]->arch_opcode());
     EXPECT_EQ(kMode_MRI, s[1]->addressing_mode());
     EXPECT_EQ(kRiscvZeroExtendWord, s[2]->arch_opcode());
     EXPECT_EQ(2U, s[1]->InputCount());
@@ -1298,8 +1298,8 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreWithImmediateIndex) {
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
     EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
+    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(2)->kind());
+    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(2)));
     EXPECT_EQ(0U, s[0]->OutputCount());
   }
 }
@@ -1316,10 +1316,10 @@ TEST_P(InstructionSelectorMemoryAccessImmTest, StoreZero) {
     EXPECT_EQ(memacc.store_opcode, s[0]->arch_opcode());
     EXPECT_EQ(kMode_MRI, s[0]->addressing_mode());
     ASSERT_EQ(3U, s[0]->InputCount());
-    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(1)->kind());
-    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(1)));
     ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(2)->kind());
-    EXPECT_EQ(0, s.ToInt64(s[0]->InputAt(2)));
+    EXPECT_EQ(index, s.ToInt32(s[0]->InputAt(2)));
+    ASSERT_EQ(InstructionOperand::IMMEDIATE, s[0]->InputAt(0)->kind());
+    EXPECT_EQ(0, s.ToInt64(s[0]->InputAt(0)));
     EXPECT_EQ(0U, s[0]->OutputCount());
   }
 }
@@ -1584,10 +1584,18 @@ TEST_F(InstructionSelectorTest, Word32ReverseBytes) {
     StreamBuilder m(this, MachineType::Int32(), MachineType::Int32());
     m.Return(m.Word32ReverseBytes(m.Parameter(0)));
     Stream s = m.Build();
-    ASSERT_EQ(1U, s.size());
-    // EXPECT_EQ(kRiscvByteSwap32, s[0]->arch_opcode());
+#ifdef CAN_USE_ZBB_INSTRUCTIONS
+    ASSERT_EQ(2U, s.size());
+    EXPECT_EQ(kRiscvRev8, s[0]->arch_opcode());
+    EXPECT_EQ(kRiscvShr64, s[1]->arch_opcode());
     EXPECT_EQ(1U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
+#else
+    ASSERT_EQ(1U, s.size());
+    EXPECT_EQ(kRiscvByteSwap32, s[0]->arch_opcode());
+    EXPECT_EQ(1U, s[0]->InputCount());
+    EXPECT_EQ(1U, s[0]->OutputCount());
+#endif
   }
 }
 
@@ -1597,7 +1605,11 @@ TEST_F(InstructionSelectorTest, Word64ReverseBytes) {
     m.Return(m.Word64ReverseBytes(m.Parameter(0)));
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
+#ifdef CAN_USE_ZBB_INSTRUCTIONS
+    EXPECT_EQ(kRiscvRev8, s[0]->arch_opcode());
+#else
     EXPECT_EQ(kRiscvByteSwap64, s[0]->arch_opcode());
+#endif
     EXPECT_EQ(1U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
@@ -1609,7 +1621,7 @@ TEST_F(InstructionSelectorTest, ExternalReferenceLoad1) {
   TRACED_FOREACH(int64_t, offset, kOffsets) {
     StreamBuilder m(this, MachineType::Int64());
     ExternalReference reference =
-        bit_cast<ExternalReference>(isolate()->isolate_root() + offset);
+        base::bit_cast<ExternalReference>(isolate()->isolate_root() + offset);
     Node* const value =
         m.Load(MachineType::Int64(), m.ExternalConstant(reference));
     m.Return(value);
@@ -1630,7 +1642,7 @@ TEST_F(InstructionSelectorTest, ExternalReferenceLoad2) {
   StreamBuilder m(this, MachineType::Int64());
   int64_t offset = 0x100000000;
   ExternalReference reference =
-      bit_cast<ExternalReference>(isolate()->isolate_root() + offset);
+      base::bit_cast<ExternalReference>(isolate()->isolate_root() + offset);
   Node* const value =
       m.Load(MachineType::Int64(), m.ExternalConstant(reference));
   m.Return(value);

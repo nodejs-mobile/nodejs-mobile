@@ -44,10 +44,10 @@ void PrintRegisterRange(UnoptimizedFrame* frame, std::ostream& os,
                         interpreter::Register first_reg, int range) {
   for (int reg_index = first_reg.index(); reg_index < first_reg.index() + range;
        reg_index++) {
-    Object reg_object = frame->ReadInterpreterRegister(reg_index);
+    Tagged<Object> reg_object = frame->ReadInterpreterRegister(reg_index);
     os << "      [ " << std::setw(reg_field_width)
        << interpreter::Register(reg_index).ToString() << arrow_direction;
-    reg_object.ShortPrint(os);
+    ShortPrint(reg_object, os);
     os << " ]" << std::endl;
   }
 }
@@ -61,7 +61,7 @@ void PrintRegisters(UnoptimizedFrame* frame, std::ostream& os, bool is_input,
   static const char* kOutputColourCode = "\033[0;35m";
   static const char* kNormalColourCode = "\033[0;m";
   const char* kArrowDirection = is_input ? " -> " : " <- ";
-  if (FLAG_log_colour) {
+  if (v8_flags.log_colour) {
     os << (is_input ? kInputColourCode : kOutputColourCode);
   }
 
@@ -69,9 +69,10 @@ void PrintRegisters(UnoptimizedFrame* frame, std::ostream& os, bool is_input,
 
   // Print accumulator.
   if ((is_input && interpreter::Bytecodes::ReadsAccumulator(bytecode)) ||
-      (!is_input && interpreter::Bytecodes::WritesAccumulator(bytecode))) {
+      (!is_input &&
+       interpreter::Bytecodes::WritesOrClobbersAccumulator(bytecode))) {
     os << "      [ " << kAccumulator << kArrowDirection;
-    accumulator->ShortPrint(os);
+    ShortPrint(*accumulator, os);
     os << " ]" << std::endl;
   }
 
@@ -97,7 +98,7 @@ void PrintRegisters(UnoptimizedFrame* frame, std::ostream& os, bool is_input,
                        kArrowDirection,
                        interpreter::Register::FromShortStar(bytecode), 1);
   }
-  if (FLAG_log_colour) {
+  if (v8_flags.log_colour) {
     os << kNormalColourCode;
   }
 }
@@ -105,18 +106,18 @@ void PrintRegisters(UnoptimizedFrame* frame, std::ostream& os, bool is_input,
 }  // namespace
 
 RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeEntry) {
-  if (!FLAG_trace_ignition && !FLAG_trace_baseline_exec) {
+  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
-  JavaScriptFrameIterator frame_iterator(isolate);
+  JavaScriptStackFrameIterator frame_iterator(isolate);
   UnoptimizedFrame* frame =
       reinterpret_cast<UnoptimizedFrame*>(frame_iterator.frame());
 
-  if (frame->is_interpreted() && !FLAG_trace_ignition) {
+  if (frame->is_interpreted() && !v8_flags.trace_ignition) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
-  if (frame->is_baseline() && !FLAG_trace_baseline_exec) {
+  if (frame->is_baseline() && !v8_flags.trace_baseline_exec) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
@@ -155,18 +156,18 @@ RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeEntry) {
 }
 
 RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeExit) {
-  if (!FLAG_trace_ignition && !FLAG_trace_baseline_exec) {
+  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
-  JavaScriptFrameIterator frame_iterator(isolate);
+  JavaScriptStackFrameIterator frame_iterator(isolate);
   UnoptimizedFrame* frame =
       reinterpret_cast<UnoptimizedFrame*>(frame_iterator.frame());
 
-  if (frame->is_interpreted() && !FLAG_trace_ignition) {
+  if (frame->is_interpreted() && !v8_flags.trace_ignition) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
-  if (frame->is_baseline() && !FLAG_trace_baseline_exec) {
+  if (frame->is_baseline() && !v8_flags.trace_baseline_exec) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
@@ -199,32 +200,18 @@ RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeExit) {
 #ifdef V8_TRACE_FEEDBACK_UPDATES
 
 RUNTIME_FUNCTION(Runtime_TraceUpdateFeedback) {
-  if (!FLAG_trace_feedback_updates) {
+  if (!v8_flags.trace_feedback_updates) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
 
   SealHandleScope shs(isolate);
   DCHECK_EQ(3, args.length());
-  Handle<JSFunction> function = args.at<JSFunction>(0);
+  Handle<FeedbackVector> vector = args.at<FeedbackVector>(0);
   int slot = args.smi_value_at(1);
   auto reason = String::cast(args[2]);
 
-  int slot_count = function->feedback_vector().metadata().slot_count();
-
-  StdoutStream os;
-  os << "[Feedback slot " << slot << "/" << slot_count << " in ";
-  function->shared().ShortPrint(os);
-  os << " updated to ";
-  function->feedback_vector().FeedbackSlotPrint(os, FeedbackSlot(slot));
-  os << " - ";
-
-  StringCharacterStream stream(reason);
-  while (stream.HasMore()) {
-    uint16_t character = stream.GetNext();
-    PrintF("%c", character);
-  }
-
-  os << "]" << std::endl;
+  FeedbackVector::TraceFeedbackChange(isolate, *vector, FeedbackSlot(slot),
+                                      reason->ToCString().get());
 
   return ReadOnlyRoots(isolate).undefined_value();
 }

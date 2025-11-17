@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-intl-number-format-v3
-
 let validUseGrouping = [
     "min2",
     "auto",
@@ -11,19 +9,30 @@ let validUseGrouping = [
     false,
 ];
 
+let fallbackUseGrouping = [
+    "true",
+    "false",
+];
+
 let invalidUseGrouping = [
     "min-2",
-    "true",
 ];
+
 
 validUseGrouping.forEach(function(useGrouping) {
   let nf = new Intl.NumberFormat(undefined, {useGrouping});
   assertEquals(useGrouping, nf.resolvedOptions().useGrouping);
 });
 
+fallbackUseGrouping.forEach(function(useGrouping) {
+  let nf = new Intl.NumberFormat(undefined, {useGrouping});
+  assertEquals("auto", nf.resolvedOptions().useGrouping);
+});
+
 invalidUseGrouping.forEach(function(useGrouping) {
-  assertThrows(() => {
-    let nf = new Intl.NumberFormat(undefined, {useGrouping}); });
+  assertThrows(
+      () => new Intl.NumberFormat(undefined, {useGrouping}),
+      RangeError);
 });
 
 // useGrouping: undefined get "auto"

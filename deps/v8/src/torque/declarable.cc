@@ -16,8 +16,6 @@ namespace v8 {
 namespace internal {
 namespace torque {
 
-DEFINE_CONTEXTUAL_VARIABLE(CurrentScope)
-
 QualifiedName QualifiedName::Parse(std::string qualified_name) {
   std::vector<std::string> qualifications;
   while (true) {
@@ -91,8 +89,8 @@ SpecializationRequester::SpecializationRequester(SourcePosition position,
 }
 
 std::vector<Declarable*> Scope::Lookup(const QualifiedName& name) {
-  if (name.namespace_qualification.size() >= 1 &&
-      name.namespace_qualification[0] == "") {
+  if (!name.namespace_qualification.empty() &&
+      name.namespace_qualification[0].empty()) {
     return GlobalContext::GetDefaultNamespace()->Lookup(
         name.DropFirstNamespaceQualification());
   }

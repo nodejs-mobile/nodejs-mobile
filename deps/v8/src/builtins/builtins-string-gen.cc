@@ -8,11 +8,12 @@
 #include "src/builtins/builtins-regexp-gen.h"
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-factory.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/execution/protectors.h"
 #include "src/heap/factory-inl.h"
 #include "src/heap/heap-inl.h"
 #include "src/logging/counters.h"
+#include "src/objects/instance-type.h"
 #include "src/objects/objects.h"
 #include "src/objects/property-cell.h"
 
@@ -31,9 +32,11 @@ TNode<RawPtrT> StringBuiltinsAssembler::DirectStringData(
 
   BIND(&if_sequential);
   {
-    var_data = RawPtrAdd(
-        ReinterpretCast<RawPtrT>(BitcastTaggedToWord(string)),
-        IntPtrConstant(SeqOneByteString::kHeaderSize - kHeapObjectTag));
+    static_assert(OFFSET_OF_DATA_START(SeqOneByteString) ==
+                  OFFSET_OF_DATA_START(SeqTwoByteString));
+    var_data = RawPtrAdd(ReinterpretCast<RawPtrT>(BitcastTaggedToWord(string)),
+                         IntPtrConstant(OFFSET_OF_DATA_START(SeqOneByteString) -
+                                        kHeapObjectTag));
     Goto(&if_join);
   }
 
@@ -124,36 +127,43 @@ TNode<IntPtrT> StringBuiltinsAssembler::SearchOneByteInOneByteString(
 }
 
 void StringBuiltinsAssembler::GenerateStringEqual(TNode<String> left,
-                                                  TNode<String> right) {
+                                                  TNode<String> right,
+                                                  TNode<IntPtrT> length) {
   TVARIABLE(String, var_left, left);
   TVARIABLE(String, var_right, right);
   Label if_equal(this), if_notequal(this), if_indirect(this, Label::kDeferred),
-      restart(this, {&var_left, &var_right});
+      start(this, {&var_left, &var_right});
 
-  TNode<IntPtrT> lhs_length = LoadStringLengthAsWord(left);
-  TNode<IntPtrT> rhs_length = LoadStringLengthAsWord(right);
+  // Callers must handle the case where {lhs} and {rhs} refer to the same
+  // String object.
+  CSA_DCHECK(this, TaggedNotEqual(left, right));
 
-  // Strings with different lengths cannot be equal.
-  GotoIf(WordNotEqual(lhs_length, rhs_length), &if_notequal);
+  CSA_DCHECK(this, IntPtrEqual(LoadStringLengthAsWord(left), length));
+  CSA_DCHECK(this, IntPtrEqual(LoadStringLengthAsWord(right), length));
 
-  Goto(&restart);
-  BIND(&restart);
+  Goto(&start);
+  BIND(&start);
   TNode<String> lhs = var_left.value();
   TNode<String> rhs = var_right.value();
 
   TNode<Uint16T> lhs_instance_type = LoadInstanceType(lhs);
   TNode<Uint16T> rhs_instance_type = LoadInstanceType(rhs);
 
-  StringEqual_Core(lhs, lhs_instance_type, rhs, rhs_instance_type, lhs_length,
+  StringEqual_Core(lhs, lhs_instance_type, rhs, rhs_instance_type, length,
                    &if_equal, &if_notequal, &if_indirect);
 
   BIND(&if_indirect);
   {
+    Label restart(this, {&var_left, &var_right});
     // Try to unwrap indirect strings, restart the above attempt on success.
     MaybeDerefIndirectStrings(&var_left, lhs_instance_type, &var_right,
                               rhs_instance_type, &restart);
 
     TailCallRuntime(Runtime::kStringEqual, NoContextConstant(), lhs, rhs);
+
+    BIND(&restart);
+    GotoIf(TaggedEqual(var_left.value(), var_right.value()), &if_equal);
+    Goto(&start);
   }
 
   BIND(&if_equal);
@@ -169,8 +179,10 @@ void StringBuiltinsAssembler::StringEqual_Core(
     Label* if_not_equal, Label* if_indirect) {
   CSA_DCHECK(this, WordEqual(LoadStringLengthAsWord(lhs), length));
   CSA_DCHECK(this, WordEqual(LoadStringLengthAsWord(rhs), length));
-  // Fast check to see if {lhs} and {rhs} refer to the same String object.
-  GotoIf(TaggedEqual(lhs, rhs), if_equal);
+
+  // Callers must handle the case where {lhs} and {rhs} refer to the same
+  // String object.
+  CSA_DCHECK(this, TaggedNotEqual(lhs, rhs));
 
   // Combine the instance types into a single 16-bit value, so we can check
   // both of them at once.
@@ -189,8 +201,8 @@ void StringBuiltinsAssembler::StringEqual_Core(
 
   // Check if both {lhs} and {rhs} are direct strings, and that in case of
   // ExternalStrings the data pointer is cached.
-  STATIC_ASSERT(kUncachedExternalStringTag != 0);
-  STATIC_ASSERT(kIsIndirectStringTag != 0);
+  static_assert(kUncachedExternalStringTag != 0);
+  static_assert(kIsIndirectStringTag != 0);
   int const kBothDirectStringMask =
       kIsIndirectStringMask | kUncachedExternalStringMask |
       ((kIsIndirectStringMask | kUncachedExternalStringMask) << 8);
@@ -199,22 +211,42 @@ void StringBuiltinsAssembler::StringEqual_Core(
                         Int32Constant(0)),
             if_indirect);
 
+  Label if_skip_fast_case(this), if_fast_case(this), if_oneonebytestring(this),
+      if_twotwobytestring(this), if_onetwobytestring(this),
+      if_twoonebytestring(this);
+
   // Dispatch based on the {lhs} and {rhs} string encoding.
   int const kBothStringEncodingMask =
       kStringEncodingMask | (kStringEncodingMask << 8);
+  int const kBothExternalStringTag =
+      kExternalStringTag | (kExternalStringTag << 8);
   int const kOneOneByteStringTag = kOneByteStringTag | (kOneByteStringTag << 8);
   int const kTwoTwoByteStringTag = kTwoByteStringTag | (kTwoByteStringTag << 8);
   int const kOneTwoByteStringTag = kOneByteStringTag | (kTwoByteStringTag << 8);
-  Label if_oneonebytestring(this), if_twotwobytestring(this),
-      if_onetwobytestring(this), if_twoonebytestring(this);
+
   TNode<Word32T> masked_instance_types =
       Word32And(both_instance_types, Int32Constant(kBothStringEncodingMask));
-  GotoIf(
-      Word32Equal(masked_instance_types, Int32Constant(kOneOneByteStringTag)),
-      &if_oneonebytestring);
-  GotoIf(
-      Word32Equal(masked_instance_types, Int32Constant(kTwoTwoByteStringTag)),
-      &if_twotwobytestring);
+  TNode<Word32T> both_are_one_byte =
+      Word32Equal(masked_instance_types, Int32Constant(kOneOneByteStringTag));
+  TNode<Word32T> both_are_two_byte =
+      Word32Equal(masked_instance_types, Int32Constant(kTwoTwoByteStringTag));
+
+  // If both strings are not external we know that their payload length is
+  // kTagged sized. When they have the same type we can compare in chunks. The
+  // padding bytes are set to zero.
+  GotoIf(Word32And(both_instance_types, Int32Constant(kBothExternalStringTag)),
+         &if_skip_fast_case);
+  TVARIABLE(IntPtrT, byte_length, length);
+  GotoIf(both_are_one_byte, &if_fast_case);
+  byte_length = WordShl(byte_length.value(), IntPtrConstant(1));
+  Branch(both_are_two_byte, &if_fast_case, &if_skip_fast_case);
+  BIND(&if_fast_case);
+  StringEqual_FastLoop(lhs, lhs_instance_type, rhs, rhs_instance_type,
+                       byte_length.value(), if_equal, if_not_equal);
+
+  BIND(&if_skip_fast_case);
+  GotoIf(both_are_one_byte, &if_oneonebytestring);
+  GotoIf(both_are_two_byte, &if_twotwobytestring);
   Branch(
       Word32Equal(masked_instance_types, Int32Constant(kOneTwoByteStringTag)),
       &if_onetwobytestring, &if_twoonebytestring);
@@ -240,44 +272,133 @@ void StringBuiltinsAssembler::StringEqual_Core(
                    if_not_equal);
 }
 
+void StringBuiltinsAssembler::StringEqual_FastLoop(
+    TNode<String> lhs, TNode<Word32T> lhs_instance_type, TNode<String> rhs,
+    TNode<Word32T> rhs_instance_type, TNode<IntPtrT> byte_length,
+    Label* if_equal, Label* if_not_equal) {
+  TNode<RawPtrT> lhs_data = DirectStringData(lhs, lhs_instance_type);
+  TNode<RawPtrT> rhs_data = DirectStringData(rhs, rhs_instance_type);
+
+  const int kChunk = kTaggedSize;
+  static_assert(kObjectAlignment % kChunk == 0);
+  // Round up the byte_length to `ceiling(length / kChunk) * kChunk`
+  TNode<IntPtrT> rounded_up_len = UncheckedCast<IntPtrT>(WordAnd(
+      UncheckedCast<WordT>(IntPtrAdd(byte_length, IntPtrConstant(kChunk - 1))),
+      UncheckedCast<WordT>(IntPtrConstant(~(kChunk - 1)))));
+  TNode<RawPtrT> lhs_end = RawPtrAdd(lhs_data, rounded_up_len);
+
+#ifdef ENABLE_SLOW_DCHECKS
+  // The padding must be zeroed for chunked comparison to be correct. This loop
+  // checks all bytes being 0 from byte_length up to rounded_up_len.
+  // If we ever stop zeroing the padding, GenerateStringRelationalComparison
+  // below will also need to be updated.
+  {
+    TVARIABLE(IntPtrT, var_padding_offset, byte_length);
+    Label loop(this, &var_padding_offset), loop_end(this);
+    Goto(&loop);
+    BIND(&loop);
+    {
+      GotoIf(WordEqual(var_padding_offset.value(), rounded_up_len), &loop_end);
+
+      // Load the next byte
+      TNode<Word32T> lhs_value = UncheckedCast<Word32T>(Load(
+          MachineType::Uint8(), lhs_data,
+          WordShl(var_padding_offset.value(),
+                  ElementSizeLog2Of(MachineType::Uint8().representation()))));
+      TNode<Word32T> rhs_value = UncheckedCast<Word32T>(Load(
+          MachineType::Uint8(), rhs_data,
+          WordShl(var_padding_offset.value(),
+                  ElementSizeLog2Of(MachineType::Uint8().representation()))));
+
+      // Check the padding is zero.
+      CSA_CHECK(this, Word32Equal(lhs_value, Int32Constant(0)));
+      CSA_CHECK(this, Word32Equal(rhs_value, Int32Constant(0)));
+
+      // Advance to next byte.
+      var_padding_offset =
+          IntPtrAdd(var_padding_offset.value(), IntPtrConstant(1));
+      Goto(&loop);
+    }
+    BIND(&loop_end);
+  }
+#endif  // ENABLE_SLOW_DCHECKS
+
+  // Compare strings in chunks of either 4 or 8 bytes, depending on the
+  // alignment of allocations.
+  static_assert(kChunk == ElementSizeInBytes(MachineRepresentation::kWord64) ||
+                kChunk == ElementSizeInBytes(MachineRepresentation::kWord32));
+  TVARIABLE(RawPtrT, rhs_ptr, rhs_data);
+  VariableList vars({&rhs_ptr}, zone());
+
+  if (kChunk == ElementSizeInBytes(MachineRepresentation::kWord64)) {
+    BuildFastLoop<RawPtrT>(
+        vars, lhs_data, lhs_end,
+        [&](TNode<RawPtrT> lhs_ptr) {
+          TNode<Word64T> lhs_value = Load<Uint64T>(lhs_ptr);
+          TNode<Word64T> rhs_value = Load<Uint64T>(rhs_ptr.value());
+          GotoIf(Word64NotEqual(lhs_value, rhs_value), if_not_equal);
+
+          // Advance {rhs_ptr} to next characters. {lhs_ptr} will be
+          // advanced along loop's {var_index}.
+          Increment(&rhs_ptr, kChunk);
+        },
+        kChunk, LoopUnrollingMode::kYes, IndexAdvanceMode::kPost);
+  } else {
+    BuildFastLoop<RawPtrT>(
+        vars, lhs_data, lhs_end,
+        [&](TNode<RawPtrT> lhs_ptr) {
+          TNode<Word32T> lhs_value = Load<Uint32T>(lhs_ptr);
+          TNode<Word32T> rhs_value = Load<Uint32T>(rhs_ptr.value());
+          GotoIf(Word32NotEqual(lhs_value, rhs_value), if_not_equal);
+
+          // Advance {rhs_ptr} to next characters. {lhs_ptr} will be
+          // advanced along loop's {var_index}.
+          Increment(&rhs_ptr, kChunk);
+        },
+        kChunk, LoopUnrollingMode::kYes, IndexAdvanceMode::kPost);
+  }
+  Goto(if_equal);
+}
+
 void StringBuiltinsAssembler::StringEqual_Loop(
     TNode<String> lhs, TNode<Word32T> lhs_instance_type, MachineType lhs_type,
     TNode<String> rhs, TNode<Word32T> rhs_instance_type, MachineType rhs_type,
     TNode<IntPtrT> length, Label* if_equal, Label* if_not_equal) {
+  Comment("StringEqual_Loop");
   CSA_DCHECK(this, WordEqual(LoadStringLengthAsWord(lhs), length));
   CSA_DCHECK(this, WordEqual(LoadStringLengthAsWord(rhs), length));
 
   // Compute the effective offset of the first character.
   TNode<RawPtrT> lhs_data = DirectStringData(lhs, lhs_instance_type);
   TNode<RawPtrT> rhs_data = DirectStringData(rhs, rhs_instance_type);
+  TNode<RawPtrT> lhs_end =
+      RawPtrAdd(lhs_data, WordShl(length, IntPtrConstant(ElementSizeLog2Of(
+                                              lhs_type.representation()))));
+  TVARIABLE(RawPtrT, rhs_ptr, rhs_data);
+  VariableList vars({&rhs_ptr}, zone());
 
   // Loop over the {lhs} and {rhs} strings to see if they are equal.
-  TVARIABLE(IntPtrT, var_offset, IntPtrConstant(0));
-  Label loop(this, &var_offset);
-  Goto(&loop);
-  BIND(&loop);
-  {
-    // If {offset} equals {end}, no difference was found, so the
-    // strings are equal.
-    GotoIf(WordEqual(var_offset.value(), length), if_equal);
+  BuildFastLoop<RawPtrT>(
+      vars, lhs_data, lhs_end,
+      [&](TNode<RawPtrT> lhs_ptr) {
+        TNode<Word32T> lhs_value =
+            UncheckedCast<Word32T>(Load(lhs_type, lhs_ptr));
+        TNode<Word32T> rhs_value =
+            UncheckedCast<Word32T>(Load(rhs_type, rhs_ptr.value()));
 
-    // Load the next characters from {lhs} and {rhs}.
-    TNode<Word32T> lhs_value = UncheckedCast<Word32T>(
-        Load(lhs_type, lhs_data,
-             WordShl(var_offset.value(),
-                     ElementSizeLog2Of(lhs_type.representation()))));
-    TNode<Word32T> rhs_value = UncheckedCast<Word32T>(
-        Load(rhs_type, rhs_data,
-             WordShl(var_offset.value(),
-                     ElementSizeLog2Of(rhs_type.representation()))));
+        // Check if the characters match.
+        GotoIf(Word32NotEqual(lhs_value, rhs_value), if_not_equal);
 
-    // Check if the characters match.
-    GotoIf(Word32NotEqual(lhs_value, rhs_value), if_not_equal);
+        // Advance {rhs_ptr} to next characters. {lhs_ptr} will be
+        // advanced along loop's {var_index}.
+        Increment(&rhs_ptr, ElementSizeInBytes(rhs_type.representation()));
+      },
+      ElementSizeInBytes(lhs_type.representation()), LoopUnrollingMode::kNo,
+      IndexAdvanceMode::kPost);
 
-    // Advance to next character.
-    var_offset = IntPtrAdd(var_offset.value(), IntPtrConstant(1));
-    Goto(&loop);
-  }
+  // All characters are checked and no difference was found, so the strings
+  // are equal.
+  Goto(if_equal);
 }
 
 TNode<String> StringBuiltinsAssembler::StringFromSingleUTF16EncodedCodePoint(
@@ -300,7 +421,7 @@ TNode<String> StringBuiltinsAssembler::StringFromSingleUTF16EncodedCodePoint(
     TNode<String> value = AllocateSeqTwoByteString(2);
     StoreNoWriteBarrier(
         MachineRepresentation::kWord32, value,
-        IntPtrConstant(SeqTwoByteString::kHeaderSize - kHeapObjectTag),
+        IntPtrConstant(OFFSET_OF_DATA_START(SeqTwoByteString) - kHeapObjectTag),
         codepoint);
     var_result = value;
     Goto(&return_result);
@@ -315,26 +436,46 @@ TNode<String> StringBuiltinsAssembler::AllocateConsString(TNode<Uint32T> length,
                                                           TNode<String> right) {
   // Added string can be a cons string.
   Comment("Allocating ConsString");
+  TVARIABLE(String, first, left);
   TNode<Int32T> left_instance_type = LoadInstanceType(left);
-  TNode<Int32T> right_instance_type = LoadInstanceType(right);
+  Label handle_right(this);
+  static_assert(base::bits::CountPopulation(kThinStringTagBit) == 1);
+  GotoIfNot(IsSetWord32(left_instance_type, kThinStringTagBit), &handle_right);
+  {
+    first = LoadObjectField<String>(left, offsetof(ThinString, actual_));
+    Goto(&handle_right);
+  }
 
+  BIND(&handle_right);
+  TVARIABLE(String, second, right);
+  TNode<Int32T> right_instance_type = LoadInstanceType(right);
+  Label allocate(this);
+  GotoIfNot(IsSetWord32(right_instance_type, kThinStringTagBit), &allocate);
+  {
+    second = LoadObjectField<String>(right, offsetof(ThinString, actual_));
+    Goto(&allocate);
+  }
+
+  BIND(&allocate);
   // Determine the resulting ConsString map to use depending on whether
   // any of {left} or {right} has two byte encoding.
-  STATIC_ASSERT(kOneByteStringTag != 0);
-  STATIC_ASSERT(kTwoByteStringTag == 0);
+  static_assert(kOneByteStringTag != 0);
+  static_assert(kTwoByteStringTag == 0);
   TNode<Int32T> combined_instance_type =
       Word32And(left_instance_type, right_instance_type);
   TNode<Map> result_map = CAST(Select<Object>(
       IsSetWord32(combined_instance_type, kStringEncodingMask),
       [=] { return ConsOneByteStringMapConstant(); },
-      [=] { return ConsStringMapConstant(); }));
-  TNode<HeapObject> result = AllocateInNewSpace(ConsString::kSize);
+      [=] { return ConsTwoByteStringMapConstant(); }));
+  TNode<HeapObject> result = AllocateInNewSpace(sizeof(ConsString));
   StoreMapNoWriteBarrier(result, result_map);
-  StoreObjectFieldNoWriteBarrier(result, ConsString::kLengthOffset, length);
-  StoreObjectFieldNoWriteBarrier(result, ConsString::kRawHashFieldOffset,
+  StoreObjectFieldNoWriteBarrier(result, offsetof(ConsString, length_), length);
+  StoreObjectFieldNoWriteBarrier(result, offsetof(ConsString, raw_hash_field_),
                                  Int32Constant(String::kEmptyHashField));
-  StoreObjectFieldNoWriteBarrier(result, ConsString::kFirstOffset, left);
-  StoreObjectFieldNoWriteBarrier(result, ConsString::kSecondOffset, right);
+  StoreObjectFieldNoWriteBarrier(result, offsetof(ConsString, first_),
+                                 first.value());
+  StoreObjectFieldNoWriteBarrier(result, offsetof(ConsString, second_),
+                                 second.value());
   return CAST(result);
 }
 
@@ -345,19 +486,18 @@ TNode<String> StringBuiltinsAssembler::StringAdd(
 
   TVARIABLE(String, result);
   Label check_right(this), runtime(this, Label::kDeferred), cons(this),
-      done(this, &result), done_native(this, &result);
-  Counters* counters = isolate()->counters();
+      done(this, &result);
 
   TNode<Uint32T> left_length = LoadStringLengthAsWord32(left);
   GotoIfNot(Word32Equal(left_length, Uint32Constant(0)), &check_right);
   result = right;
-  Goto(&done_native);
+  Goto(&done);
 
   BIND(&check_right);
   TNode<Uint32T> right_length = LoadStringLengthAsWord32(right);
   GotoIfNot(Word32Equal(right_length, Uint32Constant(0)), &cons);
   result = left;
-  Goto(&done_native);
+  Goto(&done);
 
   BIND(&cons);
   {
@@ -378,7 +518,7 @@ TNode<String> StringBuiltinsAssembler::StringAdd(
 
     result =
         AllocateConsString(new_length, var_left.value(), var_right.value());
-    Goto(&done_native);
+    Goto(&done);
 
     BIND(&non_cons);
 
@@ -412,7 +552,7 @@ TNode<String> StringBuiltinsAssembler::StringAdd(
     CopyStringCharacters(var_right.value(), result.value(), IntPtrConstant(0),
                          word_left_length, word_right_length,
                          String::ONE_BYTE_ENCODING, String::ONE_BYTE_ENCODING);
-    Goto(&done_native);
+    Goto(&done);
 
     BIND(&two_byte);
     {
@@ -426,7 +566,7 @@ TNode<String> StringBuiltinsAssembler::StringAdd(
                            word_left_length, word_right_length,
                            String::TWO_BYTE_ENCODING,
                            String::TWO_BYTE_ENCODING);
-      Goto(&done_native);
+      Goto(&done);
     }
 
     BIND(&slow);
@@ -440,12 +580,6 @@ TNode<String> StringBuiltinsAssembler::StringAdd(
   BIND(&runtime);
   {
     result = CAST(CallRuntime(Runtime::kStringAdd, context, left, right));
-    Goto(&done);
-  }
-
-  BIND(&done_native);
-  {
-    IncrementCounter(counters->string_add_native(), 1);
     Goto(&done);
   }
 
@@ -463,7 +597,7 @@ void StringBuiltinsAssembler::BranchIfCanDerefIndirectString(
          cannot_deref);
   // Cons string.
   TNode<String> rhs =
-      LoadObjectField<String>(string, ConsString::kSecondOffset);
+      LoadObjectField<String>(string, offsetof(ConsString, second_));
   GotoIf(IsEmptyString(rhs), can_deref);
   Goto(cannot_deref);
 }
@@ -480,10 +614,10 @@ void StringBuiltinsAssembler::DerefIndirectString(TVariable<String>* var_string,
   BIND(&can_deref);
 #endif  // DEBUG
 
-  STATIC_ASSERT(static_cast<int>(ThinString::kActualOffset) ==
-                static_cast<int>(ConsString::kFirstOffset));
-  *var_string =
-      LoadObjectField<String>(var_string->value(), ThinString::kActualOffset);
+  static_assert(static_cast<int>(offsetof(ThinString, actual_)) ==
+                static_cast<int>(offsetof(ConsString, first_)));
+  *var_string = LoadObjectField<String>(var_string->value(),
+                                        offsetof(ThinString, actual_));
 }
 
 void StringBuiltinsAssembler::MaybeDerefIndirectString(
@@ -530,9 +664,9 @@ TNode<String> StringBuiltinsAssembler::DerefIndirectString(
   Label deref(this);
   BranchIfCanDerefIndirectString(string, instance_type, &deref, cannot_deref);
   BIND(&deref);
-  STATIC_ASSERT(static_cast<int>(ThinString::kActualOffset) ==
-                static_cast<int>(ConsString::kFirstOffset));
-  return LoadObjectField<String>(string, ThinString::kActualOffset);
+  static_assert(static_cast<int>(offsetof(ThinString, actual_)) ==
+                static_cast<int>(offsetof(ConsString, first_)));
+  return LoadObjectField<String>(string, offsetof(ThinString, actual_));
 }
 
 TF_BUILTIN(StringAdd_CheckNone, StringBuiltinsAssembler) {
@@ -552,7 +686,7 @@ TF_BUILTIN(SubString, StringBuiltinsAssembler) {
 }
 
 void StringBuiltinsAssembler::GenerateStringRelationalComparison(
-    TNode<String> left, TNode<String> right, Operation op) {
+    TNode<String> left, TNode<String> right, StringComparison op) {
   TVARIABLE(String, var_left, left);
   TVARIABLE(String, var_right, right);
 
@@ -590,59 +724,90 @@ void StringBuiltinsAssembler::GenerateStringRelationalComparison(
 
   BIND(&if_bothonebyteseqstrings);
   {
-    // Load the length of {lhs} and {rhs}.
     TNode<IntPtrT> lhs_length = LoadStringLengthAsWord(lhs);
     TNode<IntPtrT> rhs_length = LoadStringLengthAsWord(rhs);
 
-    // Determine the minimum length.
     TNode<IntPtrT> length = IntPtrMin(lhs_length, rhs_length);
 
-    // Compute the effective offset of the first character.
-    TNode<IntPtrT> begin =
-        IntPtrConstant(SeqOneByteString::kHeaderSize - kHeapObjectTag);
-
-    // Compute the first offset after the string from the length.
-    TNode<IntPtrT> end = IntPtrAdd(begin, length);
-
     // Loop over the {lhs} and {rhs} strings to see if they are equal.
+    constexpr int kBeginOffset =
+        OFFSET_OF_DATA_START(SeqOneByteString) - kHeapObjectTag;
+    TNode<IntPtrT> begin = IntPtrConstant(kBeginOffset);
+    TNode<IntPtrT> end = IntPtrAdd(begin, length);
     TVARIABLE(IntPtrT, var_offset, begin);
-    Label loop(this, &var_offset);
-    Goto(&loop);
-    BIND(&loop);
+    Label chunk_loop(this, &var_offset), char_loop(this, &var_offset);
+    Label if_done(this);
+
+    // Unrolled first iteration.
+    GotoIf(IntPtrEqual(length, IntPtrConstant(0)), &if_done);
+
+    constexpr int kChunkSize = kTaggedSize;
+    static_assert(
+        kChunkSize == ElementSizeInBytes(MachineRepresentation::kWord64) ||
+        kChunkSize == ElementSizeInBytes(MachineRepresentation::kWord32));
+    if (kChunkSize == ElementSizeInBytes(MachineRepresentation::kWord32)) {
+      TNode<Uint32T> lhs_chunk =
+          Load<Uint32T>(lhs, IntPtrConstant(kBeginOffset));
+      TNode<Uint32T> rhs_chunk =
+          Load<Uint32T>(rhs, IntPtrConstant(kBeginOffset));
+      GotoIf(Word32NotEqual(lhs_chunk, rhs_chunk), &char_loop);
+    } else {
+      TNode<Uint64T> lhs_chunk =
+          Load<Uint64T>(lhs, IntPtrConstant(kBeginOffset));
+      TNode<Uint64T> rhs_chunk =
+          Load<Uint64T>(rhs, IntPtrConstant(kBeginOffset));
+      GotoIf(Word64NotEqual(lhs_chunk, rhs_chunk), &char_loop);
+    }
+
+    var_offset = IntPtrConstant(OFFSET_OF_DATA_START(SeqOneByteString) -
+                                kHeapObjectTag + kChunkSize);
+
+    Goto(&chunk_loop);
+
+    // Try skipping over chunks of kChunkSize identical characters.
+    // This depends on padding (between strings' lengths and the actual end
+    // of the heap object) being zeroed out.
+    BIND(&chunk_loop);
     {
-      // Check if {offset} equals {end}.
-      Label if_done(this), if_notdone(this);
-      Branch(WordEqual(var_offset.value(), end), &if_done, &if_notdone);
+      GotoIf(IntPtrGreaterThanOrEqual(var_offset.value(), end), &if_done);
 
-      BIND(&if_notdone);
-      {
-        // Load the next characters from {lhs} and {rhs}.
-        TNode<Uint8T> lhs_value = Load<Uint8T>(lhs, var_offset.value());
-        TNode<Uint8T> rhs_value = Load<Uint8T>(rhs, var_offset.value());
-
-        // Check if the characters match.
-        Label if_valueissame(this), if_valueisnotsame(this);
-        Branch(Word32Equal(lhs_value, rhs_value), &if_valueissame,
-               &if_valueisnotsame);
-
-        BIND(&if_valueissame);
-        {
-          // Advance to next character.
-          var_offset = IntPtrAdd(var_offset.value(), IntPtrConstant(1));
-        }
-        Goto(&loop);
-
-        BIND(&if_valueisnotsame);
-        Branch(Uint32LessThan(lhs_value, rhs_value), &if_less, &if_greater);
+      if (kChunkSize == ElementSizeInBytes(MachineRepresentation::kWord32)) {
+        TNode<Uint32T> lhs_chunk = Load<Uint32T>(lhs, var_offset.value());
+        TNode<Uint32T> rhs_chunk = Load<Uint32T>(rhs, var_offset.value());
+        GotoIf(Word32NotEqual(lhs_chunk, rhs_chunk), &char_loop);
+      } else {
+        TNode<Uint64T> lhs_chunk = Load<Uint64T>(lhs, var_offset.value());
+        TNode<Uint64T> rhs_chunk = Load<Uint64T>(rhs, var_offset.value());
+        GotoIf(Word64NotEqual(lhs_chunk, rhs_chunk), &char_loop);
       }
 
-      BIND(&if_done);
-      {
-        // All characters up to the min length are equal, decide based on
-        // string length.
-        GotoIf(IntPtrEqual(lhs_length, rhs_length), &if_equal);
-        Branch(IntPtrLessThan(lhs_length, rhs_length), &if_less, &if_greater);
-      }
+      var_offset = IntPtrAdd(var_offset.value(), IntPtrConstant(kChunkSize));
+      Goto(&chunk_loop);
+    }
+
+    BIND(&char_loop);
+    {
+      GotoIf(WordEqual(var_offset.value(), end), &if_done);
+
+      TNode<Uint8T> lhs_char = Load<Uint8T>(lhs, var_offset.value());
+      TNode<Uint8T> rhs_char = Load<Uint8T>(rhs, var_offset.value());
+
+      Label if_charsdiffer(this);
+      GotoIf(Word32NotEqual(lhs_char, rhs_char), &if_charsdiffer);
+
+      var_offset = IntPtrAdd(var_offset.value(), IntPtrConstant(1));
+      Goto(&char_loop);
+
+      BIND(&if_charsdiffer);
+      Branch(Uint32LessThan(lhs_char, rhs_char), &if_less, &if_greater);
+    }
+
+    BIND(&if_done);
+    {
+      // All characters up to the min length are equal, decide based on
+      // string length.
+      GotoIf(IntPtrEqual(lhs_length, rhs_length), &if_equal);
+      Branch(IntPtrLessThan(lhs_length, rhs_length), &if_less, &if_greater);
     }
   }
 
@@ -653,102 +818,121 @@ void StringBuiltinsAssembler::GenerateStringRelationalComparison(
                               rhs_instance_type, &restart);
     // TODO(bmeurer): Add support for two byte string relational comparisons.
     switch (op) {
-      case Operation::kLessThan:
+      case StringComparison::kLessThan:
         TailCallRuntime(Runtime::kStringLessThan, NoContextConstant(), lhs,
                         rhs);
         break;
-      case Operation::kLessThanOrEqual:
+      case StringComparison::kLessThanOrEqual:
         TailCallRuntime(Runtime::kStringLessThanOrEqual, NoContextConstant(),
                         lhs, rhs);
         break;
-      case Operation::kGreaterThan:
+      case StringComparison::kGreaterThan:
         TailCallRuntime(Runtime::kStringGreaterThan, NoContextConstant(), lhs,
                         rhs);
         break;
-      case Operation::kGreaterThanOrEqual:
+      case StringComparison::kGreaterThanOrEqual:
         TailCallRuntime(Runtime::kStringGreaterThanOrEqual, NoContextConstant(),
                         lhs, rhs);
         break;
-      default:
-        UNREACHABLE();
+      case StringComparison::kCompare:
+        TailCallRuntime(Runtime::kStringCompare, NoContextConstant(), lhs, rhs);
+        break;
     }
   }
 
   BIND(&if_less);
   switch (op) {
-    case Operation::kLessThan:
-    case Operation::kLessThanOrEqual:
+    case StringComparison::kLessThan:
+    case StringComparison::kLessThanOrEqual:
       Return(TrueConstant());
       break;
 
-    case Operation::kGreaterThan:
-    case Operation::kGreaterThanOrEqual:
+    case StringComparison::kGreaterThan:
+    case StringComparison::kGreaterThanOrEqual:
       Return(FalseConstant());
       break;
-    default:
-      UNREACHABLE();
+
+    case StringComparison::kCompare:
+      Return(SmiConstant(-1));
+      break;
   }
 
   BIND(&if_equal);
   switch (op) {
-    case Operation::kLessThan:
-    case Operation::kGreaterThan:
+    case StringComparison::kLessThan:
+    case StringComparison::kGreaterThan:
       Return(FalseConstant());
       break;
 
-    case Operation::kLessThanOrEqual:
-    case Operation::kGreaterThanOrEqual:
+    case StringComparison::kLessThanOrEqual:
+    case StringComparison::kGreaterThanOrEqual:
       Return(TrueConstant());
       break;
-    default:
-      UNREACHABLE();
+
+    case StringComparison::kCompare:
+      Return(SmiConstant(0));
+      break;
   }
 
   BIND(&if_greater);
   switch (op) {
-    case Operation::kLessThan:
-    case Operation::kLessThanOrEqual:
+    case StringComparison::kLessThan:
+    case StringComparison::kLessThanOrEqual:
       Return(FalseConstant());
       break;
 
-    case Operation::kGreaterThan:
-    case Operation::kGreaterThanOrEqual:
+    case StringComparison::kGreaterThan:
+    case StringComparison::kGreaterThanOrEqual:
       Return(TrueConstant());
       break;
-    default:
-      UNREACHABLE();
+
+    case StringComparison::kCompare:
+      Return(SmiConstant(1));
+      break;
   }
 }
 
 TF_BUILTIN(StringEqual, StringBuiltinsAssembler) {
   auto left = Parameter<String>(Descriptor::kLeft);
   auto right = Parameter<String>(Descriptor::kRight);
-  GenerateStringEqual(left, right);
+  auto length = UncheckedParameter<IntPtrT>(Descriptor::kLength);
+  // Callers must handle the case where {lhs} and {rhs} refer to the same
+  // String object.
+  CSA_DCHECK(this, TaggedNotEqual(left, right));
+  GenerateStringEqual(left, right, length);
 }
 
 TF_BUILTIN(StringLessThan, StringBuiltinsAssembler) {
   auto left = Parameter<String>(Descriptor::kLeft);
   auto right = Parameter<String>(Descriptor::kRight);
-  GenerateStringRelationalComparison(left, right, Operation::kLessThan);
+  GenerateStringRelationalComparison(left, right, StringComparison::kLessThan);
 }
 
 TF_BUILTIN(StringLessThanOrEqual, StringBuiltinsAssembler) {
   auto left = Parameter<String>(Descriptor::kLeft);
   auto right = Parameter<String>(Descriptor::kRight);
-  GenerateStringRelationalComparison(left, right, Operation::kLessThanOrEqual);
+  GenerateStringRelationalComparison(left, right,
+                                     StringComparison::kLessThanOrEqual);
 }
 
 TF_BUILTIN(StringGreaterThan, StringBuiltinsAssembler) {
   auto left = Parameter<String>(Descriptor::kLeft);
   auto right = Parameter<String>(Descriptor::kRight);
-  GenerateStringRelationalComparison(left, right, Operation::kGreaterThan);
+  GenerateStringRelationalComparison(left, right,
+                                     StringComparison::kGreaterThan);
+}
+
+TF_BUILTIN(StringCompare, StringBuiltinsAssembler) {
+  auto left = Parameter<String>(Descriptor::kLeft);
+  auto right = Parameter<String>(Descriptor::kRight);
+  GenerateStringRelationalComparison(left, right, StringComparison::kCompare);
 }
 
 TF_BUILTIN(StringGreaterThanOrEqual, StringBuiltinsAssembler) {
   auto left = Parameter<String>(Descriptor::kLeft);
   auto right = Parameter<String>(Descriptor::kRight);
   GenerateStringRelationalComparison(left, right,
-                                     Operation::kGreaterThanOrEqual);
+                                     StringComparison::kGreaterThanOrEqual);
 }
 
 TF_BUILTIN(StringFromCodePointAt, StringBuiltinsAssembler) {
@@ -779,7 +963,7 @@ TF_BUILTIN(StringFromCharCode, StringBuiltinsAssembler) {
   TNode<Uint32T> unsigned_argc =
       Unsigned(TruncateIntPtrToInt32(arguments.GetLengthWithoutReceiver()));
   // Check if we have exactly one argument (plus the implicit receiver), i.e.
-  // if the parent frame is not an arguments adaptor frame.
+  // if the parent frame is not an inlined arguments frame.
   Label if_oneargument(this), if_notoneargument(this);
   Branch(IntPtrEqual(arguments.GetLengthWithoutReceiver(), IntPtrConstant(1)),
          &if_oneargument, &if_notoneargument);
@@ -821,7 +1005,7 @@ TF_BUILTIN(StringFromCharCode, StringBuiltinsAssembler) {
       // The {code16} fits into the SeqOneByteString {one_byte_result}.
       TNode<IntPtrT> offset = ElementOffsetFromIndex(
           var_max_index.value(), UINT8_ELEMENTS,
-          SeqOneByteString::kHeaderSize - kHeapObjectTag);
+          OFFSET_OF_DATA_START(SeqOneByteString) - kHeapObjectTag);
       StoreNoWriteBarrier(MachineRepresentation::kWord8, one_byte_result,
                           offset, code16);
       var_max_index = IntPtrAdd(var_max_index.value(), IntPtrConstant(1));
@@ -843,9 +1027,9 @@ TF_BUILTIN(StringFromCharCode, StringBuiltinsAssembler) {
                          String::TWO_BYTE_ENCODING);
 
     // Write the character that caused the 8-bit to 16-bit fault.
-    TNode<IntPtrT> max_index_offset =
-        ElementOffsetFromIndex(var_max_index.value(), UINT16_ELEMENTS,
-                               SeqTwoByteString::kHeaderSize - kHeapObjectTag);
+    TNode<IntPtrT> max_index_offset = ElementOffsetFromIndex(
+        var_max_index.value(), UINT16_ELEMENTS,
+        OFFSET_OF_DATA_START(SeqTwoByteString) - kHeapObjectTag);
     StoreNoWriteBarrier(MachineRepresentation::kWord16, two_byte_result,
                         max_index_offset, code16);
     var_max_index = IntPtrAdd(var_max_index.value(), IntPtrConstant(1));
@@ -862,7 +1046,7 @@ TF_BUILTIN(StringFromCharCode, StringBuiltinsAssembler) {
 
           TNode<IntPtrT> offset = ElementOffsetFromIndex(
               var_max_index.value(), UINT16_ELEMENTS,
-              SeqTwoByteString::kHeaderSize - kHeapObjectTag);
+              OFFSET_OF_DATA_START(SeqTwoByteString) - kHeapObjectTag);
           StoreNoWriteBarrier(MachineRepresentation::kWord16, two_byte_result,
                               offset, code16);
           var_max_index = IntPtrAdd(var_max_index.value(), IntPtrConstant(1));
@@ -878,12 +1062,24 @@ void StringBuiltinsAssembler::MaybeCallFunctionAtSymbol(
     const TNode<Object> maybe_string, Handle<Symbol> symbol,
     DescriptorIndexNameValue additional_property_to_check,
     const NodeFunction0& regexp_call, const NodeFunction1& generic_call) {
-  Label out(this);
+  Label out(this), no_protector(this), object_is_heapobject(this);
   Label get_property_lookup(this);
 
+  // The protector guarantees that that the Number and String wrapper
+  // prototypes do not contain Symbol.{matchAll|replace|split} (aka.
+  // @@matchAll, @@replace @@split).
+  GotoIf(IsNumberStringNotRegexpLikeProtectorCellInvalid(), &no_protector);
+  // Smi is safe thanks to the protector.
+  GotoIf(TaggedIsSmi(object), &out);
+  // String is safe thanks to the protector.
+  GotoIf(IsString(CAST(object)), &out);
+  // HeapNumber is safe thanks to the protector.
+  Branch(IsHeapNumber(CAST(object)), &out, &object_is_heapobject);
+
+  BIND(&no_protector);
   // Smis have to go through the GetProperty lookup in case Number.prototype or
   // Object.prototype was modified.
-  GotoIf(TaggedIsSmi(object), &get_property_lookup);
+  Branch(TaggedIsSmi(object), &get_property_lookup, &object_is_heapobject);
 
   // Take the fast path for RegExps.
   // There's two conditions: {object} needs to be a fast regexp, and
@@ -892,6 +1088,7 @@ void StringBuiltinsAssembler::MaybeCallFunctionAtSymbol(
   {
     Label stub_call(this), slow_lookup(this);
 
+    BIND(&object_is_heapobject);
     TNode<HeapObject> heap_object = CAST(object);
 
     GotoIf(TaggedIsSmi(maybe_string), &slow_lookup);
@@ -939,7 +1136,7 @@ void StringBuiltinsAssembler::MaybeCallFunctionAtSymbol(
 
 const TNode<Smi> StringBuiltinsAssembler::IndexOfDollarChar(
     const TNode<Context> context, const TNode<String> string) {
-  const TNode<String> dollar_string = HeapConstant(
+  const TNode<String> dollar_string = HeapConstantNoHole(
       isolate()->factory()->LookupSingleCharacterStringFromCode('$'));
   const TNode<Smi> dollar_ix = CAST(CallBuiltin(
       Builtin::kStringIndexOf, context, string, dollar_string, SmiConstant(0)));
@@ -1000,19 +1197,25 @@ TF_BUILTIN(StringPrototypeReplace, StringBuiltinsAssembler) {
   RequireObjectCoercible(context, receiver, "String.prototype.replace");
 
   // Redirect to replacer method if {search[@@replace]} is not undefined.
+  {
+    Label next(this);
 
-  MaybeCallFunctionAtSymbol(
-      context, search, receiver, isolate()->factory()->replace_symbol(),
-      DescriptorIndexNameValue{JSRegExp::kSymbolReplaceFunctionDescriptorIndex,
-                               RootIndex::kreplace_symbol,
-                               Context::REGEXP_REPLACE_FUNCTION_INDEX},
-      [=]() {
-        Return(CallBuiltin(Builtin::kRegExpReplace, context, search, receiver,
-                           replace));
-      },
-      [=](TNode<Object> fn) {
-        Return(Call(context, fn, search, receiver, replace));
-      });
+    MaybeCallFunctionAtSymbol(
+        context, search, receiver, isolate()->factory()->replace_symbol(),
+        DescriptorIndexNameValue{
+            JSRegExp::kSymbolReplaceFunctionDescriptorIndex,
+            RootIndex::kreplace_symbol, Context::REGEXP_REPLACE_FUNCTION_INDEX},
+        [=]() {
+          Return(CallBuiltin(Builtin::kRegExpReplace, context, search, receiver,
+                             replace));
+        },
+        [=](TNode<Object> fn) {
+          Return(Call(context, fn, search, receiver, replace));
+        });
+    Goto(&next);
+
+    BIND(&next);
+  }
 
   // Convert {receiver} and {search} to strings.
 
@@ -1270,13 +1473,13 @@ TNode<JSArray> StringBuiltinsAssembler::StringToArray(
     GotoIfNot(IsOneByteStringInstanceType(to_direct.instance_type()),
               &call_runtime);
 
-    TNode<FixedArray> elements = CAST(AllocateFixedArray(
-        PACKED_ELEMENTS, length, AllocationFlag::kAllowLargeObjectAllocation));
+    TNode<FixedArray> elements =
+        CAST(AllocateFixedArray(PACKED_ELEMENTS, length));
     // Don't allocate anything while {string_data} is live!
     TNode<RawPtrT> string_data =
         to_direct.PointerToData(&fill_thehole_and_call_runtime);
     TNode<IntPtrT> string_data_offset = to_direct.offset();
-    TNode<FixedArray> cache = SingleCharacterStringCacheConstant();
+    TNode<FixedArray> cache = SingleCharacterStringTableConstant();
 
     BuildFastLoop<IntPtrT>(
         IntPtrConstant(0), length,
@@ -1292,13 +1495,11 @@ TNode<JSArray> StringBuiltinsAssembler::StringToArray(
           TNode<UintPtrT> code_index = ChangeUint32ToWord(char_code);
           TNode<Object> entry = LoadFixedArrayElement(cache, code_index);
 
-          // If we cannot find a char in the cache, fill the hole for the fixed
-          // array, and call runtime.
-          GotoIf(IsUndefined(entry), &fill_thehole_and_call_runtime);
+          CSA_DCHECK(this, Word32BinaryNot(IsUndefined(entry)));
 
           StoreFixedArrayElement(elements, index, entry);
         },
-        1, IndexAdvanceMode::kPost);
+        1, LoopUnrollingMode::kNo, IndexAdvanceMode::kPost);
 
     TNode<Map> array_map = LoadJSArrayElementsMap(PACKED_ELEMENTS, context);
     result_array = AllocateJSArray(array_map, elements, length_smi);
@@ -1501,6 +1702,61 @@ TNode<Int32T> StringBuiltinsAssembler::LoadSurrogatePairAt(
   return var_result.value();
 }
 
+TNode<BoolT> StringBuiltinsAssembler::HasUnpairedSurrogate(TNode<String> string,
+                                                           Label* if_indirect) {
+  TNode<Uint16T> instance_type = LoadInstanceType(string);
+  CSA_DCHECK(this, Word32Equal(Word32And(instance_type,
+                                         Int32Constant(kStringEncodingMask)),
+                               Int32Constant(kTwoByteStringTag)));
+  GotoIfNot(Word32Equal(Word32And(instance_type,
+                                  Int32Constant(kIsIndirectStringMask |
+                                                kUncachedExternalStringMask)),
+                        Int32Constant(0)),
+            if_indirect);
+
+  TNode<RawPtrT> string_data = DirectStringData(string, instance_type);
+  TNode<IntPtrT> length = LoadStringLengthAsWord(string);
+
+  const TNode<ExternalReference> has_unpaired_surrogate =
+      ExternalConstant(ExternalReference::has_unpaired_surrogate());
+  return UncheckedCast<BoolT>(
+      CallCFunction(has_unpaired_surrogate, MachineType::Uint32(),
+                    std::make_pair(MachineType::Pointer(), string_data),
+                    std::make_pair(MachineType::IntPtr(), length)));
+}
+
+void StringBuiltinsAssembler::ReplaceUnpairedSurrogates(TNode<String> source,
+                                                        TNode<String> dest,
+                                                        Label* if_indirect) {
+  TNode<Uint16T> source_instance_type = LoadInstanceType(source);
+  CSA_DCHECK(this, Word32Equal(Word32And(source_instance_type,
+                                         Int32Constant(kStringEncodingMask)),
+                               Int32Constant(kTwoByteStringTag)));
+  GotoIfNot(Word32Equal(Word32And(source_instance_type,
+                                  Int32Constant(kIsIndirectStringMask |
+                                                kUncachedExternalStringMask)),
+                        Int32Constant(0)),
+            if_indirect);
+
+  TNode<RawPtrT> source_data = DirectStringData(source, source_instance_type);
+  // The destination string is a freshly allocated SeqString, and so is always
+  // direct.
+  TNode<Uint16T> dest_instance_type = LoadInstanceType(dest);
+  CSA_DCHECK(this, Word32Equal(Word32And(dest_instance_type,
+                                         Int32Constant(kStringEncodingMask)),
+                               Int32Constant(kTwoByteStringTag)));
+  TNode<RawPtrT> dest_data = DirectStringData(dest, dest_instance_type);
+  TNode<IntPtrT> length = LoadStringLengthAsWord(source);
+  CSA_DCHECK(this, IntPtrEqual(length, LoadStringLengthAsWord(dest)));
+
+  const TNode<ExternalReference> replace_unpaired_surrogates =
+      ExternalConstant(ExternalReference::replace_unpaired_surrogates());
+  CallCFunction(replace_unpaired_surrogates, MachineType::Pointer(),
+                std::make_pair(MachineType::Pointer(), source_data),
+                std::make_pair(MachineType::Pointer(), dest_data),
+                std::make_pair(MachineType::IntPtr(), length));
+}
+
 void StringBuiltinsAssembler::BranchIfStringPrimitiveWithNoCustomIteration(
     TNode<Object> object, TNode<Context> context, Label* if_true,
     Label* if_false) {
@@ -1510,7 +1766,7 @@ void StringBuiltinsAssembler::BranchIfStringPrimitiveWithNoCustomIteration(
   // Check that the String iterator hasn't been modified in a way that would
   // affect iteration.
   TNode<PropertyCell> protector_cell = StringIteratorProtectorConstant();
-  DCHECK(isolate()->heap()->string_iterator_protector().IsPropertyCell());
+  DCHECK(i::IsPropertyCell(isolate()->heap()->string_iterator_protector()));
   Branch(
       TaggedEqual(LoadObjectField(protector_cell, PropertyCell::kValueOffset),
                   SmiConstant(Protectors::kProtectorValid)),
@@ -1539,15 +1795,15 @@ void StringBuiltinsAssembler::CopyStringCharacters(
   // faked sequential strings when handling external subject strings.
   bool from_one_byte = from_encoding == String::ONE_BYTE_ENCODING;
   bool to_one_byte = to_encoding == String::ONE_BYTE_ENCODING;
-  DCHECK_IMPLIES(to_one_byte, from_one_byte);
   Comment("CopyStringCharacters ",
           from_one_byte ? "ONE_BYTE_ENCODING" : "TWO_BYTE_ENCODING", " -> ",
           to_one_byte ? "ONE_BYTE_ENCODING" : "TWO_BYTE_ENCODING");
 
   ElementsKind from_kind = from_one_byte ? UINT8_ELEMENTS : UINT16_ELEMENTS;
   ElementsKind to_kind = to_one_byte ? UINT8_ELEMENTS : UINT16_ELEMENTS;
-  STATIC_ASSERT(SeqOneByteString::kHeaderSize == SeqTwoByteString::kHeaderSize);
-  int header_size = SeqOneByteString::kHeaderSize - kHeapObjectTag;
+  static_assert(OFFSET_OF_DATA_START(SeqOneByteString) ==
+                OFFSET_OF_DATA_START(SeqTwoByteString));
+  int header_size = OFFSET_OF_DATA_START(SeqOneByteString) - kHeapObjectTag;
   TNode<IntPtrT> from_offset =
       ElementOffsetFromIndex(from_index, from_kind, header_size);
   TNode<IntPtrT> to_offset =
@@ -1556,7 +1812,7 @@ void StringBuiltinsAssembler::CopyStringCharacters(
       ElementOffsetFromIndex(character_count, from_kind);
   TNode<IntPtrT> limit_offset = IntPtrAdd(from_offset, byte_count);
 
-  // Prepare the fast loop
+  // Prepare the fast loop.
   MachineType type =
       from_one_byte ? MachineType::Uint8() : MachineType::Uint16();
   MachineRepresentation rep = to_one_byte ? MachineRepresentation::kWord8
@@ -1575,14 +1831,23 @@ void StringBuiltinsAssembler::CopyStringCharacters(
   BuildFastLoop<IntPtrT>(
       vars, from_offset, limit_offset,
       [&](TNode<IntPtrT> offset) {
+        compiler::Node* value = Load(type, from_string, offset);
+#if DEBUG
+        // Copying two-byte characters to one-byte is okay if callers have
+        // checked that this loses no information.
+        if (v8_flags.debug_code && !from_one_byte && to_one_byte) {
+          CSA_DCHECK(this, Uint32LessThanOrEqual(UncheckedCast<Uint32T>(value),
+                                                 Uint32Constant(0xFF)));
+        }
+#endif
         StoreNoWriteBarrier(rep, to_string,
                             index_same ? offset : current_to_offset.value(),
-                            Load(type, from_string, offset));
+                            value);
         if (!index_same) {
           Increment(&current_to_offset, to_increment);
         }
       },
-      from_increment, IndexAdvanceMode::kPost);
+      from_increment, LoopUnrollingMode::kYes, IndexAdvanceMode::kPost);
 }
 
 // A wrapper around CopyStringCharacters which determines the correct string
@@ -1615,13 +1880,87 @@ TNode<String> StringBuiltinsAssembler::AllocAndCopyStringCharacters(
   // The subject string is a sequential two-byte string.
   BIND(&two_byte_sequential);
   {
-    TNode<String> result = AllocateSeqTwoByteString(
-        Unsigned(TruncateIntPtrToInt32(character_count)));
-    CopyStringCharacters<T>(from, result, from_index, IntPtrConstant(0),
-                            character_count, String::TWO_BYTE_ENCODING,
-                            String::TWO_BYTE_ENCODING);
-    var_result = result;
-    Goto(&end);
+    // Check if the to-be-copied range happens to contain only one-byte
+    // characters, and copy it to a one-byte string if so.
+    // If the range is long enough, we check 8 characters at a time, to reduce
+    // the amount of branching.
+    // For a more readable version of this logic, see {StringFromTwoByteSlice}
+    // in wasm.tq.
+    TNode<IntPtrT> start_offset = ElementOffsetFromIndex(
+        from_index, UINT16_ELEMENTS,
+        OFFSET_OF_DATA_START(SeqTwoByteString) - kHeapObjectTag);
+    TNode<IntPtrT> end_offset = IntPtrAdd(
+        start_offset, ElementOffsetFromIndex(character_count, UINT16_ELEMENTS));
+    TNode<IntPtrT> eight_char_loop_end = IntPtrSub(
+        end_offset, ElementOffsetFromIndex(IntPtrConstant(8), UINT16_ELEMENTS));
+
+    TVARIABLE(IntPtrT, var_cursor, start_offset);
+    TNode<RawPtrT> raw_from;
+    if constexpr (std::is_same_v<T, RawPtrT>) {
+      raw_from = from;
+    } else {
+      raw_from = ReinterpretCast<RawPtrT>(BitcastTaggedToWord(from));
+    }
+    Label first_loop(this, &var_cursor), second_loop(this, &var_cursor);
+    Label twobyte(this);
+    Branch(IntPtrLessThanOrEqual(start_offset, eight_char_loop_end),
+           &first_loop, &second_loop);
+    BIND(&first_loop);
+    {
+      TNode<RawPtrT> chunk = RawPtrAdd(raw_from, var_cursor.value());
+      TNode<Uint32T> c1 = Load<Uint16T>(chunk);
+      TNode<Uint32T> c2 = Load<Uint16T>(chunk, IntPtrConstant(2));
+      TNode<Uint32T> bits = Word32Or(c1, c2);
+      TNode<Uint32T> c3 = Load<Uint16T>(chunk, IntPtrConstant(4));
+      bits = Word32Or(bits, c3);
+      TNode<Uint32T> c4 = Load<Uint16T>(chunk, IntPtrConstant(6));
+      bits = Word32Or(bits, c4);
+      TNode<Uint32T> c5 = Load<Uint16T>(chunk, IntPtrConstant(8));
+      bits = Word32Or(bits, c5);
+      TNode<Uint32T> c6 = Load<Uint16T>(chunk, IntPtrConstant(10));
+      bits = Word32Or(bits, c6);
+      TNode<Uint32T> c7 = Load<Uint16T>(chunk, IntPtrConstant(12));
+      bits = Word32Or(bits, c7);
+      TNode<Uint32T> c8 = Load<Uint16T>(chunk, IntPtrConstant(14));
+      bits = Word32Or(bits, c8);
+      GotoIf(Uint32GreaterThan(bits, Uint32Constant(0xFF)), &twobyte);
+      Increment(&var_cursor, 8 * sizeof(uint16_t));
+      Branch(IntPtrLessThanOrEqual(var_cursor.value(), eight_char_loop_end),
+             &first_loop, &second_loop);
+    }
+
+    BIND(&second_loop);
+    TVARIABLE(Uint32T, var_bits, Uint32Constant(0));
+    VariableList vars({&var_bits}, zone());
+    FastLoopBody<IntPtrT> one_char_loop = [&](TNode<IntPtrT> offset) {
+      TNode<Uint32T> c = Load<Uint16T>(from, offset);
+      var_bits = Word32Or(var_bits.value(), c);
+    };
+    BuildFastLoop<IntPtrT>(vars, var_cursor, var_cursor.value(), end_offset,
+                           one_char_loop, sizeof(uint16_t),
+                           LoopUnrollingMode::kNo, IndexAdvanceMode::kPost);
+    GotoIf(Uint32GreaterThan(var_bits.value(), Uint32Constant(0xFF)), &twobyte);
+    // Fallthrough: only one-byte characters in the to-be-copied range.
+    {
+      TNode<String> result = AllocateSeqOneByteString(
+          Unsigned(TruncateIntPtrToInt32(character_count)));
+      CopyStringCharacters<T>(from, result, from_index, IntPtrConstant(0),
+                              character_count, String::TWO_BYTE_ENCODING,
+                              String::ONE_BYTE_ENCODING);
+      var_result = result;
+      Goto(&end);
+    }
+
+    BIND(&twobyte);
+    {
+      TNode<String> result = AllocateSeqTwoByteString(
+          Unsigned(TruncateIntPtrToInt32(character_count)));
+      CopyStringCharacters<T>(from, result, from_index, IntPtrConstant(0),
+                              character_count, String::TWO_BYTE_ENCODING,
+                              String::TWO_BYTE_ENCODING);
+      var_result = result;
+      Goto(&end);
+    }
   }
 
   BIND(&end);
@@ -1663,7 +2002,7 @@ TNode<String> StringBuiltinsAssembler::SubString(TNode<String> string,
   // encoding at this point.
   Label external_string(this);
   {
-    if (FLAG_string_slices) {
+    if (v8_flags.string_slices) {
       Label next(this);
 
       // Short slice.  Copy instead of slicing.
@@ -1672,10 +2011,6 @@ TNode<String> StringBuiltinsAssembler::SubString(TNode<String> string,
              &next);
 
       // Allocate new sliced string.
-
-      Counters* counters = isolate()->counters();
-      IncrementCounter(counters->sub_string_native(), 1);
-
       Label one_byte_slice(this), two_byte_slice(this);
       Branch(IsOneByteStringInstanceType(to_direct.instance_type()),
              &one_byte_slice, &two_byte_slice);
@@ -1705,10 +2040,6 @@ TNode<String> StringBuiltinsAssembler::SubString(TNode<String> string,
 
     var_result = AllocAndCopyStringCharacters(direct_string, instance_type,
                                               offset, substr_length);
-
-    Counters* counters = isolate()->counters();
-    IncrementCounter(counters->sub_string_native(), 1);
-
     Goto(&end);
   }
 
@@ -1720,9 +2051,6 @@ TNode<String> StringBuiltinsAssembler::SubString(TNode<String> string,
 
     var_result = AllocAndCopyStringCharacters(
         fake_sequential_string, instance_type, offset, substr_length);
-
-    Counters* counters = isolate()->counters();
-    IncrementCounter(counters->sub_string_native(), 1);
 
     Goto(&end);
   }
@@ -1749,10 +2077,6 @@ TNode<String> StringBuiltinsAssembler::SubString(TNode<String> string,
     GotoIf(UintPtrGreaterThan(from, IntPtrConstant(0)), &runtime);
 
     // Return the original string (substr_length == string_length).
-
-    Counters* counters = isolate()->counters();
-    IncrementCounter(counters->sub_string_native(), 1);
-
     var_result = string;
     Goto(&end);
   }

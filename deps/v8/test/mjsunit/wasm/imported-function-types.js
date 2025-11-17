@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-typed-funcref
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 var exporting_module = (function() {
@@ -12,14 +10,14 @@ var exporting_module = (function() {
   var binaryType = builder.addType(kSig_i_ii);
   var unaryType = builder.addType(kSig_i_i);
 
-  builder.addFunction("func1", makeSig([wasmRefType(binaryType)], [kWasmI32])).
-    addBody([kExprI32Const, 42, kExprI32Const, 12, kExprLocalGet, 0,
-             kExprCallRef]).
-    exportFunc();
+  builder.addFunction("func1", makeSig([wasmRefType(binaryType)], [kWasmI32]))
+    .addBody([kExprI32Const, 42, kExprI32Const, 12, kExprLocalGet, 0,
+              kExprCallRef, binaryType])
+    .exportFunc();
 
-  builder.addFunction("func2", makeSig([wasmRefType(unaryType)], [kWasmI32])).
-    addBody([kExprI32Const, 42, kExprLocalGet, 0, kExprCallRef]).
-    exportFunc();
+  builder.addFunction("func2", makeSig([wasmRefType(unaryType)], [kWasmI32]))
+    .addBody([kExprI32Const, 42, kExprLocalGet, 0, kExprCallRef, unaryType])
+    .exportFunc();
 
   return builder.instantiate({});
 })();

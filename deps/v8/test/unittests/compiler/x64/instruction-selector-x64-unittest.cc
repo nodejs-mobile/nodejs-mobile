@@ -4,7 +4,9 @@
 
 #include <limits>
 
+#include "src/codegen/assembler.h"
 #include "src/common/globals.h"
+#include "src/compiler/backend/instruction-codes.h"
 #include "src/compiler/machine-operator.h"
 #include "src/compiler/node-matchers.h"
 #include "src/objects/objects-inl.h"
@@ -2085,6 +2087,7 @@ TEST_F(InstructionSelectorTest, LoadAndWord64ShiftRight32) {
   }
 }
 
+#if V8_ENABLE_WEBASSEMBLY
 // -----------------------------------------------------------------------------
 // SIMD.
 
@@ -2099,7 +2102,7 @@ TEST_F(InstructionSelectorTest, SIMDSplatZero) {
     m.Return(splat);
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kX64S128Zero, s[0]->arch_opcode());
+    EXPECT_EQ(kX64SZero, s[0]->arch_opcode());
     ASSERT_EQ(0U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
@@ -2109,7 +2112,7 @@ TEST_F(InstructionSelectorTest, SIMDSplatZero) {
     m.Return(splat);
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kX64S128Zero, s[0]->arch_opcode());
+    EXPECT_EQ(kX64SZero, s[0]->arch_opcode());
     ASSERT_EQ(0U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
@@ -2119,7 +2122,7 @@ TEST_F(InstructionSelectorTest, SIMDSplatZero) {
     m.Return(splat);
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kX64S128Zero, s[0]->arch_opcode());
+    EXPECT_EQ(kX64SZero, s[0]->arch_opcode());
     ASSERT_EQ(0U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
@@ -2129,13 +2132,12 @@ TEST_F(InstructionSelectorTest, SIMDSplatZero) {
     m.Return(splat);
     Stream s = m.Build();
     ASSERT_EQ(1U, s.size());
-    EXPECT_EQ(kX64S128Zero, s[0]->arch_opcode());
+    EXPECT_EQ(kX64SZero, s[0]->arch_opcode());
     ASSERT_EQ(0U, s[0]->InputCount());
     EXPECT_EQ(1U, s[0]->OutputCount());
   }
 }
 
-#if V8_ENABLE_WEBASSEMBLY
 struct ArchShuffle {
   uint8_t shuffle[kSimd128Size];
   ArchOpcode arch_opcode;
@@ -2369,7 +2371,91 @@ TEST_P(InstructionSelectorSIMDArchShuffleTest, SIMDArchShuffle) {
 INSTANTIATE_TEST_SUITE_P(InstructionSelectorTest,
                          InstructionSelectorSIMDArchShuffleTest,
                          ::testing::ValuesIn(kArchShuffles));
-#endif  // V8_ENABLE_WEBASSEMBLY
+
+struct ArchShuffle256 {
+  uint8_t shuffle[kSimd256Size];
+  ArchOpcode arch_opcode;
+  size_t input_count;
+};
+
+static constexpr ArchShuffle256 kArchShuffles256[] = {
+    {{4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 0,  1,  2,  3,
+      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 16, 17, 18, 19},
+     kX64Vpshufd,
+     2}};
+
+using InstructionSelectorSIMDArchShuffle256Test =
+    InstructionSelectorTestWithParam<ArchShuffle256>;
+
+TEST_P(InstructionSelectorSIMDArchShuffle256Test, SIMDArchShuffle256) {
+  MachineType type = MachineType::Simd128();
+  {
+    // Tests various shuffle optimizations
+    StreamBuilder m(this, type, type, type);
+    auto param = GetParam();
+    auto shuffle = param.shuffle;
+    const Operator* op = m.machine()->I8x32Shuffle(shuffle);
+    Node* n = m.AddNode(op, m.Parameter(0), m.Parameter(1));
+    m.Return(n);
+    Stream s = m.Build();
+    ASSERT_EQ(1U, s.size());
+    EXPECT_EQ(param.arch_opcode, s[0]->arch_opcode());
+    ASSERT_EQ(param.input_count, s[0]->InputCount());
+    EXPECT_EQ(1U, s[0]->OutputCount());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(InstructionSelectorTest,
+                         InstructionSelectorSIMDArchShuffle256Test,
+                         ::testing::ValuesIn(kArchShuffles256));
+
+struct ShuffleWithZeroInput {
+  uint8_t shuffle_mask[kSimd128Size];
+  ArchOpcode arch_opcode;
+  size_t input_count;
+};
+
+static constexpr ShuffleWithZeroInput kShuffleWithZeroInput[] = {
+    // These are matched by TryMatchByteToDwordZeroExtend.
+    {
+        {16, 1, 2, 3, 17, 4, 5, 6, 18, 7, 8, 9, 19, 10, 11, 12},
+        kX64I32X4ShiftZeroExtendI8x16,
+        2,
+    },
+    // Generic shuffle that uses one zero input.
+    {
+        {16, 1, 2, 3, 17, 4, 5, 6, 18, 7, 8, 9, 19, 20, 21, 22},
+        kX64I8x16Shuffle,
+        5,
+    },
+};
+
+using InstructionSelectorSIMDShuffleWithZeroInputTest =
+    InstructionSelectorTestWithParam<ShuffleWithZeroInput>;
+
+TEST_P(InstructionSelectorSIMDShuffleWithZeroInputTest,
+       SIMDShuffleWithZeroInputTest) {
+  MachineType type = MachineType::Simd128();
+  {
+    // Tests shuffle to packed zero extend optimization
+    uint8_t zeros[kSimd128Size] = {0};
+    StreamBuilder m(this, type, type);
+    auto param = GetParam();
+    const Operator* op = m.machine()->I8x16Shuffle(param.shuffle_mask);
+    Node* const c = m.S128Const(zeros);
+    Node* n = m.AddNode(op, c, m.Parameter(0));
+    m.Return(n);
+    Stream s = m.Build();
+    ASSERT_EQ(1U, s.size());
+    EXPECT_EQ(param.arch_opcode, s[0]->arch_opcode());
+    ASSERT_EQ(param.input_count, s[0]->InputCount());
+    EXPECT_EQ(1U, s[0]->OutputCount());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(InstructionSelectorTest,
+                         InstructionSelectorSIMDShuffleWithZeroInputTest,
+                         ::testing::ValuesIn(kShuffleWithZeroInput));
 
 struct SwizzleConstants {
   uint8_t shuffle[kSimd128Size];
@@ -2430,6 +2516,7 @@ TEST_F(InstructionSelectorTest, F64x2PromoteLowF32x4WithS128Load64Zero) {
   EXPECT_EQ(2U, s[0]->InputCount());
   EXPECT_EQ(1U, s[0]->OutputCount());
 }
+#endif  // V8_ENABLE_WEBASSEMBLY
 
 }  // namespace compiler
 }  // namespace internal

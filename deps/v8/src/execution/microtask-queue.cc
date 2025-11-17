@@ -9,6 +9,7 @@
 
 #include "src/api/api-inl.h"
 #include "src/base/logging.h"
+#include "src/base/optional.h"
 #include "src/execution/isolate.h"
 #include "src/handles/handles-inl.h"
 #include "src/objects/microtask-inl.h"
@@ -71,7 +72,7 @@ MicrotaskQueue::~MicrotaskQueue() {
 Address MicrotaskQueue::CallEnqueueMicrotask(Isolate* isolate,
                                              intptr_t microtask_queue_pointer,
                                              Address raw_microtask) {
-  Microtask microtask = Microtask::cast(Object(raw_microtask));
+  Tagged<Microtask> microtask = Microtask::cast(Tagged<Object>(raw_microtask));
   reinterpret_cast<MicrotaskQueue*>(microtask_queue_pointer)
       ->EnqueueMicrotask(microtask);
   return Smi::zero().ptr();
@@ -97,7 +98,7 @@ void MicrotaskQueue::EnqueueMicrotask(v8::Isolate* v8_isolate,
   EnqueueMicrotask(*microtask);
 }
 
-void MicrotaskQueue::EnqueueMicrotask(Microtask microtask) {
+void MicrotaskQueue::EnqueueMicrotask(Tagged<Microtask> microtask) {
   if (size_ == capacity_) {
     // Keep the capacity of |ring_buffer_| power of 2, so that the JIT
     // implementation can calculate the modulo easily.
@@ -112,15 +113,15 @@ void MicrotaskQueue::EnqueueMicrotask(Microtask microtask) {
 
 void MicrotaskQueue::PerformCheckpointInternal(v8::Isolate* v8_isolate) {
   DCHECK(ShouldPerfomCheckpoint());
-  std::unique_ptr<MicrotasksScope> microtasks_scope;
+  base::Optional<MicrotasksScope> microtasks_scope;
   if (microtasks_policy_ == v8::MicrotasksPolicy::kScoped) {
     // If we're using microtask scopes to schedule microtask execution, V8
     // API calls will check that there's always a microtask scope on the
     // stack. As the microtasks we're about to execute could invoke embedder
     // callbacks which then calls back into V8, we create an artificial
     // microtask scope here to avoid running into the CallDepthScope check.
-    microtasks_scope.reset(new v8::MicrotasksScope(
-        v8_isolate, this, v8::MicrotasksScope::kDoNotRunMicrotasks));
+    microtasks_scope.emplace(v8_isolate, this,
+                             v8::MicrotasksScope::kDoNotRunMicrotasks);
   }
   Isolate* isolate = reinterpret_cast<Isolate*>(v8_isolate);
   RunMicrotasks(isolate);
@@ -148,30 +149,38 @@ class SetIsRunningMicrotasks {
 }  // namespace
 
 int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
+  SetIsRunningMicrotasks scope(&is_running_microtasks_);
+  v8::Isolate::SuppressMicrotaskExecutionScope suppress(
+      reinterpret_cast<v8::Isolate*>(isolate), this);
+
   if (!size()) {
     OnCompleted(isolate);
     return 0;
   }
 
+  // We should not enter V8 if it's marked for termination.
+  DCHECK_IMPLIES(v8_flags.strict_termination_checks,
+                 !isolate->is_execution_terminating());
+
   intptr_t base_count = finished_microtask_count_;
-
   HandleScope handle_scope(isolate);
-  MaybeHandle<Object> maybe_exception;
-
   MaybeHandle<Object> maybe_result;
+
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+  Handle<Object> continuation_preserved_embedder_data = Handle<Object>(
+      isolate->isolate_data()->continuation_preserved_embedder_data(), isolate);
+  isolate->isolate_data()->set_continuation_preserved_embedder_data(
+      ReadOnlyRoots(isolate).undefined_value());
+#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
 
   int processed_microtask_count;
   {
-    SetIsRunningMicrotasks scope(&is_running_microtasks_);
-    v8::Isolate::SuppressMicrotaskExecutionScope suppress(
-        reinterpret_cast<v8::Isolate*>(isolate));
     HandleScopeImplementer::EnteredContextRewindScope rewind_scope(
         isolate->handle_scope_implementer());
     TRACE_EVENT_BEGIN0("v8.execute", "RunMicrotasks");
     {
       TRACE_EVENT_CALL_STATS_SCOPED(isolate, "v8", "V8.RunMicrotasks");
-      maybe_result = Execution::TryRunMicrotasks(isolate, this,
-                                                 &maybe_exception);
+      maybe_result = Execution::TryRunMicrotasks(isolate, this);
       processed_microtask_count =
           static_cast<int>(finished_microtask_count_ - base_count);
     }
@@ -179,18 +188,24 @@ int MicrotaskQueue::RunMicrotasks(Isolate* isolate) {
                      processed_microtask_count);
   }
 
-  // If execution is terminating, clean up and propagate that to TryCatch scope.
-  if (maybe_result.is_null() && maybe_exception.is_null()) {
+  if (isolate->is_execution_terminating()) {
+    DCHECK(isolate->has_exception());
+    DCHECK(maybe_result.is_null());
     delete[] ring_buffer_;
     ring_buffer_ = nullptr;
     capacity_ = 0;
     size_ = 0;
     start_ = 0;
-    DCHECK(isolate->has_scheduled_exception());
     isolate->OnTerminationDuringRunMicrotasks();
     OnCompleted(isolate);
     return -1;
   }
+
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+  isolate->isolate_data()->set_continuation_preserved_embedder_data(
+      *continuation_preserved_embedder_data);
+#endif  // V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+
   DCHECK_EQ(0, size());
   OnCompleted(isolate);
 
@@ -202,10 +217,10 @@ void MicrotaskQueue::IterateMicrotasks(RootVisitor* visitor) {
     // Iterate pending Microtasks as root objects to avoid the write barrier for
     // all single Microtask. If this hurts the GC performance, use a FixedArray.
     visitor->VisitRootPointers(
-        Root::kStrongRoots, nullptr, FullObjectSlot(ring_buffer_ + start_),
+        Root::kMicroTasks, nullptr, FullObjectSlot(ring_buffer_ + start_),
         FullObjectSlot(ring_buffer_ + std::min(start_ + size_, capacity_)));
     visitor->VisitRootPointers(
-        Root::kStrongRoots, nullptr, FullObjectSlot(ring_buffer_),
+        Root::kMicroTasks, nullptr, FullObjectSlot(ring_buffer_),
         FullObjectSlot(ring_buffer_ + std::max(start_ + size_ - capacity_,
                                                static_cast<intptr_t>(0))));
   }
@@ -251,9 +266,9 @@ void MicrotaskQueue::OnCompleted(Isolate* isolate) const {
   }
 }
 
-Microtask MicrotaskQueue::get(intptr_t index) const {
+Tagged<Microtask> MicrotaskQueue::get(intptr_t index) const {
   DCHECK_LT(index, size_);
-  Object microtask(ring_buffer_[(index + start_) % capacity_]);
+  Tagged<Object> microtask(ring_buffer_[(index + start_) % capacity_]);
   return Microtask::cast(microtask);
 }
 

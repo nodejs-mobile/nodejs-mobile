@@ -7,18 +7,15 @@
 
 #include <cstdint>
 
+#include "include/v8config.h"
+#include "src/trap-handler/trap-handler.h"
+
 // This header defines the ProbeMemory function to be used by simulators to
 // trigger a signal at a defined location, before doing an actual memory access.
 
-// This implementation is only usable on an x64 host with non-x64 target (i.e. a
-// simulator build on x64).
-#if (!defined(_M_X64) && !defined(__x86_64__)) || defined(V8_TARGET_ARCH_X64)
-#error "Do only include this file on simulator builds on x64."
-#endif
+#ifdef V8_TRAP_HANDLER_VIA_SIMULATOR
 
-namespace v8 {
-namespace internal {
-namespace trap_handler {
+namespace v8::internal::trap_handler {
 
 // Probe a memory address by doing a 1-byte read from the given address. If the
 // address is not readable, this will cause a trap as usual, but the trap
@@ -28,10 +25,18 @@ namespace trap_handler {
 // is not registered as a protected instruction, the signal will be propagated
 // as usual.
 // If the read at {address} succeeds, this function returns {0} instead.
-extern "C" uintptr_t ProbeMemory(uintptr_t address, uintptr_t pc);
+uintptr_t ProbeMemory(uintptr_t address, uintptr_t pc)
+// Specify an explicit symbol name (defined in
+// handler-outside-simulator.cc). Just {extern "C"} would produce
+// "ProbeMemory", but we want something more expressive on stack traces.
+#if V8_OS_DARWIN
+    asm("_v8_internal_simulator_ProbeMemory");
+#else
+    asm("v8_internal_simulator_ProbeMemory");
+#endif
 
-}  // namespace trap_handler
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::trap_handler
+
+#endif  // V8_TRAP_HANDLER_VIA_SIMULATOR
 
 #endif  // V8_TRAP_HANDLER_TRAP_HANDLER_SIMULATOR_H_

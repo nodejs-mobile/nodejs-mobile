@@ -4,7 +4,7 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/codegen/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler-inl.h"
 #include "src/ic/accessor-assembler.h"
 
 namespace v8 {
@@ -52,6 +52,16 @@ void Builtins::Generate_LoadSuperICBaseline(
 void Builtins::Generate_KeyedLoadIC(compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateKeyedLoadIC();
+}
+void Builtins::Generate_EnumeratedKeyedLoadIC(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateEnumeratedKeyedLoadIC();
+}
+void Builtins::Generate_EnumeratedKeyedLoadICBaseline(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateEnumeratedKeyedLoadICBaseline();
 }
 void Builtins::Generate_KeyedLoadIC_Megamorphic(
     compiler::CodeAssemblerState* state) {
@@ -101,9 +111,19 @@ void Builtins::Generate_StoreIC(compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateStoreIC();
 }
+void Builtins::Generate_StoreIC_Megamorphic(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateStoreIC_Megamorphic();
+}
 void Builtins::Generate_StoreICTrampoline(compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateStoreICTrampoline();
+}
+void Builtins::Generate_StoreICTrampoline_Megamorphic(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateStoreICTrampoline_Megamorphic();
 }
 void Builtins::Generate_StoreICBaseline(compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
@@ -131,6 +151,11 @@ void Builtins::Generate_KeyedStoreICTrampoline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateKeyedStoreICTrampoline();
+}
+void Builtins::Generate_KeyedStoreICTrampoline_Megamorphic(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateKeyedStoreICTrampoline_Megamorphic();
 }
 void Builtins::Generate_KeyedStoreICBaseline(
     compiler::CodeAssemblerState* state) {
@@ -230,10 +255,33 @@ void Builtins::Generate_LoadGlobalICInsideTypeofBaseline(
   assembler.GenerateLoadGlobalICBaseline(TypeofMode::kInside);
 }
 
+void Builtins::Generate_LookupGlobalIC(compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalIC(TypeofMode::kNotInside);
+}
+
+void Builtins::Generate_LookupGlobalICTrampoline(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalICTrampoline(TypeofMode::kNotInside);
+}
+
 void Builtins::Generate_LookupGlobalICBaseline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateLookupGlobalICBaseline(TypeofMode::kNotInside);
+}
+
+void Builtins::Generate_LookupGlobalICInsideTypeof(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalIC(TypeofMode::kInside);
+}
+
+void Builtins::Generate_LookupGlobalICInsideTypeofTrampoline(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupGlobalICTrampoline(TypeofMode::kInside);
 }
 
 void Builtins::Generate_LookupGlobalICInsideTypeofBaseline(
@@ -242,10 +290,22 @@ void Builtins::Generate_LookupGlobalICInsideTypeofBaseline(
   assembler.GenerateLookupGlobalICBaseline(TypeofMode::kInside);
 }
 
+void Builtins::Generate_LookupContextTrampoline(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupContextTrampoline(TypeofMode::kNotInside);
+}
+
 void Builtins::Generate_LookupContextBaseline(
     compiler::CodeAssemblerState* state) {
   AccessorAssembler assembler(state);
   assembler.GenerateLookupContextBaseline(TypeofMode::kNotInside);
+}
+
+void Builtins::Generate_LookupContextInsideTypeofTrampoline(
+    compiler::CodeAssemblerState* state) {
+  AccessorAssembler assembler(state);
+  assembler.GenerateLookupContextTrampoline(TypeofMode::kInside);
 }
 
 void Builtins::Generate_LookupContextInsideTypeofBaseline(

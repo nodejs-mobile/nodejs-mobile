@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "include/v8config.h"
+
 // Test enabled only on supported architectures.
 #if V8_OS_LINUX &&                                                 \
     (defined(V8_TARGET_ARCH_X64) || defined(V8_TARGET_ARCH_ARM) || \
@@ -10,6 +12,7 @@
 #include "src/flags/flags.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/objects.h"
+#include "test/cctest/cctest.h"
 #include "test/cctest/compiler/function-tester.h"
 
 namespace v8 {
@@ -17,8 +20,8 @@ namespace internal {
 namespace compiler {
 
 TEST(RunUnwindingInfo) {
-  FLAG_always_opt = true;
-  FLAG_perf_prof_unwinding_info = true;
+  v8_flags.always_turbofan = true;
+  v8_flags.perf_prof_unwinding_info = true;
 
   FunctionTester tester(
       "(function (x) {\n"
@@ -28,7 +31,7 @@ TEST(RunUnwindingInfo) {
 
   tester.Call(tester.Val(-1));
 
-  CHECK(tester.function->code().has_unwinding_info());
+  CHECK(tester.function->code(tester.main_isolate())->has_unwinding_info());
 }
 
 // TODO(ssanfilippo) Build low-level graph and check that state is correctly

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-threads
-
 d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 
 // TODO(gdeepti): If non-shared atomics are moving forward, ensure that
@@ -34,7 +32,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprLocalGet, 0,
       kExprLocalGet, 1,
       kAtomicPrefix,
-      kExprAtomicNotify, 0, 0])
+      kExprAtomicNotify, 2, 0])
     .exportAs("main");
   let module = new WebAssembly.Module(builder.toBuffer());
   let instance = new WebAssembly.Instance(module, {m: {memory}});
@@ -53,7 +51,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprLocalGet, 2,
       kExprI64SConvertF64,
       kAtomicPrefix,
-      kExprI32AtomicWait, 0, 0])
+      kExprI32AtomicWait, 2, 0])
       .exportAs("main");
   let module = new WebAssembly.Module(builder.toBuffer());
   let instance = new WebAssembly.Instance(module, {m: {memory}});
@@ -68,7 +66,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprLocalGet, 0,
       kExprLocalGet, 1,
       kAtomicPrefix,
-      kExprAtomicNotify, 0, 0])
+      kExprAtomicNotify, 2, 0])
     .exportAs("main");
 
   // Instantiate module, get function exports
@@ -90,7 +88,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprLocalGet, 2,
       kExprI64SConvertF64,
       kAtomicPrefix,
-      kExprI32AtomicWait, 0, 0])
+      kExprI32AtomicWait, 2, 0])
       .exportAs("main");
 
   // Instantiate module, get function exports
@@ -113,7 +111,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
       kExprLocalGet, 2,
       kExprI64SConvertF64,
       kAtomicPrefix,
-      kExprI64AtomicWait, 0, 0])
+      kExprI64AtomicWait, 3, 0])
       .exportAs("main");
 
   // Instantiate module, get function exports

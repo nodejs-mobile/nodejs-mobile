@@ -61,36 +61,17 @@ void UnrollLoop(Node* loop_node, ZoneUnorderedSet<Node*>* loop, uint32_t depth,
         if (stack_check->opcode() != IrOpcode::kStackPointerGreaterThan) {
           break;
         }
+        // Replace value uses of the stack check with {true}, and remove the
+        // stack check from the effect chain.
         FOREACH_COPY_INDEX(i) {
-          COPY(node, i)->ReplaceInput(0,
-                                      graph->NewNode(common->Int32Constant(1)));
-        }
-        for (Node* use : stack_check->uses()) {
-          if (use->opcode() == IrOpcode::kEffectPhi) {
-            // We now need to remove stack check and the related function call
-            // from the effect chain.
-            // The effect chain looks like this (* stand for irrelevant nodes):
-            //
-            // {replacing_effect} (effect before stack check)
-            //   *  *  |  *
-            //   |  |  |  |
-            // ( LoadFromObject )
-            //   |  |
-            // {stack_check}
-            // |   |
-            // |   *
-            // |
-            // | * *
-            // | | |
-            // {use}: EffectPhi (stack check effect that we need to replace)
-            DCHECK_EQ(use->opcode(), IrOpcode::kEffectPhi);
-            DCHECK_EQ(NodeProperties::GetEffectInput(use), stack_check);
-            DCHECK_EQ(NodeProperties::GetEffectInput(stack_check)->opcode(),
-                      IrOpcode::kLoadFromObject);
-            Node* replacing_effect = NodeProperties::GetEffectInput(
-                NodeProperties::GetEffectInput(stack_check));
-            FOREACH_COPY_INDEX(i) {
-              COPY(use, i)->ReplaceUses(COPY(replacing_effect, i));
+          for (Edge use_edge : COPY(stack_check, i)->use_edges()) {
+            if (NodeProperties::IsValueEdge(use_edge)) {
+              use_edge.UpdateTo(graph->NewNode(common->Int32Constant(1)));
+            } else if (NodeProperties::IsEffectEdge(use_edge)) {
+              use_edge.UpdateTo(
+                  NodeProperties::GetEffectInput(COPY(stack_check, i)));
+            } else {
+              UNREACHABLE();
             }
           }
         }
@@ -101,7 +82,7 @@ void UnrollLoop(Node* loop_node, ZoneUnorderedSet<Node*>* loop, uint32_t depth,
         /*** Step 2: Create merges for loop exits. ***/
         if (node->InputAt(1) == loop_node) {
           // Create a merge node from all iteration exits.
-          Node** merge_inputs = tmp_zone->NewArray<Node*>(iteration_count);
+          Node** merge_inputs = tmp_zone->AllocateArray<Node*>(iteration_count);
           merge_inputs[0] = node;
           for (uint32_t i = 1; i < iteration_count; i++) {
             merge_inputs[i] = COPY(node, i - 1);
@@ -124,7 +105,7 @@ void UnrollLoop(Node* loop_node, ZoneUnorderedSet<Node*>* loop, uint32_t depth,
                     LoopExitValueRepresentationOf(use->op()), iteration_count);
               }
               Node** phi_inputs =
-                  tmp_zone->NewArray<Node*>(iteration_count + 1);
+                  tmp_zone->AllocateArray<Node*>(iteration_count + 1);
               phi_inputs[0] = use;
               for (uint32_t i = 1; i < iteration_count; i++) {
                 phi_inputs[i] = COPY(use, i - 1);
