@@ -51,3 +51,8 @@ Please see the [CONTRIBUTING](./doc_mobile/CONTRIBUTING.md) file in the `doc_mob
 <!-- build-trigger-16kb -->
 
 <!-- build-trigger-16kb-2 -->
+
+
+## 16KB page support
+
+Android 15+ devices with 16KB pages require the Android `.so` built with `-Wl,-z,max-page-size=16384` (see PR #154).
